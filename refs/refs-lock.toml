@@ -1,0 +1,41 @@
+# Reference projects tracked by Astra. Baselines are locked at bootstrap and
+# frozen until feature parity (spec section 13.2). The 22:00 sync task
+# advances last_ported; see docs/upstream-sync.md for the full contract.
+version = 1
+root = "D:/Projects/mailclient"
+
+[[repo]]
+name = "mail-calendar"
+path = "opensource/mail-calendar"
+url = "https://github.com/allodia-eu/mail-calendar.git"
+role = "features-and-organisation"
+baseline = "5b4fd40dca3cdd76cad7558b37fc6667aae56135"
+last_ported = "5b4fd40dca3cdd76cad7558b37fc6667aae56135"
+locked_at = "2026-10-08"
+
+[[repo]]
+name = "inbox-zero"
+path = "opensource/inbox-zero"
+url = "https://github.com/elie222/inbox-zero.git"
+role = "ai-design"
+baseline = "84fd613d3dc1b3dbe8c3f46f9ec85d9e8681621c"
+last_ported = "84fd613d3dc1b3dbe8c3f46f9ec85d9e8681621c"
+locked_at = "2026-10-08"
+
+[[repo]]
+name = "kylins"
+path = "kylins"
+url = "git@github.com:kenizhou/kylins-client.git"
+role = "stack-ui-sidecar-security"
+baseline = "440fbcbfaa903ae8fa08d84c4ea3f2a7d7f41f47"
+last_ported = "440fbcbfaa903ae8fa08d84c4ea3f2a7d7f41f47"
+locked_at = "2026-10-08"
+
+[[repo]]
+name = "email-calendar-sync-engine"
+path = "opensource/email-calendar-sync-engine"
+url = "https://github.com/allodia-eu/email-calendar-sync-engine.git"
+role = "engine-upstream"
+baseline = "68eab00e6a9a9fe5a200218e156dbaae1ba00caa"
+last_ported = "68eab00e6a9a9fe5a200218e156dbaae1ba00caa"
+locked_at = "2026-10-08"
