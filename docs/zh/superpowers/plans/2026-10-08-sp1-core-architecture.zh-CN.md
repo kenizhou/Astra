@@ -172,10 +172,11 @@
 
 **文件：**
 - 新建：`client/desktop/src/{app_state.rs, credential_store.rs, observer.rs, observer_tests.rs, commands.rs, commands_tests.rs, boot.rs, exit.rs}`
+- 修改（Task 6 评审发现的 SyncProgress 缺口）：`crates/astra-viewmodel/src/sync_progress.rs`（最小 `SyncProgressSnapshot` 类型）与 `crates/astra-app`（一个 `Surfaced<SyncProgressSnapshot>` 单元加同步轮次中发布它的引擎 `SyncObserver` 接线；这是 Task 10 唯一可做的 astra-app 变更）。
 - 移植自：`MC/crates/mailcal-bindings/src/{credential_store.rs（trait 形态）, observer.rs（DebouncedObserver）, app_accounts.rs（add_account 流程）, boot.rs（序列）}`；keyring 实现为新写。
 
 **接口：**
-- 产出：基于 `keyring` crate 的 `AccountCredentialStore`（服务名 `astra`、按账户条目、persist 失败回滚）；`dispatch(intent: Intent)` 命令（从 webview serde 进来、runtime 上 spawn）；`mailbox_list() -> MailboxListSnapshot` 与 `sync_progress()` 拉取命令；经 `DebouncedObserver`（250ms、MailboxList 前沿、SyncProgress 后沿）发 `surface_changed` 事件；`add_account(config_toml)`（prepare、dial、persist、`add_new_account_deferred`、spawn `sync_added_account`）；`imap_test_connection`；五秒有界停同步的退出钩子。
+- 产出：基于 `keyring` crate 的 `AccountCredentialStore`（服务名 `astra`、按账户条目、persist 失败回滚）；`dispatch(intent: Intent)` 命令（从 webview serde 进来、runtime 上 spawn）；`mailbox_list() -> MailboxListSnapshot` 与 `sync_progress() -> SyncProgressSnapshot` 拉取命令（后者由新 surfaced 单元支撑）；经 `DebouncedObserver`（250ms、MailboxList 前沿、SyncProgress 后沿）发 `surface_changed` 事件；`add_account(config_toml)`（prepare、dial、persist、`add_new_account_deferred`、spawn `sync_added_account`）；`imap_test_connection`；五秒有界停同步的退出钩子。
 
 - [ ] **步骤 1：** 用同一 trait 缝后面的假 `App` 先写 `commands_tests.rs`：`dispatch` 接受每个 Intent 变体的 JSON；`mailbox_list` 返回已发布快照；不可解析 intent 得类型化错误、绝不 panic。
 - [ ] **步骤 2：** 先写 `observer_tests.rs`：窗口内 N 次发布合并为一次前沿 MailboxList 信号；SyncProgress 信号后沿。

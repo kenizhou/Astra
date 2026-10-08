@@ -163,10 +163,11 @@
 
 **Files:**
 - Create: `client/desktop/src/{app_state.rs, credential_store.rs, observer.rs, observer_tests.rs, commands.rs, commands_tests.rs, boot.rs, exit.rs}`
+- Modify (SyncProgress gap from Task 6's review): `crates/astra-viewmodel/src/sync_progress.rs` (minimal `SyncProgressSnapshot` type) and `crates/astra-app` (a `Surfaced<SyncProgressSnapshot>` cell plus engine `SyncObserver` wiring publishing it during sync rounds; the only astra-app change Task 10 may make).
 - Port from: `MC/crates/mailcal-bindings/src/{credential_store.rs (trait shape), observer.rs (DebouncedObserver), app_accounts.rs (add_account flow), boot.rs (sequence), token-free}`; keyring implementation new.
 
 **Interfaces:**
-- Produces: `AccountCredentialStore` implemented over the `keyring` crate (service `astra`, account-scoped entries, rollback on persist failure); `dispatch(intent: Intent)` command (serde from the webview, spawns on the runtime); `mailbox_list() -> MailboxListSnapshot` and `sync_progress()` pull commands; `surface_changed` event emission through a `DebouncedObserver` (250 ms, leading for MailboxList, trailing for SyncProgress); `add_account(config_toml)` (prepare, dial, persist, `add_new_account_deferred`, spawn `sync_added_account`); `imap_test_connection`; exit hook stopping sync with a five second bound.
+- Produces: `AccountCredentialStore` implemented over the `keyring` crate (service `astra`, account-scoped entries, rollback on persist failure); `dispatch(intent: Intent)` command (serde from the webview, spawns on the runtime); `mailbox_list() -> MailboxListSnapshot` and `sync_progress() -> SyncProgressSnapshot` pull commands (the latter backed by the new surfaced cell); `surface_changed` event emission through a `DebouncedObserver` (250 ms, leading for MailboxList, trailing for SyncProgress); `add_account(config_toml)` (prepare, dial, persist, `add_new_account_deferred`, spawn `sync_added_account`); `imap_test_connection`; exit hook stopping sync with a five second bound.
 
 - [ ] **Step 1:** Write `commands_tests.rs` first with a fake `App` behind the same trait seam: `dispatch` accepts the JSON of every Intent variant; `mailbox_list` returns the published snapshot; unparsable intent yields a typed error, never a panic.
 - [ ] **Step 2:** Write `observer_tests.rs` first: N publishes inside the window coalesce to one leading-edge MailboxList signal; SyncProgress signals trail.
