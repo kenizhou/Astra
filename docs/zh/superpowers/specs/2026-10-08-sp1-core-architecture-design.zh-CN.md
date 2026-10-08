@@ -101,9 +101,10 @@ toml；thiserror；IMAP 的 rustls 栈；time；log），按需增长。
   dialog、notification；kylins 几何的无边框主窗（1200x800，最小 800x600）。
   SP1 无托盘、无自启、无全局快捷键（随设置切片到来）。
 - 命令：`dispatch`、`mailbox_list`、`sync_progress`，加账户设置：
-  `detect_account_settings`（先以 astra-account 的手动 IMAP 推荐作桩；
-  自动探测策略随 SP2 账户切片移植）、`add_account(config_toml)`、
-  `imap_test_connection`。
+  `add_account(config_toml)` 与 `imap_test_connection`。服务器推荐步骤
+  （`detect_account_settings`）是已记录的已知推迟项：随 SP2 账户切片
+  落地（自动探测策略届时移植）；手动 IMAP 优先的默认值位于客户端设置
+  流程内。
 - 事件：`surface_changed`（只有名字；客户端拉取）；保留名 `engine:*` 不用：
   app 是引擎的唯一消费者。
 - 凭据存储端口：`AccountCredentialStore` 以 OS keyring 实现，作为必需构造
@@ -134,10 +135,12 @@ toml；thiserror；IMAP 的 rustls 栈；time；log），按需增长。
 1. `cargo run -p xtask -- gate` 全绿，含每个新文件的许可证头。
 2. 对 Stalwart harness：向导添加 IMAP 账户后凭据入 OS keyring、经引擎
    同步、文件夹树在壳内渲染，且应用重启后仍在。
-3. 每个产品操作都经 `dispatch` 流动：没有 Tauri 命令直接改引擎或产品
-   状态。
-4. 引擎只经 `engine-api` 消费（`astra-account` 内的 provider crate 除外），
-   锁在 rev `68eab00e`。
+3. 每个邮件操作都经 `dispatch` 流动；账户设置命令（`add_account`、
+   `imap_test_connection`）是获准的设置路径例外。
+4. 引擎只经 `engine-api` 消费（另加 `astra-account` 内经批准的
+   reach-around：provider crate、用于 TLS 策略的 `engine-tls`、用于
+   Provider trait 自身 SyncState/SyncUpdate/RawMime 类型的 `engine-core`；
+   他处的测试 fake 属 dev-dependency），锁在 rev `68eab00e`。
 5. `capabilities.md` 对应行随变更移至 partial 或 complete，changelog
    fragment 同变更落地。
 6. `client/desktop` 在 Windows 构建；CI 绿。

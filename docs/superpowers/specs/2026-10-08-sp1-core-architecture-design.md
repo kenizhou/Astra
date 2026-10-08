@@ -113,9 +113,11 @@ time; log) and grows only on demand.
   (1200x800, min 800x600). No tray, no autostart, no global shortcuts in
   SP1 (they arrive with the settings slice).
 - Commands: `dispatch`, `mailbox_list`, `sync_progress`, plus account
-  setup: `detect_account_settings` (stub delegating to astra-account's
-  recommend for manual IMAP first; autodetect strategies port in the SP2
-  accounts slice), `add_account(config_toml)`, `imap_test_connection`.
+  setup: `add_account(config_toml)` and `imap_test_connection`. The
+  server-recommendation step (`detect_account_settings`) is a known
+  deferral to the SP2 accounts slice, where the autodetect strategies
+  port; the manual-IMAP-first defaults live client-side in the setup
+  flow.
 - Events: `surface_changed` (name + nothing else; the client pulls),
   reserved names `engine:*` are not used: the app is the only engine
   consumer.
@@ -153,10 +155,14 @@ time; log) and grows only on demand.
 2. Against the Stalwart harness: adding an IMAP account from the wizard
    persists credentials in the OS keyring, syncs via the engine, and the
    folder tree renders in the shell, surviving an app restart.
-3. Every product operation flows through `dispatch`: no Tauri command
-   mutates engine or product state directly.
-4. The engine is consumed only through `engine-api` (plus provider crates
-   inside `astra-account`), pinned at rev `68eab00e`.
+3. Every mail operation flows through `dispatch`; the account-setup
+   commands (`add_account`, `imap_test_connection`) are the sanctioned
+   setup-path exceptions.
+4. The engine is consumed only through `engine-api` (plus the ratified
+   reach-arounds inside `astra-account`: provider crates, `engine-tls`
+   for the TLS policy, and `engine-core` for the Provider trait's own
+   SyncState/SyncUpdate/RawMime types; test fakes elsewhere are
+   dev-dependencies), pinned at rev `68eab00e`.
 5. `capabilities.md` rows for the slice move to partial or complete, with
    the changelog fragment in the same change.
 6. `client/desktop` builds on Windows; CI green.
