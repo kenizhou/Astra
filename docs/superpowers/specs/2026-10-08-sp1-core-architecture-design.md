@@ -89,7 +89,7 @@ time; log) and grows only on demand.
 
 ## 5. Protocol v1
 
-- Intent variants for SP1: `RefreshMail`, `SelectAccount(Option<String>)`,
+- Intent variants for SP1: `RefreshMail`, `SelectAccount(Option<AccountId>)`,
   `SetAccountExpanded { account, expanded }`, `SetFolderExpanded { folder,
   expanded }`, `SelectFolder { folder }`, `SetViewMode(ViewMode)`,
   `ShowMore`, plus the family shape (`Folders(FolderIntent)`) with

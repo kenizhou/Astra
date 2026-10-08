@@ -99,3 +99,4 @@ reference decision is forbidden: disagreements are escalated in the PR.
   list the components it needs, or fmt and clippy go missing on the runner.
 - The gate walks the working tree, not the git index; .superpowers is
   skipped, so nothing tracked may live there.
+- rustc dead_code analysis ignores test-only usage: a helper whose runtime consumer lands in a later task stays pub in a private module, never pub(crate), or deny(warnings) fails the interim build.

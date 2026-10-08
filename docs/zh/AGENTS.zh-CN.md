@@ -90,3 +90,4 @@ LLM 调用、工具调用与权限决定都带关联 id 落入其台账。
   组件，否则 fmt 和 clippy 在运行器上缺失。
 - 门禁遍历的是工作树而非 git 索引；.superpowers 被跳过，因此被跟踪的
   文件一律不得存放在那里。
+- rustc 的 dead_code 分析不看仅测试使用：运行时消费者晚到的辅助类型在私有模块里保持 pub、绝不用 pub(crate)，否则 deny(warnings) 会在中间构建失败。

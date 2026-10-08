@@ -80,7 +80,7 @@ toml；thiserror；IMAP 的 rustls 栈；time；log），按需增长。
 
 ## 5. 协议 v1
 
-- SP1 的 Intent 变体：`RefreshMail`、`SelectAccount(Option<String>)`、
+- SP1 的 Intent 变体：`RefreshMail`、`SelectAccount(Option<AccountId>)`、
   `SetAccountExpanded { account, expanded }`、`SetFolderExpanded { folder,
   expanded }`、`SelectFolder { folder }`、`SetViewMode(ViewMode)`、
   `ShowMore`，加上家族形态（`Folders(FolderIntent)`），其中
