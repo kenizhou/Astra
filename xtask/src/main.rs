@@ -14,7 +14,10 @@ fn main() -> ExitCode {
         (Some("gate"), None) => gate(&root),
         (Some("check"), Some(name)) => one(&root, name),
         (Some("icons"), None) => {
-            let written = icons::generate(&root.join("branding/icon-source.jpg"), &root.join("client/desktop/icons"));
+            let written = icons::generate(
+                &root.join("branding/icon-source.jpg"),
+                &root.join("client/desktop/icons"),
+            );
             match written {
                 Ok(files) => {
                     for f in files {

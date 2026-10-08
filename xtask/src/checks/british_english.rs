@@ -6,9 +6,23 @@
 /// list alphabetical. `dialog`, `artifact`, and `catalog` stay American by
 /// the mail-calendar rulebook.
 pub const AMERICANISMS: &[&str] = &[
-    "behavior", "behavioral", "canceled", "canceling", "color", "colored",
-    "colors", "favorite", "favorites", "fulfill", "fulfillment", "labeled",
-    "labeling", "maximize", "minimized", "organize", "organized",
+    "behavior",
+    "behavioral",
+    "canceled",
+    "canceling",
+    "color",
+    "colored",
+    "colors",
+    "favorite",
+    "favorites",
+    "fulfill",
+    "fulfillment",
+    "labeled",
+    "labeling",
+    "maximize",
+    "minimized",
+    "organize",
+    "organized",
 ];
 
 pub fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
@@ -34,7 +48,11 @@ pub fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
             bad.push(format!("{r}: American spelling \"{word}\""));
         }
     }
-    if bad.is_empty() { Ok(()) } else { Err(bad) }
+    if bad.is_empty() {
+        Ok(())
+    } else {
+        Err(bad)
+    }
 }
 
 /// Case-insensitive whole-word scan returning the matched source words.
@@ -76,7 +94,10 @@ mod tests {
 
     #[test]
     fn fenced_code_is_exempt() {
-        let root = fixture(&[("a.md", "prose\n\n```rust\nlet s = \"the color\";\n```\n\nmore prose\n")]);
+        let root = fixture(&[(
+            "a.md",
+            "prose\n\n```rust\nlet s = \"the color\";\n```\n\nmore prose\n",
+        )]);
         assert!(super::check(&root).is_ok());
     }
 }

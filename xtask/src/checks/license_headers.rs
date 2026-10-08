@@ -13,7 +13,11 @@ pub fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
             bad.push(format!("{r}: missing SPDX licence header"));
         }
     }
-    if bad.is_empty() { Ok(()) } else { Err(bad) }
+    if bad.is_empty() {
+        Ok(())
+    } else {
+        Err(bad)
+    }
 }
 
 #[cfg(test)]
@@ -22,7 +26,10 @@ mod tests {
 
     #[test]
     fn passes_with_header() {
-        let root = fixture(&[("a.rs", "// SPDX-License-Identifier: GPL-3.0-only\nfn a() {}\n")]);
+        let root = fixture(&[(
+            "a.rs",
+            "// SPDX-License-Identifier: GPL-3.0-only\nfn a() {}\n",
+        )]);
         assert!(super::check(&root).is_ok());
     }
 

@@ -12,7 +12,10 @@ pub fn check(root: &Path) -> Result<(), Vec<String>> {
     for en in &docs {
         let mirror = mirror_of(root, en);
         if !mirror.is_file() {
-            bad.push(format!("missing Chinese review copy for {}", super::rel(root, en)));
+            bad.push(format!(
+                "missing Chinese review copy for {}",
+                super::rel(root, en)
+            ));
         }
     }
     let mut zh_files: Vec<PathBuf> = super::walk_files(&root.join("docs/zh"), &["md"]);
@@ -31,10 +34,16 @@ pub fn check(root: &Path) -> Result<(), Vec<String>> {
             format!("docs/{stripped}.md")
         };
         if !root.join(&english_rel).is_file() {
-            bad.push(format!("orphan Chinese review copy: {r} (no {english_rel})"));
+            bad.push(format!(
+                "orphan Chinese review copy: {r} (no {english_rel})"
+            ));
         }
     }
-    if bad.is_empty() { Ok(()) } else { Err(bad) }
+    if bad.is_empty() {
+        Ok(())
+    } else {
+        Err(bad)
+    }
 }
 
 pub fn english_docs(root: &Path) -> Vec<PathBuf> {
@@ -100,7 +109,12 @@ mod tests {
     #[test]
     fn mirror_paths_follow_the_rule() {
         let root = fixture(&[]);
-        assert!(super::mirror_of(&root, &root.join("AGENTS.md")).ends_with("docs/zh/AGENTS.zh-CN.md"));
-        assert!(super::mirror_of(&root, &root.join("docs/superpowers/specs/s.md")).ends_with("docs/zh/superpowers/specs/s.zh-CN.md"));
+        assert!(
+            super::mirror_of(&root, &root.join("AGENTS.md")).ends_with("docs/zh/AGENTS.zh-CN.md")
+        );
+        assert!(
+            super::mirror_of(&root, &root.join("docs/superpowers/specs/s.md"))
+                .ends_with("docs/zh/superpowers/specs/s.zh-CN.md")
+        );
     }
 }

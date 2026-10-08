@@ -19,13 +19,34 @@ pub struct Check {
 /// All gate checks, cheapest first. Tasks register checks here as they land.
 pub fn all() -> Vec<Check> {
     vec![
-        Check { name: "paths-ascii", run: crate::checks::paths_ascii::check },
-        Check { name: "file-length", run: crate::checks::file_length::check },
-        Check { name: "version-sync", run: crate::checks::version_sync::check },
-        Check { name: "dash-hygiene", run: crate::checks::dash_hygiene::check },
-        Check { name: "british-english", run: crate::checks::british_english::check },
-        Check { name: "license-headers", run: crate::checks::license_headers::check },
-        Check { name: "doc-sync", run: crate::checks::doc_sync::check },
+        Check {
+            name: "paths-ascii",
+            run: crate::checks::paths_ascii::check,
+        },
+        Check {
+            name: "file-length",
+            run: crate::checks::file_length::check,
+        },
+        Check {
+            name: "version-sync",
+            run: crate::checks::version_sync::check,
+        },
+        Check {
+            name: "dash-hygiene",
+            run: crate::checks::dash_hygiene::check,
+        },
+        Check {
+            name: "british-english",
+            run: crate::checks::british_english::check,
+        },
+        Check {
+            name: "license-headers",
+            run: crate::checks::license_headers::check,
+        },
+        Check {
+            name: "doc-sync",
+            run: crate::checks::doc_sync::check,
+        },
     ]
 }
 
@@ -44,7 +65,9 @@ pub fn walk_files(root: &Path, exts: &[&str]) -> Vec<PathBuf> {
 }
 
 fn walk(root: &Path, dir: &Path, exts: &[&str], out: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(dir) else { return };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         let name = entry.file_name();
@@ -57,7 +80,11 @@ fn walk(root: &Path, dir: &Path, exts: &[&str], out: &mut Vec<PathBuf>) {
                 continue;
             }
             walk(root, &path, exts, out);
-        } else if exts.is_empty() || path.extension().is_some_and(|x| exts.contains(&x.to_string_lossy().as_ref())) {
+        } else if exts.is_empty()
+            || path
+                .extension()
+                .is_some_and(|x| exts.contains(&x.to_string_lossy().as_ref()))
+        {
             out.push(path);
         }
     }
@@ -113,9 +140,14 @@ mod tests {
 
     #[test]
     fn fixture_writes_files_under_a_temp_root() {
-        let root = fixture(&[("docs/a.md", "hello\n"), ("xtask/src/main.rs", "fn main() {}\n")]);
+        let root = fixture(&[
+            ("docs/a.md", "hello\n"),
+            ("xtask/src/main.rs", "fn main() {}\n"),
+        ]);
         assert!(root.join("docs/a.md").is_file());
         assert!(root.join("xtask/src/main.rs").is_file());
-        assert!(super::walk_files(&root, &["md"]).iter().any(|p| p.ends_with("docs/a.md")));
+        assert!(super::walk_files(&root, &["md"])
+            .iter()
+            .any(|p| p.ends_with("docs/a.md")));
     }
 }

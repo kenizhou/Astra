@@ -9,12 +9,16 @@ pub fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
     }
     let declared = super::read_lossy(&version_file).trim().to_string();
     let Some(workspace) = workspace_version(&super::read_lossy(&cargo_file)) else {
-        return Err(vec!["Cargo.toml has no [workspace.package] version".to_string()]);
+        return Err(vec![
+            "Cargo.toml has no [workspace.package] version".to_string()
+        ]);
     };
     if declared == workspace {
         Ok(())
     } else {
-        Err(vec![format!("VERSION says {declared} but Cargo.toml says {workspace}")])
+        Err(vec![format!(
+            "VERSION says {declared} but Cargo.toml says {workspace}"
+        )])
     }
 }
 

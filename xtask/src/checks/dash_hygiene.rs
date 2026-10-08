@@ -8,7 +8,12 @@ const EN_DASH: char = '\u{2013}';
 
 pub fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
     let mut bad = Vec::new();
-    for f in super::walk_files(root, &["rs", "ts", "tsx", "md", "toml", "yml", "yaml", "json", "css", "sh"]) {
+    for f in super::walk_files(
+        root,
+        &[
+            "rs", "ts", "tsx", "md", "toml", "yml", "yaml", "json", "css", "sh",
+        ],
+    ) {
         let r = super::rel(root, &f);
         if r == "LICENSE" || r.starts_with("docs/zh/") || super::is_zh_mirror(&f) {
             continue;
@@ -24,11 +29,18 @@ pub fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
                 bad.push(format!("{r}:{} contains a dash character", idx + 1));
             }
             if is_markdown && !in_fence && spaced_hyphen_as_punctuation(line) {
-                bad.push(format!("{r}:{} uses a spaced hyphen as punctuation", idx + 1));
+                bad.push(format!(
+                    "{r}:{} uses a spaced hyphen as punctuation",
+                    idx + 1
+                ));
             }
         }
     }
-    if bad.is_empty() { Ok(()) } else { Err(bad) }
+    if bad.is_empty() {
+        Ok(())
+    } else {
+        Err(bad)
+    }
 }
 
 /// True when the line uses a spaced hyphen as punctuation. A leading list
@@ -77,7 +89,10 @@ mod tests {
 
     #[test]
     fn fenced_code_is_exempt_from_the_prose_rule() {
-        let root = fixture(&[("a.md", "prose\n\n```rust\nlet s = \"x - y\";\n```\n\nmore prose\n")]);
+        let root = fixture(&[(
+            "a.md",
+            "prose\n\n```rust\nlet s = \"x - y\";\n```\n\nmore prose\n",
+        )]);
         assert!(super::check(&root).is_ok());
     }
 }

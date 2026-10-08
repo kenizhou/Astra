@@ -6,7 +6,12 @@ pub const MAX_LINES: usize = 500;
 
 pub fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
     let mut bad = Vec::new();
-    for f in super::walk_files(root, &["rs", "ts", "tsx", "css", "json", "yml", "yaml", "toml", "sh"]) {
+    for f in super::walk_files(
+        root,
+        &[
+            "rs", "ts", "tsx", "css", "json", "yml", "yaml", "toml", "sh",
+        ],
+    ) {
         let r = super::rel(root, &f);
         if r == "LICENSE" || r.starts_with("docs/zh/") || super::is_zh_mirror(&f) {
             continue;
@@ -16,7 +21,11 @@ pub fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
             bad.push(format!("{r}: {lines} lines (max {MAX_LINES})"));
         }
     }
-    if bad.is_empty() { Ok(()) } else { Err(bad) }
+    if bad.is_empty() {
+        Ok(())
+    } else {
+        Err(bad)
+    }
 }
 
 #[cfg(test)]

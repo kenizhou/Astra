@@ -12,7 +12,11 @@ pub fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
             bad.push(format!("non-ASCII path: {r}"));
         }
     }
-    if bad.is_empty() { Ok(()) } else { Err(bad) }
+    if bad.is_empty() {
+        Ok(())
+    } else {
+        Err(bad)
+    }
 }
 
 #[cfg(test)]
