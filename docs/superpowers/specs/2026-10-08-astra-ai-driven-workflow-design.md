@@ -259,7 +259,7 @@ the advantage; mail-calendar wins on feature contracts.
 
 ## 9. AI architecture and feature phases
 
-### 9.1 Process model (kylins)
+### 9.1 Process model and sidecar requirements (kylins)
 
 A Node >= 22 sidecar spawned by the Rust host, JSONL over stdio, mirrored
 protocol files (TypeScript in the sidecar, Rust in the host), supervisor with
@@ -270,6 +270,25 @@ Interactive agent chat runs in the sidecar (pi SDK). Background and structured
 tasks (rules matching, categorisation, summarisation, digest) run from the
 Rust LLM client. Both sides share the tier and use-case configuration and the
 usage ledger.
+
+The sidecar is designed to be light, secure, and fully traceable:
+
+- **Light**: one esbuild-bundled CommonJS artifact with pinned, minimal
+  dependencies; no direct database or engine access (the data plane is
+  reached only through `astra-cli`); no state beyond session transcripts;
+  cheap to spawn, supervise, and replace.
+- **Secure**: section 8 applies in full; model API keys live only in sidecar
+  memory; the environment is scrubbed for every exec; the permission bridge
+  is fail closed.
+- **Traceable**: every agent operation is reconstructible end to end. Each
+  LLM call lands in the `llm_calls` ledger; each tool call lands in the
+  audit log with its verb, argument preview, outcome, and correlation id;
+  each permission decision (policy hit, human approval, denial) is recorded;
+  session transcripts persist as JSONL in the application data directory;
+  and one correlation id per agent turn is propagated from the UI through
+  the Rust host, the sidecar, the LLM provider, and the CLI into every
+  ledger entry, so any observed mail change can be traced back to the prompt
+  and the approval that caused it.
 
 ### 9.2 inbox-zero patterns mapped onto the stack
 
@@ -322,9 +341,9 @@ Platforms and Bump tags, `VERSION` moves only in release PRs, `cargo xtask
 gate` before every push, British English, and no dash used as punctuation.
 
 Astra adds these rules: English only across documentation, code, comments,
-and folder names (xtask checks for non-ASCII paths); AI behaviour changes
-require evals; plugin hook API changes follow the versioned process in
-`docs/plugins.md`; the security adjudication rule of section 8.
+and folder names (xtask checks for non-ASCII paths outside `docs/zh/`); AI
+behaviour changes require evals; plugin hook API changes follow the versioned
+process in `docs/plugins.md`; the security adjudication rule of section 8.
 
 `docs/` is organised as mail-calendar organises it: a README index table of
 contract docs; contract docs ported area by area as slices land (accounts,
@@ -369,6 +388,9 @@ Chinese mirror, and no mirror is orphaned.
   example-plugin e2e.
 - AI evals: scenario files and an LLM judge (inbox-zero pattern); a gate for
   AI behaviour changes.
+- Audit and ledger coverage: the MockHarness e2e asserts that every gated
+  tool path produces its `llm_calls`, audit log, and permission decision
+  entries, and that correlation ids propagate end to end.
 - Gate: `cargo xtask gate`, cheapest first: formatting, clippy pedantic,
   workspace tests, contract checks (file length, version sync, dash hygiene,
   British English, licence headers, non-ASCII paths, icon sync, doc sync),
@@ -513,5 +535,6 @@ Each sub-project runs its own spec -> plan -> implement cycle.
 | AI scope | Full inbox-zero catalogue, phased A1 to A4 | Core set only; core plus personalisation |
 | Orchestration | Hybrid: cloud CI and builds, local ZCode automation for porting | All-cloud agent in CI (key management, cost); all-local (no macOS builds possible) |
 | CLI positioning | Agent-first tool-call entry point; human CLI shares the contract | Human-first CLI with an agent adapter layer |
+| Sidecar posture | Light (single bundle, no data plane access), secure (section 8), fully traceable (ledgers plus end-to-end correlation ids) | Rich in-process AI runtime; best-effort logging |
 | Security baseline | kylins implementations win on mechanics; mail-calendar wins on feature contracts | Per-case ad hoc decisions |
 | Documentation language | English normative; non-normative Chinese review copies under `docs/zh/`, moved in the same change | English only (hard for the author to review); bilingual normative (drift risk) |

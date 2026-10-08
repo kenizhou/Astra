@@ -220,7 +220,7 @@ kylins 有优势则 kylins 优先；功能契约上 mail-calendar 优先。
 
 ## 9. AI 架构与功能分期
 
-### 9.1 进程模型（kylins）
+### 9.1 进程模型与 sidecar 要求（kylins）
 
 Node >= 22 sidecar 由 Rust host 拉起，JSONL over stdio，镜像协议文件
 （sidecar 的 TypeScript、host 的 Rust），supervisor 带退避，fail-closed
@@ -228,6 +228,20 @@ Node >= 22 sidecar 由 Rust host 拉起，JSONL over stdio，镜像协议文件
 
 交互式 agent 对话跑在 sidecar（pi SDK）。后台与结构化任务（规则匹配、分类、
 摘要、digest）跑在 Rust LLM client。两侧共享 tier/use-case 配置与使用台账。
+
+sidecar 按轻量、安全、全操作可追踪三项要求设计：
+
+- **轻量**：esbuild 打包为单一 CommonJS 产物，依赖精简且锁定版本；不直接
+  访问数据库或 engine（数据面只经 `astra-cli` 触达）；除会话转录外无状态；
+  拉起、监督、替换都很廉价。
+- **安全**：第 8 节全部适用；模型 API key 只存 sidecar 内存；每次 exec 都
+  净化环境；权限桥 fail closed。
+- **可追踪**：每个 agent 操作端到端可复原。每次 LLM 调用落 `llm_calls`
+  台账；每次工具调用以动词、参数预览、结果与 correlation id 落 audit
+  log；每次权限决定（命中策略、人工批准、拒绝）都有记录；会话转录以
+  JSONL 持久化在应用数据目录；每个 agent 轮次一个 correlation id，从 UI
+  经 Rust host、sidecar、LLM provider、CLI 贯通传播进每条台账记录——
+  任何观察到的邮件变更都能回溯到引发它的 prompt 与批准。
 
 ### 9.2 inbox-zero 模式映射到本栈
 
@@ -269,9 +283,9 @@ Node >= 22 sidecar 由 Rust host 拉起，JSONL over stdio，镜像协议文件
 <slug>.md` 并带 Platforms 与 Bump 标签、`VERSION` 只在 release PR 移动、
 每次 push 前跑 `cargo xtask gate`、英式英语、破折号不作标点。
 
-Astra 新增规则：文档、代码、注释与文件夹名只用英文（xtask 检查非 ASCII
-路径）；AI 行为变更必须过 eval；插件 hook API 变更遵循 `docs/plugins.md`
-的版本化流程；第 8 节的安全裁决规则。
+Astra 新增规则：文档、代码、注释与文件夹名只用英文（xtask 检查 `docs/zh/`
+以外的非 ASCII 路径）；AI 行为变更必须过 eval；插件 hook API 变更遵循
+`docs/plugins.md` 的版本化流程；第 8 节的安全裁决规则。
 
 `docs/` 按 mail-calendar 方式组织：README 契约文档索引表；契约文档随切片
 逐域移植（accounts、folder-pane、search、drafts、sending、calendar、
@@ -305,6 +319,8 @@ CLI 与 AI 功能的 Astra 段。
 - Sidecar：`node --test` 加夹具驱动的 MockHarness e2e（kylins）。
 - 插件宿主：manifest、权限与生命周期单测加 example-plugin e2e。
 - AI eval：场景文件与 LLM judge（inbox-zero 模式）；AI 行为变更的门禁。
+- 台账与审计覆盖：MockHarness e2e 断言每条 gated 工具路径都产出其
+  `llm_calls`、audit log 与权限决定记录，且 correlation id 端到端贯通。
 - Gate：`cargo xtask gate`，从廉到贵：格式化、clippy pedantic、workspace
   测试、契约检查（file length、version sync、dash hygiene、英式英语、
   许可证头、非 ASCII 路径、icon sync、doc sync），并有 `--ui`、`--sidecar`、
@@ -424,5 +440,6 @@ mail-calendar 能力完成或明确 N/A、AI 分期 A1 至 A4 完成、插件宿
 | AI 范围 | inbox-zero 全目录，A1 至 A4 分期 | 仅核心集；核心加个性化 |
 | 编排 | 混合：云端 CI 与构建，本地 ZCode 自动化做移植 | 全云端 CI agent（密钥与成本）；全本地（无法产 macOS 构建） |
 | CLI 定位 | Agent-first 工具调用入口；人类 CLI 共享契约 | 人类优先 CLI 加 agent 适配层 |
+| Sidecar 姿态 | 轻量（单一打包产物、不触数据面）、安全（第 8 节）、全操作可追踪（台账加端到端 correlation id） | 富进程内 AI 运行时；尽力而为的日志 |
 | 安全基线 | 机制上 kylins 优先；功能契约上 mail-calendar 优先 | 逐案临时裁决 |
 | 文档语言 | 英文规范；`docs/zh/` 非规范中文审阅副本同变更移动 | 仅英文（作者难审阅）；双语规范（漂移风险） |
