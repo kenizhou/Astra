@@ -334,9 +334,22 @@ client, plus Astra sections for plugins, the CLI, and AI features.
 
 - Rust core: inline sibling test files (`<module>_tests.rs`), a fakes harness,
   and gated live tests, following mail-calendar's convention.
-- Live integration: a seeded Stalwart server in Docker via
-  `scripts/dev/harness.sh`; JMAP and IMAP round trips; dev accounts are
-  environment-gated.
+- Test environments, three tiers:
+  - **Tier 1, reproducible and secret free**: Astra builds its own Docker test
+    environment the mail-calendar way: a seeded Stalwart server started by
+    `scripts/dev/harness.sh`, providing JMAP and IMAP/SMTP round trips. This
+    is the default live environment for developers and for CI.
+  - **Tier 2, real provider accounts, environment gated, local only**: the
+    author provides a local Exchange server, an outlook.com account, and a
+    Gmail account. These suites follow mail-calendar's gated live sign-in
+    pattern (`ASTRA_LIVE_*` environment gates). Credentials live in an
+    uncommitted local environment file, never in the repository, and these
+    suites never run in public CI. Requests for accounts or credentials are
+    made explicitly when a slice needs them.
+  - **Tier 3, AI testing**: the author provides LLM connection details on
+    request. Sidecar integration tests and AI evals consume them through the
+    same model configuration surface the application uses; they are stored
+    locally and never committed.
 - SPA: Vitest + Testing Library (kylins' setup).
 - Sidecar: `node --test` plus the fixture-driven MockHarness e2e (kylins).
 - Plugin host: manifest, permission, and lifecycle unit tests plus an
@@ -465,6 +478,9 @@ Each sub-project runs its own spec -> plan -> implement cycle.
 
 - Desktop UI automation approach: kylins' MockHarness-driven e2e versus
   WebDriver-driven webview tests; decided during SP1.
+- Provider reachability of the tier 2 accounts (outlook.com personal accounts
+  and on-premises Exchange against the upstream engine's provider set) is
+  resolved with live tests during the SP2 accounts slices.
 - A desktop first-run assistant (adapted from inbox-zero's onboarding) is
   optional in A4; decide then.
 - Code signing certificates for Windows and macOS; add when available.
