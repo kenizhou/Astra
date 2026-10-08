@@ -354,9 +354,9 @@ rendering-security, composer-security, and the rest); Astra-specific docs:
 client, plus Astra sections for plugins, the CLI, and AI features.
 
 Review copies: every spec, plan, and contract document (including
-`capabilities.md`) carries a non-normative Chinese translation at
-`docs/zh/<same-path>.zh-CN.md`, headed with a note that the English version
-governs. The Chinese copy moves in the same change as its English source, so
+`capabilities.md`) carries a non-normative Chinese translation at the
+mirrored path under `docs/zh/` with `.md` replaced by `.zh-CN.md`, headed
+with a note that the English version governs. The Chinese copy moves in the same change as its English source, so
 the author can review every document in Chinese. Code, comments, identifiers,
 and changelog fragments remain English only. The `xtask` gate includes a
 `check-doc-sync` contract check: every in-scope English document has its

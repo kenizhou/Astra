@@ -294,8 +294,9 @@ Astra 专属文档：`plugins.md`、`cli.md`、`upstream-sync.md` 与 `ai-*.md`�
 `capabilities.md` 以 mail-calendar 矩阵限定桌面客户端列为起点，加上插件、
 CLI 与 AI 功能的 Astra 段。
 
-审阅副本：每份 spec、plan 与契约文档（含 `capabilities.md`）在
-`docs/zh/<同路径>.zh-CN.md` 附非规范性中文译本，开头注明以英文版为准。
+审阅副本：每份 spec、plan 与契约文档（含 `capabilities.md`）在 `docs/zh/`
+下的镜像路径附非规范性中文译本（`.md` 替换为 `.zh-CN.md`），开头注明以
+英文版为准。
 中文副本与英文源在同一次变更中移动，作者因此可以用中文审阅每份文档。代码、
 注释、标识符与 changelog fragment 仍纯英文。`xtask` gate 含
 `check-doc-sync` 契约检查：范围内每份英文文档都有中文镜像，且无孤儿镜像。
