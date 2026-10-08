@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Contract checks and shared file-walking helpers.
 
+pub mod dash_hygiene;
 pub mod file_length;
 pub mod paths_ascii;
 pub mod version_sync;
@@ -18,13 +19,14 @@ pub fn all() -> Vec<Check> {
         Check { name: "paths-ascii", run: crate::checks::paths_ascii::check },
         Check { name: "file-length", run: crate::checks::file_length::check },
         Check { name: "version-sync", run: crate::checks::version_sync::check },
+        Check { name: "dash-hygiene", run: crate::checks::dash_hygiene::check },
     ]
 }
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const SKIP_DIRS: &[&str] = &[".git", "target", "node_modules", "dist"];
+const SKIP_DIRS: &[&str] = &[".git", "target", "node_modules", "dist", ".superpowers"];
 
 /// Every file under `root` whose name ends with one of `exts` (all files when
 /// `exts` is empty), skipping build output and the Chinese review copies.
