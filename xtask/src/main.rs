@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 mod checks;
+mod icons;
 
 fn main() -> ExitCode {
     let root = repo_root();
@@ -12,6 +13,21 @@ fn main() -> ExitCode {
     match (args.next().as_deref(), args.next().as_deref()) {
         (Some("gate"), None) => gate(&root),
         (Some("check"), Some(name)) => one(&root, name),
+        (Some("icons"), None) => {
+            let written = icons::generate(&root.join("branding/icon-source.jpg"), &root.join("client/desktop/icons"));
+            match written {
+                Ok(files) => {
+                    for f in files {
+                        println!("{}", f.display());
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("icons: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         _ => {
             eprintln!("usage: cargo run -p xtask -- gate | check <name>");
             ExitCode::FAILURE
