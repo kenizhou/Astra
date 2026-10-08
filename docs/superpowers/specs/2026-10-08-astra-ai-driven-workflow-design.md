@@ -22,6 +22,10 @@ Three rules govern every decision in this document:
    (`D:\Projects\mailclient\opensource\inbox-zero`).
 
 All documentation, code, comments, and folder names in Astra are English only.
+English is the sole normative language. For review convenience, every spec,
+plan, and contract document additionally carries a non-normative Chinese
+review copy under `docs/zh/` mirroring the English path; wherever the two
+differ, the English version governs (section 10).
 
 ## 2. Reference projects and porting strategy
 
@@ -330,6 +334,15 @@ rendering-security, composer-security, and the rest); Astra-specific docs:
 `capabilities.md` starts as mail-calendar's matrix restricted to the desktop
 client, plus Astra sections for plugins, the CLI, and AI features.
 
+Review copies: every spec, plan, and contract document (including
+`capabilities.md`) carries a non-normative Chinese translation at
+`docs/zh/<same-path>.zh-CN.md`, headed with a note that the English version
+governs. The Chinese copy moves in the same change as its English source, so
+the author can review every document in Chinese. Code, comments, identifiers,
+and changelog fragments remain English only. The `xtask` gate includes a
+`check-doc-sync` contract check: every in-scope English document has its
+Chinese mirror, and no mirror is orphaned.
+
 ## 11. Testing strategy
 
 - Rust core: inline sibling test files (`<module>_tests.rs`), a fakes harness,
@@ -358,8 +371,8 @@ client, plus Astra sections for plugins, the CLI, and AI features.
   AI behaviour changes.
 - Gate: `cargo xtask gate`, cheapest first: formatting, clippy pedantic,
   workspace tests, contract checks (file length, version sync, dash hygiene,
-  British English, licence headers, non-ASCII paths, icon sync), with
-  `--ui`, `--sidecar`, and `--plugins` extensions. CI mirrors the gate.
+  British English, licence headers, non-ASCII paths, icon sync, doc sync),
+  with `--ui`, `--sidecar`, and `--plugins` extensions. CI mirrors the gate.
 
 ## 12. CI/CD
 
@@ -416,9 +429,9 @@ commits so missed nights are caught up on the next run:
 1. Fetch all four references; diff `last-ported..HEAD`; skip if empty.
 2. Classify changes: docs only, tests only, refactor, behaviour, new feature,
    security.
-3. Port per the rulebook (contract doc, matrix, changelog fragment land in
-   the same change). Security-tagged changes are always held for review and
-   never auto-merged.
+3. Port per the rulebook (contract doc, matrix, changelog fragment, and the
+   Chinese review copy of the doc land in the same change). Security-tagged
+   changes are always held for review and never auto-merged.
 4. Run the fast local gate subset (the full gate runs in CI).
 5. Open a PR with a per-repository summary. Auto-merge only for low-risk
    classes with a green gate; anything else waits for morning review with a
@@ -501,3 +514,4 @@ Each sub-project runs its own spec -> plan -> implement cycle.
 | Orchestration | Hybrid: cloud CI and builds, local ZCode automation for porting | All-cloud agent in CI (key management, cost); all-local (no macOS builds possible) |
 | CLI positioning | Agent-first tool-call entry point; human CLI shares the contract | Human-first CLI with an agent adapter layer |
 | Security baseline | kylins implementations win on mechanics; mail-calendar wins on feature contracts | Per-case ad hoc decisions |
+| Documentation language | English normative; non-normative Chinese review copies under `docs/zh/`, moved in the same change | English only (hard for the author to review); bilingual normative (drift risk) |
