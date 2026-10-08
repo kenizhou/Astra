@@ -101,3 +101,4 @@ reference decision is forbidden: disagreements are escalated in the PR.
   skipped, so nothing tracked may live there.
 - rustc dead_code analysis ignores test-only usage: a helper whose runtime consumer lands in a later task stays pub in a private module, never pub(crate), or deny(warnings) fails the interim build.
 - tauri-build writes its capability schemas into client/desktop/gen in the working tree, not OUT_DIR; the gate skips that directory and it stays untracked.
+- npm 11 blocks esbuild's postinstall until approved: run `npm install-scripts approve esbuild` in client/web after a fresh install, or the dev server stays unbuilt.

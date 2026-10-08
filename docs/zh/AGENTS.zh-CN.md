@@ -92,3 +92,4 @@ LLM 调用、工具调用与权限决定都带关联 id 落入其台账。
   文件一律不得存放在那里。
 - rustc 的 dead_code 分析不看仅测试使用：运行时消费者晚到的辅助类型在私有模块里保持 pub、绝不用 pub(crate)，否则 deny(warnings) 会在中间构建失败。
 - tauri-build 会把能力 schema 写入工作树的 client/desktop/gen 而非 OUT_DIR；门禁跳过该目录，且它保持不被跟踪。
+- npm 11 会拦截 esbuild 的 postinstall 直至批准：全新安装后在 client/web 运行 `npm install-scripts approve esbuild`，否则开发服务器无法构建。
