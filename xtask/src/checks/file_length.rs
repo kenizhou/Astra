@@ -1,8 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Gate check: no source file exceeds 500 lines. Markdown documents are
-//! exempt: prose length is judged by review, not by a line budget.
+//! exempt: prose length is judged by review, not by a line budget. Generated
+//! lockfiles are exempt: their length belongs to the package manager.
 
 pub(crate) const MAX_LINES: usize = 500;
+
+/// True for package manager lockfiles, which are generated output.
+fn is_lockfile(p: &std::path::Path) -> bool {
+    matches!(
+        p.file_name().and_then(|n| n.to_str()),
+        Some("package-lock.json" | "pnpm-lock.yaml")
+    )
+}
 
 pub(crate) fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
     let mut bad = Vec::new();
@@ -14,6 +23,9 @@ pub(crate) fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
     ) {
         let r = super::rel(root, &f);
         if r == "LICENSE" || r.starts_with("docs/zh/") || super::is_zh_mirror(&f) {
+            continue;
+        }
+        if is_lockfile(&f) {
             continue;
         }
         let lines = super::read_lossy(&f).lines().count();
@@ -49,6 +61,13 @@ mod tests {
     fn markdown_is_exempt() {
         let long = "line\n".repeat(super::MAX_LINES + 1);
         let root = fixture(&[("a.md", &long), ("docs/zh/a.zh-CN.md", &long)]);
+        assert!(super::check(&root).is_ok());
+    }
+
+    #[test]
+    fn lockfiles_are_generated_output() {
+        let long = "line\n".repeat(super::MAX_LINES + 1);
+        let root = fixture(&[("client/web/package-lock.json", &long)]);
         assert!(super::check(&root).is_ok());
     }
 }

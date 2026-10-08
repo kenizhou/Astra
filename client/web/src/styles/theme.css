@@ -1,0 +1,199 @@
+/*
+ * Theme tokens as CSS custom properties. Light values live on :root and the
+ * .light class; .dark overrides them. A component consumes tokens by name and
+ * never by raw colour, so the shell restyles entirely through this file.
+ */
+
+:root,
+.light {
+  /* Typography; system stacks only, the app runs fully offline. */
+  --font-ui:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', 'Noto Sans SC', system-ui, sans-serif;
+  --font-serif: Georgia, Cambria, 'Times New Roman', serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Courier New', monospace;
+
+  /* Neutral series: cool-tinted slate (oklch, hue 258). */
+  --series-50: oklch(0.985 0.003 258);
+  --series-100: oklch(0.965 0.006 258);
+  --series-200: oklch(0.925 0.009 258);
+  --series-300: oklch(0.868 0.013 258);
+  --series-400: oklch(0.705 0.017 258);
+  --series-500: oklch(0.56 0.02 258);
+  --series-600: oklch(0.465 0.02 258);
+  --series-700: oklch(0.395 0.018 258);
+  --series-800: oklch(0.3 0.015 258);
+  --series-900: oklch(0.24 0.013 258);
+  --series-950: oklch(0.175 0.01 258);
+
+  /* Brand accent: iris. */
+  --series-accent: oklch(0.52 0.21 282);
+  --series-accent-hover: oklch(0.46 0.2 282);
+
+  /* Semantic mapping; the background sits below pure white so cards read. */
+  --background: oklch(0.965 0.004 258);
+  --foreground: var(--series-900);
+
+  --card: #ffffff;
+  --card-foreground: var(--series-900);
+  --popover: #ffffff;
+  --popover-foreground: var(--series-900);
+  --primary: var(--series-accent);
+  --primary-foreground: #ffffff;
+  --secondary: var(--series-100);
+  --secondary-foreground: var(--series-900);
+  --muted: var(--series-100);
+  --muted-foreground: var(--series-600);
+  --accent: color-mix(in srgb, var(--primary) 5%, var(--series-50));
+  --accent-foreground: var(--series-900);
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
+  --border: var(--series-200);
+  --input: var(--series-200);
+  --ring: color-mix(in oklab, var(--series-accent), transparent 75%);
+  --radius: 0.4375rem;
+  --radius-xs: 2px;
+
+  /* Status colours. */
+  --success: #059669;
+  --success-foreground: var(--series-900);
+  --error: var(--destructive);
+  --error-foreground: var(--destructive-foreground);
+  --warning: #d97706;
+  --warning-foreground: var(--series-900);
+
+  /* Shell surfaces and interaction states. */
+  --surface: oklch(0.94 0.007 258);
+  --text: var(--series-900);
+  --muted-text: var(--series-600);
+  --hover: color-mix(in srgb, var(--primary) 7%, var(--series-100));
+  --selected: color-mix(in srgb, var(--primary) 13%, var(--series-100));
+  --selected-text: var(--text);
+  --primary-fg: #ffffff;
+  --link: #1d4ed8;
+  --link-hover: #1e40af;
+
+  /* Chrome and depth. */
+  --chrome: color-mix(in srgb, var(--primary) 4%, var(--series-200));
+  --chrome-foreground: var(--foreground);
+  --surface-elevated: color-mix(in srgb, var(--background) 96%, var(--foreground));
+  --surface-floating: var(--card);
+  --backdrop: color-mix(in srgb, var(--series-950) 40%, transparent);
+
+  /* Layout sizing. */
+  --header-h: 44px;
+  --status-h: 36px;
+  --pane-header-h: 32px;
+  --row-h: 28px;
+
+  /* Z-index scale. */
+  --z-dropdown: 50;
+  --z-sticky: 60;
+  --z-modal-backdrop: 70;
+  --z-modal: 80;
+  --z-popover: 90;
+  --z-tooltip: 100;
+  --z-toast: 110;
+
+  /* Shadows, tinted with the neutral hue. */
+  --shadow-color: var(--series-950);
+  --shadow-sm: 0 1px 2px 0 color-mix(in srgb, var(--shadow-color) 5%, transparent);
+  --shadow:
+    0 1px 3px 0 color-mix(in srgb, var(--shadow-color) 8%, transparent),
+    0 1px 2px -1px color-mix(in srgb, var(--shadow-color) 7%, transparent);
+  --shadow-md:
+    0 2px 4px -2px color-mix(in srgb, var(--shadow-color) 10%, transparent),
+    0 6px 12px -2px color-mix(in srgb, var(--shadow-color) 10%, transparent);
+  --shadow-lg:
+    0 4px 8px -4px color-mix(in srgb, var(--shadow-color) 12%, transparent),
+    0 12px 24px -6px color-mix(in srgb, var(--shadow-color) 14%, transparent);
+
+  /* Motion. */
+  --duration-fast: 120ms;
+  --duration-normal: 200ms;
+  --duration-slow: 300ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* Shared typography scale. */
+  --text-caption: 500 12px / 1.35 var(--font-ui);
+  --text-body: 400 13px / 1.45 var(--font-ui);
+  --text-body-lg: 400 14px / 1.5 var(--font-ui);
+  --text-subject: 600 15px / 1.35 var(--font-ui);
+  --text-pane-title: 600 13px / 1.3 var(--font-ui);
+  --text-display: 600 28px / 1.2 var(--font-ui);
+}
+
+.dark {
+  /* Neutral series reversed: deep graphite-navy, never pure black. */
+  --series-50: oklch(0.165 0.01 258);
+  --series-100: oklch(0.205 0.012 258);
+  --series-200: oklch(0.258 0.014 258);
+  --series-300: oklch(0.335 0.016 258);
+  --series-400: oklch(0.455 0.018 258);
+  --series-500: oklch(0.56 0.02 258);
+  --series-600: oklch(0.712 0.016 258);
+  --series-700: oklch(0.8 0.013 258);
+  --series-800: oklch(0.88 0.009 258);
+  --series-900: oklch(0.935 0.006 258);
+  --series-950: oklch(0.975 0.003 258);
+
+  --series-accent: oklch(0.7 0.15 285);
+  --series-accent-hover: oklch(0.62 0.18 284);
+
+  --background: var(--series-100);
+  --foreground: var(--series-900);
+
+  --card: var(--series-200);
+  --card-foreground: var(--series-900);
+  --popover: var(--series-200);
+  --popover-foreground: var(--series-900);
+  --primary: var(--series-accent);
+  --primary-foreground: var(--series-50);
+  --secondary: var(--series-200);
+  --secondary-foreground: var(--series-900);
+  --muted: var(--series-200);
+  --muted-foreground: var(--series-600);
+  --accent: color-mix(in srgb, var(--primary) 6%, var(--series-300));
+  --accent-foreground: var(--series-900);
+  --destructive: #f87171;
+  --destructive-foreground: var(--series-950);
+  --border: var(--series-300);
+  --input: var(--series-300);
+  --ring: color-mix(in oklab, var(--series-accent), transparent 75%);
+
+  --success: #34d399;
+  --success-foreground: var(--series-950);
+  --error: var(--destructive);
+  --error-foreground: var(--destructive-foreground);
+  --warning: #fbbf24;
+  --warning-foreground: var(--series-950);
+
+  --surface: var(--series-200);
+  --text: var(--series-900);
+  --muted-text: var(--series-600);
+  --hover: color-mix(in srgb, var(--primary) 8%, var(--series-200));
+  --selected: color-mix(in srgb, var(--primary) 15%, var(--series-200));
+  --selected-text: var(--text);
+  --primary-fg: var(--series-950);
+  --link: #60a5fa;
+  --link-hover: #93c5fd;
+
+  --chrome: color-mix(in srgb, var(--primary) 3%, var(--series-100));
+  --chrome-foreground: var(--foreground);
+  --surface-elevated: color-mix(in srgb, var(--background) 94%, var(--foreground));
+  --surface-floating: var(--card);
+  --backdrop: color-mix(in srgb, oklch(0.1 0.012 258) 55%, transparent);
+
+  --shadow-color: oklch(0.1 0.012 258);
+  --shadow-sm: 0 1px 2px 0 color-mix(in srgb, var(--shadow-color) 30%, transparent);
+  --shadow:
+    0 1px 3px 0 color-mix(in srgb, var(--shadow-color) 35%, transparent),
+    0 1px 2px -1px color-mix(in srgb, var(--shadow-color) 35%, transparent);
+  --shadow-md:
+    0 2px 4px -2px color-mix(in srgb, var(--shadow-color) 40%, transparent),
+    0 6px 12px -2px color-mix(in srgb, var(--shadow-color) 40%, transparent);
+  --shadow-lg:
+    0 4px 8px -4px color-mix(in srgb, var(--shadow-color) 45%, transparent),
+    0 12px 24px -6px color-mix(in srgb, var(--shadow-color) 45%, transparent);
+}

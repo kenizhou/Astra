@@ -1,11 +1,6 @@
 /target
 node_modules/
 dist/
-# The web build output is ignored, but the placeholder that lets the desktop
-# build resolve `frontendDist` before the frontend exists is tracked.
-!client/web/dist/
-client/web/dist/*
-!client/web/dist/.gitkeep
 .env
 *.local
 # Tauri-generated capability schemas (client/desktop/gen/schemas).
