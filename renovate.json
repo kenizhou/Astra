@@ -1,0 +1,67 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "Dependency updates, grouped so one PR lands on one gate run.",
+    "Monthly window with a three day release age, following the shape mail-calendar proved.",
+    "Security fixes are exempt: vulnerabilityAlerts defaults to no schedule and no release-age wait.",
+    "The engine pin is not managed here: docs/upstream-sync.md assigns it to the 22:00 integration task."
+  ],
+  "extends": ["config:recommended"],
+  "timezone": "Asia/Shanghai",
+  "schedule": ["on the first day of the month"],
+  "minimumReleaseAge": "3 days",
+  "semanticCommits": "enabled",
+  "prHourlyLimit": 0,
+  "prConcurrentLimit": 10,
+  "labels": ["dependencies"],
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "labels": ["dependencies", "security"]
+  },
+  "packageRules": [
+    {
+      "description": "A toolchain pin bump can change formatting and clippy output, so it lands on its own PR instead of grouped with package bumps.",
+      "matchFileNames": ["rust-toolchain.toml"],
+      "groupName": "Rust toolchain pin",
+      "labels": ["dependencies", "rust", "toolchain"]
+    },
+    {
+      "description": "The engine is one git source at one rev, and moving it is an integration pass owned by the 22:00 sync task, never a dependency bump.",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": ["/email-calendar-sync-engine/"],
+      "enabled": false
+    },
+    {
+      "matchFileNames": ["Cargo.toml", "xtask/**", "crates/**", "client/desktop/**", "cli/**"],
+      "labels": ["dependencies", "rust"]
+    },
+    {
+      "description": "One workspace, one lockfile: every Rust package moves together. Two branches editing Cargo.lock conflict on the first merge, and on a monthly schedule the loser stays conflicted for a month.",
+      "matchFileNames": ["Cargo.toml", "xtask/**", "crates/**", "client/desktop/**", "cli/**"],
+      "matchUpdateTypes": ["minor", "patch", "digest", "pin", "pinDigest", "bump"],
+      "groupName": "Rust workspace dependencies"
+    },
+    {
+      "description": "The React SPA and the agent sidecar are separate npm roots with separate lockfiles, so they group independently of Rust.",
+      "matchFileNames": ["client/web/**"],
+      "matchUpdateTypes": ["minor", "patch", "digest", "pin", "pinDigest", "bump"],
+      "groupName": "Web client dependencies",
+      "labels": ["dependencies", "web"]
+    },
+    {
+      "matchFileNames": ["sidecar/**"],
+      "matchUpdateTypes": ["minor", "patch", "digest", "pin", "pinDigest", "bump"],
+      "groupName": "Agent sidecar dependencies",
+      "labels": ["dependencies", "sidecar"]
+    },
+    {
+      "matchFileNames": [".github/**"],
+      "labels": ["dependencies", "ci"]
+    },
+    {
+      "matchFileNames": [".github/**"],
+      "matchUpdateTypes": ["minor", "patch", "digest", "pin", "pinDigest", "bump"],
+      "groupName": "GitHub Actions"
+    }
+  ]
+}
