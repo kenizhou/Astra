@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - English only across documentation, code, comments, and folder names; `docs/zh/` holds non-normative Chinese review copies only.
-- British English in prose; no dash as punctuation: U+2014 and U+2013 are banned in every tracked text file, and ` - ` is banned in Markdown.
+- British English in prose; no dash as punctuation: U+2014 and U+2013 are banned in every tracked text file, and a spaced hyphen as punctuation is banned in Markdown (list markers are not punctuation).
 - Licence GPL-3.0-only; every `.rs`, `.ts`, `.tsx` file starts with `// SPDX-License-Identifier: GPL-3.0-only`.
 - Files stay under 500 lines (gate-enforced).
 - `VERSION` equals `[workspace.package] version` in `Cargo.toml` at all times; `VERSION` moves only in release PRs.
@@ -328,7 +328,7 @@ mod tests {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `cargo test -p xtask` after adding the member (Step 3) — before that the crate does not exist, so expect a compile error naming `test_support` as missing once the crate is wired.
+Run: `cargo test -p xtask` after adding the member (Step 3). Before the crate is wired the command cannot run at all, which is the red state; the first green run comes after Step 4.
 
 - [ ] **Step 3: Create the crate and register the member**
 
@@ -575,7 +575,7 @@ mod tests {
 - [ ] **Step 2: Wire the module and run to see the failure**
 
 Add `pub mod paths_ascii;` to `checks/mod.rs` (module declarations block, see Step 4) and register later. Run: `cargo test -p xtask paths_ascii`
-Expected: the tests fail until the module compiles; after compiling they pass — so first verify compile failure by adding only the test file without wiring, or wire and observe all three tests pass on first run (either order is acceptable as long as the check runs red-to-green via the registration in Step 4 being what `gate` sees).
+Expected: before wiring the module declaration the crate fails to compile (the red state); after wiring, all three tests pass on the first run. The registration in Step 3 is what makes `gate` see the check.
 
 - [ ] **Step 3: Register the check**
 
@@ -827,12 +827,24 @@ pub fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
             if line.contains(EM_DASH) || line.contains(EN_DASH) {
                 bad.push(format!("{r}:{} contains a dash character", idx + 1));
             }
-            if is_markdown && line.contains(" - ") {
+            if is_markdown && spaced_hyphen_as_punctuation(line) {
                 bad.push(format!("{r}:{} uses a spaced hyphen as punctuation", idx + 1));
             }
         }
     }
     if bad.is_empty() { Ok(()) } else { Err(bad) }
+}
+
+/// True when the line uses a spaced hyphen as punctuation. A leading list
+/// marker (`- ` or `* ` after indentation) is not punctuation and is
+/// stripped before scanning.
+fn spaced_hyphen_as_punctuation(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    let body = trimmed
+        .strip_prefix("- ")
+        .or_else(|| trimmed.strip_prefix("* "))
+        .unwrap_or(trimmed);
+    body.contains(" - ")
 }
 
 #[cfg(test)]
@@ -857,6 +869,14 @@ mod tests {
         let bad_doc = fixture(&[("a.md", "hot - dog\n")]);
         assert!(super::check(&ok_code).is_ok());
         assert!(super::check(&bad_doc).is_err());
+    }
+
+    #[test]
+    fn list_markers_are_not_punctuation() {
+        let root = fixture(&[("a.md", "- item\n  - nested item\n* star item\n")]);
+        assert!(super::check(&root).is_ok());
+        let trailing = fixture(&[("a.md", "- item with - a mid dash\n")]);
+        assert!(super::check(&trailing).is_err());
     }
 }
 ```
@@ -1172,14 +1192,13 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Register and run**
+- [ ] **Step 2: Verify the tests pass, but hold the registration**
 
-Add `pub mod doc_sync;` and the `doc-sync` entry. Run:
-```bash
-cargo test -p xtask
-cargo run -p xtask -- gate
-```
-Expected: tests pass. The gate will FAIL on the real tree: `docs/upstream-sync.md` (Task 1) has no mirror yet — but it does (`docs/zh/upstream-sync.zh-CN.md` was created in Task 1). The actual first failure is `docs/superpowers/specs/...` and `docs/superpowers/plans/...`: they predate this task. Add `docs/zh/superpowers/specs/2026-10-08-astra-ai-driven-workflow-design.zh-CN.md` verification (it exists already) and note the plan file itself gets its mirror in Task 12; until then record the failure as expected and temporarily register `doc-sync` last with a `TODO(plan-mirror)` note removed in Task 12. Simplest sequencing: implement and test the module now, but only add it to `all()` in Task 12 when the last mirror lands.
+Add `pub mod doc_sync;` to the module declarations. Run `cargo test -p xtask`
+and expect every doc_sync test to pass. Do NOT add the check to `all()` in
+this task: on the real tree it would fail because this plan's own Chinese
+review copy lands with Task 12. Task 12 Step 6 performs the registration
+once the last mirror exists.
 
 - [ ] **Step 3: Commit**
 
@@ -1367,7 +1386,8 @@ branding/default.env at build time.
 - Brief and concrete. Say it once: a rule lives in exactly one place.
 - British English (`colour`, `licence` noun, `license` verb). `dialog`,
   `artifact`, and `catalog` stay American.
-- No dash as punctuation: no em or en dash anywhere, no ` - ` in Markdown.
+- No dash as punctuation: no em or en dash anywhere, and no spaced hyphen
+  as punctuation in Markdown.
 - Code comments describe the present only; no history, no plan phases,
   sparingly. Log lines never mention repository paths.
 - English only across documentation, code, comments, and folder names.
@@ -1475,7 +1495,8 @@ replaced by `.zh-CN.md`. They are non-normative.
 
 Transform `D:/Projects/mailclient/opensource/mail-calendar/docs/capabilities.md`:
 keep every row whose shared core status is `✅` or `🚧`, drop rows that are
-`⬜` or `—` in every client (not yet implemented upstream), and reformat each
+`⬜` or marked not applicable (the dash marker) in every client because
+upstream has not implemented them, and reformat each
 row as `| Area | Feature | Status | Source |` where Status is `⬜` (Astra has
 nothing yet) and Source links the mail-calendar contract doc when one exists.
 Keep the area grouping and order of the original. Open the file with:

@@ -19,7 +19,7 @@
 ## 全局约束
 
 - 文档、代码、注释与文件夹名只用英文；`docs/zh/` 只放非规范性中文审阅版。
-- 散文用英式英语；破折号不作标点：所有被跟踪文本文件禁止 U+2014 与 U+2013，Markdown 额外禁止 ` - `。
+- 散文用英式英语；破折号不作标点：所有被跟踪文本文件禁止 U+2014 与 U+2013，Markdown 额外禁止空格连字符作标点（列表标记不算标点）。
 - 许可证 GPL-3.0-only；每个 `.rs`、`.ts`、`.tsx` 文件以 `// SPDX-License-Identifier: GPL-3.0-only` 开头。
 - 文件不超过 500 行（gate 强制）。
 - `VERSION` 始终等于 `Cargo.toml` 的 `[workspace.package] version`；`VERSION` 只在 release PR 中移动。
@@ -832,12 +832,24 @@ pub fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
             if line.contains(EM_DASH) || line.contains(EN_DASH) {
                 bad.push(format!("{r}:{} contains a dash character", idx + 1));
             }
-            if is_markdown && line.contains(" - ") {
+            if is_markdown && spaced_hyphen_as_punctuation(line) {
                 bad.push(format!("{r}:{} uses a spaced hyphen as punctuation", idx + 1));
             }
         }
     }
     if bad.is_empty() { Ok(()) } else { Err(bad) }
+}
+
+/// True when the line uses a spaced hyphen as punctuation. A leading list
+/// marker (`- ` or `* ` after indentation) is not punctuation and is
+/// stripped before scanning.
+fn spaced_hyphen_as_punctuation(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    let body = trimmed
+        .strip_prefix("- ")
+        .or_else(|| trimmed.strip_prefix("* "))
+        .unwrap_or(trimmed);
+    body.contains(" - ")
 }
 
 #[cfg(test)]
@@ -862,6 +874,14 @@ mod tests {
         let bad_doc = fixture(&[("a.md", "hot - dog\n")]);
         assert!(super::check(&ok_code).is_ok());
         assert!(super::check(&bad_doc).is_err());
+    }
+
+    #[test]
+    fn list_markers_are_not_punctuation() {
+        let root = fixture(&[("a.md", "- item\n  - nested item\n* star item\n")]);
+        assert!(super::check(&root).is_ok());
+        let trailing = fixture(&[("a.md", "- item with - a mid dash\n")]);
+        assert!(super::check(&trailing).is_err());
     }
 }
 ```
@@ -1366,7 +1386,8 @@ branding/default.env at build time.
 - Brief and concrete. Say it once: a rule lives in exactly one place.
 - British English (`colour`, `licence` noun, `license` verb). `dialog`,
   `artifact`, and `catalog` stay American.
-- No dash as punctuation: no em or en dash anywhere, no ` - ` in Markdown.
+- No dash as punctuation: no em or en dash anywhere, and no spaced hyphen
+  as punctuation in Markdown.
 - Code comments describe the present only; no history, no plan phases,
   sparingly. Log lines never mention repository paths.
 - English only across documentation, code, comments, and folder names.
@@ -1474,7 +1495,7 @@ replaced by `.zh-CN.md`. They are non-normative.
 
 对 `D:/Projects/mailclient/opensource/mail-calendar/docs/capabilities.md`
 做变换：保留共享核心状态为 `✅` 或 `🚧` 的每一行，丢弃在所有客户端都为
-`⬜` 或 `—` 的行（上游尚未实现），并把每行重排为
+`⬜` 或标记为不适用（短横线标记）的行（上游尚未实现），并把每行重排为
 `| Area | Feature | Status | Source |`，其中 Status 一律 `⬜`（Astra 尚无
 实现），Source 在存在契约文档时链接之。保持原文件的分组与顺序。文件开头：
 
