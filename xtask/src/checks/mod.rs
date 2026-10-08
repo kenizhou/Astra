@@ -76,7 +76,13 @@ fn walk(root: &Path, dir: &Path, exts: &[&str], out: &mut Vec<PathBuf>) {
             if SKIP_DIRS.contains(&name.as_ref()) {
                 continue;
             }
-            if rel(root, &path) == "docs/zh" {
+            let path_rel = rel(root, &path);
+            if path_rel == "docs/zh" {
+                continue;
+            }
+            // tauri-build writes its capability schemas into the working tree
+            // (not OUT_DIR), and they bust the 500-line cap on every build.
+            if path_rel == "client/desktop/gen" {
                 continue;
             }
             walk(root, &path, exts, out);
@@ -149,5 +155,11 @@ mod tests {
         assert!(super::walk_files(&root, &["md"])
             .iter()
             .any(|p| p.ends_with("docs/a.md")));
+    }
+
+    #[test]
+    fn tauri_generated_schemas_are_skipped() {
+        let root = fixture(&[("client/desktop/gen/schemas/desktop-schema.json", "{}\n")]);
+        assert!(super::walk_files(&root, &["json"]).is_empty());
     }
 }

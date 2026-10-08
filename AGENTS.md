@@ -100,3 +100,4 @@ reference decision is forbidden: disagreements are escalated in the PR.
 - The gate walks the working tree, not the git index; .superpowers is
   skipped, so nothing tracked may live there.
 - rustc dead_code analysis ignores test-only usage: a helper whose runtime consumer lands in a later task stays pub in a private module, never pub(crate), or deny(warnings) fails the interim build.
+- tauri-build writes its capability schemas into client/desktop/gen in the working tree, not OUT_DIR; the gate skips that directory and it stays untracked.

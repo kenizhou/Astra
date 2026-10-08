@@ -1,0 +1,40 @@
+[package]
+name = "astra-desktop"
+description = "The Astra Mail desktop host: the Tauri shell, the frameless main window, and the app's async runtime."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[build-dependencies]
+# Embeds tauri.conf.json, the capability files, and the window icons into the
+# binary; the build fails when the config or the icons it names go missing.
+tauri-build = { version = "2.5", features = [] }
+
+[dependencies]
+# The desktop shell this crate is: the builder, the window, and the event loop.
+# No tray, devtools, or asset protocol in SP1; the feature set stays empty
+# until a task needs one.
+tauri = { version = "2.10", features = [] }
+# The single-instance guard: must be registered first, before any plugin whose
+# initialisation a second launch must not repeat.
+tauri-plugin-single-instance = "2"
+# The mailto deep link (a second launch's argv arrives through the guard
+# above; the cold-start path arrives through this plugin).
+tauri-plugin-deep-link = "2"
+# External link and folder opening (the shell side of every "open in browser"
+# affordance; the webview itself never navigates away).
+tauri-plugin-opener = "2"
+# File pickers and message boxes behind the composer and settings surfaces.
+tauri-plugin-dialog = "2"
+# OS notifications for new mail and sync outcomes.
+tauri-plugin-notification = "2"
+# The Tauri context macro's generated code names serde_json directly, so the
+# crate must depend on it even before any command serialises a value.
+serde_json.workspace = true
+# The app's async runtime: every engine call the host drives runs on it, and
+# blocking host calls are polled on a thread of our own (src/runtime.rs).
+tokio = { workspace = true, features = ["rt-multi-thread"] }

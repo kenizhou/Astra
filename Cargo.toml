@@ -1,6 +1,12 @@
 [workspace]
 resolver = "2"
-members = ["crates/*", "xtask"]
+members = ["crates/*", "xtask", "client/desktop"]
+# Bare `cargo build`/`test`/`run` stay on the engine-side crates; the desktop
+# host builds explicitly (`cargo build -p astra-desktop`) because its Tauri
+# dependency tree is heavy and needs the platform webview libraries.
+# `--workspace` commands still compile it, which is why CI installs the Tauri
+# system dependencies (Ruling R8).
+default-members = ["crates/*", "xtask"]
 
 [workspace.package]
 version = "0.1.0"
