@@ -1,0 +1,153 @@
+# Capabilities
+
+What Astra ships, per area. A row moves from ⬜ to 🚧 to ✅ only in the same
+change as the feature it describes (rulebook: Contract changes). Rows marked
+N/A carry their reason in Notes. Source links the mail-calendar contract
+this row ports.
+
+| Area | Feature | Status | Source |
+|---|---|---|---|
+| Accounts | IMAP/SMTP account setup wizard with manual server entry | ⬜ | accounts.md |
+| Accounts | Auto-detect from email address (JMAP probe, SRV, autoconfig, ISPDB, MX) | ⬜ | account-autodetect.md |
+| Mail | Folder pane across accounts with nested folders and persisted expansion | ⬜ | folder-pane.md |
+| Mail | Flat and threaded message list with windowed paging | ⬜ | |
+| Calendar | Day, work week, and month grids with drag to create, move, resize | ⬜ | calendar.md |
+| Core | Reactive Rust to native binding, dispatch to immutable snapshots | ⬜ | |
+| Accounts | Settings accounts page lists every account, with per-service toggles, relinking, sign-in again, server editing, and removal | ⬜ | accounts.md |
+| Accounts | Outgoing name per account, asked once at connect, editable in settings, kept in step with the provider | ⬜ | sending.md |
+| Accounts | Untrusted server certificates shown with a fingerprint and accepted once per server; verification is never switched off | ⬜ | certificate-exceptions.md |
+| Accounts | Microsoft 365 accounts: browser OAuth sign-in (PKCE), mail read and actions, send, calendar read and write | ⬜ | |
+| Accounts | Microsoft reconnect banner when a permission is missing; one tap re-grants the full scope set | ⬜ | provider-oauth.md |
+| Accounts | Expired or revoked sign-ins reported as such with an offer to sign in again, across Microsoft, Google, JMAP, and password accounts | ⬜ | provider-oauth.md |
+| Accounts | Google accounts over native APIs: browser OAuth sign-in (PKCE), mail read and actions, send, calendar | ⬜ | provider-oauth.md |
+| Accounts | JMAP accounts (RFC 8620/8621): one secret, mail read with bodies, send, calendar read | ⬜ | |
+| Accounts | JMAP OAuth sign-in discovered entirely from the standards, with no per-provider code | ⬜ | jmap.md |
+| Accounts | IMAP/SMTP sign in with your provider where the server offers it, discovered from the standards | ⬜ | mail-oauth.md |
+| Accounts | JMAP sign-in renewed in place, keeping mail, folders, and settings | ⬜ | jmap.md |
+| Accounts | Multi-account with unified inbox and account switcher | ⬜ | |
+| Mail | Unified mail as an All Accounts group in the folder pane, remembered across launches | ⬜ | folder-pane.md |
+| Accounts | Per-account credential storage with in-app account removal | ⬜ | |
+| Accounts | Account list offered on the next device from a vendor account: address and servers, never a password | ⬜ | onboarding.md |
+| Accounts | Vendor account sign-in, creation, management, and deletion in its own settings category | ⬜ | allodia_license/entitlement.md |
+| Accounts | Subscription view: charges, renewal, retried payment, multiple-biller warning, cancel and restart under direct billing | ⬜ | allodia_license/purchasing.md |
+| Mail | Create, rename, move, and delete folders from the folder pane; queued offline; delete goes to Trash first | ⬜ | folder-pane.md |
+| Mail | Drag a folder into another folder or onto its account; drag messages onto a folder | ⬜ | folder-pane.md |
+| Mail | Move to folder action in the message row menu, within one account | ⬜ | folder-pane.md |
+| Mail | Threaded conversation view: the whole conversation including your sent replies, across folders | ⬜ | |
+| Mail | Reading view with sanitised HTML, inline CID images, recipient headers, remote-image gating, and retry | ⬜ | |
+| Mail | Web and mail addresses in message text open in the browser or mail app; http, https, and mailto only | ⬜ | rendering-security.md |
+| Mail | Message laid out against the reading pane's own width, so a newsletter's own mobile rules apply | ⬜ | reading-zoom.md |
+| Mail | Fixed-width messages reflowed to fit at every pane width, live during resize | ⬜ | reading-zoom.md |
+| Mail | Offline-first bodies: synced bodies auto-download after every sync under a per-account cap, so opens are instant | ⬜ | |
+| Mail | Three-pane desktop layout: sidebar, list, reading pane | ⬜ | |
+| Mail | Reading actions: reply, reply all, forward, archive, delete | ⬜ | |
+| Mail | Overflow menu with Save as .eml, writing the message exactly as delivered | ⬜ | reading-actions.md |
+| Mail | Print a message with subject and header lines through the platform print dialog | ⬜ | reading-actions.md |
+| Mail | Attachments: list, save, and open received files; attach files in the composer | ⬜ | |
+| Composer | Rich HTML composer for new mail, reply, reply all, and forward, with editable To, Cc, and Bcc | ⬜ | |
+| Composer | A forward opens holding the original's attachments, removable one by one | ⬜ | sending.md |
+| Composer | Drafts stored on the server while you type; one draft across devices; taken away on send | ⬜ | drafts.md |
+| Composer | A Drafts row opens back into the composer and saves over the same copy | ⬜ | |
+| Mail | Open a message in its own window carrying the whole reading view | ⬜ | reading-window.md |
+| Composer | From account picker with an app-level default send account | ⬜ | |
+| Composer | Formatting: bold, italic, underline, font size, text and highlight colour, nested lists, tables with row and column editing | ⬜ | |
+| Composer | Links made, changed, or removed on the selection; typed addresses become links; http, https, and mailto only, checked on send | ⬜ | composer-security.md |
+| Composer | Composer toolbar chrome in the app's language, from the shared catalog | ⬜ | composer-security.md |
+| Composer | Subject editable in replies and forwards, with derived Re: and Fwd: prefixes | ⬜ | |
+| Composer | Paste a picture into the message or a signature, sent as an inline cid: part | ⬜ | composer-security.md |
+| Composer | Resize a pasted or quoted picture by dragging a corner; ratio kept | ⬜ | composer-security.md |
+| Composer | Drag files onto the composer: a document attaches, a picture asks inline or file | ⬜ | composer-security.md |
+| Composer | mailto: links open the composer prefilled; extra headers dropped | ⬜ | composer-security.md |
+| Composer | Share files into a new message from the OS share sheet; unsafe names and types dropped | ⬜ | os-integration.md |
+| Platform | Offer to become the default mail app, asked once, changeable in settings | ⬜ | os-integration.md |
+| Composer | Reply and forward quoting below the original, app default with per-message override | ⬜ | |
+| Composer | Signature library with rich text and an inline logo; per-account for new mail and replies; auto-swapped with From | ⬜ | signatures.md |
+| Mail | Mail actions: read and unread, flag, archive, delete, trash | ⬜ | |
+| Mail | Select several messages and act on the lot: archive, trash, delete, read, unread, flag | ⬜ | list-selection.md |
+| Mail | Mark as spam or not spam, reported to the provider so its filter learns | ⬜ | reporting.md |
+| MCP | MCP server over a local socket, opt-in and off by default: read and act on mail from an MCP client, direct send behind its own toggle | ⬜ | mcp.md |
+| Mail | Configurable swipe actions per direction, with undo | ⬜ | |
+| Calendar | Agenda view with create and delete event | ⬜ | |
+| Calendar | Write affordances gated on per-row can_write | ⬜ | |
+| Calendar | Write-status feedback: spinner while saving, warning on unconfirmed, retry | ⬜ | |
+| Calendar | All-day and multi-day banners with a per-day overflow count that expands | ⬜ | |
+| Calendar | Calendar manager: per-calendar visibility and colour override, persisted | ⬜ | |
+| Settings | Display settings: first day of week, 12 or 24-hour clock, light or dark appearance, calendar horizon | ⬜ | |
+| Calendar | The shape and horizon you left the calendar in, restored on launch | ⬜ | |
+| Calendar | The diary on screen from the store at launch, filled without opening it, there offline | ⬜ | |
+| Calendar | Calendar refreshes periodically while the app stays open | ⬜ | |
+| Calendar | Event creation with a calendar picker, all-day, notes, location | ⬜ | |
+| Calendar | Tap an event to view its detail and edit title, time, notes, location | ⬜ | |
+| Calendar | Attendee list with responses, on the detail and read-only in the editor | ⬜ | |
+| Calendar | Deleting one occurrence of a repeating event asks this event or all events first | ⬜ | calendar.md |
+| Calendar | Editing a whole repeating event warns where the server would throw away single-occurrence changes | ⬜ | calendar.md |
+| Calendar | A repeating rule read back in full on the event detail | ⬜ | calendar.md |
+| Calendar | One occurrence of a repeating event shows that occurrence's date and time | ⬜ | calendar.md |
+| Calendar | Editing one occurrence of a repeating event asks this event or all events first | ⬜ | calendar.md |
+| Calendar | Setting a repeat rule: how often, how many periods to skip, weekdays, what ends it; a rule too detailed to state is shown, not offered | ⬜ | calendar.md |
+| Invitations | An invitation email shows a card: who is asking, when, where, how everyone answered, conflicts, that day's grid | ⬜ | invitations.md |
+| Invitations | The invitation's own .ics part is not shown as a junk attachment; a really attached calendar file still is | ⬜ | |
+| Invitations | An unanswered meeting drawn as a hold on the grid, month, and agenda | ⬜ | |
+| Invitations | A declined meeting leaves the calendar on every provider; the invitation email is the way back | ⬜ | |
+| Invitations | Answer accept, maybe, or decline, with a note to the organiser where the account supports it | ⬜ | |
+| Invitations | An email-only invitation is put on the calendar when answered, and the reply emailed to the organiser where the server will not send it | ⬜ | invitations.md |
+| Invitations | A superseded invitation says it is out of date and stops offering an answer | ⬜ | |
+| Invitations | When the server cannot pass your answer on, you are told and offered email instead, rememberable per account | ⬜ | invitations.md |
+| Contacts | Unified contact list across account address books (CardDAV, JMAP, Google, Microsoft), with search and detail | ⬜ | contacts.md |
+| Contacts | Add and edit a contact in a writable address book; one source card named when a person is filed twice | ⬜ | |
+| Sending | Outbox keeps a message that could not be sent and sends it later by itself | ⬜ | sending.md |
+| Sending | Outbox actions: send now, cancel, or edit a message that has not gone | ⬜ | |
+| Sending | A send interrupted by app close is kept and never sent twice; the user answers Mark as Sent or Send Again | ⬜ | sending.md |
+| Sending | A message the server refused stays until sent again, edited, or discarded | ⬜ | |
+| Contacts | Sender avatars: a coloured monogram, replaced by an address-book photo | ⬜ | avatars.md |
+| Contacts | The same person in several accounts is one row, joined on a shared address, and says so | ⬜ | |
+| Composer | Recipient autosuggest ranked from synced contacts and from people you have written to | ⬜ | |
+| Search | from: and to: search DSL, unified across accounts, newest first, every folder but Trash | ⬜ | search.md |
+| Search | Search scope filter: narrow to the current folder and back to all mail | ⬜ | |
+| Search | Search says how far back it looked, with a link to change the depth | ⬜ | search.md |
+| Search | Search results follow the list's conversation grouping | ⬜ | |
+| Sync | Per-account fetch depth and message size, with every folder synced within the depth | ⬜ | |
+| Sync | Sync progress: a bar under the list for a started download, a status line for background passes, Sync paused when throttled | ⬜ | sync-progress.md |
+| Settings | Unified settings screen: language, appearance, time zone, conversation grouping, swipe actions, per-account fetch, quote style, default send account, reset, About | ⬜ | |
+| Sync | Per-mailbox sync behaviour: IMAP IDLE push where capable, otherwise 15 to 120 minute polling | ⬜ | |
+| Sync | Background mail delivery while the app is not in the foreground | ⬜ | background-sync.md |
+| Sync | New-mail notifications from the background sync: who it is from, what it is about, how it begins | ⬜ | |
+| Sync | Auto-reconnect after network loss, offline banner, per-account outage badge | ⬜ | |
+| Settings | Time-zone-aware display with a device-zone change prompt | ⬜ | |
+| Settings | Localisation: the app language drives dates as well as copy | ⬜ | timestamps.md |
+| Diagnostics | Rotating privacy-safe file log, attachable for support | ⬜ | |
+| Diagnostics | In-app diagnostics: log viewer, share and export with a privacy note, persisted debug toggle | ⬜ | logging.md |
+| Analytics | Consented product analytics: opt-in and default off, no mail content in the payload, one-click withdrawal | ⬜ | analytics.md |
+| Platform | Showcase mode: boots a seeded in-memory dataset for store screenshots | ⬜ | debugging.md |
+
+## Astra: plugins
+
+| Feature | Status | Notes |
+|---|---|---|
+| Plugin host with manifest, lifecycle, supervision | ⬜ | SP1 |
+| Versioned hook API v1 (compose.transform, message.decode) | ⬜ | SP1 skeleton |
+| example-plugin e2e | ⬜ | SP1 |
+| SMIME plugin package | ⬜ | SP-CRYPTO, post parity |
+| OpenPGP plugin package | ⬜ | SP-CRYPTO, post parity |
+
+## Astra: CLI
+
+| Feature | Status | Notes |
+|---|---|---|
+| Read verbs with --json contract | ⬜ | grows with SP2+ slices |
+| Gated mutating verbs with --preview | ⬜ | grows with SP2+ slices |
+| Virtual permission tools mapping | ⬜ | SPA0 |
+| Shell completions | ⬜ | SP-CLI |
+
+## Astra: AI (inbox-zero port, phases per spec 9.3)
+
+| Phase | Feature | Status |
+|---|---|---|
+| A1 | AI rules: prompt-to-rules, matching, deterministic execution | ⬜ |
+| A1 | Sender categorisation | ⬜ |
+| A1 | Cold email blocker | ⬜ |
+| A2 | Reply drafting with writing style | ⬜ |
+| A2 | Summarisation with cache | ⬜ |
+| A2 | Assistant chat with tool budget | ⬜ |
+| A3 | Knowledge, persona, snippets, autocomplete, translate | ⬜ |
+| A4 | Digest, meeting briefs, analytics reports, split inbox | ⬜ |

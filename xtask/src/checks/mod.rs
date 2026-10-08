@@ -3,9 +3,6 @@
 
 pub mod british_english;
 pub mod dash_hygiene;
-// doc-sync joins all() in Task 12, once this plan's own Chinese review copy
-// exists; until then the binary never calls into the module.
-#[allow(dead_code)]
 pub mod doc_sync;
 pub mod file_length;
 pub mod license_headers;
@@ -28,6 +25,7 @@ pub fn all() -> Vec<Check> {
         Check { name: "dash-hygiene", run: crate::checks::dash_hygiene::check },
         Check { name: "british-english", run: crate::checks::british_english::check },
         Check { name: "license-headers", run: crate::checks::license_headers::check },
+        Check { name: "doc-sync", run: crate::checks::doc_sync::check },
     ]
 }
 
