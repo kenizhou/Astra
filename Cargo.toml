@@ -87,3 +87,18 @@ serde_json = "1"
 toml = "1.0"
 # Error enums for the crate-level contracts.
 thiserror = "2"
+# Implementing the engine's async `Provider` trait for the reconnecting IMAP wrapper.
+async-trait = "0.1"
+# Builds the reconnecting wrapper's retried provider streams.
+async-stream = "0.3.6"
+# Drives the provider streams the wrapper retries (`StreamExt` over email chunks).
+futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }
+# The async runtime the IMAP connections dial and deduplicate over.
+tokio = { version = "1", default-features = false }
+# Names the stream an IMAP account's connections run over (`ImapConnections`); the
+# engine is generic over it and exports no alias.
+tokio-rustls = { version = "0.26.4", default-features = false, features = ["ring", "tls12"] }
+# The scripted in-process TLS IMAP server the connection tests dial (dev only).
+rcgen = "0.14"
+# Server side of that scripted TLS server (dev only).
+rustls = { version = "0.23.41", default-features = false, features = ["ring", "std", "tls12"] }

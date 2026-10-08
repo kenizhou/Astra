@@ -11,16 +11,42 @@ workspace = true
 
 [dependencies]
 engine-api.workspace = true
+# The engine's sync cursors and raw MIME type appear in the `Provider` trait's own
+# method signatures (`SyncState`, `SyncUpdate`, `RawMime`) and are re-exported by
+# neither `engine-api` nor `engine-provider`, so implementing the trait names them
+# here. Everything else engine-side comes through `engine-api` / `engine-provider`.
+engine-core.workspace = true
+# The provider trait and its plumbing (ProviderError, ConnectionInfo, HandOver,
+# ScopeSync) that the reconnecting IMAP wrapper implements.
+engine-provider.workspace = true
 # The host-selected TLS policy every connection of an account runs under; the acceptor
 # construction and certificate exception pinning types build against it.
 engine-tls.workspace = true
 # The IMAP adapter this crate builds an engine `ImapConfig` for; the credential source
 # and credentials types are the engine's.
 provider-imap.workspace = true
+# Implementing the engine's async `Provider` trait for the reconnecting IMAP wrapper.
+async-trait.workspace = true
+# Builds the reconnecting wrapper's retried provider streams.
+async-stream.workspace = true
+# Drives the provider streams the wrapper retries (`StreamExt` over email chunks).
+futures.workspace = true
 serde.workspace = true
+# The async runtime the IMAP connections dial and deduplicate over (the TCP stream,
+# the dial mutex, and the listener the scripted test server binds).
+tokio = { workspace = true, features = ["net", "sync"] }
+# Names the stream an IMAP account's connections run over (`ImapConnections`); the
+# engine is generic over it and exports no alias.
+tokio-rustls.workspace = true
 # The stored account config's TOML form (`build_config_toml` / `load_str` / `to_toml`).
 toml.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+# The self-signed certificate the scripted in-process TLS IMAP server presents.
+rcgen.workspace = true
+# Server side of that scripted TLS server.
+rustls.workspace = true
 serde_json.workspace = true
+# The test runtime (`#[tokio::test]`) and the line reader the scripted server answers.
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread"] }
