@@ -86,3 +86,5 @@ LLM 调用、工具调用与权限决定都带关联 id 落入其台账。
 - `cargo fmt --all`、`cargo clippy --workspace --all-targets -- -D warnings`、
   `cargo test --workspace` 是底线。
 - 工作中发现的坑逐行追加到本节。
+- rust-toolchain.toml 会覆盖 CI 安装的工具链：锁定的频道必须同时声明所需
+  组件，否则 fmt 和 clippy 在运行器上缺失。

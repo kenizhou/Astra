@@ -95,3 +95,5 @@ reference decision is forbidden: disagreements are escalated in the PR.
   `cargo test --workspace` are the floor.
 - Traps discovered while working go into this section, appended one line
   each.
+- rust-toolchain.toml overrides the CI toolchain: the pinned channel must
+  list the components it needs, or fmt and clippy go missing on the runner.
