@@ -4,6 +4,7 @@
 pub mod british_english;
 pub mod dash_hygiene;
 pub mod file_length;
+pub mod license_headers;
 pub mod paths_ascii;
 pub mod version_sync;
 
@@ -22,6 +23,7 @@ pub fn all() -> Vec<Check> {
         Check { name: "version-sync", run: crate::checks::version_sync::check },
         Check { name: "dash-hygiene", run: crate::checks::dash_hygiene::check },
         Check { name: "british-english", run: crate::checks::british_english::check },
+        Check { name: "license-headers", run: crate::checks::license_headers::check },
     ]
 }
 
