@@ -1,0 +1,21 @@
+[package]
+name = "astra-plugin"
+description = "The plugin host's contracts: manifest parsing, lifecycle states, hook API v1 types, and the fail-closed permission table."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# The hook request/response contracts and the manifest's permission and hook
+# declarations cross the plugin boundary as serde types.
+serde.workspace = true
+# The manifest's on-disk form.
+toml.workspace = true
+
+[dev-dependencies]
+# Asserting the exact JSON wire shape of every hook contract in the tests.
+serde_json.workspace = true
