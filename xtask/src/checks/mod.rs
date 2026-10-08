@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Contract checks and shared file-walking helpers.
 
+pub mod british_english;
 pub mod dash_hygiene;
 pub mod file_length;
 pub mod paths_ascii;
@@ -20,6 +21,7 @@ pub fn all() -> Vec<Check> {
         Check { name: "file-length", run: crate::checks::file_length::check },
         Check { name: "version-sync", run: crate::checks::version_sync::check },
         Check { name: "dash-hygiene", run: crate::checks::dash_hygiene::check },
+        Check { name: "british-english", run: crate::checks::british_english::check },
     ]
 }
 
