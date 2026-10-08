@@ -22,6 +22,13 @@ mod sync;
 mod sync_account;
 mod window;
 
+// The gated live test against the local Stalwart harness: a sibling file (the crate's
+// convention) that skips unless ASTRA_LIVE_HARNESS=1, so an offline `cargo test`
+// never dials anything.
+#[cfg(test)]
+#[path = "tests_live_harness.rs"]
+mod tests_live_harness;
+
 use std::{
     path::PathBuf,
     sync::{atomic::AtomicU64, Arc, Mutex},

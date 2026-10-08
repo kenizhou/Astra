@@ -1,0 +1,10 @@
+# The tree is LF throughout. Git Bash on Windows with core.autocrlf=true would
+# otherwise check text files out as CRLF, which breaks the scripts the Stalwart
+# harness mounts into its container (/bin/sh cannot read a CRLF script) and turns
+# one-line edits into whole-file rewrites.
+*.sh   text eol=lf
+*.rs   text eol=lf
+*.md   text eol=lf
+*.yaml text eol=lf
+*.yml  text eol=lf
+*.toml text eol=lf

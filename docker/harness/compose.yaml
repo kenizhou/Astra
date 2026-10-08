@@ -1,0 +1,71 @@
+# The Astra Mail local protocol harness: a seeded Stalwart mail server the gated live
+# tests dial (docker/harness; scripts/dev/harness.sh is its lifecycle wrapper).
+#
+# `docker compose up -d --wait` starts a Stalwart that self-bootstraps through its
+# management API, creates the two harness accounts (astra1@example.test,
+# astra2@example.test, password astra-harness), creates each one's custom folder
+# (Projects for astra1, Archive2 for astra2), then reports healthy once seeding is done
+# (the healthcheck gates on a post-seed marker, so healthy means ready, not merely
+# started).
+#
+# TLS ROUTE (the recorded decision): IMAP rides implicit TLS on container port 993,
+# published on 127.0.0.1:2143, with the server's self-signed certificate. A no-TLS
+# loopback IMAP port was considered and not taken: Astra's account layer dials TLS only
+# (ConnectionSecurity is implicit TLS or STARTTLS, and ImapConnections is typed over a
+# TLS stream), so a plaintext port is unreachable through the product's connect path the
+# gated test must exercise, and the mail-calendar harness this ports from publishes no
+# plaintext IMAP port either. The gated test instead walks the product's own acceptance
+# path: the first dial is refused, the rejection is recorded, and the accepted
+# certificate is pinned as a CertificateException for that one server. Nothing here
+# touches a host trust store.
+#
+# SMTP submission rides implicit TLS on 465, published on 127.0.0.1:2025.
+#
+# Ports are loopback only (a test mail server is never published on the other
+# interfaces), and the 2xxx host block keeps this harness clear of the mail-calendar
+# harness's 12xxx and the engine harness's 11xxx should both ever run beside it.
+# Determinism: both images in ./stalwart/Dockerfile are pinned by digest, and the whole
+# setup is driven from fixed inputs. Start from a clean slate with
+# `scripts/dev/harness.sh reset` before an `up` a measurement depends on.
+
+name: astra-harness
+
+services:
+  stalwart:
+    # Stalwart plus its CLI, pinned in ./stalwart/Dockerfile. `pull_policy: build`
+    # rebuilds on every `up` (from cache, in seconds), so a bumped pin is never answered
+    # by a stale local image.
+    build: ./stalwart
+    pull_policy: build
+    # Self-bootstrapping wrapper: bootstrap via API, restart to full server, create the
+    # accounts, seed the custom folders, then run the server in the foreground.
+    entrypoint: ["/bin/sh", "/harness/entrypoint.sh"]
+    environment:
+      # Fixed fallback-admin credential so the management API has a known login from
+      # first boot (no random password, no wizard).
+      STALWART_RECOVERY_ADMIN: "admin:astra-harness-admin"
+      STALWART_HOSTNAME: "mail.example.test"
+      HARNESS_ADMIN_PW: "astra-harness-admin"
+    volumes:
+      - ./stalwart/entrypoint.sh:/harness/entrypoint.sh:ro
+      - ./stalwart/seed.sh:/harness/seed.sh:ro
+      - stalwart-etc:/etc/stalwart
+      - stalwart-data:/var/lib/stalwart
+    ports:
+      - "127.0.0.1:2143:993" # IMAP, implicit TLS
+      - "127.0.0.1:2025:465" # SMTP submission, implicit TLS
+    # Healthy only once the custom folders are seeded: the marker is written at the end
+    # of the entrypoint, and HTTP liveness must also answer. This is the readiness
+    # signal tests wait on, not a sleep.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - test -f /var/lib/stalwart/.harness-ready && curl -fsS http://127.0.0.1:8080/healthz/live >/dev/null || exit 1
+      interval: 3s
+      timeout: 5s
+      retries: 80
+      start_period: 10s
+
+volumes:
+  stalwart-etc:
+  stalwart-data:
