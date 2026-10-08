@@ -131,9 +131,18 @@ version = "0.1.0"
 dependencies = [
  "astra-account",
  "astra-viewmodel",
+ "async-trait",
  "engine-api",
+ "engine-core",
+ "engine-provider",
+ "futures",
+ "log",
  "serde",
  "serde_json",
+ "thiserror",
+ "time",
+ "tokio",
+ "toml",
 ]
 
 [[package]]

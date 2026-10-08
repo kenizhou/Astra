@@ -87,12 +87,16 @@ serde_json = "1"
 toml = "1.0"
 # Error enums for the crate-level contracts.
 thiserror = "2"
+# Diagnostic logging facade; the host installs the logger, the crates only emit.
+log = "0.4"
 # Implementing the engine's async `Provider` trait for the reconnecting IMAP wrapper.
 async-trait = "0.1"
 # Builds the reconnecting wrapper's retried provider streams.
 async-stream = "0.3.6"
 # Drives the provider streams the wrapper retries (`StreamExt` over email chunks).
 futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }
+# The sync-depth window's whole-months calendar arithmetic.
+time = "0.3"
 # The async runtime the IMAP connections dial and deduplicate over.
 tokio = { version = "1", default-features = false }
 # Names the stream an IMAP account's connections run over (`ImapConnections`); the
