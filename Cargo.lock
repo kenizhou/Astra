@@ -126,6 +126,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "astra-app"
+version = "0.1.0"
+dependencies = [
+ "astra-account",
+ "astra-viewmodel",
+ "engine-api",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "astra-viewmodel"
 version = "0.1.0"
 dependencies = [

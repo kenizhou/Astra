@@ -1,0 +1,23 @@
+[package]
+name = "astra-app"
+description = "The intent and surface protocol of the Astra Mail unidirectional loop."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# The account configuration the runtime drives; the protocol itself names only ids.
+astra-account = { path = "../astra-account" }
+# The immutable snapshots the surfaces render.
+astra-viewmodel = { path = "../astra-viewmodel" }
+# Account ids travel inside intents and references (engine types via re-exports).
+engine-api.workspace = true
+# Every protocol type crosses the IPC as JSON.
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
