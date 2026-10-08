@@ -7,7 +7,8 @@
 //! `Option`s omitted rather than nulled. SP1 ships them as compiled, unit-tested
 //! contracts only; no hook is executed, because no composer or process host
 //! exists yet. Changing any wire shape under [`HOOK_API_V1`] is a breaking
-//! contract change and follows the versioned process in `docs/plugins.md`.
+//! contract change; the versioned process such changes will follow lives in the
+//! plugin contract document once it is written.
 //!
 //! Hooks never touch the engine: a hook sees only the payload carried in its
 //! request, and send discipline in the host cannot be bypassed by a response.
@@ -20,16 +21,19 @@ use crate::permissions::Permission;
 /// level; anything else is rejected at parse (see [`crate::PluginManifest`]).
 pub const HOOK_API_V1: u32 = 1;
 
-/// The hooks of API level 1. A manifest names the ones a plugin serves, and
+/// The hooks of API level 1. A manifest names the ones a plugin serves by their
+/// dotted wire names (for example `compose.transform`), and
 /// [`HookApiV1::required_permission`] is what each of them costs in declared
-/// permissions.
+/// permissions. The serde names are the same dotted strings, so a manifest, the
+/// wire, and error messages all cite one name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum HookApiV1 {
     /// Pre-send transform (encrypt, sign) at the composer's output seam.
+    #[serde(rename = "compose.transform")]
     ComposeTransform,
     /// Post-fetch decode (decrypt, verify) producing renderable parts and
     /// security banner data.
+    #[serde(rename = "message.decode")]
     MessageDecode,
 }
 
@@ -37,7 +41,8 @@ impl HookApiV1 {
     /// Every hook of API level 1.
     pub const ALL: [HookApiV1; 2] = [HookApiV1::ComposeTransform, HookApiV1::MessageDecode];
 
-    /// The hook's documented name in `docs/plugins.md` and error messages.
+    /// The hook's dotted wire name: the string a manifest declares, the serde
+    /// envelope carries, and error messages cite.
     #[must_use]
     pub fn wire_name(self) -> &'static str {
         match self {

@@ -41,8 +41,8 @@ pub enum LifecycleEvent {
     Load,
     /// Activate a loaded plugin so it starts serving hooks.
     Activate,
-    /// Fail the plugin for the carried reason; legal from any state except
-    /// [`Lifecycle::Failed`], where it is a no-op the machine refuses.
+    /// Fail the plugin for the carried reason. Every live state accepts it;
+    /// [`Lifecycle::Failed`] is terminal and refuses it like any other event.
     Fail(String),
 }
 

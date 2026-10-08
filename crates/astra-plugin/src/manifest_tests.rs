@@ -13,7 +13,7 @@ id = "dev.astra.crypto"
 name = "Astra Crypto"
 version = "0.1.0"
 hook_api = 1
-hooks = ["compose_transform", "message_decode"]
+hooks = ["compose.transform", "message.decode"]
 permissions = ["transform_outgoing", "decode_incoming", "read_mailbox"]
 "#;
 
@@ -127,7 +127,7 @@ fn an_unknown_permission_name_is_rejected() {
 #[test]
 fn an_unknown_hook_name_is_rejected() {
     let text = VALID.replace(
-        "hooks = [\"compose_transform\", \"message_decode\"]",
+        "hooks = [\"compose.transform\", \"message.decode\"]",
         "hooks = [\"engine.write_raw\"]",
     );
     assert!(matches!(
@@ -146,9 +146,78 @@ fn a_missing_required_field_is_rejected() {
 }
 
 #[test]
+fn a_manifest_without_a_permissions_key_is_rejected() {
+    // A plugin that declares no permissions at all asks for nothing, which the
+    // contract refuses: the key must be present, even before its contents are
+    // checked against the declared hooks.
+    let text = VALID.replace(
+        "permissions = [\"transform_outgoing\", \"decode_incoming\", \"read_mailbox\"]\n",
+        "",
+    );
+    assert!(matches!(
+        PluginManifest::parse(&text),
+        Err(ManifestError::InvalidToml(_))
+    ));
+}
+
+#[test]
+fn an_empty_id_is_rejected() {
+    let text = VALID.replace("dev.astra.crypto", "");
+    let error = PluginManifest::parse(&text).expect_err("empty id");
+    assert!(matches!(error, ManifestError::BlankId));
+}
+
+#[test]
+fn a_whitespace_only_id_is_rejected() {
+    let text = VALID.replace("dev.astra.crypto", "   ");
+    assert!(matches!(
+        PluginManifest::parse(&text),
+        Err(ManifestError::BlankId)
+    ));
+}
+
+#[test]
+fn an_id_with_surrounding_whitespace_is_rejected_not_trimmed() {
+    // Pinned behaviour: the guard rejects rather than trims. The host keys
+    // registry entries and permission grants by the exact id string, so a
+    // silently trimmed id would let two manifests share one identity.
+    let text = VALID.replace("dev.astra.crypto", "  dev.astra.crypto  ");
+    assert!(matches!(
+        PluginManifest::parse(&text),
+        Err(ManifestError::BlankId)
+    ));
+}
+
+#[test]
+fn a_duplicate_hook_is_rejected() {
+    let text = VALID.replace(
+        "hooks = [\"compose.transform\", \"message.decode\"]",
+        "hooks = [\"compose.transform\", \"compose.transform\"]",
+    );
+    let error = PluginManifest::parse(&text).expect_err("duplicate hook");
+    assert!(matches!(
+        error,
+        ManifestError::DuplicateHook(HookApiV1::ComposeTransform)
+    ));
+}
+
+#[test]
+fn a_duplicate_permission_is_rejected() {
+    let text = VALID.replace(
+        "permissions = [\"transform_outgoing\", \"decode_incoming\", \"read_mailbox\"]",
+        "permissions = [\"transform_outgoing\", \"transform_outgoing\", \"decode_incoming\"]",
+    );
+    let error = PluginManifest::parse(&text).expect_err("duplicate permission");
+    assert!(matches!(
+        error,
+        ManifestError::DuplicatePermission(Permission::TransformOutgoing)
+    ));
+}
+
+#[test]
 fn a_manifest_declaring_no_hooks_is_rejected() {
     let text = VALID.replace(
-        "hooks = [\"compose_transform\", \"message_decode\"]",
+        "hooks = [\"compose.transform\", \"message.decode\"]",
         "hooks = []",
     );
     assert!(matches!(
@@ -165,8 +234,8 @@ fn a_coherent_single_hook_manifest_parses() {
     // permission. The host grants nothing at parse; permissions are asks.
     let text = VALID
         .replace(
-            "hooks = [\"compose_transform\", \"message_decode\"]",
-            "hooks = [\"message_decode\"]",
+            "hooks = [\"compose.transform\", \"message.decode\"]",
+            "hooks = [\"message.decode\"]",
         )
         .replace(
             "permissions = [\"transform_outgoing\", \"decode_incoming\", \"read_mailbox\"]",

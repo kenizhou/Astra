@@ -29,12 +29,23 @@ fn each_hook_requires_exactly_its_permission() {
 #[test]
 fn hooks_round_trip_through_their_envelope_names() {
     for (hook, name) in [
-        (HookApiV1::ComposeTransform, "compose_transform"),
-        (HookApiV1::MessageDecode, "message_decode"),
+        (HookApiV1::ComposeTransform, "compose.transform"),
+        (HookApiV1::MessageDecode, "message.decode"),
     ] {
         assert_eq!(serde_json::to_value(hook).expect("serialises"), json!(name));
         let parsed: HookApiV1 = serde_json::from_value(json!(name)).expect("parses");
         assert_eq!(parsed, hook);
+    }
+}
+
+#[test]
+fn the_envelope_names_match_the_wire_names() {
+    // The dotted name a manifest declares, the serde envelope, and wire_name()
+    // are one string, so error messages cannot disagree with the manifest an
+    // author wrote.
+    for hook in HookApiV1::ALL {
+        let envelope = serde_json::to_value(hook).expect("serialises");
+        assert_eq!(envelope, json!(hook.wire_name()));
     }
 }
 
