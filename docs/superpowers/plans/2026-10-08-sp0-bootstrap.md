@@ -15,7 +15,7 @@
 - English only across documentation, code, comments, and folder names; `docs/zh/` holds non-normative Chinese review copies only.
 - British English in prose; no dash as punctuation: U+2014 and U+2013 are banned in every tracked text file, and a spaced hyphen as punctuation is banned in Markdown (list markers are not punctuation).
 - Licence GPL-3.0-only; every `.rs`, `.ts`, `.tsx` file starts with `// SPDX-License-Identifier: GPL-3.0-only`.
-- Files stay under 500 lines (gate-enforced).
+- Source files stay under 500 lines (gate-enforced; Markdown prose is exempt).
 - `VERSION` equals `[workspace.package] version` in `Cargo.toml` at all times; `VERSION` moves only in release PRs.
 - Every in-scope English document change carries its `.zh-CN.md` mirror in the same commit. In scope: `AGENTS.md`, `docs/*.md`, `docs/superpowers/**/*.md`. Out of scope: `docs/changelog/**`, everything under `docs/zh/`.
 - `cargo run -p xtask -- gate` passes before every push.
@@ -619,20 +619,21 @@ git commit -m "feat: add paths-ascii gate check"
 
 **Interfaces:**
 - Consumes: `walk_files`, `rel` from Task 3.
-- Produces: check `file-length`; limit constant `pub const MAX_LINES: usize = 500;` applied to `.rs`, `.ts`, `.tsx`, `.md`.
+- Produces: check `file-length`; limit constant `pub const MAX_LINES: usize = 500;` applied to `.rs`, `.ts`, `.tsx`, `.css`, `.json`, `.yml`, `.yaml`, `.toml`, `.sh` (Markdown exempt).
 
 - [ ] **Step 1: Write the failing tests**
 
 `xtask/src/checks/file_length.rs`:
 ```rust
 // SPDX-License-Identifier: GPL-3.0-only
-//! Gate check: no source or document file exceeds 500 lines.
+//! Gate check: no source file exceeds 500 lines. Markdown documents are
+//! exempt: prose length is judged by review, not by a line budget.
 
 pub const MAX_LINES: usize = 500;
 
 pub fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
     let mut bad = Vec::new();
-    for f in super::walk_files(root, &["rs", "ts", "tsx", "md"]) {
+    for f in super::walk_files(root, &["rs", "ts", "tsx", "css", "json", "yml", "yaml", "toml", "sh"]) {
         let r = super::rel(root, &f);
         if r == "LICENSE" || r.starts_with("docs/zh/") || super::is_zh_mirror(&f) {
             continue;
@@ -663,9 +664,9 @@ mod tests {
     }
 
     #[test]
-    fn chinese_review_copies_are_exempt() {
+    fn markdown_is_exempt() {
         let long = "line\n".repeat(super::MAX_LINES + 1);
-        let root = fixture(&[("docs/zh/a.zh-CN.md", &long)]);
+        let root = fixture(&[("a.md", &long), ("docs/zh/a.zh-CN.md", &long)]);
         assert!(super::check(&root).is_ok());
     }
 }
@@ -944,7 +945,19 @@ pub fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
         if r.starts_with("docs/zh/") || super::is_zh_mirror(&f) {
             continue;
         }
-        for word in find_americanisms(&super::read_lossy(&f)) {
+        let mut in_fence = false;
+        let mut prose = String::new();
+        for line in super::read_lossy(&f).lines() {
+            if line.trim_start().starts_with("```") {
+                in_fence = !in_fence;
+                continue;
+            }
+            if !in_fence {
+                prose.push_str(line);
+                prose.push('\n');
+            }
+        }
+        for word in find_americanisms(&prose) {
             bad.push(format!("{r}: American spelling \"{word}\""));
         }
     }
@@ -986,6 +999,12 @@ mod tests {
     fn identifiers_are_not_flagged() {
         assert!(super::find_americanisms("CategorizeSender and summarize_thread_id").is_empty());
         assert_eq!(super::find_americanisms("the color").len(), 1);
+    }
+
+    #[test]
+    fn fenced_code_is_exempt() {
+        let root = fixture(&[("a.md", "prose\n\n```rust\nlet s = \"the color\";\n```\n\nmore prose\n")]);
+        assert!(super::check(&root).is_ok());
     }
 }
 ```
@@ -1407,7 +1426,8 @@ branding/default.env at build time.
 
 ## Hard rules
 
-- Files stay under 500 lines. The gate enforces it for every language.
+- Source files stay under 500 lines. The gate enforces it for every source
+  language; Markdown prose is exempt.
 - Newtypes for identities; no raw `String` ids across module boundaries.
 - Test-first for behaviour changes. A bug fix lands with a regression test
   at the lowest shared layer that observes the contract.
