@@ -3,6 +3,7 @@
 
 pub mod file_length;
 pub mod paths_ascii;
+pub mod version_sync;
 
 pub type CheckFn = fn(&Path) -> Result<(), Vec<String>>;
 
@@ -16,6 +17,7 @@ pub fn all() -> Vec<Check> {
     vec![
         Check { name: "paths-ascii", run: crate::checks::paths_ascii::check },
         Check { name: "file-length", run: crate::checks::file_length::check },
+        Check { name: "version-sync", run: crate::checks::version_sync::check },
     ]
 }
 
