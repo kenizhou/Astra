@@ -103,3 +103,4 @@ reference decision is forbidden: disagreements are escalated in the PR.
 - tauri-build writes its capability schemas into client/desktop/gen in the working tree, not OUT_DIR; the gate skips that directory and it stays untracked.
 - npm 11 blocks esbuild's postinstall until approved: run `npm install-scripts approve esbuild` in client/web after a fresh install, or the dev server stays unbuilt.
 - The allowScripts record in client/web/package.json is what that approval writes; npm 11.19 only warns when it is missing, and the committed record keeps fresh installs and CI silent.
+- rustdoc denies public docs linking private items (private_intra-doc_links): name a private constant in prose, never as a doc link, or `cargo doc --workspace --no-deps` fails.

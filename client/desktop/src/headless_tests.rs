@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Tests for the headless slice's pure pieces: the tree assertion and the poll that
-//! waits on it. The dial, add, and restart flows themselves are the live run
-//! `scripts/dev/slice-check.sh` owns; what stays here is everything that decides
-//! without a server.
+//! Tests for the headless slice's pure pieces: the tree assertion, the poll
+//! that waits on it, the order usage errors report in, and the log level the
+//! run reads from the environment. The dial, add, and restart flows themselves
+//! are the live run `scripts/dev/slice-check.sh` owns; what stays here is
+//! everything that decides without a server.
 
-use std::time::Duration;
+use std::{path::PathBuf, time::Duration};
 
 use astra_viewmodel::{AccountFolderRow, FolderRow};
 use engine_api::{AccountId, MailboxId};
@@ -119,4 +120,54 @@ fn the_poll_times_out_with_the_last_snapshot_and_its_diff() {
     let (_, diff) = outcome.expect_err("the probe never holds the tree");
     assert_eq!(diff, vec!["missing folder: Projects".to_owned()]);
     assert!(calls > 1, "the poll kept pulling until the deadline");
+}
+
+#[test]
+fn an_unknown_phase_is_reported_before_the_environment() {
+    let Err(error) = resolve_run(
+        "bogus",
+        || Err("ASTRA_SLICE_DATA_DIR is not set".to_owned()),
+    ) else {
+        panic!("the phase is the usage error that reports first")
+    };
+    assert_eq!(error, "unknown phase 'bogus'");
+}
+
+#[test]
+fn a_known_phase_reports_the_environment_error_next() {
+    let Err(error) = resolve_run("add", || Err("ASTRA_SLICE_DATA_DIR is not set".to_owned()))
+    else {
+        panic!("a known phase surfaces the environment error")
+    };
+    assert_eq!(error, "ASTRA_SLICE_DATA_DIR is not set");
+}
+
+#[test]
+fn a_resolved_run_holds_the_phase_and_the_environment() {
+    let (_, env) = resolve_run("list", || {
+        Ok(SliceEnv {
+            imap_host: "127.0.0.1".to_owned(),
+            imap_port: "2143".to_owned(),
+            username: "astra1@example.test".to_owned(),
+            password: "astra-harness".to_owned(),
+            data_dir: PathBuf::from("scratch"),
+            timeout: Duration::from_secs(1),
+        })
+    })
+    .expect("a known phase with a readable environment resolves");
+    assert_eq!(env.imap_host, "127.0.0.1");
+    assert_eq!(env.timeout, Duration::from_secs(1));
+}
+
+#[test]
+fn the_log_level_names_the_standard_levels_case_insensitively() {
+    assert_eq!(level_from("warn"), log::LevelFilter::Warn);
+    assert_eq!(level_from("TRACE"), log::LevelFilter::Trace);
+    assert_eq!(level_from("off"), log::LevelFilter::Off);
+}
+
+#[test]
+fn the_log_level_is_error_on_anything_unnameable() {
+    assert_eq!(level_from(""), log::LevelFilter::Error);
+    assert_eq!(level_from("chatty"), log::LevelFilter::Error);
 }

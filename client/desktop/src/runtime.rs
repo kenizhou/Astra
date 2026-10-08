@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! The app's async runtime, and the thread every blocking host call is polled on.
 //!
-//! A blocking call from the shell never polls its future on the thread that made it. That thread is the host's, and so is its stack size: the main thread, or a thread the windowing framework sized, can be far under what a debug build's deep call path needs, and overflowing it ends the process. The future is polled on a thread of our own instead, sized by [`DRIVER_STACK`], and the caller only waits. Whatever thread the host calls from, the stack the app runs on is the same.
+//! A blocking call from the shell never polls its future on the thread that made it. That thread is the host's, and so is its stack size: the main thread, or a thread the windowing framework sized, can be far under what a debug build's deep call path needs, and overflowing it ends the process. The future is polled on a thread of our own instead, sized by the DRIVER_STACK constant below, and the caller only waits. Whatever thread the host calls from, the stack the app runs on is the same.
 //!
 //! The future is also **built** there: a caller passes a closure that makes it, never the future itself. A debug build's deep call path is a future of hundreds of KiB, and passing one by value copies it through each frame on the way to the driver, which on its own can overflow a small host thread. The closure holds only what the future borrows or takes.
 //!
@@ -93,8 +93,9 @@ impl AppRuntime {
 }
 
 /// Builds the future `make` returns and polls it on `handle`'s runtime, both
-/// on a new [`DRIVER_STACK`]-sized thread, and waits for it. A panic in
-/// either resumes on the caller, where the host turns it into an error.
+/// on a new thread sized by the DRIVER_STACK constant, and waits for it. A
+/// panic in either resumes on the caller, where the host turns it into an
+/// error.
 ///
 /// Called from a runtime worker (a scheduled pass), the wait moves the worker
 /// out of the scheduler first ([`tokio::task::block_in_place`]), so the work

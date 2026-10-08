@@ -69,10 +69,21 @@ if command -v cygpath >/dev/null 2>&1; then
 fi
 export ASTRA_SLICE_DATA_DIR="$DATA_DIR"
 
+# Prints a phase's captured tree JSON: the EXIT trap removes the scratch
+# directory, so a failing phase's evidence goes to the console before the FAIL
+# line rather than into the teardown with it.
+show_tree() { # json-file  phase
+  if [ -s "$1" ]; then
+    printf 'slice-check: phase %s: the tree as it last stood:\n' "$2"
+    cat "$1"
+  fi
+}
+
 # Runs one phase, its tree JSON captured beside the narration the binary prints.
 run_phase() { # phase  json-out
   say "phase $1: running the headless slice"
   if ! "$BIN" --headless-slice "$1" >"$2"; then
+    show_tree "$2" "$1"
     fail "phase $1 did not complete (the diff is in the narration above)"
   fi
 }
@@ -82,6 +93,7 @@ run_phase() { # phase  json-out
 assert_tree() { # json-file  phase
   for folder in INBOX Projects; do
     if ! grep -q "\"$folder\"" "$1"; then
+      show_tree "$1" "$2"
       fail "phase $2: the tree JSON holds no $folder folder"
     fi
   done

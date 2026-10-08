@@ -22,7 +22,9 @@
 //! tree came back from the keyring and the engine store without re-adding, prints it,
 //! and takes the stored credential back out so the next run starts clean. Progress
 //! narration goes to stderr; stdout carries only the JSON, which is what the script
-//! asserts on.
+//! asserts on. A logger is installed before anything runs, so the boot and dial
+//! paths' records land in the same stderr narration: its level comes from
+//! `ASTRA_LOG` and is Error unless that names another.
 
 use std::{
     path::PathBuf,
@@ -59,13 +61,51 @@ const STOP_SYNC_BOUND: Duration = Duration::from_secs(5);
 const EXPECTED_FOLDERS: [&str; 2] = ["INBOX", "Projects"];
 
 /// The headless host's event sink: there is no webview to emit to, so surface
-/// changes are logged (and without a logger installed, dropped: the null sink).
+/// changes go to the logger at debug level, which `ASTRA_LOG` turns on.
 #[derive(Debug)]
 struct LoggingEventSink;
 
 impl SurfaceEventSink for LoggingEventSink {
     fn surface_changed(&self, change: SurfaceChanged) {
         log::debug!("headless: the {:?} surface changed", change.surface);
+    }
+}
+
+/// The headless run's logger: one line per record on stderr, which already
+/// carries the run's narration. Hand-rolled because the headless slice is a
+/// diagnostic tool that pulls no logging framework behind it.
+struct StderrLogger;
+
+impl log::Log for StderrLogger {
+    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+        metadata.level() <= log::max_level()
+    }
+
+    fn log(&self, record: &log::Record<'_>) {
+        if self.enabled(record.metadata()) {
+            eprintln!("{}: {}", record.level(), record.args());
+        }
+    }
+
+    fn flush(&self) {}
+}
+
+/// One `ASTRA_LOG` value as a level filter, Error on anything the log crate
+/// does not name: quiet by default, loud on request.
+fn level_from(text: &str) -> log::LevelFilter {
+    text.parse().unwrap_or(log::LevelFilter::Error)
+}
+
+/// Installs the stderr logger with the level `ASTRA_LOG` names (Error when the
+/// variable is unset), so a failed boot or dial leaves its records in the
+/// run's output.
+fn install_logger() {
+    static LOGGER: StderrLogger = StderrLogger;
+    let level =
+        std::env::var("ASTRA_LOG").map_or(log::LevelFilter::Error, |text| level_from(&text));
+    // A refusal means a logger is already installed; the run keeps that one.
+    if log::set_logger(&LOGGER).is_ok() {
+        log::set_max_level(level);
     }
 }
 
@@ -357,30 +397,45 @@ fn print_usage() {
     eprintln!("        the keyring and the engine store persisted, without re-adding");
     eprintln!("env: ASTRA_HARNESS_IMAP_HOST, ASTRA_HARNESS_IMAP_PORT,");
     eprintln!("     ASTRA_HARNESS_IMAP_USER, ASTRA_HARNESS_IMAP_PASSWORD,");
-    eprintln!("     ASTRA_SLICE_DATA_DIR (required), ASTRA_SLICE_TIMEOUT_SECS");
+    eprintln!("     ASTRA_SLICE_DATA_DIR (required), ASTRA_SLICE_TIMEOUT_SECS,");
+    eprintln!("     ASTRA_LOG (stderr log level, Error by default)");
+}
+
+/// The function one phase runs as: `run_add` or `run_list`.
+type PhaseRun = fn(&SliceEnv) -> Result<String, String>;
+
+/// Validates the phase name into the function that runs it.
+fn phase_runner(phase: &str) -> Result<PhaseRun, String> {
+    match phase {
+        "add" => Ok(run_add),
+        "list" => Ok(run_list),
+        other => Err(format!("unknown phase '{other}'")),
+    }
+}
+
+/// Resolves what the run does: the phase first, the environment second, so an
+/// unknown phase reports its own usage error even when the environment is
+/// unset as well.
+fn resolve_run(
+    phase: &str,
+    read_env: impl FnOnce() -> Result<SliceEnv, String>,
+) -> Result<(PhaseRun, SliceEnv), String> {
+    Ok((phase_runner(phase)?, read_env()?))
 }
 
 /// Runs the headless slice phase and answers the process exit code: 0 on success, 1
 /// on a failed assertion (the diff is printed), 2 on a usage error.
 pub fn run_headless_slice(phase: &str) -> i32 {
-    let env = match SliceEnv::from_env() {
-        Ok(env) => env,
+    install_logger();
+    let (run, env) = match resolve_run(phase, SliceEnv::from_env) {
+        Ok(resolved) => resolved,
         Err(message) => {
             eprintln!("slice: {message}");
             print_usage();
             return 2;
         }
     };
-    let result = match phase {
-        "add" => run_add(&env),
-        "list" => run_list(&env),
-        other => {
-            eprintln!("slice: unknown phase '{other}'");
-            print_usage();
-            return 2;
-        }
-    };
-    match result {
+    match run(&env) {
         Ok(json) => {
             println!("{json}");
             0
