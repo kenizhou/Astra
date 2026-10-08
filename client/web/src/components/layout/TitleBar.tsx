@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The frameless title bar: the whole strip is a drag region and a double click
-// on it toggles maximise, the pattern the tauri drag attribute enables. The
-// product name, the theme toggle, and the account setup entry sit on it, each
-// its own no-drag target by virtue of being the event's target rather than the
-// region itself.
+// The frameless title bar: the whole strip is a drag region, and a double
+// click on one of the dedicated drag regions toggles maximise. The handler
+// lives on the regions alone, never on the header: a double click on a button
+// bubbles to the header, and an answer there would net the control an extra
+// toggle on top of its own clicks. The product name, the theme toggle, and
+// the account setup entry sit on the strip as their own no-drag targets by
+// virtue of being the event's target rather than the region itself.
 
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
@@ -26,14 +28,21 @@ export function TitleBar() {
   return (
     <header
       data-tauri-drag-region
-      onDoubleClick={toggleMaximise}
       className="flex h-[var(--header-h)] shrink-0 select-none items-center border-b border-border bg-chrome pl-3 text-chrome-foreground"
     >
-      <span data-tauri-drag-region className="text-[13px] font-semibold">
+      <span
+        data-tauri-drag-region
+        onDoubleClick={toggleMaximise}
+        className="text-[13px] font-semibold"
+      >
         Astra Mail
       </span>
 
-      <div data-tauri-drag-region className="h-full min-w-[40px] flex-1" />
+      <div
+        data-tauri-drag-region
+        onDoubleClick={toggleMaximise}
+        className="h-full min-w-[40px] flex-1"
+      />
 
       <button
         type="button"
