@@ -80,8 +80,9 @@ fn walk(root: &Path, dir: &Path, exts: &[&str], out: &mut Vec<PathBuf>) {
             if path_rel == "docs/zh" {
                 continue;
             }
-            // tauri-build writes its capability schemas into the working tree
-            // (not OUT_DIR), and they bust the 500-line cap on every build.
+            // tauri-build's generated schemas are untracked build output
+            // sitting in the working tree (not OUT_DIR); the directory is
+            // excluded from every walk-based check, not just the line cap.
             if path_rel == "client/desktop/gen" {
                 continue;
             }

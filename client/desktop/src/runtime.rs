@@ -4,6 +4,8 @@
 //! A blocking call from the shell never polls its future on the thread that made it. That thread is the host's, and so is its stack size: the main thread, or a thread the windowing framework sized, can be far under what a debug build's deep call path needs, and overflowing it ends the process. The future is polled on a thread of our own instead, sized by [`DRIVER_STACK`], and the caller only waits. Whatever thread the host calls from, the stack the app runs on is the same.
 //!
 //! The future is also **built** there: a caller passes a closure that makes it, never the future itself. A debug build's deep call path is a future of hundreds of KiB, and passing one by value copies it through each frame on the way to the driver, which on its own can overflow a small host thread. The closure holds only what the future borrows or takes.
+//!
+//! `clippy.toml` forbids tokio's own `block_on` everywhere else in this crate, so a call site cannot go back to polling on the caller's stack: [`AppRuntime::block_on`] and [`drive`] are the only way to wait on a future here.
 
 use std::future::Future;
 
@@ -79,6 +81,7 @@ impl AppRuntime {
 /// Called from a runtime worker (a scheduled pass), the wait moves the worker
 /// out of the scheduler first ([`tokio::task::block_in_place`]), so the work
 /// it waits for still has somewhere to run.
+#[allow(clippy::disallowed_methods)] // the one place tokio's `block_on` is called
 pub fn drive<M, F>(handle: &Handle, make: M) -> F::Output
 where
     M: FnOnce() -> F + Send,
