@@ -1,0 +1,26 @@
+[package]
+name = "astra-account"
+description = "Load an account's connection config and shape the IMAP connections it drives."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+engine-api.workspace = true
+# The host-selected TLS policy every connection of an account runs under; the acceptor
+# construction and certificate exception pinning types build against it.
+engine-tls.workspace = true
+# The IMAP adapter this crate builds an engine `ImapConfig` for; the credential source
+# and credentials types are the engine's.
+provider-imap.workspace = true
+serde.workspace = true
+# The stored account config's TOML form (`build_config_toml` / `load_str` / `to_toml`).
+toml.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
