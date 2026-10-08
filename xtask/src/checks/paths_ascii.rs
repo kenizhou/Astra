@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Gate check: every tracked path is ASCII outside docs/zh.
 
-pub fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
+pub(crate) fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
     let mut bad = Vec::new();
     for f in super::walk_files(root, &[]) {
         let r = super::rel(root, &f);

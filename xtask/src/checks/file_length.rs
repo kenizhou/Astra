@@ -2,9 +2,9 @@
 //! Gate check: no source file exceeds 500 lines. Markdown documents are
 //! exempt: prose length is judged by review, not by a line budget.
 
-pub const MAX_LINES: usize = 500;
+pub(crate) const MAX_LINES: usize = 500;
 
-pub fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
+pub(crate) fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
     let mut bad = Vec::new();
     for f in super::walk_files(
         root,

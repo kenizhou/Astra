@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Gate check: VERSION and the workspace package version agree.
 
-pub fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
+pub(crate) fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
     let version_file = root.join("VERSION");
     let cargo_file = root.join("Cargo.toml");
     if !version_file.is_file() || !cargo_file.is_file() {
@@ -23,7 +23,7 @@ pub fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
 }
 
 /// Reads `version = "x.y.z"` from the `[workspace.package]` section.
-pub fn workspace_version(cargo_toml: &str) -> Option<String> {
+pub(crate) fn workspace_version(cargo_toml: &str) -> Option<String> {
     let mut in_section = false;
     for line in cargo_toml.lines() {
         let t = line.trim();

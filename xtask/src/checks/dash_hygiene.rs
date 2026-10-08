@@ -6,7 +6,9 @@
 const EM_DASH: char = '\u{2014}';
 const EN_DASH: char = '\u{2013}';
 
-pub fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
+use std::path::Path;
+
+pub(crate) fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
     let mut bad = Vec::new();
     for f in super::walk_files(
         root,
@@ -18,7 +20,9 @@ pub fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
         if r == "LICENSE" || r.starts_with("docs/zh/") || super::is_zh_mirror(&f) {
             continue;
         }
-        let is_markdown = r.ends_with(".md");
+        let is_markdown = Path::new(&r)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("md"));
         let mut in_fence = false;
         for (idx, line) in super::read_lossy(&f).lines().enumerate() {
             if is_markdown && line.trim_start().starts_with("```") {

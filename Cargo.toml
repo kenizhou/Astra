@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["xtask"]
+members = ["crates/*", "xtask"]
 
 [workspace.package]
 version = "0.1.0"
@@ -8,5 +8,75 @@ edition = "2021"
 license = "GPL-3.0-only"
 repository = "https://github.com/kenizhou/Astra"
 
+# Lint discipline mirrored from mail-calendar (AR5); every member inherits it
+# via `[lints] workspace = true`.
 [workspace.lints.rust]
 unsafe_code = "forbid"
+# Every rustc warning is a hard error, caught on a local `cargo build`/`test`
+# rather than only in CI. `warnings` is the default-warn group (unused,
+# dead_code, and the rest) at low priority; the allow-by-default lints below
+# are enabled on top. Only this workspace's crates are affected: Cargo caps
+# lints on dependencies. Without a pinned toolchain a newer rustc can
+# introduce a new default-warn lint that then fails the build; fix or bump
+# when that happens.
+warnings = { level = "deny", priority = -1 }
+missing_docs = "deny"
+missing_debug_implementations = "deny"
+unreachable_pub = "deny"
+
+# Rustdoc lints also hard-fail (on `cargo doc`), so a broken/private doc link
+# or an accidental HTML tag is caught locally instead of in CI.
+[workspace.lints.rustdoc]
+all = { level = "deny", priority = -1 }
+
+# Clippy's `pedantic` group is a hard error here. `priority = -1` lets the
+# per-lint `allow`s below win; they are the ones that fire almost entirely on
+# false positives (mirrors the engine's own allows). Everything else in
+# `pedantic` is fixed, not silenced.
+[workspace.lints.clippy]
+pedantic = { level = "deny", priority = -1 }
+# Domain proper nouns (JMAP, CalDAV, IMAP, OAuth, PKCE, RFC numbers, and the
+# rest) read as unticked code identifiers to `doc_markdown`, but the docs are
+# protocol-heavy prose where they are proper nouns.
+doc_markdown = "allow"
+# Module and type naming intentionally repeats the module name for call-site
+# clarity (for example `account::AccountConfig`); this lint fights that
+# convention.
+module_name_repetitions = "allow"
+# `must_use_candidate` flags nearly every pure getter and builder; the
+# signal-to-noise is too low to gate the build on.
+must_use_candidate = "allow"
+# `too_many_lines` (a per-function 100-line threshold) fights the 500-line
+# file rule and fires on cohesive-but-long functions; the file-length gate is
+# the size discipline instead.
+too_many_lines = "allow"
+# The only panics in this workspace are internal `lock().expect("... poisoned")`
+# calls: an unrecoverable invariant violation, not documented API behaviour a
+# caller can act on. (`missing_errors_doc` stays denied: errors ARE part of
+# the contract.)
+missing_panics_doc = "allow"
+
+[workspace.dependencies]
+# The sync engine, consumed only through its `engine-api` facade (AGENTS.md).
+# Pinned by git commit to the public allodia-eu/email-calendar-sync-engine, so
+# the build is reproducible everywhere with no sibling checkout (and no repo
+# credentials: it is public). The rev matches refs/refs-lock.toml. To develop
+# against a local engine checkout at the same time, use the `[patch]` pattern
+# documented as comments in `.cargo/config.toml`. Re-pin: bump `rev` on every
+# line below to the new engine commit, keeping them identical.
+engine-api = { git = "https://github.com/allodia-eu/email-calendar-sync-engine", rev = "68eab00e6a9a9fe5a200218e156dbaae1ba00caa" }
+engine-core = { git = "https://github.com/allodia-eu/email-calendar-sync-engine", rev = "68eab00e6a9a9fe5a200218e156dbaae1ba00caa" }
+engine-provider = { git = "https://github.com/allodia-eu/email-calendar-sync-engine", rev = "68eab00e6a9a9fe5a200218e156dbaae1ba00caa" }
+# The one host-selected TLS policy shared across IMAP/CalDAV/JMAP/Graph.
+engine-tls = { git = "https://github.com/allodia-eu/email-calendar-sync-engine", rev = "68eab00e6a9a9fe5a200218e156dbaae1ba00caa", features = ["tls-native-certs"] }
+# Concrete provider adapters the account layer connects.
+provider-imap = { git = "https://github.com/allodia-eu/email-calendar-sync-engine", rev = "68eab00e6a9a9fe5a200218e156dbaae1ba00caa" }
+provider-caldav = { git = "https://github.com/allodia-eu/email-calendar-sync-engine", rev = "68eab00e6a9a9fe5a200218e156dbaae1ba00caa" }
+# The Microsoft Graph mail read/sync plus writes adapter (bearer-token).
+provider-graph = { git = "https://github.com/allodia-eu/email-calendar-sync-engine", rev = "68eab00e6a9a9fe5a200218e156dbaae1ba00caa" }
+# The Google (Gmail and Google Calendar) native-API adapter (bearer-token),
+# the cloud-API counterpart of provider-graph.
+provider-google = { git = "https://github.com/allodia-eu/email-calendar-sync-engine", rev = "68eab00e6a9a9fe5a200218e156dbaae1ba00caa" }
+# The JMAP mail read/sync plus submission plus calendar-read adapter (RFC
+# 8620/8621).
+provider-jmap = { git = "https://github.com/allodia-eu/email-calendar-sync-engine", rev = "68eab00e6a9a9fe5a200218e156dbaae1ba00caa" }
