@@ -1,0 +1,43 @@
+# Cargo settings that must hold for every build of this workspace. Tracked on
+# purpose, and the engine override at the bottom is comments only: the git pins
+# in Cargo.toml must resolve from the network fetch, so nothing here may patch
+# them locally.
+
+# One build directory for every checkout of this repository, so worktrees
+# share the compile work instead of each growing a multi-GB `target/`.
+# Intermediates only: binaries and test executables still land in each
+# checkout's own `target/`. Fixed name on purpose: `{workspace-path-hash}`
+# would give every worktree its own directory and defeat the sharing.
+# `{cargo-cache-home}` is CARGO_HOME, so no absolute path is committed. Cargo
+# locks the directory for the length of a build, so a second checkout waits;
+# `CARGO_BUILD_BUILD_DIR` opts one out.
+[build]
+build-dir = "{cargo-cache-home}/build/astra-mail"
+
+# Engine path override (simultaneous engine and core development).
+#
+# A live `[patch]` in this tracked file would mask the git pins for every
+# build, which is why the block below stays commented out. To develop against
+# a local engine checkout, create `<the directory holding this
+# checkout>/.cargo/config.toml` with the block below uncommented. Paths
+# resolve relative to the config file declaring them, so they point at an
+# engine checkout sitting beside this one (refs/refs-lock.toml keeps it at
+# opensource/email-calendar-sync-engine). Delete that file to go back to the
+# git-pinned commit in Cargo.toml. ($CARGO_HOME/config.toml works too, but
+# applies to every workspace on the machine.)
+#
+# [patch."https://github.com/allodia-eu/email-calendar-sync-engine"]
+# engine-api = { path = "email-calendar-sync-engine/crates/engine-api" }
+# engine-core = { path = "email-calendar-sync-engine/crates/engine-core" }
+# engine-provider = { path = "email-calendar-sync-engine/crates/engine-provider" }
+# engine-tls = { path = "email-calendar-sync-engine/crates/engine-tls" }
+# provider-imap = { path = "email-calendar-sync-engine/crates/provider-imap" }
+# provider-caldav = { path = "email-calendar-sync-engine/crates/provider-caldav" }
+# provider-graph = { path = "email-calendar-sync-engine/crates/provider-graph" }
+# provider-google = { path = "email-calendar-sync-engine/crates/provider-google" }
+# provider-jmap = { path = "email-calendar-sync-engine/crates/provider-jmap" }
+#
+# Use `[patch]`, never `paths = [...]`: a `paths` override may not change a
+# crate's dependency list, so it hits a confusing resolver conflict the moment
+# the local engine's dependencies differ from the pinned commit's, which is
+# exactly what this override is for.

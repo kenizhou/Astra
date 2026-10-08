@@ -7,15 +7,15 @@ this row ports.
 
 | Area | Feature | Status | Source |
 |---|---|---|---|
-| Accounts | IMAP/SMTP account setup wizard with manual server entry | ⬜ | accounts.md |
+| Accounts | IMAP/SMTP account setup wizard with manual server entry | 🚧 | accounts.md |
 | Accounts | Auto-detect from email address (JMAP probe, SRV, autoconfig, ISPDB, MX) | ⬜ | account-autodetect.md |
-| Mail | Folder pane across accounts with nested folders and persisted expansion | ⬜ | folder-pane.md |
+| Mail | Folder pane across accounts with nested folders and persisted expansion | 🚧 | folder-pane.md |
 | Mail | Flat and threaded message list with windowed paging | ⬜ | |
 | Calendar | Day, work week, and month grids with drag to create, move, resize | ⬜ | calendar.md |
-| Core | Reactive Rust to native binding, dispatch to immutable snapshots | ⬜ | |
+| Core | Reactive Rust to native binding, dispatch to immutable snapshots | 🚧 | |
 | Accounts | Settings accounts page lists every account, with per-service toggles, relinking, sign-in again, server editing, and removal | ⬜ | accounts.md |
 | Accounts | Outgoing name per account, asked once at connect, editable in settings, kept in step with the provider | ⬜ | sending.md |
-| Accounts | Untrusted server certificates shown with a fingerprint and accepted once per server; verification is never switched off | ⬜ | certificate-exceptions.md |
+| Accounts | Untrusted server certificates shown with a fingerprint and accepted once per server; verification is never switched off | 🚧 | certificate-exceptions.md |
 | Accounts | Microsoft 365 accounts: browser OAuth sign-in (PKCE), mail read and actions, send, calendar read and write | ⬜ | |
 | Accounts | Microsoft reconnect banner when a permission is missing; one tap re-grants the full scope set | ⬜ | provider-oauth.md |
 | Accounts | Expired or revoked sign-ins reported as such with an offer to sign in again, across Microsoft, Google, JMAP, and password accounts | ⬜ | provider-oauth.md |
@@ -39,7 +39,7 @@ this row ports.
 | Mail | Message laid out against the reading pane's own width, so a newsletter's own mobile rules apply | ⬜ | reading-zoom.md |
 | Mail | Fixed-width messages reflowed to fit at every pane width, live during resize | ⬜ | reading-zoom.md |
 | Mail | Offline-first bodies: synced bodies auto-download after every sync under a per-account cap, so opens are instant | ⬜ | |
-| Mail | Three-pane desktop layout: sidebar, list, reading pane | ⬜ | |
+| Mail | Three-pane desktop layout: sidebar, list, reading pane | 🚧 | |
 | Mail | Reading actions: reply, reply all, forward, archive, delete | ⬜ | |
 | Mail | Overflow menu with Save as .eml, writing the message exactly as delivered | ⬜ | reading-actions.md |
 | Mail | Print a message with subject and header lines through the platform print dialog | ⬜ | reading-actions.md |
@@ -107,7 +107,7 @@ this row ports.
 | Search | Search says how far back it looked, with a link to change the depth | ⬜ | search.md |
 | Search | Search results follow the list's conversation grouping | ⬜ | |
 | Sync | Per-account fetch depth and message size, with every folder synced within the depth | ⬜ | |
-| Sync | Sync progress: a bar under the list for a started download, a status line for background passes, Sync paused when throttled | ⬜ | sync-progress.md |
+| Sync | Sync progress: a bar under the list for a started download, a status line for background passes, Sync paused when throttled | 🚧 | sync-progress.md |
 | Settings | Unified settings screen: language, appearance, time zone, conversation grouping, swipe actions, per-account fetch, quote style, default send account, reset, About | ⬜ | |
 | Sync | Per-mailbox sync behaviour: IMAP IDLE push where capable, otherwise 15 to 120 minute polling | ⬜ | |
 | Sync | Background mail delivery while the app is not in the foreground | ⬜ | background-sync.md |

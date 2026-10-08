@@ -90,3 +90,8 @@ LLM 调用、工具调用与权限决定都带关联 id 落入其台账。
   组件，否则 fmt 和 clippy 在运行器上缺失。
 - 门禁遍历的是工作树而非 git 索引；.superpowers 被跳过，因此被跟踪的
   文件一律不得存放在那里。
+- rustc 的 dead_code 分析不看仅测试使用：运行时消费者晚到的辅助类型在私有模块里保持 pub、绝不用 pub(crate)，否则 deny(warnings) 会在中间构建失败。
+- tauri-build 会把能力 schema 写入工作树的 client/desktop/gen 而非 OUT_DIR；门禁跳过该目录，且它保持不被跟踪。
+- npm 11 会拦截 esbuild 的 postinstall 直至批准：全新安装后在 client/web 运行 `npm install-scripts approve esbuild`，否则开发服务器无法构建。
+- client/web/package.json 中提交的 allowScripts 记录就是该批准写入的内容；npm 11.19 缺少它时只会警告，提交的记录让全新安装与 CI 保持安静。
+- rustdoc 拒绝公开文档链接私有条目（private_intra-doc_links）：私有常量在正文中用纯文本命名、绝不做文档链接，否则 `cargo doc --workspace --no-deps` 失败。

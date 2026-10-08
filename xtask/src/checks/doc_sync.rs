@@ -6,7 +6,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub fn check(root: &Path) -> Result<(), Vec<String>> {
+pub(crate) fn check(root: &Path) -> Result<(), Vec<String>> {
     let mut bad = Vec::new();
     let docs = english_docs(root);
     for en in &docs {
@@ -26,7 +26,7 @@ pub fn check(root: &Path) -> Result<(), Vec<String>> {
             .strip_prefix("docs/zh/")
             .unwrap_or(&r)
             .strip_suffix(".zh-CN.md")
-            .map(|s| s.to_string())
+            .map(str::to_string)
             .unwrap_or_default();
         let english_rel = if stripped == "AGENTS" {
             "AGENTS.md".to_string()
@@ -46,7 +46,7 @@ pub fn check(root: &Path) -> Result<(), Vec<String>> {
     }
 }
 
-pub fn english_docs(root: &Path) -> Vec<PathBuf> {
+pub(crate) fn english_docs(root: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let agents = root.join("AGENTS.md");
     if agents.is_file() {
@@ -71,7 +71,7 @@ pub fn english_docs(root: &Path) -> Vec<PathBuf> {
     out
 }
 
-pub fn mirror_of(root: &Path, english: &Path) -> PathBuf {
+pub(crate) fn mirror_of(root: &Path, english: &Path) -> PathBuf {
     let r = super::rel(root, english);
     let stripped = r.strip_prefix("docs/").unwrap_or(&r);
     let stem = stripped.strip_suffix(".md").unwrap_or(stripped);
@@ -97,13 +97,13 @@ mod tests {
     #[test]
     fn fails_when_a_mirror_is_missing() {
         let root = fixture(&[("docs/foo.md", "doc\n")]);
-        assert!(super::check(&root).unwrap_err().len() == 1);
+        assert_eq!(super::check(&root).unwrap_err().len(), 1);
     }
 
     #[test]
     fn fails_on_an_orphan_mirror() {
         let root = fixture(&[("docs/zh/foo.zh-CN.md", "doc\n")]);
-        assert!(super::check(&root).unwrap_err().len() == 1);
+        assert_eq!(super::check(&root).unwrap_err().len(), 1);
     }
 
     #[test]

@@ -41,7 +41,7 @@ fn main() -> ExitCode {
 fn repo_root() -> PathBuf {
     env::var_os("CARGO_MANIFEST_DIR")
         .map(PathBuf::from)
-        .and_then(|d| d.parent().map(|p| p.to_path_buf()))
+        .and_then(|d| d.parent().map(Path::to_path_buf))
         .unwrap_or_else(|| PathBuf::from("."))
 }
 

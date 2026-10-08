@@ -1,0 +1,461 @@
+// SPDX-License-Identifier: GPL-3.0-only
+//! Tests for the redial loop: a dropped socket is redialled once and the call retried,
+//! and a delegate's own failure is surfaced rather than masked as a reconnect.
+//!
+//! In their own `#[path]` file to keep `reconnect.rs` under the 500-line limit.
+
+use std::{
+    collections::BTreeSet,
+    sync::atomic::{AtomicUsize, Ordering},
+};
+
+use engine_api::{EmailAddress, FailureClass, Memberships, MessageIdHeader};
+use engine_core::{ids::MessageId, sync::SyncUpdate};
+use engine_provider::{Capabilities, ProviderError, TlsVersion, Unrecorded};
+
+use super::*;
+
+/// A scripted delegate: every mail call increments a shared counter and returns either
+/// `Ok` (an empty snapshot) or a classified error, so a test can assert whether the
+/// wrapper retried on a fresh delegate.
+struct FakeDelegate {
+    calls: Arc<AtomicUsize>,
+    outcome: Option<FailureClass>,
+    info: ConnectionInfo,
+}
+
+impl FakeDelegate {
+    fn arc(calls: Arc<AtomicUsize>, outcome: Option<FailureClass>) -> Arc<dyn Provider> {
+        Self::arc_with_info(
+            calls,
+            outcome,
+            ConnectionInfo::new(Capabilities::none().with_mail()),
+        )
+    }
+
+    fn arc_with_info(
+        calls: Arc<AtomicUsize>,
+        outcome: Option<FailureClass>,
+        info: ConnectionInfo,
+    ) -> Arc<dyn Provider> {
+        Arc::new(Self {
+            calls,
+            outcome,
+            info,
+        })
+    }
+
+    fn record(&self) -> ProviderResult<()> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        match self.outcome {
+            None => Ok(()),
+            Some(class) => Err(ProviderError::new(class, "scripted failure")),
+        }
+    }
+}
+
+// Adopted as `Arc<dyn Provider>`, so it has to be one. The rejecting default
+// is right for these tests: they exercise the redial loop, not reporting.
+#[async_trait]
+impl Provider for FakeDelegate {
+    fn connection_info(&self) -> ConnectionInfo {
+        self.info
+    }
+
+    async fn sync_mailboxes(
+        &self,
+        _account: &AccountId,
+        _cursor: Option<&SyncState>,
+    ) -> ProviderResult<ScopeSync<Mailbox>> {
+        self.record()?;
+        Ok(ScopeSync::new(
+            SyncUpdate::snapshot(Vec::new(), BTreeSet::new()),
+            SyncState::new("cursor"),
+        ))
+    }
+
+    async fn submit_email(
+        &self,
+        _account: &AccountId,
+        _draft: &Draft,
+        _hand_over: &HandOver<'_>,
+    ) -> ProviderResult<SubmissionReceipt> {
+        self.record()?;
+        unreachable!("submit tests only script a failing outcome");
+    }
+
+    async fn put_draft(
+        &self,
+        _account: &AccountId,
+        _draft: &Draft,
+        _replacing: Option<&ProviderKey>,
+    ) -> ProviderResult<ProviderKey> {
+        self.record()?;
+        Ok(ProviderKey::new("Drafts:1:7").expect("valid key"))
+    }
+
+    async fn delete_draft(&self, _account: &AccountId, _draft: &ProviderKey) -> ProviderResult<()> {
+        self.record()
+    }
+
+    async fn file_sent_copy(
+        &self,
+        _account: &AccountId,
+        _draft: &Draft,
+    ) -> ProviderResult<ProviderKey> {
+        self.record()?;
+        Ok(ProviderKey::new("Sent:1:9").expect("valid key"))
+    }
+
+    // A batch of its own, so a test can tell forwarding from the trait's one-at-a-time default:
+    // that would call `fetch_message_source`, which this fake rejects.
+    fn fetch_message_sources<'a>(
+        &'a self,
+        _account: &'a AccountId,
+        messages: &'a [Message],
+    ) -> SourceStream<'a> {
+        let outcome = self.record();
+        let answers: Vec<_> = (0..messages.len())
+            .map(|index| {
+                let answer = match &outcome {
+                    Ok(()) => Ok(RawMime::new(b"Subject: batch\r\n\r\nbody".to_vec())),
+                    Err(err) => Err(ProviderError::new(err.class(), err.to_string())),
+                };
+                (index, answer)
+            })
+            .collect();
+        Box::pin(futures::stream::iter(answers))
+    }
+}
+
+impl engine_api::MailboxWrites for FakeDelegate {}
+impl CalendarWrites for FakeDelegate {}
+
+fn account() -> AccountId {
+    AccountId::try_from("test@example.com").expect("valid account id")
+}
+
+fn draft() -> Draft {
+    Draft::new(
+        MessageIdHeader::new("m@example.com").expect("valid message id"),
+        EmailAddress::new("from@example.com"),
+        vec![EmailAddress::new("to@example.com")],
+        "Subject",
+        "Body",
+    )
+}
+
+fn mailbox() -> MailboxId {
+    MailboxId::try_from("INBOX").expect("valid mailbox id")
+}
+
+/// A `redial` that produces an always-succeeding delegate and counts how often it fires.
+fn healthy_redial(redials: Arc<AtomicUsize>) -> Redial {
+    let calls = Arc::new(AtomicUsize::new(0));
+    Box::new(move || {
+        redials.fetch_add(1, Ordering::SeqCst);
+        let calls = Arc::clone(&calls);
+        Box::pin(async move { Ok(FakeDelegate::arc(calls, None)) })
+    })
+}
+
+/// A `redial` that reports a specific connection fact on the fresh delegate.
+fn healthy_redial_with_info(redials: Arc<AtomicUsize>, info: ConnectionInfo) -> Redial {
+    let calls = Arc::new(AtomicUsize::new(0));
+    Box::new(move || {
+        redials.fetch_add(1, Ordering::SeqCst);
+        let calls = Arc::clone(&calls);
+        Box::pin(async move { Ok(FakeDelegate::arc_with_info(calls, None, info)) })
+    })
+}
+
+#[tokio::test]
+async fn retries_once_on_a_fresh_session_after_a_retryable_drop() {
+    let redials = Arc::new(AtomicUsize::new(0));
+    // The adopted session fails once with a dead-socket error…
+    let initial = FakeDelegate::arc(Arc::new(AtomicUsize::new(0)), Some(FailureClass::Retryable));
+    let provider =
+        ReconnectingImapProvider::adopt(initial, mailbox(), healthy_redial(Arc::clone(&redials)));
+
+    // …and the call still succeeds, because the wrapper re-dialed and retried.
+    let result = provider.sync_mailboxes(&account(), None).await;
+    assert!(
+        result.is_ok(),
+        "expected the retry on a fresh session to succeed"
+    );
+    assert_eq!(
+        redials.load(Ordering::SeqCst),
+        1,
+        "reconnected exactly once"
+    );
+}
+
+#[tokio::test]
+async fn connection_info_tracks_the_current_session_after_redial() {
+    let redials = Arc::new(AtomicUsize::new(0));
+    let initial_info = ConnectionInfo {
+        tls_version: Some(TlsVersion::Tls1_2),
+        ..ConnectionInfo::new(Capabilities::none().with_mail())
+    };
+    let redial_info = ConnectionInfo {
+        tls_version: Some(TlsVersion::Tls1_3),
+        ..ConnectionInfo::new(Capabilities::none().with_mail())
+    };
+    let initial = FakeDelegate::arc_with_info(
+        Arc::new(AtomicUsize::new(0)),
+        Some(FailureClass::Retryable),
+        initial_info,
+    );
+    let provider = ReconnectingImapProvider::adopt(
+        initial,
+        mailbox(),
+        healthy_redial_with_info(Arc::clone(&redials), redial_info),
+    );
+
+    assert_eq!(
+        provider.connection_info().tls_version,
+        Some(TlsVersion::Tls1_2)
+    );
+    let result = provider.sync_mailboxes(&account(), None).await;
+    assert!(result.is_ok(), "redial should recover the scripted drop");
+    assert_eq!(
+        provider.connection_info().tls_version,
+        Some(TlsVersion::Tls1_3)
+    );
+}
+
+#[tokio::test]
+async fn does_not_reconnect_on_a_non_retryable_error() {
+    let redials = Arc::new(AtomicUsize::new(0));
+    let initial = FakeDelegate::arc(
+        Arc::new(AtomicUsize::new(0)),
+        Some(FailureClass::Authentication),
+    );
+    let provider =
+        ReconnectingImapProvider::adopt(initial, mailbox(), healthy_redial(Arc::clone(&redials)));
+
+    let result = provider.sync_mailboxes(&account(), None).await;
+    assert!(result.is_err(), "an auth error is not a transport drop");
+    assert_eq!(
+        redials.load(Ordering::SeqCst),
+        0,
+        "must not re-dial on auth failure"
+    );
+}
+
+#[tokio::test]
+async fn a_send_is_never_blind_retried() {
+    let redials = Arc::new(AtomicUsize::new(0));
+    let submits = Arc::new(AtomicUsize::new(0));
+    let initial = FakeDelegate::arc(Arc::clone(&submits), Some(FailureClass::Retryable));
+    let provider =
+        ReconnectingImapProvider::adopt(initial, mailbox(), healthy_redial(Arc::clone(&redials)));
+
+    let result = provider
+        .submit_email(&account(), &draft(), &HandOver::new(&Unrecorded))
+        .await;
+    assert!(result.is_err(), "a retryable send surfaces the error");
+    assert_eq!(
+        submits.load(Ordering::SeqCst),
+        1,
+        "the send was attempted exactly once"
+    );
+    assert_eq!(
+        redials.load(Ordering::SeqCst),
+        0,
+        "submit invalidates but does not re-dial"
+    );
+}
+
+#[tokio::test]
+async fn a_dropped_session_keeps_reporting_the_width_it_had() {
+    // A body warm reads the width when its pass starts. If that lands between a lost
+    // connection and the redial, the defaults would have it fetch one message per request,
+    // one request at a time, for the whole pass.
+    let info = ConnectionInfo::new(Capabilities::none().with_mail())
+        .with_concurrent_fetches(4)
+        .with_sources_per_request(25);
+    let initial = FakeDelegate::arc_with_info(
+        Arc::new(AtomicUsize::new(0)),
+        Some(FailureClass::Retryable),
+        info,
+    );
+    let provider = ReconnectingImapProvider::adopt(
+        initial,
+        mailbox(),
+        healthy_redial(Arc::new(AtomicUsize::new(0))),
+    );
+    let messages = [inbox_message(1)];
+    let _: Vec<_> = provider
+        .fetch_message_sources(&account(), &messages)
+        .collect()
+        .await;
+
+    let reported = provider.connection_info();
+    assert_eq!(reported.concurrent_fetches, 4);
+    assert_eq!(reported.sources_per_request, 25);
+}
+
+fn inbox_message(uid: u32) -> Message {
+    Message::new(
+        MessageId::try_from(format!("imap:v1:u{uid}@INBOX").as_str()).expect("valid message id"),
+        Memberships::of_one(mailbox()),
+    )
+}
+
+#[tokio::test]
+async fn a_batch_reaches_the_delegates_own_batch() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let initial = FakeDelegate::arc(Arc::clone(&calls), None);
+    let provider = ReconnectingImapProvider::adopt(
+        initial,
+        mailbox(),
+        healthy_redial(Arc::new(AtomicUsize::new(0))),
+    );
+    let messages = [inbox_message(1), inbox_message(2)];
+
+    let outcomes: Vec<_> = provider
+        .fetch_message_sources(&account(), &messages)
+        .map(|(index, result)| (index, result.is_ok()))
+        .collect()
+        .await;
+
+    assert_eq!(outcomes, vec![(0, true), (1, true)]);
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "one batch call, not one per message"
+    );
+}
+
+#[tokio::test]
+async fn a_batch_that_lost_its_connection_redials_the_next_call_rather_than_repeating() {
+    let redials = Arc::new(AtomicUsize::new(0));
+    let initial = FakeDelegate::arc(Arc::new(AtomicUsize::new(0)), Some(FailureClass::Retryable));
+    let provider =
+        ReconnectingImapProvider::adopt(initial, mailbox(), healthy_redial(Arc::clone(&redials)));
+    let messages = [inbox_message(1)];
+
+    let first: Vec<_> = provider
+        .fetch_message_sources(&account(), &messages)
+        .map(|(_, result)| result.is_ok())
+        .collect()
+        .await;
+    assert_eq!(
+        first,
+        vec![false],
+        "the failure is reported, not retried here"
+    );
+    assert_eq!(redials.load(Ordering::SeqCst), 0);
+
+    let second: Vec<_> = provider
+        .fetch_message_sources(&account(), &messages)
+        .map(|(_, result)| result.is_ok())
+        .collect()
+        .await;
+    assert_eq!(second, vec![true]);
+    assert_eq!(
+        redials.load(Ordering::SeqCst),
+        1,
+        "the next call ran on a fresh session"
+    );
+}
+
+// Every IMAP account is wrapped, so a verb the wrapper does not forward is a verb no IMAP
+// account has: the trait's default answers "unsupported" while the capabilities say otherwise.
+#[tokio::test]
+async fn a_draft_save_reaches_the_imap_session() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let initial = FakeDelegate::arc(Arc::clone(&calls), None);
+    let provider = ReconnectingImapProvider::adopt(
+        initial,
+        mailbox(),
+        healthy_redial(Arc::new(AtomicUsize::new(0))),
+    );
+
+    let key = provider.put_draft(&account(), &draft(), None).await;
+    assert_eq!(key.expect("the save is forwarded").as_str(), "Drafts:1:7");
+    provider
+        .delete_draft(
+            &account(),
+            &ProviderKey::new("Drafts:1:7").expect("valid key"),
+        )
+        .await
+        .expect("the removal is forwarded");
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+}
+
+// An `APPEND` that landed before the socket died would be stored twice by a replay.
+#[tokio::test]
+async fn a_draft_save_is_never_blind_retried() {
+    let redials = Arc::new(AtomicUsize::new(0));
+    let saves = Arc::new(AtomicUsize::new(0));
+    let initial = FakeDelegate::arc(Arc::clone(&saves), Some(FailureClass::Retryable));
+    let provider =
+        ReconnectingImapProvider::adopt(initial, mailbox(), healthy_redial(Arc::clone(&redials)));
+
+    let result = provider.put_draft(&account(), &draft(), None).await;
+    assert!(result.is_err(), "a retryable save surfaces the error");
+    assert_eq!(
+        saves.load(Ordering::SeqCst),
+        1,
+        "the save was attempted once"
+    );
+    assert_eq!(redials.load(Ordering::SeqCst), 0);
+
+    provider
+        .put_draft(&account(), &draft(), None)
+        .await
+        .expect("the next save runs on a fresh session");
+    assert_eq!(redials.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn a_draft_removal_is_retried_on_a_fresh_session() {
+    let redials = Arc::new(AtomicUsize::new(0));
+    let initial = FakeDelegate::arc(Arc::new(AtomicUsize::new(0)), Some(FailureClass::Retryable));
+    let provider =
+        ReconnectingImapProvider::adopt(initial, mailbox(), healthy_redial(Arc::clone(&redials)));
+
+    provider
+        .delete_draft(
+            &account(),
+            &ProviderKey::new("Drafts:1:7").expect("valid key"),
+        )
+        .await
+        .expect("an absent draft is success, so a repeat is safe");
+    assert_eq!(redials.load(Ordering::SeqCst), 1);
+}
+
+// Every IMAP account is wrapped, so a verb the wrapper does not forward is a verb no IMAP
+// account has: the trait's default answers that the send already filed the copy.
+#[tokio::test]
+async fn filing_a_sent_copy_reaches_the_imap_session() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let initial = FakeDelegate::arc(Arc::clone(&calls), None);
+    let provider = ReconnectingImapProvider::adopt(
+        initial,
+        mailbox(),
+        healthy_redial(Arc::new(AtomicUsize::new(0))),
+    );
+
+    let key = provider.file_sent_copy(&account(), &draft()).await;
+    assert_eq!(key.expect("the filing is forwarded").as_str(), "Sent:1:9");
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+// The trait requires the filing to look for the copy before placing one, so a repeat after a
+// dropped socket finds the copy the first attempt placed rather than adding a second.
+#[tokio::test]
+async fn filing_a_sent_copy_is_retried_on_a_fresh_session() {
+    let redials = Arc::new(AtomicUsize::new(0));
+    let initial = FakeDelegate::arc(Arc::new(AtomicUsize::new(0)), Some(FailureClass::Retryable));
+    let provider =
+        ReconnectingImapProvider::adopt(initial, mailbox(), healthy_redial(Arc::clone(&redials)));
+
+    provider
+        .file_sent_copy(&account(), &draft())
+        .await
+        .expect("the retry on a fresh session files the copy");
+    assert_eq!(redials.load(Ordering::SeqCst), 1);
+}

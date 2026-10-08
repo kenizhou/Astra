@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Gate check: Rust and TypeScript sources carry the SPDX header.
 
-pub const HEADER: &str = "// SPDX-License-Identifier: GPL-3.0-only";
+pub(crate) const HEADER: &str = "// SPDX-License-Identifier: GPL-3.0-only";
 
-pub fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
+pub(crate) fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
     let mut bad = Vec::new();
     for f in super::walk_files(root, &["rs", "ts", "tsx"]) {
         let r = super::rel(root, &f);

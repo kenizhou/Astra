@@ -1,0 +1,48 @@
+[package]
+name = "astra-app"
+description = "The Astra Mail application core: the intent and surface protocol of the unidirectional loop, and the runtime that drives it."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# The account layer's folder-shaping rule (which listed folders a pass syncs) and the
+# connection seams the host drives; the protocol itself names only ids.
+astra-account = { path = "../astra-account" }
+# The immutable snapshots the surfaces render, and the folder-row projection.
+astra-viewmodel = { path = "../astra-viewmodel" }
+# The engine facade: every mail read and sync goes through it (engine types via
+# re-exports; no other engine crate).
+engine-api.workspace = true
+# Every protocol and preferences type crosses the IPC or the preferences file as data.
+serde.workspace = true
+# The async `MailboxConnector` seam the host implements.
+async-trait.workspace = true
+# The sync fan-out joins every account's pass (join_all), and the row load reads every
+# account's tree at once.
+futures.workspace = true
+# Diagnostic lines for the sync and boot paths; the host installs the logger.
+log.workspace = true
+# Error enums for the dispatch and boot contracts.
+thiserror.workspace = true
+# The preferences file's TOML form.
+toml.workspace = true
+# The sync-depth window's calendar arithmetic (the whole-months cutoff).
+time.workspace = true
+# The account set behind an async RwLock only; the runtime itself is the host's, so no
+# rt feature here.
+tokio = { workspace = true, features = ["sync"] }
+
+[dev-dependencies]
+# The fake provider implements the engine's `Provider` contract, whose sync plumbing
+# (SyncState, SyncUpdate) the facade does not re-export.
+engine-core.workspace = true
+# The same fake names the provider-side stream and error types.
+engine-provider.workspace = true
+serde_json.workspace = true
+# The test executor (`#[tokio::test]`); tests may build a runtime, the library may not.
+tokio = { workspace = true, features = ["macros", "rt"] }

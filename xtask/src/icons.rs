@@ -10,7 +10,7 @@ use image::{DynamicImage, ImageFormat};
 const SIZES: [u32; 8] = [1024, 512, 256, 128, 64, 48, 32, 16];
 const ICO_SIZES: [u32; 4] = [256, 48, 32, 16];
 
-pub fn generate(src: &Path, out_dir: &Path) -> Result<Vec<PathBuf>, String> {
+pub(crate) fn generate(src: &Path, out_dir: &Path) -> Result<Vec<PathBuf>, String> {
     let img = image::open(src).map_err(|e| format!("cannot read {}: {e}", src.display()))?;
     let img = img.into_rgba8();
     std::fs::create_dir_all(out_dir).map_err(|e| e.to_string())?;

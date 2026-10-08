@@ -1,0 +1,91 @@
+// SPDX-License-Identifier: GPL-3.0-only
+//! The [`Intent`] enum: the single inbound channel of the unidirectional loop, with the
+//! two enums its variants carry ([`ViewMode`] and [`FolderIntent`]) beside it.
+
+use engine_api::AccountId;
+use serde::{Deserialize, Serialize};
+
+use crate::reference::FolderRef;
+
+/// How the mailbox list is grouped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ViewMode {
+    /// A flat list of messages, newest first.
+    #[default]
+    Flat,
+    /// Conversations grouped by thread, newest activity first.
+    Threaded,
+}
+
+/// What the folder pane asks the runtime to do to an account's folders.
+///
+/// Each change goes through the engine's outbox, so one made offline is drawn in the pane
+/// at once, marked pending, and reaches the server when the device is back online.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum FolderIntent {
+    /// Make a folder called `name` inside `parent`, or at the top of the account's tree.
+    Create {
+        /// The account to make it in.
+        account: AccountId,
+        /// The folder to make it inside, a key of `account`'s, or `None` for the top level.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        parent: Option<String>,
+        /// The new folder's own name.
+        name: String,
+    },
+}
+
+/// A host intent: the single inbound channel of the unidirectional loop.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Intent {
+    /// Sync the account's mail (every connected folder) and refresh the mailbox-list
+    /// snapshot.
+    RefreshMail,
+    /// Show one account's folders (by account id), or the unified "all inboxes" view
+    /// (`None`). Resets the selected folder.
+    SelectAccount(Option<AccountId>),
+    /// Open or shut one account's folder tree in the sidebar, and remember it across
+    /// launches.
+    ///
+    /// Deliberately **not** navigation: it changes neither the selected account nor the
+    /// selected folder, so any number of trees can be open at once. A client renders the
+    /// chevron from the account's own row and never keeps its own copy, which would
+    /// disagree with the core and reset on every restart.
+    SetAccountExpanded {
+        /// The account whose tree to open or shut.
+        account: AccountId,
+        /// Whether the tree is open.
+        expanded: bool,
+    },
+    /// Open or shut the folders filed inside one folder, and remember it across launches.
+    /// An account's tree and a folder's are the same thing one level down, so this follows
+    /// [`Intent::SetAccountExpanded`]'s rules: not navigation, independent of what is
+    /// selected, and the core's to remember. A [`FolderRef`] for [`Intent::SelectFolder`]'s
+    /// reason.
+    SetFolderExpanded {
+        /// The folder whose own sub-folders to show or hide, bound to its owning account.
+        folder: FolderRef,
+        /// Whether the folders inside it are showing.
+        expanded: bool,
+    },
+    /// Show one folder's mail. A [`FolderRef`], never a bare key: a key is unique only
+    /// within its account, and there is no folder-only form. An account's own all-mail
+    /// view is [`Intent::SelectAccount`].
+    SelectFolder {
+        /// The folder to show, bound to its owning account.
+        folder: FolderRef,
+    },
+    /// Switch the mailbox list between a flat and a threaded view.
+    SetViewMode(ViewMode),
+    /// Grow the visible mailbox-list window by one page: the host dispatches this as it
+    /// scrolls toward the end of the list, so only the rows in view are built and crossed
+    /// the IPC. Any navigation that changes the list (select account or folder, switch
+    /// view mode) resets the window to the first page.
+    ShowMore,
+    /// A change to an account's folder tree ([`FolderIntent`]).
+    Folders(FolderIntent),
+}

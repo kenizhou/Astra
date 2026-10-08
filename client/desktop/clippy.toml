@@ -1,0 +1,6 @@
+# A blocking host call polls its future on a thread of our own, never on the caller's: see
+# `src/runtime.rs`. Its `drive` is the one place tokio's `block_on` is allowed.
+disallowed-methods = [
+    { path = "tokio::runtime::Runtime::block_on", reason = "poll on the driver thread: `AppRuntime::block_on` or `runtime::drive`" },
+    { path = "tokio::runtime::Handle::block_on", reason = "poll on the driver thread: `AppRuntime::block_on` or `runtime::drive`" },
+]

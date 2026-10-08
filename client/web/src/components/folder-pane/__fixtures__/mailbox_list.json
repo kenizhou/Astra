@@ -1,0 +1,62 @@
+{
+  "account_folders": [
+    {
+      "account_id": "work",
+      "display_name": "work@example.net",
+      "expanded": true,
+      "folders": [
+        {
+          "key": "INBOX",
+          "name": "Inbox",
+          "role": "inbox",
+          "unread": 3,
+          "depth": 0,
+          "has_children": false,
+          "expanded": false
+        },
+        {
+          "key": "Clients",
+          "name": "Clients",
+          "unread": 0,
+          "depth": 0,
+          "has_children": true,
+          "expanded": true
+        },
+        {
+          "key": "Clients/Acme",
+          "name": "Acme",
+          "parent": "Clients",
+          "unread": 2,
+          "depth": 1,
+          "has_children": false,
+          "expanded": false
+        },
+        {
+          "key": "Sent",
+          "name": "Sent",
+          "role": "sent",
+          "unread": 0,
+          "depth": 0,
+          "has_children": false,
+          "expanded": false
+        }
+      ]
+    },
+    {
+      "account_id": "home",
+      "display_name": "Home",
+      "expanded": false,
+      "folders": [
+        {
+          "key": "INBOX",
+          "name": "Inbox",
+          "role": "inbox",
+          "unread": 7,
+          "depth": 0,
+          "has_children": false,
+          "expanded": false
+        }
+      ]
+    }
+  ]
+}

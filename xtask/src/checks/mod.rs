@@ -1,23 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Contract checks and shared file-walking helpers.
 
-pub mod british_english;
-pub mod dash_hygiene;
-pub mod doc_sync;
-pub mod file_length;
-pub mod license_headers;
-pub mod paths_ascii;
-pub mod version_sync;
+pub(crate) mod british_english;
+pub(crate) mod dash_hygiene;
+pub(crate) mod doc_sync;
+pub(crate) mod file_length;
+pub(crate) mod license_headers;
+pub(crate) mod paths_ascii;
+pub(crate) mod version_sync;
 
-pub type CheckFn = fn(&Path) -> Result<(), Vec<String>>;
+pub(crate) type CheckFn = fn(&Path) -> Result<(), Vec<String>>;
 
-pub struct Check {
-    pub name: &'static str,
-    pub run: CheckFn,
+pub(crate) struct Check {
+    pub(crate) name: &'static str,
+    pub(crate) run: CheckFn,
 }
 
 /// All gate checks, cheapest first. Tasks register checks here as they land.
-pub fn all() -> Vec<Check> {
+pub(crate) fn all() -> Vec<Check> {
     vec![
         Check {
             name: "paths-ascii",
@@ -57,7 +57,7 @@ const SKIP_DIRS: &[&str] = &[".git", "target", "node_modules", "dist", ".superpo
 
 /// Every file under `root` whose name ends with one of `exts` (all files when
 /// `exts` is empty), skipping build output and the Chinese review copies.
-pub fn walk_files(root: &Path, exts: &[&str]) -> Vec<PathBuf> {
+pub(crate) fn walk_files(root: &Path, exts: &[&str]) -> Vec<PathBuf> {
     let mut out = Vec::new();
     walk(root, root, exts, &mut out);
     out.sort();
@@ -76,7 +76,14 @@ fn walk(root: &Path, dir: &Path, exts: &[&str], out: &mut Vec<PathBuf>) {
             if SKIP_DIRS.contains(&name.as_ref()) {
                 continue;
             }
-            if rel(root, &path) == "docs/zh" {
+            let path_rel = rel(root, &path);
+            if path_rel == "docs/zh" {
+                continue;
+            }
+            // tauri-build's generated schemas are untracked build output
+            // sitting in the working tree (not OUT_DIR); the directory is
+            // excluded from every walk-based check, not just the line cap.
+            if path_rel == "client/desktop/gen" {
                 continue;
             }
             walk(root, &path, exts, out);
@@ -90,19 +97,19 @@ fn walk(root: &Path, dir: &Path, exts: &[&str], out: &mut Vec<PathBuf>) {
     }
 }
 
-pub fn read_lossy(path: &Path) -> String {
+pub(crate) fn read_lossy(path: &Path) -> String {
     fs::read(path)
         .map(|b| String::from_utf8_lossy(&b).into_owned())
         .unwrap_or_default()
 }
 
 /// True when the file is a Chinese review copy (`*.zh-CN.md`).
-pub fn is_zh_mirror(p: &Path) -> bool {
+pub(crate) fn is_zh_mirror(p: &Path) -> bool {
     p.to_string_lossy().contains(".zh-CN.")
 }
 
 /// Forward-slash relative path of `p` under `root`.
-pub fn rel(root: &Path, p: &Path) -> String {
+pub(crate) fn rel(root: &Path, p: &Path) -> String {
     p.strip_prefix(root)
         .unwrap_or(p)
         .to_string_lossy()
@@ -110,7 +117,7 @@ pub fn rel(root: &Path, p: &Path) -> String {
 }
 
 #[cfg(test)]
-pub mod test_support {
+pub(crate) mod test_support {
     use std::fs;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -119,7 +126,7 @@ pub mod test_support {
 
     /// Creates a throwaway directory tree from `(relative path, contents)`
     /// pairs and returns its root.
-    pub fn fixture(files: &[(&str, &str)]) -> PathBuf {
+    pub(crate) fn fixture(files: &[(&str, &str)]) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
             "astra-xtask-{}-{}",
             std::process::id(),
@@ -149,5 +156,11 @@ mod tests {
         assert!(super::walk_files(&root, &["md"])
             .iter()
             .any(|p| p.ends_with("docs/a.md")));
+    }
+
+    #[test]
+    fn tauri_generated_schemas_are_skipped() {
+        let root = fixture(&[("client/desktop/gen/schemas/desktop-schema.json", "{}\n")]);
+        assert!(super::walk_files(&root, &["json"]).is_empty());
     }
 }

@@ -1,0 +1,65 @@
+// SPDX-License-Identifier: GPL-3.0-only
+//! The Astra Mail desktop host.
+//!
+//! [`run`] assembles the Tauri shell: the single-instance guard first, then the
+//! deep-link (mailto), opener, dialog, and notification plugins, over the frameless
+//! main window `tauri.conf.json` declares, with the IPC command surface registered
+//! and the boot hook that builds the managed state behind it. The app's async
+//! runtime lives in [`runtime`], the observer port and its rate limiter in
+//! `observer`, the credential store port in `credential_store`, and the exit hook
+//! that stops sync in `exit`.
+
+pub mod runtime;
+
+mod app_state;
+mod boot;
+mod commands;
+mod credential_store;
+mod exit;
+mod headless;
+mod observer;
+
+use tauri::{Emitter, Manager};
+
+pub(crate) use app_state::{AppPort, AppState, HostAccount, HostProvider};
+pub(crate) use boot::AccountDials;
+pub use credential_store::CredentialStoreError;
+pub(crate) use credential_store::{AccountCredentialStore, KeyringCredentialStore};
+pub use headless::run_headless_slice;
+pub use observer::{SurfaceChanged, SurfaceEventSink, TauriEventSink};
+pub(crate) use runtime::{build_runtime, AppRuntime};
+
+/// Runs the desktop application: registers the plugin set and the command surface,
+/// builds the Tauri context, and drives the event loop until the main window
+/// closes.
+///
+/// The single-instance plugin must be registered first: it owns the first-launch
+/// decision that every later plugin's initialisation runs under, and a second
+/// launch reaches the app only through its callback, which focuses the existing
+/// window and hands it the launch arguments.
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+                let _ = window.unminimize();
+            }
+            let _ = app.emit("single-instance-args", argv);
+        }))
+        .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
+        .invoke_handler(tauri::generate_handler![
+            commands::dispatch,
+            commands::mailbox_list,
+            commands::sync_progress,
+            commands::add_account,
+            commands::imap_test_connection
+        ])
+        .setup(boot::setup_host)
+        .build(tauri::generate_context!())
+        .expect("the tauri application builds")
+        .run(exit::on_run_event);
+}

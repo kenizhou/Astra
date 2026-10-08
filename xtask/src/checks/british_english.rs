@@ -5,7 +5,7 @@
 /// American spellings banned in prose. Extend as they are found; keep the
 /// list alphabetical. `dialog`, `artifact`, and `catalog` stay American by
 /// the mail-calendar rulebook.
-pub const AMERICANISMS: &[&str] = &[
+pub(crate) const AMERICANISMS: &[&str] = &[
     "behavior",
     "behavioral",
     "canceled",
@@ -25,7 +25,7 @@ pub const AMERICANISMS: &[&str] = &[
     "organized",
 ];
 
-pub fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
+pub(crate) fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
     let mut bad = Vec::new();
     for f in super::walk_files(root, &["md"]) {
         let r = super::rel(root, &f);
@@ -56,7 +56,7 @@ pub fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
 }
 
 /// Case-insensitive whole-word scan returning the matched source words.
-pub fn find_americanisms(text: &str) -> Vec<String> {
+pub(crate) fn find_americanisms(text: &str) -> Vec<String> {
     let mut hits = Vec::new();
     for word in text.split(|c: char| !(c.is_alphanumeric())) {
         let lower = word.to_lowercase();

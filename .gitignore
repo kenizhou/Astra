@@ -3,3 +3,5 @@ node_modules/
 dist/
 .env
 *.local
+# Tauri-generated capability schemas (client/desktop/gen/schemas).
+/client/desktop/gen/

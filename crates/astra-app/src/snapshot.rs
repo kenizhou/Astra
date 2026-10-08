@@ -1,0 +1,270 @@
+// SPDX-License-Identifier: GPL-3.0-only
+//! Mailbox-list snapshot building: project the accounts in view into the
+//! [`MailboxListSnapshot`] the host renders, and signal [`Surface::MailboxList`]. An
+//! `impl App` block reusing the runtime's fields.
+//!
+//! The projection is one walk: every configured account's whole tree, read through the
+//! row cache, sorted by the shared view-model, truncated to the visible window, and
+//! stamped with the persisted expansion at publish time.
+
+use std::{
+    sync::{atomic::Ordering, Arc},
+    time::Instant,
+};
+
+use astra_viewmodel::{sorted_folder_rows, AccountFolderRow, MailboxListSnapshot};
+use engine_api::{AccountId, Mailbox, Provider};
+
+use crate::{reference::FolderRef, Account, App, CachedRows, Scope, ViewMode};
+
+impl<P: Provider> App<P> {
+    /// The mailbox-list snapshot, for the host's pull after a
+    /// [`Surface::MailboxList`](crate::Surface::MailboxList) signal.
+    #[must_use]
+    pub fn mailbox_list(&self) -> MailboxListSnapshot {
+        self.mailbox_list.get()
+    }
+
+    /// The sync-progress snapshot, for the host's pull after a
+    /// [`Surface::SyncProgress`](crate::Surface::SyncProgress) signal: what every mail
+    /// pass has folded into the shared cell so far.
+    #[must_use]
+    pub fn sync_progress(&self) -> astra_viewmodel::SyncProgressSnapshot {
+        self.sync_progress.snapshot()
+    }
+
+    /// Reads the accounts in view and projects them into the mailbox-list snapshot;
+    /// then signals [`Surface::MailboxList`](crate::Surface::MailboxList).
+    pub(crate) async fn rebuild_snapshot(&self) {
+        // The generation is captured here rather than deeper in: this rebuild answers
+        // the list as it stands now, and `rebuild_snapshot_for` re-checks the
+        // generation before publishing; see [`bump_generation`](Self::bump_generation)
+        // for what that defends against.
+        let generation = self.generation.load(Ordering::SeqCst);
+        self.rebuild_snapshot_for(generation).await;
+    }
+
+    /// [`rebuild_snapshot`](Self::rebuild_snapshot) for one captured generation: the
+    /// list is built, then published **only** if no newer intent has landed while it
+    /// was being built.
+    ///
+    /// The generation is a parameter rather than a read at the top because it is what
+    /// an in-flight rebuild carries, and handing a test the pair an *older* one
+    /// carried reproduces the race exactly, without having to win a scheduling
+    /// coin-toss for it.
+    pub(crate) async fn rebuild_snapshot_for(&self, generation: u64) {
+        let start = Instant::now();
+        let handles = self.account_handles().await;
+        let ids: Vec<AccountId> = handles.iter().map(|account| account.id.clone()).collect();
+        let limit = self.visible_limit();
+
+        let mut snapshot = self.mailbox_snapshot(&handles, &ids, limit).await;
+        self.restamp_expansion(&mut snapshot);
+        let accounts = snapshot.account_folders.len();
+        if self.generation.load(Ordering::SeqCst) != generation {
+            log::info!(
+                "rebuild_snapshot: {accounts} account(s) superseded by a newer intent after \
+                 {}ms, dropped",
+                start.elapsed().as_millis(),
+            );
+            return;
+        }
+        self.mailbox_list.publish(snapshot);
+        log::info!(
+            "rebuild_snapshot: {accounts} account(s) in {}ms",
+            start.elapsed().as_millis(),
+        );
+    }
+
+    /// The mailbox list for the current window: every account's tree, read through the
+    /// row cache, truncated across the flattened pane rows so only the visible window
+    /// is built and crossed the IPC.
+    async fn mailbox_snapshot(
+        &self,
+        handles: &[Arc<Account<P>>],
+        ids: &[AccountId],
+        limit: usize,
+    ) -> MailboxListSnapshot {
+        let trees = self.load_rows(ids).await;
+        let mut account_folders = Vec::with_capacity(handles.len());
+        // How many rows the window still holds, spent account by account in pane
+        // order: the first accounts fill the page and the later ones wait for a
+        // ShowMore, which is the same contract the merged message list will follow.
+        let mut budget = limit;
+        for (account, tree) in handles.iter().zip(trees.iter()) {
+            let mut folders = sorted_folder_rows(tree);
+            if folders.len() > budget {
+                folders.truncate(budget);
+            }
+            budget = budget.saturating_sub(folders.len());
+            account_folders.push(AccountFolderRow {
+                account_id: account.id.clone(),
+                display_name: account.identity.email.clone(),
+                // Open until the publisher stamps the persisted state over it; see
+                // `AccountFolderRow::expanded`.
+                expanded: true,
+                folders,
+            });
+        }
+        MailboxListSnapshot { account_folders }
+    }
+
+    /// Re-reads each account's folder-tree expansion **at publish time**, overwriting
+    /// whatever the projection captured when it began.
+    ///
+    /// A rebuild spans several `await`s (store reads per account), so one that started
+    /// before the user's chevron finishes after it and would publish the expansion as
+    /// it was *then*; springing the tree back open a beat after they shut it. The same
+    /// shape as the generation counter: the pass that started earlier must not win by
+    /// finishing later. One lock for the whole pane rather than one per row.
+    fn restamp_expansion(&self, snapshot: &mut MailboxListSnapshot) {
+        let pane = self.pane.lock().expect("preferences mutex poisoned");
+        for account in &mut snapshot.account_folders {
+            account.expanded = pane.account_expanded(account.account_id.as_str());
+            pane.stamp(account.account_id.as_str(), &mut account.folders);
+        }
+    }
+
+    /// The trees for the accounts in view, from the in-memory cache; one store read per
+    /// account on first use, reused for every later rebuild of the same list.
+    ///
+    /// A cached load is reused when it spans exactly these accounts; a different set
+    /// (an account added or removed) reloads.
+    /// [`invalidate_list_cache`](Self::invalidate_list_cache) drops it after a sync so
+    /// it never serves stale rows.
+    async fn load_rows(&self, accounts: &[AccountId]) -> Arc<Vec<Arc<Vec<Mailbox>>>> {
+        if let Some(cached) = self
+            .row_cache
+            .lock()
+            .expect("row-cache mutex poisoned")
+            .as_ref()
+            .filter(|cached| cached.serves(accounts))
+        {
+            return Arc::clone(&cached.rows);
+        }
+        // Miss: snapshot the cache generation, then read from the store without holding
+        // the lock across the await.
+        let generation = self.row_cache_generation.load(Ordering::SeqCst);
+        let load_start = Instant::now();
+        let rows: Arc<Vec<Arc<Vec<Mailbox>>>> = Arc::new(
+            futures::future::join_all(accounts.iter().map(|id| self.engine.mailboxes(id)))
+                .await
+                .into_iter()
+                .map(|read| Arc::new(read.unwrap_or_default()))
+                .collect(),
+        );
+        log::debug!(
+            "list rows: read {} account tree(s) in {}ms (cache miss)",
+            rows.len(),
+            load_start.elapsed().as_millis(),
+        );
+        // Only publish this load if no sync invalidated the cache while it was in
+        // flight; otherwise a slow pre-sync read could land *after* the invalidation
+        // and resurrect stale rows. On a mismatch, return the freshly-read rows for
+        // this one snapshot without caching them; the sync that bumped the generation
+        // rebuilds from its own fresh read.
+        if self.row_cache_generation.load(Ordering::SeqCst) == generation {
+            *self.row_cache.lock().expect("row-cache mutex poisoned") = Some(CachedRows {
+                accounts: accounts.to_vec(),
+                rows: Arc::clone(&rows),
+            });
+        }
+        rows
+    }
+
+    /// Drops the cached list so the next snapshot re-reads it; called after a sync
+    /// commits new state. The read it forces is one store query per account, which is
+    /// why this is not per-account.
+    pub(crate) fn invalidate_list_cache(&self) {
+        self.row_cache_generation.fetch_add(1, Ordering::SeqCst);
+        *self.row_cache.lock().expect("row-cache mutex poisoned") = None;
+    }
+
+    /// Whether the shown list's rows are currently held in memory.
+    #[cfg(test)]
+    pub(crate) fn list_cache_is_loaded(&self) -> bool {
+        self.row_cache
+            .lock()
+            .expect("row-cache mutex poisoned")
+            .is_some()
+    }
+
+    /// The list generation: bumped by every intent that changes what the list shows,
+    /// so an in-flight rebuild for the older list cannot win by finishing last.
+    pub(crate) fn bump_generation(&self) {
+        self.generation.fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// The current list generation, for [`rebuild_snapshot_for`](Self::rebuild_snapshot_for).
+    #[cfg(test)]
+    pub(crate) fn list_generation(&self) -> u64 {
+        self.generation.load(Ordering::SeqCst)
+    }
+
+    /// The row-cache generation, for the stale-load guard in [`load_rows`](Self::load_rows).
+    #[cfg(test)]
+    pub(crate) fn row_cache_generation(&self) -> u64 {
+        self.row_cache_generation.load(Ordering::SeqCst)
+    }
+
+    /// Opens or shuts one account's folder tree, and persists the choice.
+    ///
+    /// Deliberately touches neither the selected account nor the selected folder:
+    /// expanding is not navigating. That separation is what stops the tree collapsing
+    /// when the user moves to the unified view.
+    pub(crate) async fn set_account_expanded(&self, account: &AccountId, expanded: bool) {
+        let changed = self
+            .pane
+            .lock()
+            .expect("preferences mutex poisoned")
+            .set_account_expanded(account.as_str(), expanded);
+        if changed {
+            self.rebuild_snapshot().await;
+        }
+    }
+
+    /// Opens or shuts the folders inside one folder, and persists the choice. An
+    /// account's tree and a folder's are the same thing one level down, so this follows
+    /// [`set_account_expanded`](Self::set_account_expanded)'s rules exactly.
+    pub(crate) async fn set_folder_expanded(&self, folder: &FolderRef, expanded: bool) {
+        let changed = self
+            .pane
+            .lock()
+            .expect("preferences mutex poisoned")
+            .set_folder_expanded(folder.account.as_str(), &folder.key, expanded);
+        if changed {
+            self.rebuild_snapshot().await;
+        }
+    }
+
+    /// The current mailbox-list grouping, seeded from the persisted preference.
+    #[must_use]
+    pub fn view_mode(&self) -> ViewMode {
+        self.pane
+            .lock()
+            .expect("preferences mutex poisoned")
+            .view_mode()
+    }
+
+    /// Records the selection and persists the selected folder (or its clearing).
+    pub(crate) fn set_scope(&self, scope: Scope) {
+        self.pane
+            .lock()
+            .expect("preferences mutex poisoned")
+            .set_selected_folder(match &scope {
+                Scope::Folder(folder) => Some(folder.clone()),
+                Scope::AllInboxes | Scope::Account(_) => None,
+            });
+        *self.scope.lock().expect("scope mutex poisoned") = scope;
+    }
+
+    /// The selected folder, or `None` on a whole-account or unified view; for tests
+    /// asserting what a fresh app seeded from the preferences file.
+    #[cfg(test)]
+    pub(crate) fn scope_for_test(&self) -> Option<FolderRef> {
+        match &*self.scope.lock().expect("scope mutex poisoned") {
+            Scope::Folder(folder) => Some(folder.clone()),
+            Scope::AllInboxes | Scope::Account(_) => None,
+        }
+    }
+}
