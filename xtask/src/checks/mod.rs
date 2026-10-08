@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Contract checks and shared file-walking helpers.
-// read_lossy stays unused until the file-length check consumes it.
-#![allow(dead_code)]
 
+pub mod file_length;
 pub mod paths_ascii;
 
 pub type CheckFn = fn(&Path) -> Result<(), Vec<String>>;
@@ -14,7 +13,10 @@ pub struct Check {
 
 /// All gate checks, cheapest first. Tasks register checks here as they land.
 pub fn all() -> Vec<Check> {
-    vec![Check { name: "paths-ascii", run: crate::checks::paths_ascii::check }]
+    vec![
+        Check { name: "paths-ascii", run: crate::checks::paths_ascii::check },
+        Check { name: "file-length", run: crate::checks::file_length::check },
+    ]
 }
 
 use std::fs;
@@ -55,6 +57,11 @@ pub fn read_lossy(path: &Path) -> String {
     fs::read(path)
         .map(|b| String::from_utf8_lossy(&b).into_owned())
         .unwrap_or_default()
+}
+
+/// True when the file is a Chinese review copy (`*.zh-CN.md`).
+pub fn is_zh_mirror(p: &Path) -> bool {
+    p.to_string_lossy().contains(".zh-CN.")
 }
 
 /// Forward-slash relative path of `p` under `root`.
