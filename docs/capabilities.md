@@ -12,7 +12,7 @@ this row ports.
 | Mail | Folder pane across accounts with nested folders and persisted expansion | ⬜ | folder-pane.md |
 | Mail | Flat and threaded message list with windowed paging | ⬜ | |
 | Calendar | Day, work week, and month grids with drag to create, move, resize | ⬜ | calendar.md |
-| Core | Reactive Rust to native binding, dispatch to immutable snapshots | ⬜ | |
+| Core | Reactive Rust to native binding, dispatch to immutable snapshots | 🚧 | |
 | Accounts | Settings accounts page lists every account, with per-service toggles, relinking, sign-in again, server editing, and removal | ⬜ | accounts.md |
 | Accounts | Outgoing name per account, asked once at connect, editable in settings, kept in step with the provider | ⬜ | sending.md |
 | Accounts | Untrusted server certificates shown with a fingerprint and accepted once per server; verification is never switched off | ⬜ | certificate-exceptions.md |

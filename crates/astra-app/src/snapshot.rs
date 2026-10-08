@@ -25,6 +25,14 @@ impl<P: Provider> App<P> {
         self.mailbox_list.get()
     }
 
+    /// The sync-progress snapshot, for the host's pull after a
+    /// [`Surface::SyncProgress`](crate::Surface::SyncProgress) signal: what every mail
+    /// pass has folded into the shared cell so far.
+    #[must_use]
+    pub fn sync_progress(&self) -> astra_viewmodel::SyncProgressSnapshot {
+        self.sync_progress.snapshot()
+    }
+
     /// Reads the accounts in view and projects them into the mailbox-list snapshot;
     /// then signals [`Surface::MailboxList`](crate::Surface::MailboxList).
     pub(crate) async fn rebuild_snapshot(&self) {

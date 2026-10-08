@@ -1,28 +1,40 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! The Astra Mail desktop host.
 //!
-//! [`run`] assembles the Tauri shell: the single-instance guard first, then
-//! the deep-link (mailto), opener, dialog, and notification plugins, over the
-//! frameless main window `tauri.conf.json` declares. The managed state and
-//! the exit hook are placeholders; wiring the ports and commands onto them is
-//! the next task's work. The app's async runtime lives in [`runtime`].
+//! [`run`] assembles the Tauri shell: the single-instance guard first, then the
+//! deep-link (mailto), opener, dialog, and notification plugins, over the frameless
+//! main window `tauri.conf.json` declares, with the IPC command surface registered
+//! and the boot hook that builds the managed state behind it. The app's async
+//! runtime lives in [`runtime`], the observer port and its rate limiter in
+//! `observer`, the credential store port in `credential_store`, and the exit hook
+//! that stops sync in `exit`.
 
 pub mod runtime;
 
+mod app_state;
+mod boot;
+mod commands;
+mod credential_store;
+mod exit;
+mod observer;
+
 use tauri::{Emitter, Manager};
 
-/// The state the shell manages. Empty in the scaffold: the ports and the
-/// command surface that fill it arrive with the wiring task.
-#[derive(Debug, Default)]
-pub struct AppState {}
+pub(crate) use app_state::{AppPort, AppState, HostAccount, HostProvider};
+pub(crate) use boot::AccountDials;
+pub use credential_store::CredentialStoreError;
+pub(crate) use credential_store::{AccountCredentialStore, KeyringCredentialStore};
+pub use observer::{SurfaceChanged, SurfaceEventSink, TauriEventSink};
+pub(crate) use runtime::{build_runtime, AppRuntime};
 
-/// Runs the desktop application: registers the plugin set, builds the Tauri
-/// context, and drives the event loop until the main window closes.
+/// Runs the desktop application: registers the plugin set and the command surface,
+/// builds the Tauri context, and drives the event loop until the main window
+/// closes.
 ///
-/// The single-instance plugin must be registered first: it owns the
-/// first-launch decision that every later plugin's initialisation runs under,
-/// and a second launch reaches the app only through its callback, which
-/// focuses the existing window and hands it the launch arguments.
+/// The single-instance plugin must be registered first: it owns the first-launch
+/// decision that every later plugin's initialisation runs under, and a second
+/// launch reaches the app only through its callback, which focuses the existing
+/// window and hands it the launch arguments.
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
@@ -37,28 +49,15 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
-        .setup(setup)
+        .invoke_handler(tauri::generate_handler![
+            commands::dispatch,
+            commands::mailbox_list,
+            commands::sync_progress,
+            commands::add_account,
+            commands::imap_test_connection
+        ])
+        .setup(boot::setup_host)
         .build(tauri::generate_context!())
         .expect("the tauri application builds")
-        .run(on_run_event);
-}
-
-/// The `setup` hook: registers the managed state on the app handle, where the
-/// command surface reads it back through `State<'_, AppState>`.
-// The `Result` return is the signature Tauri's `.setup()` demands; the
-// scaffold's body cannot fail yet.
-#[allow(clippy::unnecessary_wraps)]
-fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    app.manage(AppState::default());
-    Ok(())
-}
-
-/// The exit hook: reached exactly once on every exit path, after the windows
-/// are gone but while the managed state is still alive.
-// `.run()` hands the event by value; the hook owns what it inspects.
-#[allow(clippy::needless_pass_by_value)]
-fn on_run_event(_app: &tauri::AppHandle, event: tauri::RunEvent) {
-    // The scaffold has nothing to stop yet; the app runtime's shutdown goes
-    // here once the wiring task manages one.
-    if let tauri::RunEvent::Exit = event {}
+        .run(exit::on_run_event);
 }

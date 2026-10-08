@@ -9,12 +9,12 @@ use std::collections::BTreeSet;
 
 use astra_account::pass_syncs;
 use engine_api::{
-    AccountId, Engine, IgnoreCommits, MailSyncReport, Mailbox, MailboxId, MailboxRole, Provider,
-    StreamTuning, SyncScope,
+    AccountId, Engine, MailSyncReport, Mailbox, MailboxId, MailboxRole, Provider, StreamTuning,
+    SyncScope,
 };
 use futures::future::join_all;
 
-use crate::{Account, MailboxConnector};
+use crate::{sync_progress::SyncProgress, Account, MailboxConnector};
 
 /// The folder a mail scope is bound to, or `None` for a scope that covers the whole
 /// account (JMAP, Gmail).
@@ -52,14 +52,14 @@ fn still_listed(listed: &[Mailbox], scope: &SyncScope) -> bool {
 /// the list names that no provider is bound to is bound through `connector` and synced
 /// in the same pass, so every folder the account lists is synced by every pass.
 ///
-/// Reports nothing but the log: the per-scope outcomes that drive reachability badges,
-/// sign-in prompts, and throttle waits arrive with the connectivity surface they answer
-/// to, and this milestone has none of them.
+/// The pass reports its lifecycle into `progress`, the shared sync-progress fold, so
+/// the host's progress surface moves with the pass instead of polling.
 pub(crate) async fn sync_account_providers<P: Provider>(
     engine: &Engine,
     account: &Account<P>,
     connector: Option<&dyn MailboxConnector<P>>,
     tuning: StreamTuning,
+    progress: &SyncProgress,
     acct: usize,
 ) {
     // `acct` is the account's stable position in the pane (not its id, which carries
@@ -71,7 +71,7 @@ pub(crate) async fn sync_account_providers<P: Provider>(
     }
 
     let mut report = engine
-        .sync_mail(&account.providers, &account.id, tuning, &IgnoreCommits)
+        .sync_mail(&account.providers, &account.id, tuning, progress)
         .await;
     // The folder list as this pass left it, when the pass read one: where the folders
     // no provider is bound to are found, and what tells a folder the server no longer
@@ -81,7 +81,16 @@ pub(crate) async fn sync_account_providers<P: Provider>(
         _ => None,
     };
     if let Some(listed) = &listed {
-        sync_unbound_folders(engine, account, listed, connector, tuning, &mut report).await;
+        sync_unbound_folders(
+            engine,
+            account,
+            listed,
+            connector,
+            tuning,
+            progress,
+            &mut report,
+        )
+        .await;
     }
     log_pass(acct, &report, listed.as_deref());
 }
@@ -97,6 +106,7 @@ async fn sync_unbound_folders<P: Provider>(
     listed: &[Mailbox],
     connector: Option<&dyn MailboxConnector<P>>,
     tuning: StreamTuning,
+    progress: &SyncProgress,
     report: &mut MailSyncReport,
 ) {
     let Some(connector) = connector else {
@@ -138,7 +148,7 @@ async fn sync_unbound_folders<P: Provider>(
         return;
     }
     let added = engine
-        .refresh_folders(&providers, &account.id, tuning, &IgnoreCommits)
+        .refresh_folders(&providers, &account.id, tuning, progress)
         .await;
     report.folders.extend(added.folders);
     report.elapsed += added.elapsed;

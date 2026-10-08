@@ -6,8 +6,10 @@
 //! The future is also **built** there: a caller passes a closure that makes it, never the future itself. A debug build's deep call path is a future of hundreds of KiB, and passing one by value copies it through each frame on the way to the driver, which on its own can overflow a small host thread. The closure holds only what the future borrows or takes.
 //!
 //! `clippy.toml` forbids tokio's own `block_on` everywhere else in this crate, so a call site cannot go back to polling on the caller's stack: [`AppRuntime::block_on`] and [`drive`] are the only way to wait on a future here.
+//!
+//! The runtime sits behind a mutex so the exit hook can take it out from a shared handle and shut it down with a bound; while it lives, the mutex is only ever held to clone the handle out, never across a poll.
 
-use std::future::Future;
+use std::{future::Future, sync::Mutex, time::Duration};
 
 use tokio::runtime::{Builder, Handle, Runtime, RuntimeFlavor};
 
@@ -28,8 +30,10 @@ const DRIVER_NAME: &str = "astra-desktop-call";
 /// The app's runtime, with the only `block_on` the host may call.
 #[derive(Debug)]
 pub struct AppRuntime {
-    /// The runtime every engine call runs on.
-    runtime: Runtime,
+    /// The runtime every engine call runs on, taken by
+    /// [`shutdown_timeout`](AppRuntime::shutdown_timeout): the one mutation the
+    /// type has, so every other method finds it present.
+    runtime: Mutex<Option<Runtime>>,
     /// The worker count the runtime was built with, so the caller can state
     /// (and a test can check) how many cores the app took.
     workers: usize,
@@ -38,18 +42,29 @@ pub struct AppRuntime {
 impl AppRuntime {
     /// Builds the future `make` returns on a thread of our own, runs it to
     /// completion there, and returns its output; see the module docs.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the runtime has been shut down; nothing calls it after the
+    /// exit hook, which is the only taker.
     pub fn block_on<M, F>(&self, make: M) -> F::Output
     where
         M: FnOnce() -> F + Send,
         F: Future,
         F::Output: Send,
     {
-        drive(self.runtime.handle(), make)
+        drive(&self.handle(), make)
     }
 
     /// The runtime's handle, for spawning onto it without blocking the caller.
-    pub fn handle(&self) -> &Handle {
-        self.runtime.handle()
+    pub fn handle(&self) -> Handle {
+        self.runtime
+            .lock()
+            .expect("runtime mutex poisoned")
+            .as_ref()
+            .expect("the runtime is alive until the exit hook shuts it down")
+            .handle()
+            .clone()
     }
 
     /// Spawns a task onto the runtime and returns its join handle.
@@ -58,19 +73,22 @@ impl AppRuntime {
         F: Future + Send + 'static,
         F::Output: Send + 'static,
     {
-        self.runtime.spawn(future)
-    }
-
-    /// Marks the calling thread as inside the runtime, so blocking std calls
-    /// in the entered scope are seen by the runtime's driver.
-    pub fn enter(&self) -> tokio::runtime::EnterGuard<'_> {
-        self.runtime.enter()
+        self.handle().spawn(future)
     }
 
     /// The worker count the runtime was built with: one fewer than the core
     /// count, at least one.
     pub fn workers(&self) -> usize {
         self.workers
+    }
+
+    /// Shuts the runtime down, giving in-flight sync at most `timeout` before it
+    /// stops waiting: the exit hook's bound, so closing the window never hangs on
+    /// a stalled pass. Idempotent: a second call finds nothing left to shut down.
+    pub fn shutdown_timeout(&self, timeout: Duration) {
+        if let Some(runtime) = self.runtime.lock().expect("runtime mutex poisoned").take() {
+            runtime.shutdown_timeout(timeout);
+        }
     }
 }
 
@@ -121,7 +139,10 @@ pub fn build_runtime() -> std::io::Result<AppRuntime> {
         .thread_stack_size(WORKER_STACK)
         .enable_all()
         .build()?;
-    Ok(AppRuntime { runtime, workers })
+    Ok(AppRuntime {
+        runtime: Mutex::new(Some(runtime)),
+        workers,
+    })
 }
 
 #[cfg(test)]

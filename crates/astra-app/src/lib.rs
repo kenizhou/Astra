@@ -20,6 +20,7 @@ mod snapshot;
 mod surfaced;
 mod sync;
 mod sync_account;
+mod sync_progress;
 mod window;
 
 // The gated live test against the local Stalwart harness: a sibling file (the crate's
@@ -71,6 +72,10 @@ pub struct App<P> {
     scope: Mutex<Scope>,
     /// The mailbox-list snapshot and its signal, published as one thing.
     mailbox_list: Surfaced<astra_viewmodel::MailboxListSnapshot>,
+    /// The sync-progress snapshot and its signal: what every mail pass reports its
+    /// per-account position through, published on change by the
+    /// [`SyncObserver`](engine_api::SyncObserver) fold in `sync_progress`.
+    sync_progress: sync_progress::SyncProgress,
     /// The loaded preferences and the path they write through: the view mode, the
     /// expansion map, and the selected folder.
     pane: Mutex<PreferencesState>,
@@ -123,11 +128,13 @@ impl<P: Provider> App<P> {
         connector: Option<Box<dyn MailboxConnector<P>>>,
         observer: Arc<dyn AppObserver>,
     ) -> Self {
+        let sync_progress = sync_progress::SyncProgress::new(Arc::clone(&observer));
         Self {
             engine,
             accounts: RwLock::new(accounts.into_iter().map(Arc::new).collect()),
             scope: Mutex::new(Scope::default()),
             mailbox_list: Surfaced::new(Surface::MailboxList, observer),
+            sync_progress,
             pane: Mutex::new(PreferencesState::new(None)),
             visible_limit: Mutex::new(PAGE),
             generation: AtomicU64::new(0),

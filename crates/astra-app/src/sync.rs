@@ -40,6 +40,7 @@ impl<P: Provider> App<P> {
                     account,
                     self.connector.as_deref(),
                     tuning,
+                    &self.sync_progress,
                     at,
                 )
                 .await;
@@ -73,6 +74,7 @@ impl<P: Provider> App<P> {
             &account,
             self.connector.as_deref(),
             tuning,
+            &self.sync_progress,
             at,
         )
         .await;

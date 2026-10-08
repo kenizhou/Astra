@@ -112,3 +112,6 @@ tokio-rustls = { version = "0.26.4", default-features = false, features = ["ring
 rcgen = "0.14"
 # Server side of that scripted TLS server (dev only).
 rustls = { version = "0.23.41", default-features = false, features = ["ring", "std", "tls12"] }
+# The OS secure store the desktop host keeps account credentials in (host only:
+# Windows Credential Manager, the macOS keychain, the freedesktop secret service).
+keyring = { version = "3", features = ["apple-native", "sync-secret-service", "windows-native"] }

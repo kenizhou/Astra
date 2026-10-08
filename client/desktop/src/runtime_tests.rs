@@ -106,7 +106,7 @@ fn a_call_from_a_runtime_worker_still_completes() {
     // take the worker the call itself needs.
     let runtime = runtime();
     let handle = runtime.handle().clone();
-    let answer = drive(runtime.handle(), move || async move {
+    let answer = drive(&runtime.handle(), move || async move {
         tokio::spawn(async move { drive(&handle, || async { 42 }) })
             .await
             .expect("the worker task completes")
