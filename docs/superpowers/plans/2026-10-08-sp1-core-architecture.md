@@ -156,7 +156,7 @@
 
 - [ ] **Step 1:** Scaffold the crate; `tauri.conf.json` with `frontendDist` pointing at `../web/dist` (placeholder allowed until Task 12 exists; use `../web/dist` and create an empty `client/web/dist/.gitkeep` so the build resolves, removed in Task 12).
 - [ ] **Step 2:** Port the runtime module; test: `build_runtime()` returns a runtime whose worker count matches the formula on this machine.
-- [ ] **Step 3:** `cargo build -p astra-desktop` succeeds on Windows; add `client/desktop` to workspace members but EXCLUDE it from `default-members` (so `cargo clippy --workspace` on CI ubuntu without webkit deps stays green).
+- [ ] **Step 3:** `cargo build -p astra-desktop` succeeds on Windows; add `client/desktop` to workspace members but EXCLUDE it from `default-members`; in the same change add the Tauri system dependency install step (`libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev`) to the ubuntu legs of BOTH `.github/workflows/ci.yml` and `nightly.yml`, because workspace-wide cargo commands now compile the desktop crate and ubuntu runners lack these libraries (Ruling R8).
 - [ ] **Step 4:** Gate green; commit `feat: scaffold the tauri host with runtime and window`.
 
 ### Task 10: Tauri host ports and commands

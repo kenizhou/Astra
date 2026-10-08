@@ -165,7 +165,7 @@
 
 - [ ] **步骤 1：** 脚手架 crate；`tauri.conf.json` 的 `frontendDist` 指向 `../web/dist`（任务 12 前先建空 `client/web/dist/.gitkeep` 兜底，任务 12 移除）。
 - [ ] **步骤 2：** 移植 runtime 模块；测试：`build_runtime()` 返回的 runtime worker 数符合本机公式。
-- [ ] **步骤 3：** Windows 上 `cargo build -p astra-desktop` 成功；加入 workspace 成员但排除出 `default-members`（CI 无 webkit 依赖的 ubuntu 上 `cargo clippy --workspace` 保持绿）。
+- [ ] **步骤 3：** Windows 上 `cargo build -p astra-desktop` 成功；加入 workspace 成员但排除出 `default-members`；同一变更里给 `.github/workflows/ci.yml` 与 `nightly.yml` 两侧 ubuntu 腿加 Tauri 系统依赖安装步骤（`libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev`），因为 workspace 级 cargo 命令从此会编译 desktop crate 而 ubuntu runner 缺这些库（Ruling R8）。
 - [ ] **步骤 4：** gate 绿；提交 `feat: scaffold the tauri host with runtime and window`。
 
 ### 任务 10：Tauri host 端口与命令
