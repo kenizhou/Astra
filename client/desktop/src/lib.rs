@@ -16,6 +16,7 @@ mod boot;
 mod commands;
 mod credential_store;
 mod exit;
+mod headless;
 mod observer;
 
 use tauri::{Emitter, Manager};
@@ -24,6 +25,7 @@ pub(crate) use app_state::{AppPort, AppState, HostAccount, HostProvider};
 pub(crate) use boot::AccountDials;
 pub use credential_store::CredentialStoreError;
 pub(crate) use credential_store::{AccountCredentialStore, KeyringCredentialStore};
+pub use headless::run_headless_slice;
 pub use observer::{SurfaceChanged, SurfaceEventSink, TauriEventSink};
 pub(crate) use runtime::{build_runtime, AppRuntime};
 

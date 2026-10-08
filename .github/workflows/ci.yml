@@ -25,3 +25,34 @@ jobs:
         run: cargo test --workspace
       - name: Gate
         run: cargo run -p xtask -- gate
+  # The desktop host on its shipping platform: clippy and a build of the Tauri
+  # crate (windows-latest needs no extra system libraries for it), then the web
+  # client the shell loads. The esbuild postinstall approval lives in
+  # client/web/package.json under allowScripts (the record
+  # `npm install-scripts approve esbuild` writes), so `npm ci` runs it without an
+  # interactive step; npm 11 only warns when the record is missing, and the
+  # committed one keeps the job clean and a future blocking npm green.
+  desktop:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Clippy (desktop host)
+        run: cargo clippy -p astra-desktop --all-targets -- -D warnings
+      - name: Build (desktop host)
+        run: cargo build -p astra-desktop
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install web dependencies
+        working-directory: client/web
+        run: npm ci
+      - name: Build web client
+        working-directory: client/web
+        run: npm run build
+      - name: Test web client
+        working-directory: client/web
+        run: npm run test:run

@@ -29,6 +29,52 @@ use crate::{
     AppPort, AppState, HostAccount, HostProvider, KeyringCredentialStore, TauriEventSink,
 };
 
+/// Assembles the host's state over `data_dir`: the same pieces in the same order for
+/// every host shape, windowed or headless. The caller owns the two things a shape can
+/// differ in: where the data lives, and where surface changes are signalled.
+///
+/// # Errors
+///
+/// Fails when the data directory cannot be made, the runtime cannot start, the stored
+/// accounts cannot be read, or the engine cannot open its store: nothing a host shape
+/// could run over.
+pub(crate) fn assemble_state(
+    data_dir: &Path,
+    observer: Arc<dyn astra_app::AppObserver>,
+) -> Result<AppState, Box<dyn std::error::Error>> {
+    std::fs::create_dir_all(data_dir)?;
+    let runtime = build_runtime()?;
+    let keyring = KeyringCredentialStore::new();
+    let connections = Arc::new(AccountDials::load(data_dir)?);
+
+    let accounts = runtime.block_on(|| dial_stored(&connections));
+    let engine_path = data_dir.join(ENGINE_STORE_FILE);
+    let spawn = {
+        let spawner = runtime.handle().clone();
+        move |task: SpawnedTask| {
+            spawner.spawn(task);
+        }
+    };
+    let core = runtime.block_on(|| {
+        astra_app::boot(
+            &engine_path,
+            accounts,
+            Some(Box::new(DialConnector {
+                dials: Arc::clone(&connections),
+            })),
+            observer,
+            spawn,
+        )
+    })?;
+
+    Ok(AppState {
+        app: core as Arc<dyn AppPort>,
+        runtime,
+        connections,
+        credential_store: Arc::new(keyring),
+    })
+}
+
 /// The engine store's file name, under the data directory.
 const ENGINE_STORE_FILE: &str = "astra.sqlite";
 
@@ -240,60 +286,29 @@ async fn dial_stored(dials: &AccountDials) -> Vec<HostAccount> {
     accounts
 }
 
-/// The `setup` hook: builds the host's pieces, boots the app core, and registers the
-/// managed state the command surface reads. The dials run to completion here, on the
-/// runtime's driver thread, because `astra-app` takes its accounts host-connected; a
-/// first run has none and boots instantly.
+/// The `setup` hook: resolves the shell's data directory, assembles the host's state
+/// over it, and registers it as the managed state the command surface reads. The
+/// assembly itself is [`assemble_state`], shared with the headless host shape.
 ///
 /// # Errors
 ///
-/// Fails when the data directory cannot be made, the runtime cannot start, the
-/// stored accounts cannot be read, or the engine cannot open its store: nothing the
-/// shell could show a window over.
+/// Fails when the data directory cannot be resolved or the state cannot be assembled:
+/// nothing the shell could show a window over.
 pub(crate) fn setup_host(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let handle = app.handle().clone();
     let data_dir = handle
         .path()
         .app_data_dir()
         .map_err(|err| format!("the app data directory could not be resolved: {err}"))?;
-    std::fs::create_dir_all(&data_dir)?;
-
-    let runtime = build_runtime()?;
-    let keyring = KeyringCredentialStore::new();
     let observer: Arc<dyn astra_app::AppObserver> = Arc::new(DebouncedObserver::new(
         ObserverBridge::new(Box::new(TauriEventSink::new(handle))),
     ));
-    let connections = Arc::new(AccountDials::load(&data_dir)?);
-
-    let accounts = runtime.block_on(|| dial_stored(&connections));
-    let engine_path = data_dir.join(ENGINE_STORE_FILE);
-    let spawn = {
-        let spawner = runtime.handle().clone();
-        move |task: SpawnedTask| {
-            spawner.spawn(task);
-        }
-    };
-    let core = runtime.block_on(|| {
-        astra_app::boot(
-            &engine_path,
-            accounts,
-            Some(Box::new(DialConnector {
-                dials: Arc::clone(&connections),
-            })),
-            observer,
-            spawn,
-        )
-    })?;
+    let state = assemble_state(&data_dir, observer)?;
 
     log::info!(
         "boot: the app core is up over {} account(s)",
-        connections.ids().len(),
+        state.connections.ids().len(),
     );
-    app.manage(AppState {
-        app: core as Arc<dyn AppPort>,
-        runtime,
-        connections,
-        credential_store: Arc::new(keyring),
-    });
+    app.manage(state);
     Ok(())
 }
