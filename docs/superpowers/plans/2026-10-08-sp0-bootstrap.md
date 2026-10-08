@@ -823,11 +823,16 @@ pub fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
             continue;
         }
         let is_markdown = r.ends_with(".md");
+        let mut in_fence = false;
         for (idx, line) in super::read_lossy(&f).lines().enumerate() {
+            if is_markdown && line.trim_start().starts_with("```") {
+                in_fence = !in_fence;
+                continue;
+            }
             if line.contains(EM_DASH) || line.contains(EN_DASH) {
                 bad.push(format!("{r}:{} contains a dash character", idx + 1));
             }
-            if is_markdown && spaced_hyphen_as_punctuation(line) {
+            if is_markdown && !in_fence && spaced_hyphen_as_punctuation(line) {
                 bad.push(format!("{r}:{} uses a spaced hyphen as punctuation", idx + 1));
             }
         }
@@ -877,6 +882,12 @@ mod tests {
         assert!(super::check(&root).is_ok());
         let trailing = fixture(&[("a.md", "- item with - a mid dash\n")]);
         assert!(super::check(&trailing).is_err());
+    }
+
+    #[test]
+    fn fenced_code_is_exempt_from_the_prose_rule() {
+        let root = fixture(&[("a.md", "prose\n\n```rust\nlet s = \"x - y\";\n```\n\nmore prose\n")]);
+        assert!(super::check(&root).is_ok());
     }
 }
 ```
