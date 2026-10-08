@@ -69,6 +69,8 @@ name = "astra-viewmodel"
 version = "0.1.0"
 dependencies = [
  "engine-api",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

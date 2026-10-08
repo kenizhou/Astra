@@ -80,3 +80,6 @@ provider-google = { git = "https://github.com/allodia-eu/email-calendar-sync-eng
 # The JMAP mail read/sync plus submission plus calendar-read adapter (RFC
 # 8620/8621).
 provider-jmap = { git = "https://github.com/allodia-eu/email-calendar-sync-engine", rev = "68eab00e6a9a9fe5a200218e156dbaae1ba00caa" }
+# Serialisation for the types that cross the Tauri IPC.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
