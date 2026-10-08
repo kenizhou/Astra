@@ -24,8 +24,8 @@ branding/default.env at build time.
 
 ## Hard rules
 
-- Source files stay under 500 lines. The gate enforces it for every source
-  language; Markdown prose is exempt.
+- Source files stay under 500 lines. The gate enforces it for the source
+  languages it scans; Markdown prose is exempt.
 - Newtypes for identities; no raw `String` ids across module boundaries.
 - Test-first for behaviour changes. A bug fix lands with a regression test
   at the lowest shared layer that observes the contract.
@@ -97,3 +97,5 @@ reference decision is forbidden: disagreements are escalated in the PR.
   each.
 - rust-toolchain.toml overrides the CI toolchain: the pinned channel must
   list the components it needs, or fmt and clippy go missing on the runner.
+- The gate walks the working tree, not the git index; .superpowers is
+  skipped, so nothing tracked may live there.

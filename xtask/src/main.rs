@@ -32,7 +32,7 @@ fn main() -> ExitCode {
             }
         }
         _ => {
-            eprintln!("usage: cargo run -p xtask -- gate | check <name>");
+            eprintln!("usage: cargo run -p xtask -- gate | check <name> | icons");
             ExitCode::FAILURE
         }
     }
