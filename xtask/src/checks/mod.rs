@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Contract checks and shared file-walking helpers.
-// The helpers below are unused until tasks 4 to 10 register the first checks.
+// read_lossy stays unused until the file-length check consumes it.
 #![allow(dead_code)]
+
+pub mod paths_ascii;
 
 pub type CheckFn = fn(&Path) -> Result<(), Vec<String>>;
 
@@ -12,7 +14,7 @@ pub struct Check {
 
 /// All gate checks, cheapest first. Tasks register checks here as they land.
 pub fn all() -> Vec<Check> {
-    Vec::new()
+    vec![Check { name: "paths-ascii", run: crate::checks::paths_ascii::check }]
 }
 
 use std::fs;
