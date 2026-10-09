@@ -39,6 +39,9 @@ pub(crate) enum CommandError {
     /// The account index could not be written.
     #[error("the account index could not be written: {0}")]
     Index(String),
+    /// The settings-detection run could not produce a recommendation.
+    #[error("the settings could not be detected: {0}")]
+    Detect(String),
 }
 
 impl Serialize for CommandError {
@@ -400,6 +403,32 @@ pub(crate) async fn imap_test_connection(
             .map(|_| ())
         })
     })
+}
+
+/// Detects the mail-server settings for `email`: the email-first setup step. Runs
+/// one bounded detection on the runtime with the host's DNS resolver, then maps
+/// the result onto the recommendation view. Never panics; every failure is the
+/// typed [`CommandError::Detect`] the wizard falls back to manual from.
+///
+/// # Errors
+///
+/// Returns [`CommandError::Detect`] when the address has no usable domain, the
+/// trust store cannot be built, or the run outlives its five second bound.
+// Tauri's command macro hands `State` by value; the wrapper reads and dials through it.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) async fn detect_account_settings(
+    state: State<'_, AppState>,
+    email: String,
+) -> Result<crate::detection::RecommendationView, CommandError> {
+    let resolver = crate::detection::detection_resolver(state.runtime.handle());
+    let config = crate::detection::detect_config();
+    crate::detection::detect_settings_with(
+        &state.runtime,
+        &email,
+        crate::detection::DETECT_BOUND,
+        || async { astra_autodetect::detect(&email, resolver, &config).await },
+    )
 }
 
 #[cfg(test)]

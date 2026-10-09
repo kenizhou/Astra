@@ -57,5 +57,10 @@ thiserror.workspace = true
 # Diagnostic lines for the boot and dial paths; the host installs the logger.
 log.workspace = true
 # The app's async runtime: every engine call the host drives runs on it, and
-# blocking host calls are polled on a thread of our own (src/runtime.rs).
-tokio = { workspace = true, features = ["rt-multi-thread"] }
+# blocking host calls are polled on a thread of our own (src/runtime.rs). The
+# time feature drives the five second bound around one detection run.
+tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
+# Account autodetection, whose DNS seam the host resolves for (src/detection.rs).
+astra-autodetect = { path = "../../crates/astra-autodetect" }
+# The MX and SRV lookups behind that seam, over the system's configured DNS.
+hickory-resolver.workspace = true

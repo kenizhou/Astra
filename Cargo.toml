@@ -127,3 +127,8 @@ quick-xml = "0.42"
 # Mozilla's compiled-in Public Suffix List; derives a provider's registrable domain
 # from an MX or server hostname for the autodetect MX fallback.
 psl = "2"
+# The host side of the autodetect DNS seam (MX and SRV records): mail-calendar's
+# clients resolve through each platform's native DNS API, which a Tauri Rust host
+# cannot reach, and std's getaddrinfo answers no MX or SRV questions; the desktop
+# host resolves through this resolver over the system's configured DNS servers.
+hickory-resolver = "0.26"

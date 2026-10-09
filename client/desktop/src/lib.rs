@@ -15,6 +15,7 @@ mod app_state;
 mod boot;
 mod commands;
 mod credential_store;
+mod detection;
 mod exit;
 mod headless;
 mod observer;
@@ -56,7 +57,8 @@ pub fn run() {
             commands::mailbox_list,
             commands::sync_progress,
             commands::add_account,
-            commands::imap_test_connection
+            commands::imap_test_connection,
+            commands::detect_account_settings
         ])
         .setup(boot::setup_host)
         .build(tauri::generate_context!())
