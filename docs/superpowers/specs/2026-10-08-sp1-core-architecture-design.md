@@ -156,8 +156,8 @@ time; log) and grows only on demand.
    persists credentials in the OS keyring, syncs via the engine, and the
    folder tree renders in the shell, surviving an app restart.
 3. Every mail operation flows through `dispatch`; the account-setup
-   commands (`add_account`, `imap_test_connection`) are the sanctioned
-   setup-path exceptions.
+   commands (`add_account`, `detect_account_settings`,
+   `imap_test_connection`) are the sanctioned setup-path exceptions.
 4. The engine is consumed only through `engine-api` (plus the ratified
    reach-arounds inside `astra-account`: provider crates, `engine-tls`
    for the TLS policy, and `engine-core` for the Provider trait's own

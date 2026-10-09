@@ -81,9 +81,9 @@ pub struct DetectConfig {
     /// own.
     pub tls_policy: TlsPolicy,
     /// Dev-harness escape hatch: rebases the JMAP well-known probe onto a local server
-    /// (e.g. `http://127.0.0.1:28080` for Stalwart) that the typed domain can't reach,
-    /// and waives the probe's HTTPS requirement. Only debug or dev-harness host builds
-    /// ever set it; production code paths cannot.
+    /// (the local Stalwart harness's `http://127.0.0.1:2080`) that the typed domain
+    /// can't reach, and waives the probe's HTTPS requirement. Only debug or dev-harness
+    /// host builds ever set it; production code paths cannot.
     pub well_known_base_override: Option<Url>,
 }
 

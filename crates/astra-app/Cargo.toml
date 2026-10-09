@@ -38,6 +38,9 @@ time.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 
 [dev-dependencies]
+# The gated live JMAP-detection test drives the detection crate's `detect` directly,
+# with the dev-harness base override the host command never sets.
+astra-autodetect = { path = "../astra-autodetect" }
 # The fake provider implements the engine's `Provider` contract, whose sync plumbing
 # (SyncState, SyncUpdate) the facade does not re-export.
 engine-core.workspace = true
@@ -46,3 +49,5 @@ engine-provider.workspace = true
 serde_json.workspace = true
 # The test executor (`#[tokio::test]`); tests may build a runtime, the library may not.
 tokio = { workspace = true, features = ["macros", "rt"] }
+# The detection config's harness override is a `Url`.
+url.workspace = true

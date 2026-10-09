@@ -164,6 +164,7 @@ name = "astra-app"
 version = "0.1.0"
 dependencies = [
  "astra-account",
+ "astra-autodetect",
  "astra-viewmodel",
  "async-trait",
  "engine-api",
@@ -177,6 +178,7 @@ dependencies = [
  "time",
  "tokio",
  "toml 1.1.7+spec-1.1.0",
+ "url",
 ]
 
 [[package]]

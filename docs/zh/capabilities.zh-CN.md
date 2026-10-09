@@ -8,8 +8,8 @@
 
 | 领域 | 功能 | 状态 | 来源 |
 |---|---|---|---|
-| 账户 | IMAP/SMTP 账户设置向导，支持手动录入服务器 | 🚧 | accounts.md |
-| 账户 | 根据邮箱地址自动检测（JMAP 探测、SRV、autoconfig、ISPDB、MX） | ⬜ | account-autodetect.md |
+| 账户 | IMAP/SMTP 账户设置向导，支持服务器发现与手动录入服务器 | 🚧 | accounts.md |
+| 账户 | 根据邮箱地址自动检测（JMAP 探测、SRV、autoconfig、ISPDB、MX） | 🚧 | account-autodetect.md |
 | 邮件 | 跨账户文件夹窗格，支持嵌套文件夹并持久记住展开状态 | 🚧 | folder-pane.md |
 | 邮件 | 平铺与线程化邮件列表，窗口化分页 | ⬜ | |
 | 日历 | 日、工作周、月网格，支持拖拽创建、移动、调整大小 | ⬜ | calendar.md |

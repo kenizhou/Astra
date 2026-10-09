@@ -136,7 +136,8 @@ toml；thiserror；IMAP 的 rustls 栈；time；log），按需增长。
 2. 对 Stalwart harness：向导添加 IMAP 账户后凭据入 OS keyring、经引擎
    同步、文件夹树在壳内渲染，且应用重启后仍在。
 3. 每个邮件操作都经 `dispatch` 流动；账户设置命令（`add_account`、
-   `imap_test_connection`）是获准的设置路径例外。
+   `detect_account_settings`、`imap_test_connection`）是获准的设置路径
+   例外。
 4. 引擎只经 `engine-api` 消费（另加 `astra-account` 内经批准的
    reach-around：provider crate、用于 TLS 策略的 `engine-tls`、用于
    Provider trait 自身 SyncState/SyncUpdate/RawMime 类型的 `engine-core`；
