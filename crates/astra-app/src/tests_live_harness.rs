@@ -22,12 +22,14 @@
 //! certificate the IMAP seeding does). The notes are genuinely submitted and
 //! delivered: Stalwart runs them through its delivery path into the INBOX, exactly the
 //! mail the gated list test reads back through the product's own dial and sync. The
-//! submission rides the seed script rather than the engine because the engine's
-//! send path needs the draft flow, which no slice has ported yet. The same seed files
-//! one rich MIME note into Projects (submission into the INBOX, then an IMAP move),
-//! the message the gated reading test opens in `reading`. The gated drafts test needs
-//! no seed: it round-trips the drafts family against the account's real Drafts folder,
-//! storing and removing copies through the product's own dispatches.
+//! same seed files one rich MIME note into Projects (submission into the INBOX, then
+//! an IMAP move), the message the gated reading test opens in `reading`. The gated
+//! drafts test needs no seed: it round-trips the drafts family against the account's
+//! real Drafts folder, storing and removing copies through the product's own
+//! dispatches. The gated send test (`send`) needs no seed either: it submits its own
+//! mail from astra1 to astra2 through the engine's real send path, reads the delivery
+//! back on the recipient's account, and withdraws both copies afterwards so the
+//! harness keeps its seeded shape for the suites that pin it.
 //!
 //! The JMAP-detection test cannot dial `https://example.test/.well-known/jmap` (the
 //! harness domain resolves nowhere), so it rebases the probe onto the harness's plain
@@ -67,13 +69,15 @@ use crate::{
     Account, App, AppObserver, FolderRef, Intent, Surface,
 };
 
-// The gated reading and drafts tests: their own files, so this one stays under the
-// 500-line cap the gate enforces. The explicit paths because this file is loaded through
-// `#[path]` and so owns no directory a bare `mod` would resolve into.
+// The gated reading, drafts, and send tests: their own files, so this one stays
+// under the 500-line cap the gate enforces. The explicit paths because this file is
+// loaded through `#[path]` and so owns no directory a bare `mod` would resolve into.
 #[path = "tests_live_harness/drafts.rs"]
 mod drafts;
 #[path = "tests_live_harness/reading.rs"]
 mod reading;
+#[path = "tests_live_harness/send.rs"]
+mod send;
 
 /// The harness connection details from the environment, or `None` to skip.
 fn harness() -> Option<(String, String, String, String)> {

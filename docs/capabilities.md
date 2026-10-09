@@ -95,10 +95,10 @@ this row ports.
 | Invitations | When the server cannot pass your answer on, you are told and offered email instead, rememberable per account | ⬜ | invitations.md |
 | Contacts | Unified contact list across account address books (CardDAV, JMAP, Google, Microsoft), with search and detail | ⬜ | contacts.md |
 | Contacts | Add and edit a contact in a writable address book; one source card named when a person is filed twice | ⬜ | |
-| Sending | Outbox keeps a message that could not be sent and sends it later by itself | ⬜ | sending.md |
-| Sending | Outbox actions: send now, cancel, or edit a message that has not gone | ⬜ | |
-| Sending | A send interrupted by app close is kept and never sent twice; the user answers Mark as Sent or Send Again | ⬜ | sending.md |
-| Sending | A message the server refused stays until sent again, edited, or discarded | ⬜ | |
+| Sending | Outbox keeps a message that could not be sent and sends it later by itself | 🚧 | sending.md |
+| Sending | Outbox actions: send now, cancel, or edit a message that has not gone | 🚧 | sending.md |
+| Sending | A send interrupted by app close is kept and never sent twice; the user answers Mark as Sent or Send Again | 🚧 | sending.md |
+| Sending | A message the server refused stays until sent again, edited, or discarded | 🚧 | sending.md |
 | Contacts | Sender avatars: a coloured monogram, replaced by an address-book photo | ⬜ | avatars.md |
 | Contacts | The same person in several accounts is one row, joined on a shared address, and says so | ⬜ | |
 | Composer | Recipient autosuggest ranked from synced contacts and from people you have written to | ⬜ | |
