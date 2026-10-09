@@ -7,15 +7,16 @@
 
 import { listen } from '@tauri-apps/api/event';
 
-import { mailboxList, reading, syncProgress } from '@/services/ipc';
+import { draftStatus, mailboxList, reading, syncProgress } from '@/services/ipc';
 import { useAccountStore } from '@/stores/accountStore';
+import { useDraftStore } from '@/stores/draftStore';
 import { useFolderStore } from '@/stores/folderStore';
 import { useListStore } from '@/stores/listStore';
 import { useReadingStore } from '@/stores/readingStore';
 import { useUiStore } from '@/stores/uiStore';
 
 /** The surfaces a change can name, as the event payload carries them. */
-export type Surface = 'mailbox_list' | 'sync_progress' | 'reading';
+export type Surface = 'mailbox_list' | 'sync_progress' | 'reading' | 'draft_status';
 
 /**
  * Tauri presence guard, evaluated at module load so jsdom tests that install
@@ -91,6 +92,11 @@ export function pullSurface(surface: Surface): Promise<void> {
       useReadingStore.getState().applySnapshot(snapshot);
     });
   }
+  if (surface === 'draft_status') {
+    return draftStatus().then((snapshot) => {
+      useDraftStore.getState().applySnapshot(snapshot);
+    });
+  }
   return syncProgress().then((snapshot) => {
     useUiStore.getState().applySyncProgress(snapshot);
   });
@@ -110,7 +116,12 @@ export function mountSurfaceEvents(): () => void {
     'surface_changed',
     (event) => {
       const { surface } = event.payload;
-      if (surface === 'mailbox_list' || surface === 'sync_progress' || surface === 'reading') {
+      if (
+        surface === 'mailbox_list' ||
+        surface === 'sync_progress' ||
+        surface === 'reading' ||
+        surface === 'draft_status'
+      ) {
         void pullSurface(surface);
       }
     },
@@ -137,6 +148,8 @@ export async function hydrate(): Promise<void> {
   useUiStore.getState().applySyncProgress(progress);
   const openReading = await reading();
   useReadingStore.getState().applySnapshot(openReading);
+  const draftHint = await draftStatus();
+  useDraftStore.getState().applySnapshot(draftHint);
   useUiStore.getState().markRunning();
   if (snapshot.account_folders.length === 0) {
     useUiStore.getState().setAccountSetupOpen(true);

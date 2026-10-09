@@ -5,8 +5,10 @@
 
 use std::sync::Arc;
 
-use astra_app::{Account, App, Intent};
-use astra_viewmodel::{MailboxListSnapshot, ReadingSnapshot, SyncProgressSnapshot};
+use astra_app::{Account, App, CompositionId, DraftResume, Intent};
+use astra_viewmodel::{
+    DraftStatusSnapshot, MailboxListSnapshot, ReadingSnapshot, SyncProgressSnapshot,
+};
 use async_trait::async_trait;
 use engine_api::{AccountId, Provider};
 
@@ -52,6 +54,21 @@ pub(crate) trait AppPort: Send + Sync {
     /// message's body, or `None` when nothing is open.
     fn reading(&self) -> Option<ReadingSnapshot>;
 
+    /// The published draft-status snapshot, for the host's pull: the composition
+    /// whose save moved and how it ended, or `None` when no composition has a
+    /// save to report.
+    fn draft_status(&self) -> Option<DraftStatusSnapshot>;
+
+    /// Opens the account's latest stored draft into `composition`, so the
+    /// composer that holds it saves over that copy rather than beside it; the
+    /// webview's resume read. `None` when the account holds no draft or its body
+    /// cannot be read, in which case nothing is adopted either.
+    async fn resume_latest_draft(
+        &self,
+        account: &AccountId,
+        composition: CompositionId,
+    ) -> Option<DraftResume>;
+
     /// Registers a newly added account without syncing, so the pane shows it and the
     /// setup flow can dismiss at once.
     async fn add_new_account_deferred(&self, account: HostAccount);
@@ -77,6 +94,18 @@ impl AppPort for App<HostProvider> {
 
     fn reading(&self) -> Option<ReadingSnapshot> {
         App::reading(self)
+    }
+
+    fn draft_status(&self) -> Option<DraftStatusSnapshot> {
+        App::draft_status(self)
+    }
+
+    async fn resume_latest_draft(
+        &self,
+        account: &AccountId,
+        composition: CompositionId,
+    ) -> Option<DraftResume> {
+        App::resume_latest_draft(self, account, composition).await
     }
 
     async fn add_new_account_deferred(&self, account: HostAccount) {

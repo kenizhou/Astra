@@ -227,6 +227,7 @@ dependencies = [
  "astra-account",
  "astra-app",
  "astra-autodetect",
+ "astra-composer",
  "astra-viewmodel",
  "async-trait",
  "engine-api",

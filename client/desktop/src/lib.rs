@@ -20,6 +20,13 @@ mod exit;
 mod headless;
 mod observer;
 
+// The command-surface test fixtures: one compiled copy of the fake app, the
+// credential store, and the state builder, at the crate root so every command
+// test module (the command tests, the reading tests they split off, and the
+// drafts tests) includes the same module rather than its own.
+#[cfg(test)]
+mod commands_fakes;
+
 use tauri::{Emitter, Manager};
 
 pub(crate) use app_state::{AppPort, AppState, HostAccount, HostProvider};
@@ -57,6 +64,8 @@ pub fn run() {
             commands::mailbox_list,
             commands::sync_progress,
             commands::reading,
+            commands::drafts::draft_status,
+            commands::drafts::draft_resume,
             commands::add_account,
             commands::imap_test_connection,
             commands::detect_account_settings
