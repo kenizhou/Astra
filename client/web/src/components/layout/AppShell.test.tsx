@@ -2,7 +2,8 @@
 // The shell's composer and outbox wiring: the New message action opens the
 // composer pane with the first account as its From, stays inert without an
 // account, the app start resume pulls the stored draft into the pane when the
-// host has one, and the status bar's outbox toggle opens the outbox panel.
+// host has one, a landed compose request opens the pane hydrated, and the
+// status bar's outbox toggle opens the outbox panel.
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -20,11 +21,12 @@ vi.mock('@/events/surfaceEvents', async (importOriginal) => ({
 }));
 
 import { AppShell } from './AppShell';
-import type { ResumeView } from '@/services/ipc';
+import type { ComposeRequestSnapshot, ResumeView } from '@/services/ipc';
 import { useAccountStore } from '@/stores/accountStore';
+import { useComposeRequestStore } from '@/stores/composeRequestStore';
 import { useSendingStore } from '@/stores/sendingStore';
 import { useUiStore } from '@/stores/uiStore';
-import { useComposerStore } from '@/features/composer/Composer';
+import { useComposerStore } from '@/features/composer/composerStore';
 import { documentToEditor } from '@/features/composer/documentWire';
 import { useSendResultStore } from '@/features/outbox/sendResult';
 
@@ -46,7 +48,9 @@ beforeEach(() => {
     subject: '',
     editor: documentToEditor({ blocks: [{ Paragraph: { content: [] } }], attachments: [] }),
     savedFingerprint: null,
+    request: null,
   });
+  useComposeRequestStore.setState({ snapshot: null });
   useSendingStore.getState().applySnapshot({ rows: [] });
   useUiStore.getState().setOutboxOpen(false);
   useSendResultStore.getState().dismiss();
@@ -103,6 +107,30 @@ describe('the shell composer wiring', () => {
     );
     expect((screen.getByRole('textbox', { name: 'Subject' }) as HTMLInputElement).value).toBe(
       'Later',
+    );
+  });
+
+  it('opens the composer hydrated when a compose request lands', () => {
+    const request: ComposeRequestSnapshot = {
+      kind: 'reply',
+      from: 'work',
+      to: 'ada@example.test',
+      cc: '',
+      subject: 'Re: Quarterly report',
+      in_reply_to: 'orig-1@server.test',
+      document: { blocks: [], attachments: [] },
+    };
+    render(<AppShell />);
+
+    act(() => {
+      useComposeRequestStore.getState().applySnapshot(request);
+    });
+
+    expect((screen.getByRole('textbox', { name: 'To' }) as HTMLInputElement).value).toBe(
+      'ada@example.test',
+    );
+    expect((screen.getByRole('textbox', { name: 'Subject' }) as HTMLInputElement).value).toBe(
+      'Re: Quarterly report',
     );
   });
 });

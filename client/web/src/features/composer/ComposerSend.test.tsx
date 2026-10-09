@@ -3,7 +3,9 @@
 // the To field and while a submit is in flight, it submits the CURRENT
 // document and then clears the stored draft and closes, a refused submit
 // keeps the pane open with its words and says why, and neither the error
-// line nor an in-flight submit outlives its own composition.
+// line nor an in-flight submit outlives its own composition. A composition a
+// compose request opened submits through its own threaded intent: the reply
+// under its original with in_reply_to, the forward answering no one.
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { JSONContent } from '@tiptap/react';
@@ -26,10 +28,13 @@ vi.mock('./Editor', () => ({
   },
 }));
 
+import type { Block, ComposeRequestSnapshot } from '@/services/ipc';
 import { useAccountStore } from '@/stores/accountStore';
+import { useComposeRequestStore } from '@/stores/composeRequestStore';
 import { useDraftStore } from '@/stores/draftStore';
 
-import { ComposerPane, useComposerStore } from './Composer';
+import { ComposerPane } from './Composer';
+import { useComposerStore } from './composerStore';
 import { documentToEditor } from './documentWire';
 
 const UUID =
@@ -37,6 +42,47 @@ const UUID =
 
 const plainRun = (text: string): string =>
   `{"Text":{"text":"${text}","bold":false,"italic":false,"underline":false,"font_size":null,"color":null,"highlight":null,"link":null}}`;
+
+/** The quote block a compose request carries, the pinned wire literal. */
+function quoteBlock(): Block {
+  return {
+    Quote: {
+      style: 'Indented',
+      attribution: {
+        line: 'On 9 Oct 2026 at 08:00, Ada Lovelace <ada@example.test> wrote:',
+        headers: [
+          { label: 'From', value: 'Ada Lovelace <ada@example.test>' },
+          { label: 'Sent', value: '9 Oct 2026 at 08:00' },
+          { label: 'To', value: 'me@work.local, Bob <bob@example.test>' },
+          { label: 'Subject', value: 'Quarterly report' },
+        ],
+      },
+      body_html: '<div style="white-space: pre-wrap;">The numbers are in.</div>',
+      body_plain: 'The numbers are in.',
+    },
+  };
+}
+
+/** The quote as the wire spells it, for byte-exact payload assertions. */
+const QUOTE_JSON =
+  '{"Quote":{"style":"Indented","attribution":{"line":"On 9 Oct 2026 at 08:00, Ada Lovelace <ada@example.test> wrote:",' +
+  '"headers":[{"label":"From","value":"Ada Lovelace <ada@example.test>"},{"label":"Sent","value":"9 Oct 2026 at 08:00"},' +
+  '{"label":"To","value":"me@work.local, Bob <bob@example.test>"},{"label":"Subject","value":"Quarterly report"}]},' +
+  '"body_html":"<div style=\\"white-space: pre-wrap;\\">The numbers are in.</div>","body_plain":"The numbers are in."}}';
+
+/** A reply request, overridable per test. */
+function replyRequest(over: Partial<ComposeRequestSnapshot> = {}): ComposeRequestSnapshot {
+  return {
+    kind: 'reply',
+    from: 'work',
+    to: 'ada@example.test',
+    cc: '',
+    subject: 'Re: Quarterly report',
+    in_reply_to: 'orig-1@server.test',
+    document: { blocks: [quoteBlock()], attachments: [] },
+    ...over,
+  };
+}
 
 function resetStores(): void {
   useAccountStore.setState({ accounts: [{ accountId: 'work', displayName: 'Work' }] });
@@ -53,7 +99,9 @@ function resetStores(): void {
     subject: '',
     editor: documentToEditor({ blocks: [{ Paragraph: { content: [] } }], attachments: [] }),
     savedFingerprint: null,
+    request: null,
   });
+  useComposeRequestStore.setState({ snapshot: null });
 }
 
 /** Opens a composition the way the New message action does. */
@@ -261,5 +309,105 @@ describe('the send button', () => {
     expect((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(
       false,
     );
+  });
+});
+
+describe('the threaded sends', () => {
+  /** Opens a composition the way a landed compose request does. */
+  function openRequest(request: ComposeRequestSnapshot): void {
+    act(() => {
+      useComposerStore.getState().openRequest(request, 'Work');
+    });
+  }
+
+  it('submits a reply under its original, then clears the draft, the request, and closes', async () => {
+    const request = replyRequest();
+    useComposeRequestStore.getState().applySnapshot(request);
+    openRequest(request);
+    const composition = useComposerStore.getState().composition as string;
+    render(<ComposerPane />);
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    });
+
+    expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
+      '{"submit_rich_reply":{"from":"work","to":"ada@example.test","cc":"","in_reply_to":"orig-1@server.test","subject":"Re: Quarterly report",' +
+        `"document":{"blocks":[${QUOTE_JSON}],"attachments":[]},"blobs":[]}}`,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(JSON.stringify(ipc.dispatch.mock.calls[1]?.[0])).toBe(
+      `{"drafts":{"discard":{"composition":"${composition}"}}}`,
+    );
+    expect(useComposerStore.getState().open).toBe(false);
+    expect(useComposeRequestStore.getState().snapshot).toBeNull();
+  });
+
+  it('submits a forward answering no one once the user names a recipient', () => {
+    openRequest(
+      replyRequest({ kind: 'forward', to: '', subject: 'Fwd: Quarterly report', in_reply_to: undefined }),
+    );
+    render(<ComposerPane />);
+
+    const send = screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+
+    act(() => {
+      useComposerStore.getState().setField('to', 'bob@example.test');
+    });
+    expect(send.disabled).toBe(false);
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    });
+
+    expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
+      '{"submit_rich_forward":{"from":"work","to":"bob@example.test","subject":"Fwd: Quarterly report",' +
+        `"document":{"blocks":[${QUOTE_JSON}],"attachments":[]},"blobs":[]}}`,
+    );
+  });
+
+  it('keeps the pending request when a reply submit refuses, so a retry still threads', async () => {
+    openRequest(replyRequest());
+    render(<ComposerPane />);
+
+    ipc.dispatch.mockRejectedValueOnce(new Error('the host is unreachable'));
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(useComposerStore.getState().open).toBe(true);
+    expect(useComposerStore.getState().request).toEqual({
+      kind: 'reply',
+      inReplyTo: 'orig-1@server.test',
+    });
+
+    ipc.dispatch.mockClear();
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    });
+    expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toContain('"submit_rich_reply"');
+    expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toContain('"in_reply_to":"orig-1@server.test"');
+  });
+
+  it('refuses a reply whose original carried no threading header, keeping the words', () => {
+    openRequest(replyRequest({ in_reply_to: undefined }));
+    render(<ComposerPane />);
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    });
+
+    expect(ipc.dispatch).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert').textContent).toBe(
+      'The original message has no Message-ID to reply under',
+    );
+    expect(useComposerStore.getState().open).toBe(true);
+    expect(useComposerStore.getState().request).toEqual({ kind: 'reply', inReplyTo: null });
   });
 });

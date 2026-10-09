@@ -30,6 +30,7 @@ const ipc = vi.hoisted(() => ({
   syncProgress: vi.fn(),
   reading: vi.fn(),
   draftStatus: vi.fn(),
+  composeRequest: vi.fn(),
   sending: vi.fn(),
   addAccount: vi.fn(),
   imapTestConnection: vi.fn(),
@@ -39,12 +40,14 @@ vi.mock('@/services/ipc', () => ipc);
 
 import { hydrate, mountSurfaceEvents } from './surfaceEvents';
 import { useAccountStore } from '@/stores/accountStore';
+import { useComposeRequestStore } from '@/stores/composeRequestStore';
 import { useDraftStore } from '@/stores/draftStore';
 import { useFolderStore } from '@/stores/folderStore';
 import { useListStore } from '@/stores/listStore';
 import { useReadingStore } from '@/stores/readingStore';
 import { useSendingStore } from '@/stores/sendingStore';
 import { useUiStore } from '@/stores/uiStore';
+import type { ComposeRequestSnapshot } from '@/services/ipc';
 import mailboxFixture from '@/services/__fixtures__/mailbox_list.json';
 
 /** The open message's reading snapshot the reading pull resolves with. */
@@ -55,6 +58,17 @@ const readingSnapshot = {
   from_address: 'ada@example.test',
   sent_at: '2026-10-09T08:30:00Z',
   remote_image_count: 0,
+};
+
+/** The reply's prefill the compose-request pull resolves with. */
+const composeRequestSnapshot: ComposeRequestSnapshot = {
+  kind: 'reply',
+  from: 'work',
+  to: 'ada@example.test',
+  cc: '',
+  subject: 'Re: Quarterly report',
+  in_reply_to: 'orig-1@server.test',
+  document: { blocks: [], attachments: [] },
 };
 
 function emit(surface: string) {
@@ -80,6 +94,7 @@ function resetStores() {
   });
   useReadingStore.setState({ snapshot: null, showRemoteImages: false });
   useDraftStore.setState({ snapshot: null });
+  useComposeRequestStore.setState({ snapshot: null });
   useSendingStore.setState({ snapshot: { rows: [] } });
 }
 
@@ -92,6 +107,8 @@ beforeEach(() => {
   ipc.reading.mockResolvedValue(null);
   ipc.draftStatus.mockReset();
   ipc.draftStatus.mockResolvedValue(null);
+  ipc.composeRequest.mockReset();
+  ipc.composeRequest.mockResolvedValue(null);
   ipc.sending.mockReset();
   ipc.sending.mockResolvedValue({ rows: [] });
   resetStores();
@@ -198,6 +215,35 @@ describe('the surface_changed listener', () => {
     await vi.waitFor(() => expect(useDraftStore.getState().snapshot).toBeNull());
   });
 
+  it('a compose_request change pulls the snapshot into the compose request store', async () => {
+    ipc.composeRequest.mockResolvedValue(composeRequestSnapshot);
+    mountSurfaceEvents();
+    await vi.waitFor(() => expect(wire.handlers).toHaveLength(1));
+
+    emit('compose_request');
+
+    await vi.waitFor(() =>
+      expect(useComposeRequestStore.getState().snapshot?.subject).toBe('Re: Quarterly report'),
+    );
+    expect(useComposeRequestStore.getState().snapshot?.kind).toBe('reply');
+    expect(useComposeRequestStore.getState().snapshot?.in_reply_to).toBe('orig-1@server.test');
+    expect(ipc.mailboxList).not.toHaveBeenCalled();
+    expect(ipc.draftStatus).not.toHaveBeenCalled();
+  });
+
+  it('a compose_request change with nothing pending clears the store', async () => {
+    useComposeRequestStore.setState({ snapshot: composeRequestSnapshot });
+    ipc.composeRequest.mockResolvedValue(null);
+    mountSurfaceEvents();
+    await vi.waitFor(() => expect(wire.handlers).toHaveLength(1));
+
+    emit('compose_request');
+
+    await vi.waitFor(() =>
+      expect(useComposeRequestStore.getState().snapshot).toBeNull(),
+    );
+  });
+
   it('a sending change pulls the snapshot into the sending store', async () => {
     ipc.sending.mockResolvedValue({
       rows: [
@@ -257,6 +303,7 @@ describe('the surface_changed listener', () => {
     expect(ipc.syncProgress).not.toHaveBeenCalled();
     expect(ipc.reading).not.toHaveBeenCalled();
     expect(ipc.draftStatus).not.toHaveBeenCalled();
+    expect(ipc.composeRequest).not.toHaveBeenCalled();
     expect(ipc.sending).not.toHaveBeenCalled();
   });
 
@@ -280,9 +327,11 @@ describe('hydration', () => {
     expect(ipc.syncProgress).toHaveBeenCalledTimes(1);
     expect(ipc.reading).toHaveBeenCalledTimes(1);
     expect(ipc.draftStatus).toHaveBeenCalledTimes(1);
+    expect(ipc.composeRequest).toHaveBeenCalledTimes(1);
     expect(ipc.sending).toHaveBeenCalledTimes(1);
     expect(useReadingStore.getState().snapshot).toBeNull();
     expect(useDraftStore.getState().snapshot).toBeNull();
+    expect(useComposeRequestStore.getState().snapshot).toBeNull();
     expect(useSendingStore.getState().snapshot.rows).toHaveLength(0);
     expect(useUiStore.getState().engineState).toBe('running');
     expect(useUiStore.getState().accountSetupOpen).toBe(true);

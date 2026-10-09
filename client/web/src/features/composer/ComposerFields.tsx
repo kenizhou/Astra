@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The composer's header fields: From as read only text (the default send
 // account, fixed this slice), To and Subject always visible, Cc and Bcc
-// behind their toggles so the common new message stays one line tall. Every
-// change crosses with its field name; the values themselves live in the
-// composer's store.
+// behind their toggles so the common new message stays one line tall. A
+// toggle whose field the composition cannot carry is not offered at all.
+// Every change crosses with its field name; the values themselves live in
+// the composer's store.
 
 interface ComposerFieldsProps {
   /** The sending account's display name, read only. */
@@ -12,8 +13,12 @@ interface ComposerFieldsProps {
   cc: string;
   bcc: string;
   subject: string;
+  /** Whether the Cc toggle stands beside To. */
+  ccOffered: boolean;
   /** Whether the Cc field is shown. */
   ccShown: boolean;
+  /** Whether the Bcc toggle stands beside To. */
+  bccOffered: boolean;
   /** Whether the Bcc field is shown. */
   bccShown: boolean;
   /** Carries one field's new value, named as the wire names it. */
@@ -31,7 +36,9 @@ export function ComposerFields({
   cc,
   bcc,
   subject,
+  ccOffered,
   ccShown,
+  bccOffered,
   bccShown,
   onField,
   onToggleCc,
@@ -55,22 +62,26 @@ export function ComposerFields({
           onChange={(event) => onField('to', event.target.value)}
           className={fieldClass}
         />
-        <button
-          type="button"
-          aria-pressed={ccShown}
-          onClick={onToggleCc}
-          className="shrink-0 rounded-[var(--radius-xs)] px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          {ccShown ? 'Hide Cc' : 'Show Cc'}
-        </button>
-        <button
-          type="button"
-          aria-pressed={bccShown}
-          onClick={onToggleBcc}
-          className="shrink-0 rounded-[var(--radius-xs)] px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          {bccShown ? 'Hide Bcc' : 'Show Bcc'}
-        </button>
+        {ccOffered && (
+          <button
+            type="button"
+            aria-pressed={ccShown}
+            onClick={onToggleCc}
+            className="shrink-0 rounded-[var(--radius-xs)] px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {ccShown ? 'Hide Cc' : 'Show Cc'}
+          </button>
+        )}
+        {bccOffered && (
+          <button
+            type="button"
+            aria-pressed={bccShown}
+            onClick={onToggleBcc}
+            className="shrink-0 rounded-[var(--radius-xs)] px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {bccShown ? 'Hide Bcc' : 'Show Bcc'}
+          </button>
+        )}
       </div>
       {ccShown && (
         <div className="flex items-center gap-2">

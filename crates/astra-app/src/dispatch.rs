@@ -99,8 +99,15 @@ impl<P: Provider> App<P> {
                 self.close_reading();
             }
             Intent::Folders(_change) => return Err(AppError::NotYet),
+            // The compose family: the prefill is computed and published, never
+            // returned; the composer opens on the surface's snapshot.
+            Intent::Compose(change) => {
+                self.dispatch_compose(change).await;
+            }
             // The composer's send: one verb whose outcome the queue holds and
-            // the sending surface publishes, never a return value.
+            // the sending surface publishes, never a return value. The reply
+            // and the forward are the same verb threaded, the original's
+            // chain re-resolved so each joins the conversation it answers.
             Intent::SubmitRichMail {
                 from,
                 to,
@@ -111,6 +118,28 @@ impl<P: Provider> App<P> {
                 blobs,
             } => {
                 self.submit_rich_mail(from, to, cc, bcc, subject, document, blobs)
+                    .await;
+            }
+            Intent::SubmitRichReply {
+                from,
+                to,
+                cc,
+                in_reply_to,
+                subject,
+                document,
+                blobs,
+            } => {
+                self.submit_rich_reply(from, to, cc, in_reply_to, subject, document, blobs)
+                    .await;
+            }
+            Intent::SubmitRichForward {
+                from,
+                to,
+                subject,
+                document,
+                blobs,
+            } => {
+                self.submit_rich_forward(from, to, subject, document, blobs)
                     .await;
             }
             // The outbox family: the same discard-and-resync discipline the

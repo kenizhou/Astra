@@ -3,8 +3,8 @@
 // the idle autosave dispatches the save intent with the exact payload and
 // stays quiet while nothing changed, the badge follows the status surface
 // for its own composition only, discard and close cross with exact payloads
-// and shut the pane, and the app start resume hydrates the stored draft
-// into the composer once.
+// and shut the pane (clearing any pending compose request behind them), and
+// the app start resume hydrates the stored draft into the composer once.
 import { act, cleanup, fireEvent, render, renderHook, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { JSONContent } from '@tiptap/react';
@@ -28,11 +28,13 @@ vi.mock('./Editor', () => ({
   },
 }));
 
-import type { ComposerDocument, ResumeView } from '@/services/ipc';
+import type { ComposerDocument, ComposeRequestSnapshot, ResumeView } from '@/services/ipc';
 import { useAccountStore } from '@/stores/accountStore';
+import { useComposeRequestStore } from '@/stores/composeRequestStore';
 import { useDraftStore } from '@/stores/draftStore';
 
-import { ComposerPane, useComposerStore, useDraftResumeAtStart } from './Composer';
+import { ComposerPane, useDraftResumeAtStart } from './Composer';
+import { useComposerStore } from './composerStore';
 import { documentToEditor } from './documentWire';
 
 const UUID =
@@ -40,6 +42,28 @@ const UUID =
 
 const plainRun = (text: string): string =>
   `{"Text":{"text":"${text}","bold":false,"italic":false,"underline":false,"font_size":null,"color":null,"highlight":null,"link":null}}`;
+
+/** A pending request, standing in the store while the composer is open. */
+const pendingRequest: ComposeRequestSnapshot = {
+  kind: 'reply',
+  from: 'work',
+  to: 'ada@example.test',
+  cc: '',
+  subject: 'Re: Quarterly report',
+  in_reply_to: 'orig-1@server.test',
+  document: { blocks: [], attachments: [] },
+};
+
+/** The same request as a forward: no recipients, no threading header. */
+function forwardRequest(): ComposeRequestSnapshot {
+  return {
+    ...pendingRequest,
+    kind: 'forward',
+    to: '',
+    subject: 'Fwd: Quarterly report',
+    in_reply_to: undefined,
+  };
+}
 
 function resetStores(): void {
   useAccountStore.setState({ accounts: [{ accountId: 'work', displayName: 'Work' }] });
@@ -56,7 +80,9 @@ function resetStores(): void {
     subject: '',
     editor: documentToEditor(emptyDocument()),
     savedFingerprint: null,
+    request: null,
   });
+  useComposeRequestStore.setState({ snapshot: null });
 }
 
 function emptyDocument(): ComposerDocument {
@@ -245,6 +271,74 @@ describe('leaving the composer', () => {
     expect(useComposerStore.getState().open).toBe(false);
     expect(screen.queryByRole('region', { name: 'Composer' })).toBeNull();
   });
+
+  it('clears a pending compose request behind every close path', () => {
+    newMessage();
+    render(<ComposerPane />);
+    act(() => {
+      useComposeRequestStore.getState().applySnapshot(pendingRequest);
+    });
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+    });
+    expect(useComposeRequestStore.getState().snapshot).toBeNull();
+
+    act(() => {
+      useComposeRequestStore.getState().applySnapshot(pendingRequest);
+      useComposerStore.getState().closePane();
+    });
+    expect(useComposeRequestStore.getState().snapshot).toBeNull();
+  });
+});
+
+describe('the fields the request kind scopes', () => {
+  it('offers the cc a reply carries and hides the bcc it cannot', () => {
+    act(() => {
+      useComposerStore.getState().openRequest(pendingRequest, 'Work');
+    });
+    render(<ComposerPane />);
+
+    expect(screen.getByRole('button', { name: 'Show Cc' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Show Bcc' })).toBeNull();
+    expect(screen.queryByRole('textbox', { name: 'Bcc' })).toBeNull();
+  });
+
+  it('shows the cc a reply-all prefilled, still without a bcc', () => {
+    act(() => {
+      useComposerStore.getState().openRequest(
+        { ...pendingRequest, kind: 'reply_all', cc: 'bob@example.test' },
+        'Work',
+      );
+    });
+    render(<ComposerPane />);
+
+    expect((screen.getByRole('textbox', { name: 'Cc' }) as HTMLInputElement).value).toBe(
+      'bob@example.test',
+    );
+    expect(screen.getByRole('button', { name: 'Hide Cc' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Show Bcc' })).toBeNull();
+  });
+
+  it('hides the cc and bcc a forward cannot carry', () => {
+    act(() => {
+      useComposerStore.getState().openRequest(forwardRequest(), 'Work');
+    });
+    render(<ComposerPane />);
+
+    expect(screen.queryByRole('button', { name: 'Show Cc' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Show Bcc' })).toBeNull();
+    expect(screen.queryByRole('textbox', { name: 'Cc' })).toBeNull();
+    expect(screen.queryByRole('textbox', { name: 'Bcc' })).toBeNull();
+  });
+
+  it('offers every field on a plain composition', () => {
+    newMessage();
+    render(<ComposerPane />);
+
+    expect(screen.getByRole('button', { name: 'Show Cc' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Show Bcc' })).toBeTruthy();
+  });
 });
 
 describe('the app start resume', () => {
@@ -335,5 +429,37 @@ describe('the app start resume', () => {
     expect(error).toHaveBeenCalledTimes(1);
     expect(useComposerStore.getState().open).toBe(false);
     error.mockRestore();
+  });
+
+  it('spends a standing request when the resume opens, so the send rides the plain submit', async () => {
+    ipc.draftResume.mockResolvedValue(view);
+    act(() => {
+      useComposerStore.getState().openRequest(pendingRequest, 'Work');
+    });
+    useComposeRequestStore.getState().applySnapshot(pendingRequest);
+    render(<ComposerPane />);
+    renderHook(() => useDraftResumeAtStart());
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // The resumed draft's fields stand in the pane and the request is spent.
+    expect((screen.getByRole('textbox', { name: 'To' }) as HTMLInputElement).value).toBe(
+      'you@test.local',
+    );
+    expect(useComposerStore.getState().request).toBeNull();
+    expect(useComposeRequestStore.getState().snapshot).toBeNull();
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    });
+
+    expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
+      '{"submit_rich_mail":{"from":"work","to":"you@test.local","cc":"cc@test.local","bcc":"quiet@test.local","subject":"Later",' +
+        `"document":{"blocks":[{"Paragraph":{"content":[${plainRun('Half written')}]}},{"Paragraph":{"content":[${plainRun(
+          'Second line',
+        )}]}}],"attachments":[]},"blobs":[]}}`,
+    );
   });
 });

@@ -24,7 +24,12 @@
 #
 #   scripts/dev/harness.sh up
 #   eval "$(scripts/dev/harness.sh env)"
-#   cargo test -p astra-app tests_live_harness -- --nocapture
+#   cargo test -p astra-app tests_live_harness -- --nocapture --test-threads=1
+#
+# The serial run is the recorded discipline (tests_live_harness.rs owns the why:
+# the suites share one live server whose contracts pin whole states, so one
+# suite's transient delivery would break another's whole-equality assertion in
+# a parallel run).
 #
 # JMAP ROUTE (the recorded decision, also in docker/harness/compose.yaml): the
 # harness also publishes Stalwart's built-in HTTP listener (JMAP + management) on

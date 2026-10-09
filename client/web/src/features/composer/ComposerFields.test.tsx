@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The composer fields: From renders read only, To and Subject always show,
-// Cc and Bcc stay hidden until their toggles open them, and every change
-// crosses with its exact field name and value.
+// Cc and Bcc stay hidden until their toggles open them, a toggle the
+// composition cannot carry never stands at all, and every change crosses
+// with its exact field name and value.
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -19,7 +20,9 @@ function setup(over: Partial<Parameters<typeof ComposerFields>[0]> = {}) {
     cc: '',
     bcc: '',
     subject: 'Launch',
+    ccOffered: true,
     ccShown: false,
+    bccOffered: true,
     bccShown: false,
     onField,
     onToggleCc,
@@ -63,6 +66,16 @@ describe('the composer fields', () => {
 
     expect(onToggleCc).toHaveBeenCalledTimes(1);
     expect(onToggleBcc).toHaveBeenCalledTimes(1);
+  });
+
+  it('withholds a toggle the composition cannot carry', () => {
+    setup({ ccOffered: false, bccOffered: false, cc: 'stale@test.local' });
+
+    expect(screen.queryByRole('button', { name: 'Show Cc' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Hide Cc' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Show Bcc' })).toBeNull();
+    expect(screen.queryByRole('textbox', { name: 'Cc' })).toBeNull();
+    expect(screen.queryByRole('textbox', { name: 'Bcc' })).toBeNull();
   });
 
   it('shows the cc and bcc inputs once opened and carries their changes', () => {

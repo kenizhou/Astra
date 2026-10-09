@@ -227,8 +227,9 @@ pub(crate) async fn render_reading<P: Provider>(
 /// Resolves `message` to its stored [`Message`], the read every body fetch is
 /// addressed through (it carries the id and blob handle the provider needs).
 /// `None` when the account's synced set holds no such key: moved, tombstoned,
-/// or never synced.
-async fn resolve(engine: &Engine, message: &MessageRef) -> Option<Message> {
+/// or never synced. Shared with the compose family, whose prefill reads the
+/// original's headers through the same resolution.
+pub(crate) async fn resolve(engine: &Engine, message: &MessageRef) -> Option<Message> {
     engine
         .messages_by_keys(&message.account, std::slice::from_ref(&message.key))
         .await

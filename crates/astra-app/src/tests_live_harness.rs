@@ -29,7 +29,15 @@
 //! dispatches. The gated send test (`send`) needs no seed either: it submits its own
 //! mail from astra1 to astra2 through the engine's real send path, reads the delivery
 //! back on the recipient's account, and withdraws both copies afterwards so the
-//! harness keeps its seeded shape for the suites that pin it.
+//! harness keeps its seeded shape for the suites that pin it. The gated reply and
+//! forward tests (`reply`, `forward`) walk the answer chain over the same wire:
+//! each first submits a fresh note from astra1 to astra2 (the seed leaves astra2
+//! nothing to answer), then composes the answer through the product's own compose
+//! pipeline, submits it as a reply or a forward, and reads the delivery back at
+//! astra1 with the threading pinned (`In-Reply-To` matching the original's
+//! `Message-ID` for the reply; `References` only, under a `Fwd:` subject, for the
+//! forward). Both withdraw every copy they made, so astra1's INBOX ends the run
+//! holding the three seeded notes again and astra2 holds nothing.
 //!
 //! The JMAP-detection test cannot dial `https://example.test/.well-known/jmap` (the
 //! harness domain resolves nowhere), so it rebases the probe onto the harness's plain
@@ -44,8 +52,14 @@
 //! ```sh
 //! scripts/dev/harness.sh up
 //! eval "$(scripts/dev/harness.sh env)"
-//! cargo test -p astra-app tests_live_harness -- --nocapture
+//! cargo test -p astra-app tests_live_harness -- --nocapture --test-threads=1
 //! ```
+//!
+//! The suites share one live server whose contracts pin whole states (the list
+//! suite's three-note INBOX; the reply and forward suites deliver into that same
+//! INBOX before withdrawing their copies), so the recorded invocation runs them
+//! one at a time: in parallel, one suite's transient delivery would break
+//! another's whole-equality assertion.
 
 use std::{
     sync::{
@@ -69,13 +83,21 @@ use crate::{
     Account, App, AppObserver, FolderRef, Intent, Surface,
 };
 
-// The gated reading, drafts, and send tests: their own files, so this one stays
-// under the 500-line cap the gate enforces. The explicit paths because this file is
-// loaded through `#[path]` and so owns no directory a bare `mod` would resolve into.
+// The gated reading, drafts, send, reply, and forward tests: their own files, so
+// this one stays under the 500-line cap the gate enforces. The explicit paths
+// because this file is loaded through `#[path]` and so owns no directory a bare
+// `mod` would resolve into. `proof` holds the fixtures the three delivery proofs
+// share (the two-account app, the composer document, the cleanup sweep).
 #[path = "tests_live_harness/drafts.rs"]
 mod drafts;
+#[path = "tests_live_harness/forward.rs"]
+mod forward;
+#[path = "tests_live_harness/proof.rs"]
+mod proof;
 #[path = "tests_live_harness/reading.rs"]
 mod reading;
+#[path = "tests_live_harness/reply.rs"]
+mod reply;
 #[path = "tests_live_harness/send.rs"]
 mod send;
 

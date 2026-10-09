@@ -8,6 +8,13 @@
 import { invoke } from '@tauri-apps/api/core';
 
 import type { ComposerDocument } from './composerDocument';
+import { composeIntents } from './composeRequest';
+import type {
+  ComposeIntent,
+  ComposeRequestSnapshot,
+  ForwardSubmission,
+  ReplySubmission,
+} from './composeRequest';
 import { sendingIntents } from './sending';
 import type { MailSubmission, OutboxIntent, SendingSnapshot } from './sending';
 import type { MailboxListSnapshot, RowKey, SyncProgressSnapshot, ViewMode } from './surfaces';
@@ -15,6 +22,11 @@ import type { MailboxListSnapshot, RowKey, SyncProgressSnapshot, ViewMode } from
 // The composer document's whole type set, re-exported so this module stays the
 // one import point of the wire.
 export * from './composerDocument';
+
+// The compose half (the compose family, its two threaded submits, and the
+// request surface's snapshot types), under the same re-export and split out
+// for the line cap.
+export * from './composeRequest';
 
 // The sending half (the submit payload, the outbox family, and the queue's
 // snapshot types), under the same re-export and split out for the line cap.
@@ -97,7 +109,10 @@ export type Intent =
   | { open_message: { message: MessageRef } }
   | 'close_reading'
   | { folders: { create: { account: string; name: string; parent?: string } } }
+  | { compose: ComposeIntent }
   | { submit_rich_mail: MailSubmission }
+  | { submit_rich_reply: ReplySubmission }
+  | { submit_rich_forward: ForwardSubmission }
   | { outbox: OutboxIntent }
   | { drafts: DraftsIntent };
 
@@ -137,8 +152,11 @@ export const intents = {
       create: parent === undefined ? { account, name } : { account, parent, name },
     },
   }),
+  // The compose family, in the enum's own order between the folders and the
+  // submits, with the slice's two threaded submits beside it.
+  ...composeIntents,
   // The submit and the outbox family, in the enum's own order between the
-  // folders and the drafts.
+  // compose family and the drafts.
   ...sendingIntents,
   /** Store the composer's current content in the account's Drafts folder. */
   saveDraft: (draft: DraftSave): Intent => ({
@@ -430,6 +448,14 @@ export function draftResume(
 /** Pulls the sending snapshot: the outbox panel's rows, empty when every send has gone. */
 export function sending(): Promise<SendingSnapshot> {
   return invoke('sending');
+}
+
+/**
+ * Pulls the compose-request snapshot: the prefill a reply or forward opened
+ * the composer on, or null when no request is pending.
+ */
+export function composeRequest(): Promise<ComposeRequestSnapshot | null> {
+  return invoke('compose_request');
 }
 
 /** Adds one account from its config TOML: dials, persists, first sync. */

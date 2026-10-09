@@ -2,10 +2,10 @@
 
 **Scope.** What happens from the moment Send is pressed: the durable outbox, the
 rule that a message is never sent twice, what an unconfirmed delivery means, the
-actions a queued send offers, and the sender's own copy. Binding on every surface
-that ships a composer or an outbox. Ported in substance from mail-calendar's
-`sending.md`, scoped to what Astra Mail ships today; the gaps are recorded at the
-end, never left silent.
+actions a queued send offers, the sender's own copy, and the reply and forward
+chain that answers mail with mail. Binding on every surface that ships a composer
+or an outbox. Ported in substance from mail-calendar's `sending.md`, scoped to
+what Astra Mail ships today; the gaps are recorded at the end, never left silent.
 
 **Principle.** *Delivering a message and keeping the sender's copy of it are two
 different operations, and a client must never let the second one fail in silence.*
@@ -128,6 +128,69 @@ first.
 - **The retry of a standing unfiled-copy question is not shipped** and is recorded
   as a gap below.
 
+## Replying and forwarding
+
+Answering mail reuses the whole contract above: the reading pane's Reply, Reply
+all, or Forward dispatches `Intent::Compose`, the core reads the original's
+headers through the engine and publishes one prefilled composition on the
+`Surface::ComposeRequest` snapshot, and the composer's Send submits it as
+`Intent::SubmitRichReply` or `Intent::SubmitRichForward` through the same durable
+outbox a new mail rides. Nothing about the queue, the never-send-twice
+discipline, or the sender's copy differs because the message answers another.
+
+**The prefill is computed once, core-side.** The snapshot carries the whole
+composition (kind, account, recipients, subject, threading header, quoted
+document), so every surface opens the same one and a host's own re-derivation
+can never disagree with the send path:
+
+- **Recipients.** A reply's `To` is the original's `Reply-To` when it has any,
+  else its `From`, included even when that is the user's own address (a reply to
+  your own Sent copy still has a recipient). Beyond that primary, the account's
+  own identity is excluded from everything a prefill derives. A reply all
+  preserves the original's layout: its other `To` recipients join `To`, its `Cc`
+  stays `Cc`, duplicates folded case-insensitively in first-seen order. A plain
+  reply leaves `Cc` to the user. A forward names no one: its recipients are the
+  user's to choose. `Bcc` is never derived; it is always the user's own addition.
+- **Subject.** `Re:` for replies, `Fwd:` for forwards, prefixed once and never
+  doubled when the original already carries its own. The prefix is not
+  localised: a translated one groups nothing.
+- **The quote.** The original's body as plain text (its plain part when there is
+  one, else the sanitised HTML read as text) under an attribution: the one-line
+  `On <date>, <sender> wrote:` a reply shows, and the labelled
+  `From`/`Sent`/`To`/`Cc`/`Subject` header block a forward's style shows, both
+  carried so a surface can flip the style without a rebuild. Rich nested-HTML
+  quoting is the rich-paste slice's, recorded below.
+
+**Threading is resolved at submit, not carried from the snapshot.** A reply's
+`In-Reply-To` is the original's own `Message-ID`, the header the snapshot
+prefilled and a saved draft resumes with; its `References` chain is the
+original's own chain followed by the original itself, re-resolved from the store
+at the moment of the send, so the reply joins the conversation it answers
+whatever the composer held. A forward carries the same chain with no
+`In-Reply-To`, because a forward continues a conversation without answering a
+message. A reply whose original cannot be re-resolved still sends, threading by
+its header alone (the parent itself the chain, never another conversation's);
+a forward cannot, because the original is the only source of the conversation it
+belongs to, and a forward without it is a new message pretending to be one: it
+sends nothing and queues nothing.
+
+**The fields the wire can carry.** The reply submit carries `To` and `Cc` and no
+`Bcc`; the forward submit carries `To` alone. The composer scopes its fields to
+the same shapes: a reply offers Cc but no Bcc, a forward offers neither, and a
+plain composition (new mail, a resumed draft) keeps every field. Nothing is left
+editable that would silently fail to cross the wire.
+
+**The composition is session state.** The request slot, and the original it was
+computed from, live in the running core. A reply saved as a draft and resumed
+after an app restart opens as a plain composition and sends as plain mail; the
+resume reopens the saved words as plain text, so the quoted original comes back
+flattened, without its quote block. Within one session the threading header
+survives the composer's own autosaves until the send spends it. The same session
+scoping has one recorded nuance: a forward submitted on the raw wire without a
+fresh `Compose` dispatch in the same session threads under the source of
+whatever request last published; the shipped UI cannot reach that state, because
+every forward it sends follows its own `Compose` dispatch.
+
 ## Rules
 
 1. **Never word an unconfirmed or unfiled send as a failure.** The one action that
@@ -151,13 +214,18 @@ first.
 
 | Surface | Ships |
 |---|---|
-| Desktop | Composer Send button; outbox panel over the status bar with the state word, subject, and arrival instant per row; the actions the table above lists; the send-result toast |
+| Desktop | Composer Send button; outbox panel over the status bar with the state word, subject, and arrival instant per row; the actions the table above lists; the send-result toast; the reading pane's Reply, Reply all, and Forward, hydrating the composer from the published request |
 
-The live proof: the gated harness suite submits a pinned message from astra1 to
+The live proofs: the gated harness suite submits a pinned message from astra1 to
 astra2 through the engine's real send path, reads it back in the recipient's INBOX
 through the product's own sync and reading pipeline, finds the sender's copy in
 their Sent folder, and withdraws both copies so the harness keeps its seeded
-shape.
+shape. Two further suites walk the answer chain over the same wire: one replies
+to a freshly delivered note and pins the delivery's `In-Reply-To` against the
+original's own `Message-ID` (its `References` chain holding the original), the
+other forwards under the `Fwd:` subject and pins the chain with no
+`In-Reply-To`; both empty the queue and withdraw every copy, leaving astra1's
+INBOX the three seeded notes and astra2 empty.
 
 ## Known gaps
 
@@ -182,5 +250,27 @@ shape.
 - **The sender's name is the account's address.** No per-account outgoing name is
   asked or stored yet, so mail goes out as the bare address the account dials
   with; the From picker and its default arrive with their slice.
-- **Reply and forward do not prefill.** This contract covers new mail composed in
-  the composer; quoting and sender prefill arrive with the reply slice.
+- **A resumed reply degrades to plain mail.** The compose request is session
+  state and the draft save carries no threading, so a reply resumed after an app
+  restart sends as a new message, its quote flattened back in as plain words.
+  Within the composition's own session the threading header rides every
+  autosave until the send spends it.
+- **An in-session raw-wire forward without a fresh Compose threads under a stale
+  source.** The original a forward re-resolves is the one the last published
+  request was computed from, cleared only by a restart or a fresh `Compose`;
+  the shipped UI always pairs the two, so no surface reaches it.
+- **A refused forward loses the typed words.** When the original has moved or
+  been deleted between opening and sending, the submit refuses (nothing sent,
+  nothing queued) and the composer closes silently, so the typed words are
+  lost; making the refusal observable so the pane keeps the words is the
+  recorded follow-up.
+- **The quote is invisible in the trimmed editor.** The editor holds the quoted
+  original as retained content below the typed words, round-tripping
+  byte-identical through every save and send, but does not render it; rich quote
+  rendering arrives with the rich-paste slice.
+- **The quote style is a constant.** Every quote opens in the indented style;
+  the account preference and the per-message override arrive with the settings
+  slice.
+- **A forward does not carry the original's attachments.** The quote is the
+  body's text alone; re-sending received files needs the attachments staging
+  flow, so a forward's document opens with nothing attached.

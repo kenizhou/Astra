@@ -9,6 +9,9 @@ publish = false
 workspace = true
 
 [dependencies]
+# The compose-request snapshot carries the composer document the core prefilled,
+# quote block and all, so a surface hydrates the composer from one thing.
+astra-composer = { path = "../astra-composer" }
 engine-api.workspace = true
 serde.workspace = true
 

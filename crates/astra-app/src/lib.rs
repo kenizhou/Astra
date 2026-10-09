@@ -11,6 +11,7 @@
 
 mod accounts;
 mod boot;
+mod compose_request;
 mod dispatch;
 mod drafts;
 mod list_rows;
@@ -23,6 +24,7 @@ mod reference;
 mod row_cache;
 mod sanitise;
 mod snapshot;
+mod submit;
 mod surfaced;
 mod sync;
 mod sync_account;
@@ -65,8 +67,8 @@ pub use dispatch::AppError;
 pub use drafts::{DraftResume, DRAFT_AUTOSAVE_IDLE};
 pub use preferences::{load_preferences, preferences_path, save_preferences, Preferences};
 pub use protocol::{
-    AppObserver, ComposerBlob, CompositionId, DraftsIntent, FolderIntent, Intent, OutboxIntent,
-    Surface, ViewMode,
+    AppObserver, ComposeIntent, ComposerBlob, CompositionId, DraftsIntent, FolderIntent, Intent,
+    OutboxIntent, Surface, ViewMode,
 };
 pub use reference::{FolderRef, MessageRef, QueuedRef, RowRef, ThreadRef};
 pub use surfaced::Surfaced;
@@ -105,6 +107,19 @@ pub struct App<P> {
     /// composer, and the per-composition map is the multi-composer slice's to
     /// add.
     draft_status: Surfaced<Option<astra_viewmodel::DraftStatusSnapshot>>,
+    /// The compose-request snapshot and its signal: the composition the last
+    /// reply or forward asked the host to open, or `None` when no request is
+    /// pending. One cell holding the latest request, not a queue: each request
+    /// replaces the one before it, because a composer opened on an older
+    /// request would answer a message the user has moved past.
+    compose_request: Surfaced<Option<astra_viewmodel::ComposeRequestSnapshot>>,
+    /// The message the pending compose request was computed from, held beside
+    /// the snapshot rather than read back out of it (the snapshot's contract
+    /// carries no reference, and no bare key crosses modules): the submit
+    /// arms re-resolve it through the reading resolve path to thread the
+    /// outgoing reply or forward under the original's `References` chain.
+    /// Replaced by each request that publishes, like the snapshot beside it.
+    compose_source: Mutex<Option<crate::reference::MessageRef>>,
     /// The sending snapshot and its signal: every account's queued sends, one
     /// list, published on each transition of the queue. See `outbox`.
     sending: Surfaced<astra_viewmodel::SendingSnapshot>,
@@ -196,6 +211,8 @@ impl<P: Provider> App<P> {
             mailbox_list: Surfaced::new(Surface::MailboxList, Arc::clone(&observer)),
             reading: Surfaced::new(Surface::Reading, Arc::clone(&observer)),
             draft_status: Surfaced::new(Surface::DraftStatus, Arc::clone(&observer)),
+            compose_request: Surfaced::new(Surface::ComposeRequest, Arc::clone(&observer)),
+            compose_source: Mutex::new(None),
             sending: Surfaced::new(Surface::Sending, observer),
             outbox: Mutex::new(outbox::Outbox::default()),
             drafts: Mutex::new(Drafts::default()),

@@ -40,7 +40,7 @@ this row ports.
 | Mail | Fixed-width messages reflowed to fit at every pane width, live during resize | ⬜ | reading-zoom.md |
 | Mail | Offline-first bodies: synced bodies auto-download after every sync under a per-account cap, so opens are instant | ⬜ | |
 | Mail | Three-pane desktop layout: sidebar, list, reading pane | 🚧 | |
-| Mail | Reading actions: reply, reply all, forward, archive, delete | ⬜ | |
+| Mail | Reading actions: reply, reply all, forward, archive, delete | 🚧 | sending.md |
 | Mail | Overflow menu with Save as .eml, writing the message exactly as delivered | ⬜ | reading-actions.md |
 | Mail | Print a message with subject and header lines through the platform print dialog | ⬜ | reading-actions.md |
 | Mail | Attachments: list, save, and open received files; attach files in the composer | ⬜ | |
@@ -53,14 +53,14 @@ this row ports.
 | Composer | Formatting: bold, italic, underline, font size, text and highlight colour, nested lists, tables with row and column editing | ⬜ | |
 | Composer | Links made, changed, or removed on the selection; typed addresses become links; http, https, and mailto only, checked on send | ⬜ | composer-security.md |
 | Composer | Composer toolbar chrome in the app's language, from the shared catalog | ⬜ | composer-security.md |
-| Composer | Subject editable in replies and forwards, with derived Re: and Fwd: prefixes | ⬜ | |
+| Composer | Subject editable in replies and forwards, with derived Re: and Fwd: prefixes | 🚧 | sending.md |
 | Composer | Paste a picture into the message or a signature, sent as an inline cid: part | ⬜ | composer-security.md |
 | Composer | Resize a pasted or quoted picture by dragging a corner; ratio kept | ⬜ | composer-security.md |
 | Composer | Drag files onto the composer: a document attaches, a picture asks inline or file | ⬜ | composer-security.md |
 | Composer | mailto: links open the composer prefilled; extra headers dropped | ⬜ | composer-security.md |
 | Composer | Share files into a new message from the OS share sheet; unsafe names and types dropped | ⬜ | os-integration.md |
 | Platform | Offer to become the default mail app, asked once, changeable in settings | ⬜ | os-integration.md |
-| Composer | Reply and forward quoting below the original, app default with per-message override | ⬜ | |
+| Composer | Reply and forward quoting below the original, app default with per-message override | 🚧 | sending.md |
 | Composer | Signature library with rich text and an inline logo; per-account for new mail and replies; auto-swapped with From | ⬜ | signatures.md |
 | Mail | Mail actions: read and unread, flag, archive, delete, trash | ⬜ | |
 | Mail | Select several messages and act on the lot: archive, trash, delete, read, unread, flag | ⬜ | list-selection.md |
@@ -99,6 +99,9 @@ this row ports.
 | Sending | Outbox actions: send now, cancel, or edit a message that has not gone | 🚧 | sending.md |
 | Sending | A send interrupted by app close is kept and never sent twice; the user answers Mark as Sent or Send Again | 🚧 | sending.md |
 | Sending | A message the server refused stays until sent again, edited, or discarded | 🚧 | sending.md |
+| Sending | Reply and reply all from the reading pane: prefilled recipients, subject, and quoted original, sent as a threaded reply | 🚧 | sending.md |
+| Sending | Forward from the reading pane: quoted original under a Fwd: subject, to recipients you name | 🚧 | sending.md |
+| Sending | Threading written on send: replies link by In-Reply-To with the References chain; forwards carry the chain alone | 🚧 | sending.md |
 | Contacts | Sender avatars: a coloured monogram, replaced by an address-book photo | ⬜ | avatars.md |
 | Contacts | The same person in several accounts is one row, joined on a shared address, and says so | ⬜ | |
 | Composer | Recipient autosuggest ranked from synced contacts and from people you have written to | ⬜ | |

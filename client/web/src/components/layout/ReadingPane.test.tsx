@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The reading pane: the empty state with nothing open, the full pane from a
-// snapshot (header, gated body, attachment rows), the remote toggle through
-// the reading store, the plain fallback, the no-body note, and the close
-// intent crossing back.
+// The reading pane: the empty state with nothing open (the compose actions
+// standing disabled beside it), the full pane from a snapshot (header, gated
+// body, attachment rows, the compose actions dispatching for the open
+// message), the remote toggle through the reading store, the plain fallback,
+// the no-body note, and the close intent crossing back.
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -60,12 +61,35 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('the reading pane', () => {
-  it('shows the empty state with nothing open', () => {
+  it('shows the empty state with nothing open and the actions disabled', () => {
     render(<ReadingPane />);
 
     expect(screen.getByText('Select a message to read it.')).toBeTruthy();
     expect(screen.queryByTitle('Message body')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Close reading pane' })).toBeNull();
+    for (const name of ['Reply', 'Reply all', 'Forward']) {
+      const button = screen.getByRole('button', { name }) as HTMLButtonElement;
+      expect(button.disabled).toBe(true);
+    }
+  });
+
+  it('dispatches the compose family from the actions for the open message', () => {
+    useReadingStore.getState().applySnapshot(snapshot());
+    render(<ReadingPane />);
+
+    for (const name of ['Reply', 'Reply all', 'Forward']) {
+      const button = screen.getByRole('button', { name }) as HTMLButtonElement;
+      expect(button.disabled).toBe(false);
+    }
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Reply all' }));
+    });
+
+    expect(ipc.dispatch).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
+      '{"compose":{"reply_all":{"message":{"account":"work","key":"imap:v1:u1"}}}}',
+    );
   });
 
   it('renders the header, the gated body, and the attachments from the snapshot', () => {
