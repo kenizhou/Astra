@@ -5,8 +5,8 @@
 //! exercised without a webview.
 //!
 //! The shape follows the unidirectional loop: `dispatch` takes an intent as JSON and
-//! hands it to the app on the runtime; `mailbox_list` and `sync_progress` pull the
-//! immutable snapshots; `add_account` and `imap_test_connection` are the two
+//! hands it to the app on the runtime; `mailbox_list`, `sync_progress` and `reading`
+//! pull the immutable snapshots; `add_account` and `imap_test_connection` are the two
 //! account-setup verbs, the only commands that dial.
 
 use std::fmt::Write as _;
@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use astra_account::ImapConnections;
-use astra_viewmodel::{MailboxListSnapshot, SyncProgressSnapshot};
+use astra_viewmodel::{MailboxListSnapshot, ReadingSnapshot, SyncProgressSnapshot};
 use engine_api::AccountId;
 
 use crate::{AppState, HostAccount, HostProvider};
@@ -195,6 +195,12 @@ pub(crate) fn sync_progress_of(state: &AppState) -> SyncProgressSnapshot {
     state.app.sync_progress()
 }
 
+/// The published reading snapshot: the one open message's sanitised body, or `None`
+/// when nothing is open.
+pub(crate) fn reading_of(state: &AppState) -> Option<ReadingSnapshot> {
+    state.app.reading()
+}
+
 /// Adds one account, the whole transaction: parse the config, derive the id, dial
 /// through `dial`, **persist once the dial succeeds** (a refused write rolls the
 /// whole add back: nothing is registered), register the account's connections, hand
@@ -349,6 +355,16 @@ pub(crate) fn mailbox_list(state: State<'_, AppState>) -> MailboxListSnapshot {
 #[tauri::command]
 pub(crate) fn sync_progress(state: State<'_, AppState>) -> SyncProgressSnapshot {
     sync_progress_of(&state)
+}
+
+/// Pulls the reading snapshot: the open message's body, or null when the pane is
+/// closed. Reading is signalled through on every publish, so this is pulled per
+/// signal rather than on a debounce.
+// Tauri's command macro hands `State` by value; the wrapper only reads through it.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) fn reading(state: State<'_, AppState>) -> Option<ReadingSnapshot> {
+    reading_of(&state)
 }
 
 /// Adds one account from its config TOML: dials, persists, registers, and spawns the

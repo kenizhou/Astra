@@ -8,7 +8,7 @@ const invoke = vi.hoisted(() => vi.fn());
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke }));
 
-import type { RecommendationView } from './ipc';
+import type { ReadingSnapshot, RecommendationView } from './ipc';
 
 import {
   addAccount,
@@ -17,6 +17,7 @@ import {
   imapTestConnection,
   intents,
   mailboxList,
+  reading,
   syncProgress,
 } from './ipc';
 
@@ -81,6 +82,16 @@ describe('the intent wire', () => {
     expect(JSON.stringify(intents.createFolder('work', 'Archive', 'INBOX'))).toBe(
       '{"folders":{"create":{"account":"work","parent":"INBOX","name":"Archive"}}}',
     );
+  });
+
+  it('names the message the reading pane opens by reference', () => {
+    expect(JSON.stringify(intents.openMessage({ account: 'work', key: 'imap:v1:u1' }))).toBe(
+      '{"open_message":{"message":{"account":"work","key":"imap:v1:u1"}}}',
+    );
+  });
+
+  it('crosses close reading as a bare renamed word', () => {
+    expect(JSON.stringify(intents.closeReading())).toBe('"close_reading"');
   });
 });
 
@@ -184,5 +195,54 @@ describe('the detection wire', () => {
     expect(invoke).toHaveBeenCalledWith('detect_account_settings', {
       email: 'user@nothing-here.invalid',
     });
+  });
+});
+
+// Both literals are byte-for-byte the JSON astra-viewmodel's reading_tests.rs
+// asserts on the Rust side, so neither side of the wire can drift.
+describe('the reading wire', () => {
+  it('mirrors the full snapshot with every optional key', () => {
+    const wire = JSON.parse(
+      '{"message":{"account":"work","key":"imap:v1:u42"},"subject":"Quarterly report","from_name":"Ada Lovelace","from_address":"ada@example.test","sent_at":"2026-10-09T08:30:00Z","html":"<p>See the report.</p>","plain":"See the report.","attachments":[{"id":1,"file_name":"report.pdf","media_type":"application/pdf","size":2048},{"id":2,"file_name":"chart.png","media_type":"image/png","size":512}],"remote_image_count":2}',
+    ) as ReadingSnapshot;
+
+    expect(wire.message).toEqual({ account: 'work', key: 'imap:v1:u42' });
+    expect(wire.subject).toBe('Quarterly report');
+    expect(wire.from_name).toBe('Ada Lovelace');
+    expect(wire.from_address).toBe('ada@example.test');
+    expect(wire.sent_at).toBe('2026-10-09T08:30:00Z');
+    expect(wire.html).toBe('<p>See the report.</p>');
+    expect(wire.plain).toBe('See the report.');
+    expect(wire.attachments).toEqual([
+      { id: 1, file_name: 'report.pdf', media_type: 'application/pdf', size: 2048 },
+      { id: 2, file_name: 'chart.png', media_type: 'image/png', size: 512 },
+    ]);
+    expect(wire.remote_image_count).toBe(2);
+  });
+
+  it('mirrors the plain only snapshot with no optional keys on the wire', () => {
+    const raw =
+      '{"message":{"account":"home","key":"imap:v1:u7"},"subject":"Lunch","from_name":"Grace Hopper","from_address":"grace@example.test","sent_at":"2026-10-09T09:15:00Z","plain":"Sandwiches at noon.","remote_image_count":0}';
+    // The at-rest optionals are absent from the wire, not carried as nulls or
+    // empty collections: no html, no attachments key at all.
+    expect(raw).not.toContain('"html"');
+    expect(raw).not.toContain('"attachments"');
+
+    const wire = JSON.parse(raw) as ReadingSnapshot;
+    expect(wire.message).toEqual({ account: 'home', key: 'imap:v1:u7' });
+    expect(wire.subject).toBe('Lunch');
+    expect(wire.from_name).toBe('Grace Hopper');
+    expect(wire.from_address).toBe('grace@example.test');
+    expect(wire.sent_at).toBe('2026-10-09T09:15:00Z');
+    expect(wire.html).toBeUndefined();
+    expect(wire.plain).toBe('Sandwiches at noon.');
+    expect(wire.attachments).toBeUndefined();
+    expect(wire.remote_image_count).toBe(0);
+  });
+
+  it('pulls the reading snapshot by its command name', async () => {
+    invoke.mockResolvedValue(null);
+    await reading();
+    expect(invoke).toHaveBeenCalledWith('reading');
   });
 });

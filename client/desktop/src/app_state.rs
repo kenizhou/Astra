@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use astra_app::{Account, App, Intent};
-use astra_viewmodel::{MailboxListSnapshot, SyncProgressSnapshot};
+use astra_viewmodel::{MailboxListSnapshot, ReadingSnapshot, SyncProgressSnapshot};
 use async_trait::async_trait;
 use engine_api::{AccountId, Provider};
 
@@ -48,6 +48,10 @@ pub(crate) trait AppPort: Send + Sync {
     /// The published sync-progress snapshot, for the host's pull.
     fn sync_progress(&self) -> SyncProgressSnapshot;
 
+    /// The published reading snapshot, for the host's pull: the one open
+    /// message's body, or `None` when nothing is open.
+    fn reading(&self) -> Option<ReadingSnapshot>;
+
     /// Registers a newly added account without syncing, so the pane shows it and the
     /// setup flow can dismiss at once.
     async fn add_new_account_deferred(&self, account: HostAccount);
@@ -69,6 +73,10 @@ impl AppPort for App<HostProvider> {
 
     fn sync_progress(&self) -> SyncProgressSnapshot {
         App::sync_progress(self)
+    }
+
+    fn reading(&self) -> Option<ReadingSnapshot> {
+        App::reading(self)
     }
 
     async fn add_new_account_deferred(&self, account: HostAccount) {
