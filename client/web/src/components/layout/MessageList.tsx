@@ -3,7 +3,8 @@
 // with @tanstack/react-virtual the way KY windows its list (an absolutely
 // positioned row per virtual item, measured as it mounts, a fixed estimate
 // before the first measure). The rows come straight from the snapshot the
-// pulls keep fresh; the selection is local, and ShowMore grows the window
+// pulls keep fresh; a single click selects and opens (selection is open,
+// the highlight following the open message), and ShowMore grows the window
 // the core owes whenever the rows fill it.
 
 import { useRef } from 'react';
@@ -15,6 +16,8 @@ import { sameRowKey } from '@/components/message-list/rowIdentity';
 import { dispatch, intents } from '@/services/ipc';
 import { useFolderStore } from '@/stores/folderStore';
 import { useListStore } from '@/stores/listStore';
+import { useReadingStore } from '@/stores/readingStore';
+import type { RowKey } from '@/services/surfaces';
 
 /** The selected folder's display name, straight off the folder tree. */
 function folderDisplayName(
@@ -34,8 +37,28 @@ export function MessageList() {
   const visibleLimit = useListStore((s) => s.visibleLimit);
   const selectedKey = useListStore((s) => s.selectedKey);
   const select = useListStore((s) => s.select);
+  const openSnapshot = useReadingStore((s) => s.snapshot);
   const accounts = useFolderStore((s) => s.accounts);
   const folder = useFolderStore((s) => s.selected);
+
+  // The highlight follows the open message first: the reading snapshot is
+  // the record of what is open, and the local click selection covers the
+  // gap before the reading pull lands. Known gap for the thread slice: in
+  // the threaded view this message key names no thread row, so it outranks
+  // the clicked thread row's local selection and nothing highlights until
+  // the open key maps to the thread it belongs to.
+  const openKey: RowKey | null =
+    openSnapshot === null ? null : { message: openSnapshot.message };
+  const highlight = openKey ?? selectedKey;
+
+  const openRow = (key: RowKey): void => {
+    select(key);
+    // A message row opens the reading pane; a thread row names no single
+    // message, so it selects alone until the thread slice lands.
+    if ('message' in key) {
+      void dispatch(intents.openMessage(key.message));
+    }
+  };
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
@@ -87,9 +110,9 @@ export function MessageList() {
                 >
                   <MessageRow
                     row={row}
-                    selected={sameRowKey(row.key, selectedKey)}
+                    selected={sameRowKey(row.key, highlight)}
                     now={now}
-                    onSelect={select}
+                    onSelect={openRow}
                   />
                 </div>
               );

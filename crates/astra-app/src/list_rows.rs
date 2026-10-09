@@ -183,8 +183,10 @@ fn sender_name(mail: &MailRow) -> String {
 }
 
 /// Formats a UTC instant as a whole-second `…Z` string a surface localises; the engine's
-/// own form can carry sub-second precision, which platform date parsers reject.
-fn format_instant(instant: UtcDateTime) -> String {
+/// own form can carry sub-second precision, which platform date parsers reject. The
+/// reading pane's snapshot formats its instant here too, so a row and the message it
+/// opened never carry two spellings of one time.
+pub(crate) fn format_instant(instant: UtcDateTime) -> String {
     format!(
         "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
         instant.year(),

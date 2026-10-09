@@ -8,8 +8,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use astra_app::{AppError, FolderIntent, Intent, ViewMode};
-use astra_viewmodel::{MailboxListSnapshot, SyncProgressSnapshot};
+use astra_app::{AppError, FolderIntent, Intent, MessageRef, ViewMode};
+use astra_viewmodel::{MailboxListSnapshot, ReadingSnapshot, SyncProgressSnapshot};
 use engine_api::EmailAddress;
 
 use crate::{
@@ -54,6 +54,7 @@ struct FakeApp {
     synced: Mutex<Vec<String>>,
     mailbox_list: MailboxListSnapshot,
     sync_progress: SyncProgressSnapshot,
+    reading: Mutex<Option<ReadingSnapshot>>,
 }
 
 impl FakeApp {
@@ -75,6 +76,7 @@ impl FakeApp {
             synced: Mutex::new(Vec::new()),
             mailbox_list,
             sync_progress,
+            reading: Mutex::new(None),
         })
     }
 }
@@ -82,6 +84,14 @@ impl FakeApp {
 #[async_trait::async_trait]
 impl AppPort for FakeApp {
     async fn dispatch(&self, intent: Intent) -> Result<(), AppError> {
+        // The reading pane's contract: an open publishes the one snapshot, a close empties it.
+        match &intent {
+            Intent::OpenMessage { .. } => {
+                *self.reading.lock().unwrap() = Some(reading::open_snapshot());
+            }
+            Intent::CloseReading => *self.reading.lock().unwrap() = None,
+            _ => {}
+        }
         self.dispatched.lock().unwrap().push(intent);
         Ok(())
     }
@@ -92,6 +102,10 @@ impl AppPort for FakeApp {
 
     fn sync_progress(&self) -> SyncProgressSnapshot {
         self.sync_progress.clone()
+    }
+
+    fn reading(&self) -> Option<ReadingSnapshot> {
+        self.reading.lock().unwrap().clone()
     }
 
     async fn add_new_account_deferred(&self, account: HostAccount) {
@@ -208,6 +222,10 @@ fn every_intent() -> Vec<Intent> {
         Intent::SetViewMode(ViewMode::Threaded),
         Intent::SetViewMode(ViewMode::Flat),
         Intent::ShowMore,
+        Intent::OpenMessage {
+            message: MessageRef::from_parts("work", "imap:v1:u42".to_owned()).unwrap(),
+        },
+        Intent::CloseReading,
         Intent::Folders(FolderIntent::Create {
             account,
             parent: None,
@@ -228,12 +246,12 @@ fn dispatch_accepts_every_intent_variants_json() {
 
     // The dispatches run on the runtime; give them a moment and then compare.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while app.dispatched.lock().unwrap().len() < 10 && std::time::Instant::now() < deadline {
+    while app.dispatched.lock().unwrap().len() < 12 && std::time::Instant::now() < deadline {
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     assert_eq!(
         app.dispatched.lock().unwrap().len(),
-        10,
+        12,
         "every intent variant reached the app: {:?}",
         app.dispatched.lock().unwrap(),
     );
@@ -474,3 +492,7 @@ fn an_added_account_identity_is_the_login_address() {
     assert_eq!(identity.email, "added@example.test");
     assert!(identity.name.is_none());
 }
+
+#[cfg(test)]
+#[path = "commands_reading_tests.rs"]
+mod reading;

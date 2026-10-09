@@ -19,6 +19,10 @@ pub enum Surface {
     /// Background mail-download progress; drives a "downloading Y of X" bar while a sync
     /// is running.
     SyncProgress,
+    /// The reading pane: the one open message's sanitised body, or nothing when no
+    /// message is open. Every publish is one message's body, so the host repaints the
+    /// pane on every signal rather than debouncing them.
+    Reading,
 }
 
 /// A host implements this to learn a [`Surface`] changed, then pulls its snapshot.

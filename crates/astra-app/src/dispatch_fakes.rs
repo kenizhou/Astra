@@ -3,12 +3,14 @@
 //! recording observer, the not-yet connector, and the account/app builders. This
 //! crate's own seam, mirroring the per-crate fakes of the port source:
 //! astra-account's scripted IMAP server models the wire, this one models the engine's
-//! provider contract. Included by `dispatch_tests` via `#[path]`, so not every helper
+//! provider contract. A crate-root module compiled once under `cfg(test)`, so the
+//! dispatch, list, and reading test modules all use the one copy; not every helper
 //! is used by every test and unused items are allowed rather than gated one by one.
 
 #![allow(dead_code)]
 
 use std::{
+    collections::HashMap,
     path::PathBuf,
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -21,6 +23,7 @@ use engine_api::{
     AccountId, CalendarWrites, Capabilities, EmailAddress, Engine, Mailbox, MailboxEdit,
     MailboxEditReceipt, MailboxId, MailboxRole, MailboxWrites, Message, Provider, SyncWindow,
 };
+use engine_core::raw::RawMime;
 use engine_core::sync::{SyncState, SyncUpdate};
 use engine_provider::{
     ConnectionInfo, EmailChunk, EmailStream, MailEdit, MailEditReceipt, ProviderError,
@@ -46,12 +49,23 @@ impl AppObserver for RecordingObserver {
 /// messages served on the first email pass of a scope (and merely re-presented
 /// afterwards, so a re-sync never undoes a local edit), and an `edit_mail` that
 /// records every call and answers success. Counts the email passes it has
-/// served, so a test can prove which path drove a sync.
+/// served, so a test can prove which path drove a sync. Raw RFC 5322 sources are
+/// served by provider key for the reading pipeline's body reads.
 pub(super) struct FakeProvider {
     /// The account's whole tree, served as the first folder-list snapshot.
     pub(super) mailboxes: Vec<Mailbox>,
-    /// The account's whole mailbox, served as the first email pass.
-    pub(super) messages: Vec<Message>,
+    /// The account's whole mailbox, served as the first email pass and re-presented
+    /// as the present set afterwards. Behind a mutex so a test can model the
+    /// server's copy moving between passes (a message deleted server-side).
+    pub(super) messages: Arc<Mutex<Vec<Message>>>,
+    /// Messages a later email pass delivers as changed, so a refresh test can move
+    /// the store's copy of a message the way a server delta would. Empty by
+    /// default: a later pass re-presents and changes nothing.
+    pub(super) updates: Arc<Mutex<Vec<Message>>>,
+    /// Raw RFC 5322 sources by provider key, served through `fetch_message_source`,
+    /// so the reading pipeline's body, inline-part, and attachment reads have bytes
+    /// to decode. A message without one fails its source fetch.
+    pub(super) sources: HashMap<String, Vec<u8>>,
     /// How many email sync passes this provider has served.
     pub(super) syncs: Arc<AtomicUsize>,
     /// Every `edit_mail` this provider was asked to apply, in order.
@@ -67,9 +81,21 @@ impl FakeProvider {
     /// A provider whose account also holds `messages`, so the list reads have rows
     /// to project.
     pub(super) fn with_mail(mailboxes: Vec<Mailbox>, messages: Vec<Message>) -> Self {
+        Self::with_sources(mailboxes, messages, Vec::new())
+    }
+
+    /// [`with_mail`](Self::with_mail) whose messages also carry raw `sources`, each
+    /// `(provider key, raw RFC 5322 bytes)`, so a reading open has a body to decode.
+    pub(super) fn with_sources(
+        mailboxes: Vec<Mailbox>,
+        messages: Vec<Message>,
+        sources: Vec<(String, Vec<u8>)>,
+    ) -> Self {
         Self {
             mailboxes,
-            messages,
+            messages: Arc::new(Mutex::new(messages)),
+            updates: Arc::new(Mutex::new(Vec::new())),
+            sources: sources.into_iter().collect(),
             syncs: Arc::new(AtomicUsize::new(0)),
             edits: Arc::new(Mutex::new(Vec::new())),
         }
@@ -118,25 +144,38 @@ impl Provider for FakeProvider {
         } else {
             "email-1"
         };
-        // The first pass delivers the whole mailbox; a later pass re-presents the same
-        // keys with nothing changed, so a reconcile never tombstones what a local edit
+        let messages = self.messages.lock().unwrap().clone();
+        // The first pass delivers the whole mailbox; a later pass delivers whatever
+        // the test queued as a delta and re-presents the keys it still holds with
+        // nothing else changed, so a reconcile never tombstones what a local edit
         // moved (the store shows queued keyword changes until the server answers).
         let changed = if cursor.is_some() {
-            Vec::new()
+            self.updates.lock().unwrap().clone()
         } else {
-            self.messages.clone()
+            messages.clone()
         };
-        let present = self
-            .messages
+        let present = messages
             .iter()
             .map(|message| message.id.key().clone())
             .collect();
         Box::pin(futures::stream::iter(vec![Ok(EmailChunk::reconcile_last(
             changed,
             present,
-            Some(self.messages.len()),
+            Some(messages.len()),
             SyncState::new(state),
         ))]))
+    }
+
+    async fn fetch_message_source(
+        &self,
+        _account: &AccountId,
+        message: &Message,
+    ) -> ProviderResult<RawMime> {
+        self.sources
+            .get(message.id.key().as_str())
+            .cloned()
+            .map(RawMime::new)
+            .ok_or_else(|| ProviderError::invalid_state("the fake holds no source for that key"))
     }
 
     async fn edit_mail(

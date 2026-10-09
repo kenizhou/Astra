@@ -31,6 +31,8 @@ log.workspace = true
 thiserror.workspace = true
 # The preferences file's TOML form.
 toml.workspace = true
+# The reading body's HTML sanitiser; the ammonia build mirrors mail-calendar's.
+ammonia.workspace = true
 # The sync-depth window's calendar arithmetic (the whole-months cutoff).
 time.workspace = true
 # The account set behind an async RwLock only; the runtime itself is the host's, so no

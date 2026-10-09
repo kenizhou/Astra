@@ -184,11 +184,10 @@ fn a_gapped_burst_repaints_at_a_bounded_rate() {
 
 #[test]
 fn a_flush_fires_what_is_pending_before_its_window_closes() {
-    // Both surfaces this milestone ships are debounced, so nothing reaches the flush
-    // from `surface_changed` yet; the next surface that is not debounced will, and it
-    // must fire what is pending **first** so the host's snapshot stays consistent. The
-    // flush is exercised directly: the second signal inside the window is the pending
-    // one a future non-debounced surface would carry out.
+    // The reading pane's signals pass straight through, so a flush fires from its
+    // path; here the flush is exercised directly: the second signal inside the
+    // window is the pending one a non-debounced surface carries out first, so
+    // the host's snapshot pulls stay consistent.
     let (obs, rx) = make_obs();
     obs.surface_changed(Surface::MailboxList);
     let leading = next(&rx, "the leading signal");
@@ -213,5 +212,43 @@ fn a_flush_fires_what_is_pending_before_its_window_closes() {
         rx.recv_timeout(Duration::from_millis(DEBOUNCE_MS * 2))
             .is_err(),
         "a flushed window fires nothing at its close",
+    );
+}
+
+#[test]
+fn a_reading_signal_passes_straight_through_and_carries_the_pending_out_first() {
+    // The reading pane republishes on every open, close, and refresh; holding one
+    // behind a window would leave the pane showing the previous message. It goes
+    // straight through, and flushes what a sync queued before it, so the host's
+    // snapshot pulls never see a newer reading beside an older list.
+    let (obs, rx) = make_obs();
+    obs.surface_changed(Surface::MailboxList);
+    let leading = next(&rx, "the leading mailbox-list signal");
+    assert_eq!(leading.surface, Surface::MailboxList);
+
+    // A second list signal inside its window: the pending one.
+    obs.surface_changed(Surface::MailboxList);
+    assert!(
+        rx.recv_timeout(Duration::from_millis(DEBOUNCE_MS / 4))
+            .is_err(),
+        "the second list signal waits for its window",
+    );
+
+    let sent = Instant::now();
+    obs.surface_changed(Surface::Reading);
+    let flushed = next(&rx, "the pending list signal the reading flushes");
+    assert_eq!(flushed.surface, Surface::MailboxList);
+    let reading = next(&rx, "the reading signal");
+    assert_eq!(reading.surface, Surface::Reading);
+    assert!(
+        sent.elapsed() < Duration::from_millis(DEBOUNCE_MS / 2),
+        "the reading signal waited {:?}, behind a window rather than through",
+        sent.elapsed(),
+    );
+    // Nothing was left queued, so nothing fires later.
+    assert!(
+        rx.recv_timeout(Duration::from_millis(DEBOUNCE_MS * 2))
+            .is_err(),
+        "a passed-through signal leaves nothing to fire later",
     );
 }

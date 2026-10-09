@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The message list pane: rows render from a snapshot through the
 // virtualizer, the states a row draws (bold, flag, attachments, thread
-// badge, stamp), the local selection, and every intent crossing back
-// (show more, view mode, mark read, set flagged) with its exact payload.
+// badge, stamp), the selection (a single click selects and opens, the
+// highlight following the open message), and every intent crossing back
+// (show more, view mode, mark read, set flagged, open message) with its
+// exact payload.
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -35,7 +37,9 @@ vi.mock('@tanstack/react-virtual', () => ({
 import { MessageList } from './MessageList';
 import { useFolderStore } from '@/stores/folderStore';
 import { useListStore } from '@/stores/listStore';
+import { useReadingStore } from '@/stores/readingStore';
 import type { MailboxListSnapshot, MessageRowView } from '@/services/surfaces';
+import type { ReadingSnapshot } from '@/services/ipc';
 import fixtureJson from '@/services/__fixtures__/mailbox_list.json';
 
 /** A flat row, overridable per test. */
@@ -91,6 +95,7 @@ beforeEach(() => {
     selection: null,
     selectedKey: null,
   });
+  useReadingStore.setState({ snapshot: null, showRemoteImages: false });
 });
 
 afterEach(() => {
@@ -203,7 +208,7 @@ describe('the message list', () => {
     expect(ipc.dispatch).toHaveBeenCalledWith({ set_view_mode: 'threaded' });
   });
 
-  it('selects a row locally without dispatching anything', () => {
+  it('selects and opens a row on single click with the exact payload', () => {
     applyList({ rows: [row(), digest], visible_limit: 50 });
 
     render(<MessageList />);
@@ -212,7 +217,51 @@ describe('the message list', () => {
 
     expect(optionWith('Quarterly report').getAttribute('aria-selected')).toBe('true');
     expect(optionWith('Your weekly digest').getAttribute('aria-selected')).toBe('false');
+    expect(ipc.dispatch).toHaveBeenCalledTimes(1);
+    expect(ipc.dispatch).toHaveBeenCalledWith({
+      open_message: { message: { account: 'work', key: 'imap:v1:u1' } },
+    });
+  });
+
+  it('selects a thread row locally without opening anything', () => {
+    applyList({
+      rows: [
+        row({
+          key: { thread: { account: 'work', thread_id: 'th-7' } },
+          subject: 'Re: Compiler design',
+          thread_count: 3,
+        }),
+      ],
+      visible_limit: 50,
+      view_mode: 'threaded',
+    });
+
+    render(<MessageList />);
+
+    fireEvent.click(screen.getByText('Ada Lovelace'));
+
+    expect(optionWith('Re: Compiler design').getAttribute('aria-selected')).toBe('true');
     expect(ipc.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('follows the open message with the selection highlight', () => {
+    applyList({ rows: [row(), digest], visible_limit: 50 });
+    // The reading pull landed for the digest: the highlight follows the open
+    // message, ahead of any local click selection.
+    const open: ReadingSnapshot = {
+      message: { account: 'work', key: 'imap:v1:u2' },
+      subject: 'Your weekly digest',
+      from_name: '',
+      from_address: 'notifications@example.test',
+      sent_at: '2026-10-08T16:05:00Z',
+      remote_image_count: 0,
+    };
+    useReadingStore.getState().applySnapshot(open);
+
+    render(<MessageList />);
+
+    expect(optionWith('Quarterly report').getAttribute('aria-selected')).toBe('false');
+    expect(optionWith('Your weekly digest').getAttribute('aria-selected')).toBe('true');
   });
 
   it('marks the selected row read with the exact payload', () => {

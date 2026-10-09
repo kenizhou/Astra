@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The surface_changed wiring: a change on one surface pulls that surface's
-// snapshot into its store, hydration seeds both, and the listener registry
-// disposes safely under a StrictMode double mount.
+// snapshot into its store, hydration seeds every surface, and the listener
+// registry disposes safely under a StrictMode double mount.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.hoisted(() => {
@@ -28,6 +28,7 @@ const ipc = vi.hoisted(() => ({
   dispatch: vi.fn(),
   mailboxList: vi.fn(),
   syncProgress: vi.fn(),
+  reading: vi.fn(),
   addAccount: vi.fn(),
   imapTestConnection: vi.fn(),
 }));
@@ -38,8 +39,19 @@ import { hydrate, mountSurfaceEvents } from './surfaceEvents';
 import { useAccountStore } from '@/stores/accountStore';
 import { useFolderStore } from '@/stores/folderStore';
 import { useListStore } from '@/stores/listStore';
+import { useReadingStore } from '@/stores/readingStore';
 import { useUiStore } from '@/stores/uiStore';
 import mailboxFixture from '@/services/__fixtures__/mailbox_list.json';
+
+/** The open message's reading snapshot the reading pull resolves with. */
+const readingSnapshot = {
+  message: { account: 'work', key: 'imap:v1:u42' },
+  subject: 'Quarterly report',
+  from_name: 'Ada Lovelace',
+  from_address: 'ada@example.test',
+  sent_at: '2026-10-09T08:30:00Z',
+  remote_image_count: 0,
+};
 
 function emit(surface: string) {
   for (const handler of wire.handlers) {
@@ -62,6 +74,7 @@ function resetStores() {
     sync: [],
     accountSetupOpen: false,
   });
+  useReadingStore.setState({ snapshot: null, showRemoteImages: false });
 }
 
 beforeEach(() => {
@@ -69,6 +82,8 @@ beforeEach(() => {
   wire.unlistens = 0;
   ipc.mailboxList.mockReset();
   ipc.syncProgress.mockReset();
+  ipc.reading.mockReset();
+  ipc.reading.mockResolvedValue(null);
   resetStores();
 });
 
@@ -112,6 +127,36 @@ describe('the surface_changed listener', () => {
     expect(ipc.mailboxList).not.toHaveBeenCalled();
   });
 
+  it('a reading change pulls the snapshot into the reading store', async () => {
+    ipc.reading.mockResolvedValue(readingSnapshot);
+    mountSurfaceEvents();
+    await vi.waitFor(() => expect(wire.handlers).toHaveLength(1));
+
+    emit('reading');
+
+    await vi.waitFor(() =>
+      expect(useReadingStore.getState().snapshot?.message.key).toBe('imap:v1:u42'),
+    );
+    expect(useReadingStore.getState().snapshot?.subject).toBe('Quarterly report');
+    expect(ipc.mailboxList).not.toHaveBeenCalled();
+    expect(ipc.syncProgress).not.toHaveBeenCalled();
+  });
+
+  it('a reading change with nothing open clears the store', async () => {
+    useReadingStore.setState({
+      snapshot: readingSnapshot,
+      showRemoteImages: true,
+    });
+    ipc.reading.mockResolvedValue(null);
+    mountSurfaceEvents();
+    await vi.waitFor(() => expect(wire.handlers).toHaveLength(1));
+
+    emit('reading');
+
+    await vi.waitFor(() => expect(useReadingStore.getState().snapshot).toBeNull());
+    expect(useReadingStore.getState().showRemoteImages).toBe(false);
+  });
+
   it('an unknown surface name is ignored without a pull', async () => {
     mountSurfaceEvents();
     await vi.waitFor(() => expect(wire.handlers).toHaveLength(1));
@@ -120,6 +165,7 @@ describe('the surface_changed listener', () => {
 
     expect(ipc.mailboxList).not.toHaveBeenCalled();
     expect(ipc.syncProgress).not.toHaveBeenCalled();
+    expect(ipc.reading).not.toHaveBeenCalled();
   });
 
   it('disposing before the registration resolves still tears it down', async () => {
@@ -132,7 +178,7 @@ describe('the surface_changed listener', () => {
 });
 
 describe('hydration', () => {
-  it('pulls both surfaces, marks the engine running, and opens setup when there is no account', async () => {
+  it('pulls every surface, marks the engine running, and opens setup when there is no account', async () => {
     ipc.mailboxList.mockResolvedValue({ account_folders: [] });
     ipc.syncProgress.mockResolvedValue({ accounts: [] });
 
@@ -140,6 +186,8 @@ describe('hydration', () => {
 
     expect(ipc.mailboxList).toHaveBeenCalledTimes(1);
     expect(ipc.syncProgress).toHaveBeenCalledTimes(1);
+    expect(ipc.reading).toHaveBeenCalledTimes(1);
+    expect(useReadingStore.getState().snapshot).toBeNull();
     expect(useUiStore.getState().engineState).toBe('running');
     expect(useUiStore.getState().accountSetupOpen).toBe(true);
   });
@@ -152,5 +200,15 @@ describe('hydration', () => {
 
     expect(useAccountStore.getState().accounts).toHaveLength(2);
     expect(useUiStore.getState().accountSetupOpen).toBe(false);
+  });
+
+  it('seeds an open reading the host published before the mount', async () => {
+    ipc.mailboxList.mockResolvedValue(mailboxFixture);
+    ipc.syncProgress.mockResolvedValue({ accounts: [] });
+    ipc.reading.mockResolvedValue(readingSnapshot);
+
+    await hydrate();
+
+    expect(useReadingStore.getState().snapshot?.message.key).toBe('imap:v1:u42');
   });
 });

@@ -15,10 +15,10 @@ use std::{
 
 use engine_api::{AccountId, MailboxRole};
 
-use crate::{boot, reference::FolderRef, AppError, FolderIntent, Intent, Surface, ViewMode};
-
-#[path = "dispatch_fakes.rs"]
-mod fakes;
+use crate::{
+    boot, dispatch_fakes as fakes, reference::FolderRef, AppError, FolderIntent, Intent, Surface,
+    ViewMode,
+};
 
 #[path = "dispatch_list_tests.rs"]
 mod list;

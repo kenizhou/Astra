@@ -56,6 +56,7 @@ pub fn run() {
             commands::dispatch,
             commands::mailbox_list,
             commands::sync_progress,
+            commands::reading,
             commands::add_account,
             commands::imap_test_connection,
             commands::detect_account_settings

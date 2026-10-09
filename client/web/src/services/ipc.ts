@@ -51,6 +51,8 @@ export type Intent =
   | { set_view_mode: ViewMode }
   | { mark_read: { row: RowRef; read: boolean } }
   | { set_flagged: { row: RowRef; flagged: boolean } }
+  | { open_message: { message: MessageRef } }
+  | 'close_reading'
   | { folders: { create: { account: string; name: string; parent?: string } } };
 
 /** Smart constructors for every intent, in the enum's own order. */
@@ -79,6 +81,10 @@ export const intents = {
   setFlagged: (row: RowRef, flagged: boolean): Intent => ({
     set_flagged: { row, flagged },
   }),
+  /** Read one message in the reading pane: fetch its body and publish it. */
+  openMessage: (message: MessageRef): Intent => ({ open_message: { message } }),
+  /** Shut the reading pane; navigating the list leaves it as it was. */
+  closeReading: (): Intent => 'close_reading',
   /** Make a folder, at the top of the account or inside a parent. */
   createFolder: (account: string, name: string, parent?: string): Intent => ({
     folders: {
@@ -86,6 +92,53 @@ export const intents = {
     },
   }),
 };
+
+/**
+ * The identity of the one message a reading snapshot holds the body of: the
+ * account and provider key pair, the same shape a message row of
+ * `RowKey` carries standing alone.
+ */
+export type MessageKey = Pick<MessageRef, 'account' | 'key'>;
+
+/** One downloadable attachment shown beneath the open message's body. */
+export interface AttachmentRow {
+  /** The attachment's message-scoped id: what a save or a download names. */
+  id: number;
+  /** The suggested file name, from the part's headers. */
+  file_name: string;
+  /** The part's media type, e.g. `application/pdf`. */
+  media_type: string;
+  /** The decoded byte length. */
+  size: number;
+}
+
+/**
+ * The reading pane's snapshot: the one open message's sanitised body. `html`
+ * is already sanitised and every remote reference in it is a placeholder, so
+ * nothing remote loads unless the reader opts in. Both `html` and `plain` are
+ * absent when the message carries no text body at all, and `attachments` when
+ * it carries none.
+ */
+export interface ReadingSnapshot {
+  /** The identity of the message this body belongs to, to match the open row. */
+  message: MessageKey;
+  /** The subject, empty if none. */
+  subject: string;
+  /** The sender's display name, empty when the header carried none. */
+  from_name: string;
+  /** The sender's bare email address, empty when there is no sender. */
+  from_address: string;
+  /** When the message was sent, as a whole-second UTC `…Z` instant string. */
+  sent_at: string;
+  /** The sanitised HTML body, when the message carries an HTML part. */
+  html?: string;
+  /** The plain-text body, when the message carries one. */
+  plain?: string;
+  /** The downloadable attachments, absent when there are none. */
+  attachments?: AttachmentRow[];
+  /** How many remote references the sanitised HTML carries, all blocked. */
+  remote_image_count: number;
+}
 
 /** How a mail connection is secured, crossing as a snake_case word. */
 export type ConnectionSecurity = 'implicit_tls' | 'start_tls';
@@ -243,6 +296,11 @@ export function mailboxList(): Promise<MailboxListSnapshot> {
 /** Pulls the sync-progress snapshot. */
 export function syncProgress(): Promise<SyncProgressSnapshot> {
   return invoke('sync_progress');
+}
+
+/** Pulls the reading snapshot: the open message's body, or null when closed. */
+export function reading(): Promise<ReadingSnapshot | null> {
+  return invoke('reading');
 }
 
 /** Adds one account from its config TOML: dials, persists, first sync. */

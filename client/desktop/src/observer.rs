@@ -263,9 +263,8 @@ impl DebouncedObserver {
     }
 
     /// Immediately fires every queued debounced signal. Called before forwarding any
-    /// non-debounced signal so the host always sees a consistent state; both surfaces
-    /// this milestone ships are debounced, so it stands ready for the first one that
-    /// is not.
+    /// non-debounced signal, the reading pane's every publish, so the host always
+    /// sees a consistent state.
     fn flush_pending(&self) {
         let (lock, _) = &*self.state;
         let pending = {

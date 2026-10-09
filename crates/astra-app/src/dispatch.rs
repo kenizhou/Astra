@@ -32,6 +32,10 @@ impl<P: Provider> App<P> {
         match intent {
             Intent::RefreshMail => {
                 self.refresh_mail().await;
+                // The pass may have moved the open message (fresh content) or
+                // dropped it from the store (deleted server-side): the pane
+                // follows either way rather than showing the body as it was.
+                self.republish_reading().await;
             }
             Intent::SelectAccount(account) => {
                 // The account's own all-mail view, or the unified list. Either way the
@@ -86,6 +90,13 @@ impl<P: Provider> App<P> {
             }
             Intent::SetFlagged { row, flagged } => {
                 self.set_flagged(row, flagged).await;
+            }
+            // The reading pane: one open, one close, both publishing the surface.
+            Intent::OpenMessage { message } => {
+                self.open_message(message).await;
+            }
+            Intent::CloseReading => {
+                self.close_reading();
             }
             Intent::Folders(_change) => return Err(AppError::NotYet),
         }
