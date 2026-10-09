@@ -118,6 +118,24 @@ fn account(port: u16, served: &rustls::pki_types::CertificateDer<'static>) -> Ac
     .expect("a valid account config")
 }
 
+/// The same account with the SMTP submission leg: the endpoint rides the same dial, over
+/// the same accepted certificate (both legs name the same server). Submission opens its own
+/// connection per send, so the dial resolves the transport without opening one.
+fn submission_account(
+    port: u16,
+    served: &rustls::pki_types::CertificateDer<'static>,
+) -> AccountConfig {
+    let exception = CertificateException::new("127.0.0.1", served);
+    load_str(&format!(
+        "[imap]\naddr = \"127.0.0.1:{port}\"\nserver_name = \"127.0.0.1\"\n\
+         username = \"someone@example.com\"\npassword = \"secret\"\n\
+         \n[smtp]\naddr = \"127.0.0.1:{port}\"\nserver_name = \"127.0.0.1\"\n\
+         \n[[certificate_exception]]\nserver_name = \"{}\"\nsha256 = \"{}\"\n",
+        exception.server_name, exception.sha256,
+    ))
+    .expect("a valid account config")
+}
+
 fn account_id() -> AccountId {
     AccountId::try_from("someone@127.0.0.1").expect("account id")
 }
@@ -158,6 +176,57 @@ async fn a_dial_binds_every_folder_the_account_lists_with_the_inbox_first() {
             "Projects/2026",
         ],
     );
+}
+
+#[tokio::test]
+async fn a_dial_binds_the_submission_provider_when_the_account_configures_smtp() {
+    // The engine's outbox drain delivers through the account's own providers, so the SMTP
+    // leg must ride the dial: every provider it returns carries the submission binding,
+    // beside the mail binding, over the one login. This is the registered provider set the
+    // drain is handed (its first provider), so submission missing here would strand every
+    // queued send.
+    let (port, served, _accepted) = scripted_server().await;
+    let config = submission_account(port, &served);
+
+    let providers = connect_mail_providers(&ImapConnections::new(), &config, &account_id())
+        .await
+        .expect("the dial");
+
+    assert!(!providers.is_empty(), "the dial bound the folders");
+    for provider in &providers {
+        let capabilities = provider.connection_info().capabilities;
+        assert!(
+            capabilities.submission(),
+            "a bound provider advertises no submission: {capabilities:?}",
+        );
+        assert!(
+            capabilities.mail(),
+            "submission rode beside the mail binding"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_dial_without_smtp_binds_mail_only_providers() {
+    // The recorded shape for an account that configures no submission: every provider the
+    // dial returns is mail only. Drafts stay bound (an APPEND needs no SMTP transport), so
+    // the missing capability is submission alone, not the mail half of the set.
+    let (port, served, _accepted) = scripted_server().await;
+    let config = account(port, &served);
+
+    let providers = connect_mail_providers(&ImapConnections::new(), &config, &account_id())
+        .await
+        .expect("the dial");
+
+    for provider in &providers {
+        let capabilities = provider.connection_info().capabilities;
+        assert!(
+            !capabilities.submission(),
+            "a mail-only account advertised submission: {capabilities:?}",
+        );
+        assert!(capabilities.mail());
+        assert!(capabilities.mail_drafts());
+    }
 }
 
 #[tokio::test]
