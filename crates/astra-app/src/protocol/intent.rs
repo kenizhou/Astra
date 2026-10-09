@@ -8,15 +8,11 @@ use serde::{Deserialize, Serialize};
 use crate::reference::FolderRef;
 
 /// How the mailbox list is grouped.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ViewMode {
-    /// A flat list of messages, newest first.
-    #[default]
-    Flat,
-    /// Conversations grouped by thread, newest activity first.
-    Threaded,
-}
+///
+/// Defined in the view-model, beside the rows it groups, so the intent that
+/// changes the mode and the snapshot that carries it name one type; re-exported
+/// here to keep the protocol the one import a host needs.
+pub use astra_viewmodel::ViewMode;
 
 /// What the folder pane asks the runtime to do to an account's folders.
 ///

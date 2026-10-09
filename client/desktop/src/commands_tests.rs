@@ -267,6 +267,7 @@ fn the_pull_commands_return_what_the_app_published() {
             expanded: true,
             folders: Vec::new(),
         }],
+        ..Default::default()
     };
     let sync_progress = SyncProgressSnapshot {
         accounts: vec![astra_viewmodel::AccountSyncProgress {

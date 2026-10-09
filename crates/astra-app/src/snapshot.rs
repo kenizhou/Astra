@@ -106,7 +106,12 @@ impl<P: Provider> App<P> {
                 folders,
             });
         }
-        MailboxListSnapshot { account_folders }
+        // The message-list fields stay at rest: the window lists no mail until
+        // a folder selection builds rows against it.
+        MailboxListSnapshot {
+            account_folders,
+            ..Default::default()
+        }
     }
 
     /// Re-reads each account's folder-tree expansion **at publish time**, overwriting
