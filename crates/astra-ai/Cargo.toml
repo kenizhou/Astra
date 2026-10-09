@@ -1,0 +1,27 @@
+[package]
+name = "astra-ai"
+description = "The AI foundation's registry and ledgers: use cases, tiers, the tier table, the correlation id, the sqlite ledgers, and prompt-injection hardening types."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# The use-case, tier, and row types cross the host/CLI boundary as serde
+# types (wire words pinned by the tests).
+serde.workspace = true
+# The TierError and AiStoreError enums.
+thiserror.workspace = true
+# The ledgers' sqlite store: the engine's own stack, so one linked sqlite3
+# serves the engine store and the AI store (see the workspace table).
+# `fallible_uint` binds the ledger's u64 token, cost, and latency fields.
+rusqlite = { workspace = true, features = ["fallible_uint"] }
+# CorrelationId generation (v4 UUID, the kylins id spelling).
+uuid.workspace = true
+
+[dev-dependencies]
+# Pinning the wire words of the use-case and tier enums in the tests.
+serde_json.workspace = true

@@ -135,3 +135,11 @@ psl = "2"
 # cannot reach, and std's getaddrinfo answers no MX or SRV questions; the desktop
 # host resolves through this resolver over the system's configured DNS servers.
 hickory-resolver = "0.26"
+# The AI ledgers' product SQLite store (astra-ai only; the product database's
+# arrival). rusqlite, not sqlx: sqlx's sqlite binding pins libsqlite3-sys
+# below 0.38 and the engine's rusqlite needs 0.38.x, and Cargo allows only
+# one linked sqlite3 per dependency graph. The same version line as the
+# engine so one libsqlite3-sys serves both stores.
+rusqlite = { version = "0.40", features = ["bundled"] }
+# CorrelationId generation: the v4 UUID spelling, as the kylins ledgers use.
+uuid = { version = "1", features = ["v4"] }
