@@ -62,11 +62,23 @@ function inlineAttachment() {
 }
 
 describe('the block literals on the wire', () => {
-  it('carries a paragraph with one marked run', () => {
-    const block: Block = { Paragraph: { content: [{ Text: { ...run('Half written'), bold: true } }] } };
+  it('carries a paragraph with one marked sized run', () => {
+    const block: Block = {
+      Paragraph: { content: [{ Text: { ...run('Half written'), bold: true, font_size: 'Large' } }] },
+    };
     expect(JSON.stringify(block)).toBe(
-      '{"Paragraph":{"content":[{"Text":{"text":"Half written","bold":true,"italic":false,"underline":false,"font_size":null,"color":null,"highlight":null,"link":null}}]}}',
+      '{"Paragraph":{"content":[{"Text":{"text":"Half written","bold":true,"italic":false,"underline":false,"font_size":"Large","color":null,"highlight":null,"link":null}}]}}',
     );
+  });
+
+  it('spells every font size word the union allows', () => {
+    const sizes = ['Small', 'Normal', 'Large', 'Huge'] as const;
+    for (const size of sizes) {
+      const block: Block = { Paragraph: { content: [{ Text: { ...run('sized'), font_size: size } }] } };
+      expect(JSON.stringify(block)).toBe(
+        `{"Paragraph":{"content":[{"Text":{"text":"sized","bold":false,"italic":false,"underline":false,"font_size":"${size}","color":null,"highlight":null,"link":null}}]}}`,
+      );
+    }
   });
 
   it('carries a bullet list with the child spelled null', () => {

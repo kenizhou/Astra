@@ -287,4 +287,44 @@ describe('the app start resume', () => {
     expect(ipc.draftResume).toHaveBeenCalledTimes(1);
     expect(useComposerStore.getState().open).toBe(false);
   });
+
+  it('shows the cc and bcc fields a resumed draft carries, hidden on a fresh one', async () => {
+    ipc.draftResume.mockResolvedValue(view);
+    render(<ComposerPane />);
+    renderHook(() => useDraftResumeAtStart());
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect((screen.getByRole('textbox', { name: 'Cc' }) as HTMLInputElement).value).toBe(
+      'cc@test.local',
+    );
+    expect((screen.getByRole('textbox', { name: 'Bcc' }) as HTMLInputElement).value).toBe(
+      'quiet@test.local',
+    );
+
+    act(() => {
+      useComposerStore.getState().closePane();
+      newMessage();
+    });
+
+    expect(screen.queryByRole('textbox', { name: 'Cc' })).toBeNull();
+    expect(screen.queryByRole('textbox', { name: 'Bcc' })).toBeNull();
+  });
+
+  it('logs a failed resume pull and leaves the pane shut', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    ipc.draftResume.mockRejectedValue(new Error('the store is unreachable'));
+
+    renderHook(() => useDraftResumeAtStart());
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(ipc.draftResume).toHaveBeenCalledTimes(1);
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(useComposerStore.getState().open).toBe(false);
+    error.mockRestore();
+  });
 });

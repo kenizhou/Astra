@@ -6,6 +6,11 @@
 // and spliced back at their original positions, so nothing crosses silently
 // altered. A shape the wire cannot carry at all is rejected loudly with a
 // typed error, never dropped.
+//
+// Known gap for the rich-paste slice: content pasted INTO the editor that
+// the trimmed schema cannot hold (a table, a heading, a coloured run) is
+// coerced away by ProseMirror at paste time, before this module ever sees
+// it; the retention below protects only what arrives through the wire.
 
 import type { JSONContent } from '@tiptap/react';
 

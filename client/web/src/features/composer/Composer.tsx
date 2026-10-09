@@ -148,14 +148,20 @@ export function useDraftResumeAtStart(): void {
     }
     const composition = mintCompositionId();
     useComposerStore.setState({ resumeAttempted: true });
-    void draftResume(account.accountId, composition).then((view) => {
-      if (view === null) {
-        return;
-      }
-      useComposerStore
-        .getState()
-        .hydrate(view, { id: account.accountId, label: account.displayName }, composition);
-    });
+    void draftResume(account.accountId, composition)
+      .then((view) => {
+        if (view === null) {
+          return;
+        }
+        useComposerStore
+          .getState()
+          .hydrate(view, { id: account.accountId, label: account.displayName }, composition);
+      })
+      .catch((err: unknown) => {
+        // A pull that cannot reach the host leaves the pane shut and the
+        // session's one attempt spent; the next app start tries again.
+        console.error('compose: the draft resume pull failed', err);
+      });
   }, [accounts]);
 }
 
@@ -205,8 +211,13 @@ export function ComposerPane() {
   const bcc = useComposerStore((s) => s.bcc);
   const subject = useComposerStore((s) => s.subject);
   const initialContent = useComposerStore((s) => s.editor.content);
-  const [ccShown, setCcShown] = useState(() => cc !== '');
-  const [bccShown, setBccShown] = useState(() => bcc !== '');
+  // A field's visibility is derived from its data: a toggle the user pressed
+  // opens it, and a value the draft carries keeps it open, so a resumed
+  // draft never hides the recipients it came with.
+  const [ccToggled, setCcToggled] = useState(false);
+  const [bccToggled, setBccToggled] = useState(false);
+  const ccShown = ccToggled || cc !== '';
+  const bccShown = bccToggled || bcc !== '';
 
   const autosave = useAutosave({
     isDirty: () => {
@@ -291,8 +302,8 @@ export function ComposerPane() {
         ccShown={ccShown}
         bccShown={bccShown}
         onField={(field, value) => useComposerStore.getState().setField(field, value)}
-        onToggleCc={() => setCcShown((shown) => !shown)}
-        onToggleBcc={() => setBccShown((shown) => !shown)}
+        onToggleCc={() => setCcToggled((toggled) => !toggled)}
+        onToggleBcc={() => setBccToggled((toggled) => !toggled)}
       />
       <Editor
         key={composition}
