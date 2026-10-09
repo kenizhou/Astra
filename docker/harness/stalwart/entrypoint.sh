@@ -11,11 +11,12 @@
 #   2. complete setup (no ACME, no DKIM) and restart into a full server,
 #   3. apply the harness configuration below and restart, since Stalwart reads it at
 #      startup,
-#   4. seed the custom folders (IMAP over TLS),
+#   4. seed the custom folders and the three harness notes (IMAP and SMTP over TLS),
 #   5. write a readiness marker and run the server in the foreground.
 #
 # It is idempotent: every plan is an `upsert`, which converges on a warm data volume
-# rather than duplicating, and the folder seeder tolerates folders that already exist.
+# rather than duplicating, and the seeder tolerates folders and notes that already
+# exist.
 set -eu
 
 CONFIG="${STALWART_CONFIG:-/etc/stalwart/config.json}"
@@ -101,7 +102,7 @@ EOF
 
 restart_server "to read the accounts above"
 
-log "seeding the harness folders"
+log "seeding the harness folders and notes"
 /bin/sh /harness/seed.sh
 
 touch "$MARKER"

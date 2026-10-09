@@ -12,6 +12,15 @@
 //! `scripts/dev/harness.sh`): the account layer dials TLS only, so a no-TLS port is
 //! unreachable through the connect path under test.
 //!
+//! The seed script (`docker/harness/stalwart/seed.sh`) also delivers three pinned
+//! notes to astra1's INBOX through the harness's own SMTP submission port (implicit
+//! TLS; curl's `smtps` with `-k`, inside the container, accepting the same self-signed
+//! certificate the IMAP seeding does). The notes are genuinely submitted and
+//! delivered: Stalwart runs them through its delivery path into the INBOX, exactly the
+//! mail the gated list test reads back through the product's own dial and sync. The
+//! submission rides the seed script rather than the engine because the engine's
+//! send path needs the draft flow, which no slice has ported yet.
+//!
 //! The JMAP-detection test cannot dial `https://example.test/.well-known/jmap` (the
 //! harness domain resolves nowhere), so it rebases the probe onto the harness's plain
 //! HTTP JMAP origin (`127.0.0.1:2080`) through the detection crate's dev-harness
@@ -28,15 +37,27 @@
 //! cargo test -p astra-app tests_live_harness -- --nocapture
 //! ```
 
-use std::time::Duration;
+use std::{
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
-use engine_api::{AccountId, Provider, SyncScope};
+use engine_api::{AccountId, EmailAddress, Engine, Provider, SyncScope};
 
 use astra_account::{
     connect_mail_providers, AccountConfig, AccountError, AccountShape, CertificateException,
     ConnectionSecurity, ImapAccount, ImapConnections, Secret,
 };
 use astra_autodetect::{detect, DetectConfig, Detected, SourceKind};
+use astra_viewmodel::{FolderRole, MailboxListSnapshot, MessageRowView, RowKey};
+
+use crate::{
+    reference::{MessageRef, RowRef},
+    Account, App, AppObserver, FolderRef, Intent, Surface,
+};
 
 /// The harness connection details from the environment, or `None` to skip.
 fn harness() -> Option<(String, String, String, String)> {
@@ -97,16 +118,17 @@ fn bound_mailboxes(providers: &[Box<dyn Provider>], account_id: &AccountId) -> V
         .collect()
 }
 
-/// The dial against the harness walks the certificate acceptance path a person does:
-/// refused first, the rejection recorded, the one certificate accepted for the one
-/// server, and then the dial binds the INBOX and the custom folder the seed created.
-#[tokio::test]
-async fn a_dial_pins_the_rejected_certificate_and_binds_the_inbox_and_the_custom_folder() {
-    let Some((host, port, user, password)) = harness() else {
-        eprintln!("skipping live harness test: ASTRA_LIVE_HARNESS is not 1");
-        return;
-    };
-    let config = account(&host, &port, &user, &password, Vec::new());
+/// Dials the harness account through the certificate acceptance path a person's first
+/// connect walks: the self-signed certificate is refused, the rejection is recorded,
+/// the one certificate is accepted for the one server, and the re-dial returns the
+/// account id and every provider it bound (the INBOX first).
+async fn dial_with_accepted_certificate(
+    host: &str,
+    port: &str,
+    user: &str,
+    password: &str,
+) -> (AccountId, Vec<Box<dyn Provider>>) {
+    let config = account(host, port, user, password, Vec::new());
     let account_id = config.account_id().expect("the account id");
     let connections = ImapConnections::new();
 
@@ -118,11 +140,92 @@ async fn a_dial_pins_the_rejected_certificate_and_binds_the_inbox_and_the_custom
     };
 
     let accepted = CertificateException::new(rejected.server_name(), rejected.certificate());
-    let config = account(&host, &port, &user, &password, vec![accepted]);
-
+    let config = account(host, port, user, password, vec![accepted]);
     let providers = connect_mail_providers(&connections, &config, &account_id)
         .await
         .expect("the dial with the accepted certificate");
+    (account_id, providers)
+}
+
+/// The three subjects the harness seed pins; the list test's fixtures.
+const NOTES: [&str; 3] = ["Harness note one", "Harness note two", "Harness note three"];
+
+/// Counts the surface signals the app fires, so the live list test can assert the loop
+/// republished the list a write flipped.
+#[derive(Default)]
+struct CountingObserver {
+    /// How many surface changes have been signalled, across every surface.
+    signals: AtomicUsize,
+}
+
+impl CountingObserver {
+    /// The count so far.
+    fn signals(&self) -> usize {
+        self.signals.load(Ordering::SeqCst)
+    }
+}
+
+impl AppObserver for CountingObserver {
+    fn surface_changed(&self, _surface: Surface) {
+        self.signals.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+/// The INBOX's folder key as the pane projects it for `account`.
+fn inbox_key(app: &App<Box<dyn Provider>>, account: &AccountId) -> String {
+    app.mailbox_list()
+        .account_folders
+        .iter()
+        .find(|row| row.account_id == *account)
+        .and_then(|row| {
+            row.folders
+                .iter()
+                .find(|folder| folder.role == Some(FolderRole::Inbox))
+        })
+        .map(|folder| folder.key.as_str().to_owned())
+        .expect("the pane lists the account's INBOX")
+}
+
+/// The one list row whose subject matches, the list tests' fixture assertion.
+fn row_by_subject<'a>(snapshot: &'a MailboxListSnapshot, subject: &str) -> &'a MessageRowView {
+    snapshot
+        .rows
+        .iter()
+        .find(|row| row.subject == subject)
+        .unwrap_or_else(|| panic!("no row with subject {subject}"))
+}
+
+/// How many listed rows are unread.
+fn unread_count(snapshot: &MailboxListSnapshot) -> usize {
+    snapshot.rows.iter().filter(|row| row.unread).count()
+}
+
+/// Flips `subject`'s row to `read`, building the action's reference from the row the
+/// list actually shows: the row's own key is the ref an action carries.
+async fn mark_read(app: &App<Box<dyn Provider>>, subject: &str, read: bool) {
+    let snapshot = app.mailbox_list();
+    let RowKey::Message { account, key } = row_by_subject(&snapshot, subject).key.clone() else {
+        panic!("a flat list row is keyed by its message");
+    };
+    app.dispatch(Intent::MarkRead {
+        row: RowRef::Message(MessageRef { account, key }),
+        read,
+    })
+    .await
+    .expect("the mark-read dispatch");
+}
+
+/// The dial against the harness walks the certificate acceptance path a person does:
+/// refused first, the rejection recorded, the one certificate accepted for the one
+/// server, and then the dial binds the INBOX and the custom folder the seed created.
+#[tokio::test]
+async fn a_dial_pins_the_rejected_certificate_and_binds_the_inbox_and_the_custom_folder() {
+    let Some((host, port, user, password)) = harness() else {
+        eprintln!("skipping live harness test: ASTRA_LIVE_HARNESS is not 1");
+        return;
+    };
+    let (account_id, providers) =
+        dial_with_accepted_certificate(&host, &port, &user, &password).await;
 
     let bound = bound_mailboxes(&providers, &account_id);
     assert_eq!(
@@ -133,6 +236,108 @@ async fn a_dial_pins_the_rejected_certificate_and_binds_the_inbox_and_the_custom
     assert!(
         bound.contains(&"Projects".to_owned()),
         "the custom folder astra1 seeds is bound; the bound list is {bound:?}",
+    );
+}
+
+/// The message list against the live harness: the three notes the seed delivers
+/// through the harness's own SMTP submission appear in astra1's INBOX after one
+/// refresh, newest first, and a mark-read writes through to the server: the row flips
+/// at once, and the read state survives a further refresh.
+///
+/// The run builds the loop the desktop host builds: the engine in a scratch store,
+/// the providers the accepted dial bound, the app over them. `dispatch` awaits each
+/// whole pass (sync, outbox drain, rebuild), so the snapshot is final when it returns
+/// and nothing needs polling.
+///
+/// A warm volume may hold the read state an earlier run left, so the test first puts
+/// every note back to unread through the product's own write path; the flip is then
+/// proven from a known state on any volume.
+#[tokio::test]
+async fn the_message_list_shows_the_seeded_notes_and_a_mark_read_survives_a_refresh() {
+    let Some((host, port, user, password)) = harness() else {
+        eprintln!("skipping live harness test: ASTRA_LIVE_HARNESS is not 1");
+        return;
+    };
+    let (account_id, providers) =
+        dial_with_accepted_certificate(&host, &port, &user, &password).await;
+
+    let counter = Arc::new(CountingObserver::default());
+    let observer: Arc<dyn AppObserver> = counter.clone();
+    let app = App::new(
+        Arc::new(Engine::open_in_memory().expect("the engine store")),
+        vec![Account {
+            id: account_id.clone(),
+            providers,
+            identity: EmailAddress::new("astra1@example.test"),
+        }],
+        None,
+        observer,
+    );
+
+    app.dispatch(Intent::RefreshMail).await.unwrap();
+
+    let inbox = FolderRef::from_parts(account_id.as_str(), inbox_key(&app, &account_id))
+        .expect("the INBOX folder reference");
+    app.dispatch(Intent::SelectFolder { folder: inbox })
+        .await
+        .unwrap();
+
+    // The three seeded notes, newest first: the seed pins the Date headers and
+    // delivers oldest first, so the order holds whatever clock served them.
+    let snapshot = app.mailbox_list();
+    let subjects: Vec<&str> = snapshot
+        .rows
+        .iter()
+        .map(|row| row.subject.as_str())
+        .collect();
+    assert_eq!(
+        subjects,
+        ["Harness note three", "Harness note two", "Harness note one"],
+        "the whole INBOX is the three seeded notes, newest first",
+    );
+    let one = row_by_subject(&snapshot, "Harness note one");
+    assert_eq!(one.sender_name, "Astra Two");
+    assert_eq!(one.sender_address, "astra2@example.test");
+
+    // Back to a known state: every note unread, the writes reaching the server on the
+    // same pass (the refresh drains the outbox after the sync).
+    for subject in NOTES {
+        mark_read(&app, subject, false).await;
+    }
+    app.dispatch(Intent::RefreshMail).await.unwrap();
+    let snapshot = app.mailbox_list();
+    assert_eq!(
+        unread_count(&snapshot),
+        NOTES.len(),
+        "every note is unread after the reset pass"
+    );
+
+    // The flip: one row marked read flips at once and republishes the list.
+    let signals = counter.signals();
+    mark_read(&app, "Harness note two", true).await;
+    assert!(
+        counter.signals() > signals,
+        "the flipped list is republished"
+    );
+    let snapshot = app.mailbox_list();
+    assert!(
+        !row_by_subject(&snapshot, "Harness note two").unread,
+        "the marked row flipped"
+    );
+    assert_eq!(unread_count(&snapshot), 2, "two notes are still unread");
+
+    // And the write holds: a further refresh syncs the server's state back and the
+    // row stays read.
+    app.dispatch(Intent::RefreshMail).await.unwrap();
+    let snapshot = app.mailbox_list();
+    assert!(
+        !row_by_subject(&snapshot, "Harness note two").unread,
+        "the read state survives a refresh"
+    );
+    assert_eq!(
+        unread_count(&snapshot),
+        2,
+        "the other two notes are untouched"
     );
 }
 

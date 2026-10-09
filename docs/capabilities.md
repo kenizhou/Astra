@@ -10,7 +10,7 @@ this row ports.
 | Accounts | IMAP/SMTP account setup wizard with server discovery and manual server entry | 🚧 | accounts.md |
 | Accounts | Auto-detect from email address (JMAP probe, SRV, autoconfig, ISPDB, MX), with results from an unencrypted hop disclosed and needing explicit approval | 🚧 | account-autodetect.md |
 | Mail | Folder pane across accounts with nested folders and persisted expansion | 🚧 | folder-pane.md |
-| Mail | Flat and threaded message list with windowed paging | ⬜ | |
+| Mail | Flat and threaded message list with windowed paging | 🚧 | mail-calendar capabilities |
 | Calendar | Day, work week, and month grids with drag to create, move, resize | ⬜ | calendar.md |
 | Core | Reactive Rust to native binding, dispatch to immutable snapshots | 🚧 | |
 | Accounts | Settings accounts page lists every account, with per-service toggles, relinking, sign-in again, server editing, and removal | ⬜ | accounts.md |
@@ -33,7 +33,7 @@ this row ports.
 | Mail | Create, rename, move, and delete folders from the folder pane; queued offline; delete goes to Trash first | ⬜ | folder-pane.md |
 | Mail | Drag a folder into another folder or onto its account; drag messages onto a folder | ⬜ | folder-pane.md |
 | Mail | Move to folder action in the message row menu, within one account | ⬜ | folder-pane.md |
-| Mail | Threaded conversation view: the whole conversation including your sent replies, across folders | ⬜ | |
+| Mail | Threaded conversation view: the whole conversation including your sent replies, across folders | 🚧 | mail-calendar capabilities |
 | Mail | Reading view with sanitised HTML, inline CID images, recipient headers, remote-image gating, and retry | ⬜ | |
 | Mail | Web and mail addresses in message text open in the browser or mail app; http, https, and mailto only | ⬜ | rendering-security.md |
 | Mail | Message laid out against the reading pane's own width, so a newsletter's own mobile rules apply | ⬜ | reading-zoom.md |

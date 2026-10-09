@@ -11,7 +11,7 @@
 | 账户 | IMAP/SMTP 账户设置向导，支持服务器发现与手动录入服务器 | 🚧 | accounts.md |
 | 账户 | 根据邮箱地址自动检测（JMAP 探测、SRV、autoconfig、ISPDB、MX），经未加密一跳得到的结果会明示并需明确批准 | 🚧 | account-autodetect.md |
 | 邮件 | 跨账户文件夹窗格，支持嵌套文件夹并持久记住展开状态 | 🚧 | folder-pane.md |
-| 邮件 | 平铺与线程化邮件列表，窗口化分页 | ⬜ | |
+| 邮件 | 平铺与线程化邮件列表，窗口化分页 | 🚧 | mail-calendar capabilities |
 | 日历 | 日、工作周、月网格，支持拖拽创建、移动、调整大小 | ⬜ | calendar.md |
 | 核心 | 响应式 Rust 与原生层绑定，dispatch 到不可变快照 | 🚧 | |
 | 账户 | 设置中的账户页列出每个账户：按服务开关、关联、重新登录、编辑服务器、移除 | ⬜ | accounts.md |
@@ -34,7 +34,7 @@
 | 邮件 | 从文件夹窗格创建、重命名、移动、删除文件夹；离线排队；删除先进 Trash | ⬜ | folder-pane.md |
 | 邮件 | 把文件夹拖入另一文件夹或其账户；把邮件拖到文件夹上 | ⬜ | folder-pane.md |
 | 邮件 | 邮件行菜单中的移至文件夹操作，限同一账户内 | ⬜ | folder-pane.md |
-| 邮件 | 线程会话视图：含已发回复的完整会话，跨文件夹 | ⬜ | |
+| 邮件 | 线程会话视图：含已发回复的完整会话，跨文件夹 | 🚧 | mail-calendar capabilities |
 | 邮件 | 阅读视图：净化后的 HTML、内联 CID 图片、收件人头、远程图片门控、重试 | ⬜ | |
 | 邮件 | 邮件文本中的网页与邮件地址在浏览器或邮件应用中打开；仅 http、https、mailto | ⬜ | rendering-security.md |
 | 邮件 | 邮件按阅读窗格自身宽度排版，使 newsletter 自身的移动端规则生效 | ⬜ | reading-zoom.md |

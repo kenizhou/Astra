@@ -18,7 +18,9 @@
 # from publishes no plaintext IMAP port either.
 #
 # The gated live test skips unless ASTRA_LIVE_HARNESS=1, so an offline `cargo test`
-# stays green. Against a running harness:
+# stays green. Against a running harness (whose seed also delivers three pinned notes
+# to astra1's INBOX through the harness's own SMTP submission port, the mail the
+# gated list test reads):
 #
 #   scripts/dev/harness.sh up
 #   eval "$(scripts/dev/harness.sh env)"
