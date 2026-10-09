@@ -115,3 +115,15 @@ rustls = { version = "0.23.41", default-features = false, features = ["ring", "s
 # The OS secure store the desktop host keeps account credentials in (host only:
 # Windows Credential Manager, the macOS keychain, the freedesktop secret service).
 keyring = { version = "3", features = ["apple-native", "sync-secret-service", "windows-native"] }
+# The HTTP client of account autodetection. Redirects are disabled and followed by
+# hand so each hop's scheme is inspected for the untrusted-source gate.
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "form", "rustls-no-provider", "charset", "http2"] }
+# URL construction for the autodetect lookup endpoints; the email address never
+# appears in one, and the trust decision reads each hop's scheme.
+url = "2"
+# Streaming pull-parser for the Mozilla autoconfig XML autodetect reads; no custom
+# entity expansion, so a hostile document cannot balloon in memory.
+quick-xml = "0.42"
+# Mozilla's compiled-in Public Suffix List; derives a provider's registrable domain
+# from an MX or server hostname for the autodetect MX fallback.
+psl = "2"
