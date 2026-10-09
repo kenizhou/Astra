@@ -90,7 +90,12 @@ fn conversation_row(thread: &str, members: &[Arc<MailListRow>], folder: &str) ->
         .filter(|row| filed_in(row, folder))
         .min_by(|a, b| newest_first(a, b).then_with(|| tiebreak(a, b)))
         .expect("a shown group holds an in-folder member");
+    // Unreachable for any group that reached here: the key is a resolved thread id or a
+    // message's non-empty provider key, and both parse. Guarded rather than unwrapped
+    // so a future key shape degrades to a message row instead of panicking a release
+    // build.
     let Ok(thread_id) = ThreadId::try_from(thread) else {
+        debug_assert!(false, "a conversation key always parses as a thread id");
         return message_row(face);
     };
     MessageRowView {

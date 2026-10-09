@@ -148,7 +148,8 @@ async fn the_threaded_view_groups_under_the_thread_root_and_counts() {
     assert_eq!(
         fakes::row_keys(&snapshot),
         ["th-1", "m-solo"],
-        "the busier conversation leads; a lone message is its own row"
+        "the conversation with the newest in-folder activity leads; a lone message is its \
+         own row"
     );
     let conversation = fakes::row(&snapshot, "th-1");
     assert_eq!(conversation.thread_count, Some(2), "both members counted");
@@ -164,6 +165,96 @@ async fn the_threaded_view_groups_under_the_thread_root_and_counts() {
         "a lone message is not dressed up as a conversation"
     );
     assert_eq!(snapshot.view_mode, ViewMode::Threaded);
+}
+
+/// Selects the work Archive, the folder whose scoping the threaded tests prove.
+async fn open_archive(app: &crate::App<fakes::FakeProvider>) {
+    app.dispatch(Intent::SelectFolder {
+        folder: FolderRef::from_parts("work", "archive".to_owned()).unwrap(),
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn the_threaded_view_scopes_to_the_folder_and_groups_across_it() {
+    let surfaces = Arc::new(Mutex::new(Vec::new()));
+    let app = listed_mailbox(
+        &surfaces,
+        vec![
+            // One conversation split across the two folders: the inbox half is the
+            // newer, the archive half the older.
+            threaded(
+                delivered_at(mail("m-inb", "inbox", "Re: Split (inb)"), 8, 30),
+                "th-split",
+            ),
+            threaded(
+                delivered_at(mail("m-arch", "archive", "Re: Split (arch)"), 8, 0),
+                "th-split",
+            ),
+            // One conversation wholly inside the inbox, and one wholly inside the
+            // archive: each is fully outside the other folder's view.
+            threaded(
+                delivered_at(mail("i1", "inbox", "Re: Inbox only"), 7, 0),
+                "th-inbox-only",
+            ),
+            threaded(
+                delivered_at(mail("i2", "inbox", "Re: Inbox only"), 7, 10),
+                "th-inbox-only",
+            ),
+            threaded(
+                delivered_at(mail("a1", "archive", "Re: Archive only"), 9, 0),
+                "th-archive-only",
+            ),
+            threaded(
+                delivered_at(mail("a2", "archive", "Re: Archive only"), 8, 45),
+                "th-archive-only",
+            ),
+        ],
+    )
+    .await;
+    app.dispatch(Intent::SetViewMode(ViewMode::Threaded))
+        .await
+        .unwrap();
+
+    open_inbox(&app).await;
+    let inbox = app.mailbox_list();
+    assert_eq!(
+        fakes::row_keys(&inbox),
+        ["th-split", "th-inbox-only"],
+        "only conversations an inbox member touches, newest in-folder activity first"
+    );
+    let split = fakes::row(&inbox, "th-split");
+    assert_eq!(split.subject, "Re: Split (inb)");
+    assert_eq!(
+        split.sent_at, "2026-10-09T08:30:00Z",
+        "the face is the conversation's newest in-folder member, not its newest overall \
+         when that one is filed elsewhere"
+    );
+    assert_eq!(
+        split.thread_count,
+        Some(2),
+        "the out-of-folder member rides in the conversation it answers"
+    );
+
+    open_archive(&app).await;
+    let archive = app.mailbox_list();
+    assert_eq!(
+        fakes::row_keys(&archive),
+        ["th-archive-only", "th-split"],
+        "only conversations an archive member touches, newest in-folder activity first"
+    );
+    let split = fakes::row(&archive, "th-split");
+    assert_eq!(
+        split.subject, "Re: Split (arch)",
+        "the face follows the folder: the archive member fronts the conversation here"
+    );
+    assert_eq!(split.sent_at, "2026-10-09T08:00:00Z");
+    assert_eq!(
+        split.thread_count,
+        Some(2),
+        "the inbox member rides in from the other side of the same rule"
+    );
 }
 
 #[tokio::test]
