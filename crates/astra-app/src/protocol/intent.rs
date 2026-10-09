@@ -5,7 +5,7 @@
 use engine_api::AccountId;
 use serde::{Deserialize, Serialize};
 
-use crate::reference::{FolderRef, RowRef};
+use crate::reference::{FolderRef, MessageRef, RowRef};
 
 /// How the mailbox list is grouped.
 ///
@@ -101,6 +101,19 @@ pub enum Intent {
         /// Whether the row's mail carries the flag.
         flagged: bool,
     },
+    /// Read one message in the reading pane: fetch its body, sanitise the HTML,
+    /// resolve the inline images, and publish the reading snapshot. Opening also
+    /// marks the message read through the same write path [`Intent::MarkRead`]
+    /// drives, unless it already is. A [`MessageRef`], never a bare key: the
+    /// body read routes through the message's owning account.
+    OpenMessage {
+        /// The message to read, bound to its owning account.
+        message: MessageRef,
+    },
+    /// Shut the reading pane: the open message's body is forgotten and the surface
+    /// goes empty. Not the same as navigating the list, which leaves the pane as it
+    /// was.
+    CloseReading,
     /// A change to an account's folder tree ([`FolderIntent`]).
     Folders(FolderIntent),
 }

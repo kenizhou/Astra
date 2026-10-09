@@ -13,6 +13,8 @@
 use engine_api::{AccountId, ProviderKey};
 use serde::{Deserialize, Serialize};
 
+use crate::RowKey;
+
 /// The identity of the one message a reading snapshot holds the body of.
 ///
 /// A provider key is unique only within its account, so the account is part
@@ -26,6 +28,44 @@ pub struct MessageKey {
     /// The message's provider key: its stable identity across mailbox moves,
     /// unique within the account.
     pub key: ProviderKey,
+}
+
+/// The error [`MessageKey::try_from`](TryFrom) returns: a thread row names a
+/// whole conversation, and no member of it is THE one message a reading pane
+/// reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NotAMessageRow;
+
+impl core::fmt::Display for NotAMessageRow {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("a thread row names a conversation, not one message")
+    }
+}
+
+impl TryFrom<RowKey> for MessageKey {
+    type Error = NotAMessageRow;
+
+    /// Ties a selected list row to the message a reading pane opens. Total for a
+    /// message row, whose payload is this key standing alone; a thread row is
+    /// rejected rather than guessed at (which member would open is the caller's
+    /// decision to make, not the conversion's).
+    fn try_from(row: RowKey) -> Result<Self, Self::Error> {
+        match row {
+            RowKey::Message { account, key } => Ok(Self { account, key }),
+            RowKey::Thread { .. } => Err(NotAMessageRow),
+        }
+    }
+}
+
+impl From<MessageKey> for RowKey {
+    /// The reading key back into the row key it came from: the same pair, worn
+    /// as a list row again.
+    fn from(message: MessageKey) -> Self {
+        Self::Message {
+            account: message.account,
+            key: message.key,
+        }
+    }
 }
 
 /// One downloadable attachment shown beneath the open message's body.

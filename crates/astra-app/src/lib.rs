@@ -16,8 +16,10 @@ mod list_rows;
 mod mail_writes;
 mod preferences;
 mod protocol;
+mod reading;
 mod reference;
 mod row_cache;
+mod sanitise;
 mod snapshot;
 mod surfaced;
 mod sync;
@@ -31,6 +33,13 @@ mod window;
 #[cfg(test)]
 #[path = "tests_live_harness.rs"]
 mod tests_live_harness;
+
+// The dispatch-loop test fixtures: one compiled copy of the fake provider and its
+// builders, at the crate root so every test module (the dispatch tests, the list
+// tests they split off, and the reading tests) includes the same module rather
+// than its own.
+#[cfg(test)]
+mod dispatch_fakes;
 
 use std::{
     path::PathBuf,
@@ -78,6 +87,15 @@ pub struct App<P> {
     scope: Mutex<Scope>,
     /// The mailbox-list snapshot and its signal, published as one thing.
     mailbox_list: Surfaced<astra_viewmodel::MailboxListSnapshot>,
+    /// The reading snapshot and its signal: the one open message's sanitised
+    /// body, or `None` when nothing is open. One cell, because SP2c has one
+    /// reading pane; the per-reader map is the multi-window slice's to add.
+    reading: Surfaced<Option<astra_viewmodel::ReadingSnapshot>>,
+    /// The message the reading pane is showing, so a refresh knows what to
+    /// re-render (or to close, when the message is gone). Held beside the
+    /// snapshot rather than read back out of it: what is open and what was last
+    /// published are two facts, and only this one drives the republish.
+    open_reading: Mutex<Option<crate::reference::MessageRef>>,
     /// The sync-progress snapshot and its signal: what every mail pass reports its
     /// per-account position through, published on change by the
     /// [`SyncObserver`](engine_api::SyncObserver) fold in `sync_progress`.
@@ -143,7 +161,9 @@ impl<P: Provider> App<P> {
             engine,
             accounts: RwLock::new(accounts.into_iter().map(Arc::new).collect()),
             scope: Mutex::new(Scope::default()),
-            mailbox_list: Surfaced::new(Surface::MailboxList, observer),
+            mailbox_list: Surfaced::new(Surface::MailboxList, Arc::clone(&observer)),
+            reading: Surfaced::new(Surface::Reading, observer),
+            open_reading: Mutex::new(None),
             sync_progress,
             pane: Mutex::new(PreferencesState::new(None)),
             visible_limit: Mutex::new(PAGE),

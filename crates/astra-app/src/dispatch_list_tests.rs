@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Tests for the message-list half of the dispatch loop: the rows a folder selection
 //! builds, the window it grows, the view modes it re-projects, and the read/flag writes
-//! that flow through the engine's outbox. The fixtures live in `dispatch_fakes` beside
-//! the dispatch tests this splits from.
+//! that flow through the engine's outbox. The fixtures live in `dispatch_fakes`, the
+//! crate-root test module every dispatch-shaped test shares.
 
 use std::sync::{Arc, Mutex};
 
-use super::fakes;
 use crate::{
+    dispatch_fakes as fakes,
     reference::{FolderRef, MessageRef, RowRef, ThreadRef},
     Intent, Surface, ViewMode,
 };

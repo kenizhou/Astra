@@ -91,6 +91,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # The stored account config's TOML form (build_config_toml / load_str / to_toml).
 toml = "1.0"
+# The reading pane's HTML sanitiser, configured to mirror mail-calendar's ammonia
+# build (allowlisted tags, attributes, and URL schemes).
+ammonia = "4"
 # Error enums for the crate-level contracts.
 thiserror = "2"
 # Diagnostic logging facade; the host installs the logger, the crates only emit.

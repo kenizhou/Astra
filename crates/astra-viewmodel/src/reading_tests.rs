@@ -5,6 +5,7 @@
 use engine_api::{AccountId, ProviderKey};
 
 use super::*;
+use crate::RowKey;
 
 fn account(value: &str) -> AccountId {
     AccountId::try_from(value).unwrap()
@@ -137,4 +138,43 @@ fn a_reading_key_is_the_account_and_message_pair() {
         serde_json::to_string(&second).unwrap(),
         r#"{"account":"home","key":"imap:v1:u42"}"#
     );
+}
+
+#[test]
+fn a_message_row_key_becomes_a_reading_key() {
+    // The tie between the two view-models: the row a list selected carries the
+    // exact identity the reading pane opens, so the conversion is total for a
+    // message row and loses nothing.
+    let row = RowKey::Message {
+        account: account("work"),
+        key: key("imap:v1:u42"),
+    };
+    let reading = MessageKey::try_from(row).unwrap();
+    assert_eq!(
+        reading,
+        MessageKey {
+            account: account("work"),
+            key: key("imap:v1:u42"),
+        }
+    );
+    // And back again: the payload stands alone in both directions.
+    assert_eq!(
+        RowKey::from(reading),
+        RowKey::Message {
+            account: account("work"),
+            key: key("imap:v1:u42"),
+        }
+    );
+}
+
+#[test]
+fn a_thread_row_key_is_rejected_as_a_reading_key() {
+    // A conversation names no single message, so the reading pane cannot open
+    // one from it; the rejection is the error, not a panic or a guess at the
+    // newest member.
+    let row = RowKey::Thread {
+        account: account("work"),
+        thread_id: engine_api::ThreadId::try_from("th-7").unwrap(),
+    };
+    assert_eq!(MessageKey::try_from(row), Err(NotAMessageRow));
 }

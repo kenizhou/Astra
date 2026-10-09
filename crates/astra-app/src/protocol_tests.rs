@@ -142,6 +142,23 @@ fn folders_carries_the_folder_intent() {
 }
 
 #[test]
+fn open_message_carries_the_message_reference() {
+    round_trips(
+        &Intent::OpenMessage {
+            message: MessageRef::from_parts("work", "imap:v1:u1".to_owned()).unwrap(),
+        },
+        r#"{"open_message":{"message":{"account":"work","key":"imap:v1:u1"}}}"#,
+    );
+}
+
+#[test]
+fn close_reading_crosses_as_a_bare_renamed_word() {
+    round_trips(&Intent::CloseReading, r#""close_reading""#);
+    // The CamelCase spelling is not the wire.
+    assert!(serde_json::from_str::<Intent>(r#""CloseReading""#).is_err());
+}
+
+#[test]
 fn surfaces_cross_as_renamed_words() {
     assert_eq!(
         serde_json::to_string(&Surface::MailboxList).unwrap(),
@@ -152,12 +169,20 @@ fn surfaces_cross_as_renamed_words() {
         r#""sync_progress""#
     );
     assert_eq!(
+        serde_json::to_string(&Surface::Reading).unwrap(),
+        r#""reading""#
+    );
+    assert_eq!(
         serde_json::from_str::<Surface>(r#""mailbox_list""#).unwrap(),
         Surface::MailboxList
     );
     assert_eq!(
         serde_json::from_str::<Surface>(r#""sync_progress""#).unwrap(),
         Surface::SyncProgress
+    );
+    assert_eq!(
+        serde_json::from_str::<Surface>(r#""reading""#).unwrap(),
+        Surface::Reading
     );
 }
 
