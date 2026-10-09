@@ -1,19 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! The command-surface test fixtures: one compiled copy of the fake app the
 //! command tests drive, the in-memory credential store, and the state builder
-//! over them, at the crate root so every command test module (the command tests,
-//! the reading tests they split off, and the drafts tests) includes the same
-//! module rather than its own.
+//! over them, at the crate root so every command test module (the command
+//! tests, the reading tests they split off, and the drafts, sending, and
+//! compose tests) includes the same module rather than its own.
 
 use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
 };
 
-use astra_app::{AppError, CompositionId, DraftResume, DraftsIntent, Intent, OutboxIntent};
+use astra_app::{
+    AppError, ComposeIntent, CompositionId, DraftResume, DraftsIntent, Intent, OutboxIntent,
+};
 use astra_viewmodel::{
-    DraftSaveState, DraftStatusSnapshot, MailboxListSnapshot, ReadingSnapshot, SendingSnapshot,
-    SyncProgressSnapshot,
+    ComposeKind, ComposeRequestSnapshot, DraftSaveState, DraftStatusSnapshot, MailboxListSnapshot,
+    ReadingSnapshot, SendingSnapshot, SyncProgressSnapshot,
 };
 use engine_api::{AccountId, ProviderKey};
 
@@ -60,6 +62,45 @@ pub(crate) fn open_snapshot() -> ReadingSnapshot {
 /// UTC instant the drafts fake fixes its landed save at.
 pub(crate) const ARRIVED_AT: &str = "2026-10-09T08:30:00Z";
 
+/// The prefill the fake computes for one compose dispatch, the core's rules
+/// at their simplest: the message's own account composes, a reply answers the
+/// original alone, a reply all keeps the original's `Cc`, and a forward names
+/// no one and threads under nothing. Shared with the command tests, which
+/// assert the pull against exactly what the fake publishes.
+pub(crate) fn compose_prefill(kind: ComposeKind, account: &str) -> ComposeRequestSnapshot {
+    ComposeRequestSnapshot {
+        kind,
+        from: AccountId::try_from(account).expect("an account id"),
+        to: if kind == ComposeKind::Forward {
+            String::new()
+        } else {
+            "ada@example.test".to_owned()
+        },
+        cc: if kind == ComposeKind::ReplyAll {
+            "carol@example.test".to_owned()
+        } else {
+            String::new()
+        },
+        subject: format!(
+            "{} Quarterly report",
+            if kind == ComposeKind::Forward {
+                "Fwd:"
+            } else {
+                "Re:"
+            }
+        ),
+        in_reply_to: if kind == ComposeKind::Forward {
+            None
+        } else {
+            Some("orig-1@server.test".to_owned())
+        },
+        document: astra_composer::ComposerDocument {
+            blocks: Vec::new(),
+            attachments: Vec::new(),
+        },
+    }
+}
+
 /// The fake's outbox: the next op id it assigns and the snapshot the pull
 /// answers with, under one lock so a dispatch and its publish cannot tear.
 #[derive(Default)]
@@ -80,6 +121,9 @@ pub(crate) struct FakeApp {
     /// The draft-status snapshot the pull answers with: what the fake's drafts
     /// dispatches last published.
     pub(crate) draft_status: Mutex<Option<DraftStatusSnapshot>>,
+    /// The compose-request snapshot the pull answers with: what the fake's
+    /// compose dispatches last published into the single slot.
+    pub(crate) compose_request: Mutex<Option<ComposeRequestSnapshot>>,
     /// The stored draft the resume answers with, emptied by a discard.
     pub(crate) stored_draft: Mutex<Option<DraftResume>>,
     /// The (account, composition) pairs the resume was asked to open, so a test
@@ -111,6 +155,7 @@ impl FakeApp {
             sync_progress,
             reading: Mutex::new(None),
             draft_status: Mutex::new(None),
+            compose_request: Mutex::new(None),
             stored_draft: Mutex::new(None),
             resumed_into: Mutex::new(Vec::new()),
             sending: Mutex::new(SendingQueue::default()),
@@ -172,6 +217,23 @@ impl FakeApp {
                 *self.draft_status.lock().unwrap() = None;
             }
         }
+    }
+
+    /// The compose family's contract the compose command observes: every
+    /// dispatch publishes one request into the single slot, the prefill
+    /// shaped by the kind the dispatch named, and nothing publishes `None`
+    /// back, so the slot holds the newest request until another replaces it.
+    fn play_compose(&self, compose: &ComposeIntent) {
+        let (kind, message) = match compose {
+            ComposeIntent::Reply { message } => (ComposeKind::Reply, message),
+            ComposeIntent::ReplyAll { message } => (ComposeKind::ReplyAll, message),
+            ComposeIntent::Forward { message } => (ComposeKind::Forward, message),
+            // The family is non-exhaustive; a verb the fake knows no prefill
+            // for publishes nothing.
+            _ => return,
+        };
+        *self.compose_request.lock().unwrap() =
+            Some(compose_prefill(kind, message.account.as_str()));
     }
 
     /// The outbox contract the sending commands observe: a submit queues a
@@ -239,6 +301,9 @@ impl AppPort for FakeApp {
         if let Intent::Drafts(drafts) = &intent {
             self.play_drafts(drafts);
         }
+        if let Intent::Compose(compose) = &intent {
+            self.play_compose(compose);
+        }
         self.play_sending(&intent);
         self.dispatched.lock().unwrap().push(intent);
         Ok(())
@@ -258,6 +323,10 @@ impl AppPort for FakeApp {
 
     fn draft_status(&self) -> Option<DraftStatusSnapshot> {
         self.draft_status.lock().unwrap().clone()
+    }
+
+    fn compose_request(&self) -> Option<ComposeRequestSnapshot> {
+        self.compose_request.lock().unwrap().clone()
     }
 
     fn sending(&self) -> SendingSnapshot {

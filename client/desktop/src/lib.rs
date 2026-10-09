@@ -23,7 +23,8 @@ mod observer;
 // The command-surface test fixtures: one compiled copy of the fake app, the
 // credential store, and the state builder, at the crate root so every command
 // test module (the command tests, the reading tests they split off, and the
-// drafts and sending tests) includes the same module rather than its own.
+// drafts, sending, and compose tests) includes the same module rather than
+// its own.
 #[cfg(test)]
 mod commands_fakes;
 
@@ -67,6 +68,7 @@ pub fn run() {
             commands::drafts::draft_status,
             commands::drafts::draft_resume,
             commands::sending::sending,
+            commands::compose::compose_request,
             commands::add_account,
             commands::imap_test_connection,
             commands::detect_account_settings

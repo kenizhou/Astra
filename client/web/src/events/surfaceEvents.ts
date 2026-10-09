@@ -7,8 +7,16 @@
 
 import { listen } from '@tauri-apps/api/event';
 
-import { draftStatus, mailboxList, reading, sending, syncProgress } from '@/services/ipc';
+import {
+  composeRequest,
+  draftStatus,
+  mailboxList,
+  reading,
+  sending,
+  syncProgress,
+} from '@/services/ipc';
 import { useAccountStore } from '@/stores/accountStore';
+import { useComposeRequestStore } from '@/stores/composeRequestStore';
 import { useDraftStore } from '@/stores/draftStore';
 import { useFolderStore } from '@/stores/folderStore';
 import { useListStore } from '@/stores/listStore';
@@ -22,7 +30,8 @@ export type Surface =
   | 'sync_progress'
   | 'reading'
   | 'draft_status'
-  | 'sending';
+  | 'sending'
+  | 'compose_request';
 
 /**
  * Tauri presence guard, evaluated at module load so jsdom tests that install
@@ -103,6 +112,11 @@ export function pullSurface(surface: Surface): Promise<void> {
       useDraftStore.getState().applySnapshot(snapshot);
     });
   }
+  if (surface === 'compose_request') {
+    return composeRequest().then((snapshot) => {
+      useComposeRequestStore.getState().applySnapshot(snapshot);
+    });
+  }
   if (surface === 'sending') {
     return sending().then((snapshot) => {
       useSendingStore.getState().applySnapshot(snapshot);
@@ -132,7 +146,8 @@ export function mountSurfaceEvents(): () => void {
         surface === 'sync_progress' ||
         surface === 'reading' ||
         surface === 'draft_status' ||
-        surface === 'sending'
+        surface === 'sending' ||
+        surface === 'compose_request'
       ) {
         void pullSurface(surface);
       }
@@ -162,6 +177,8 @@ export async function hydrate(): Promise<void> {
   useReadingStore.getState().applySnapshot(openReading);
   const draftHint = await draftStatus();
   useDraftStore.getState().applySnapshot(draftHint);
+  const pendingRequest = await composeRequest();
+  useComposeRequestStore.getState().applySnapshot(pendingRequest);
   const queue = await sending();
   useSendingStore.getState().applySnapshot(queue);
   useUiStore.getState().markRunning();

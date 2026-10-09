@@ -20,9 +20,13 @@ use engine_api::AccountId;
 
 use crate::{AppState, HostAccount, HostProvider};
 
-// The drafts command surface (the status pull and the resume read), split into
-// its own child module to keep this file under the size limit, the same split
-// the app core's protocol made for its drafts intents.
+// The compose command surface (the request pull), split into its own child
+// module to keep this file under the size limit, the same split the app core's
+// protocol made for its compose intents.
+pub(crate) mod compose;
+
+// The drafts command surface (the status pull and the resume read), under the
+// same split.
 pub(crate) mod drafts;
 
 // The sending command surface (the queue pull), under the same split.
