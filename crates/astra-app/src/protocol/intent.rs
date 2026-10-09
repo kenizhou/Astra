@@ -157,10 +157,12 @@ pub enum Intent {
     /// Send the composer's rich document as a reply: the same durable-outbox
     /// discipline as [`Intent::SubmitRichMail`], with the threading the reply
     /// answers under. The `in_reply_to` header is the original's own
-    /// `Message-ID`, the value the compose request prefilled and a saved
-    /// draft resumes with; the `References` chain is re-resolved from the
-    /// original at submit, so the reply joins the conversation it answers
-    /// whatever the composer held.
+    /// `Message-ID`, the value the compose request prefilled; the
+    /// `References` chain is re-resolved from the original at submit, so the
+    /// reply joins the conversation it answers whatever the composer held.
+    /// The prefill serves the submit alone: a saved draft carries no
+    /// threading, so a reply resumed from one sends as plain mail, the known
+    /// gap docs/sending.md records.
     SubmitRichReply {
         /// The account to send from: the composer's From dropdown, one of the
         /// configured accounts.

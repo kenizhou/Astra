@@ -5,8 +5,10 @@
 //! The core computes the whole prefill (recipients, subject, threading header,
 //! quoted original) and hands it over as one thing, so a composer opens showing
 //! exactly what the core derived and the host's own re-derivation can never
-//! disagree with the send path. `in_reply_to` rides the snapshot so a draft saved
-//! from a reply resumes with its threading intact.
+//! disagree with the send path. `in_reply_to` rides the snapshot to prefill
+//! the reply submit's threading header; a saved draft carries no threading,
+//! so a reply resumed from one sends as plain mail, the known gap
+//! docs/sending.md records.
 
 use astra_composer::ComposerDocument;
 use engine_api::AccountId;

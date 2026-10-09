@@ -259,6 +259,11 @@ INBOX the three seeded notes and astra2 empty.
   source.** The original a forward re-resolves is the one the last published
   request was computed from, cleared only by a restart or a fresh `Compose`;
   the shipped UI always pairs the two, so no surface reaches it.
+- **A refused forward loses the typed words.** When the original has moved or
+  been deleted between opening and sending, the submit refuses (nothing sent,
+  nothing queued) and the composer closes silently, so the typed words are
+  lost; making the refusal observable so the pane keeps the words is the
+  recorded follow-up.
 - **The quote is invisible in the trimmed editor.** The editor holds the quoted
   original as retained content below the typed words, round-tripping
   byte-identical through every save and send, but does not render it; rich quote
