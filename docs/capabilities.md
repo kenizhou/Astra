@@ -34,8 +34,8 @@ this row ports.
 | Mail | Drag a folder into another folder or onto its account; drag messages onto a folder | ⬜ | folder-pane.md |
 | Mail | Move to folder action in the message row menu, within one account | ⬜ | folder-pane.md |
 | Mail | Threaded conversation view: the whole conversation including your sent replies, across folders | 🚧 | mail-calendar capabilities |
-| Mail | Reading view with sanitised HTML, inline CID images, recipient headers, remote-image gating, and retry | ⬜ | |
-| Mail | Web and mail addresses in message text open in the browser or mail app; http, https, and mailto only | ⬜ | rendering-security.md |
+| Mail | Reading view with sanitised HTML, inline CID images, recipient headers, remote-image gating, and retry | 🚧 | |
+| Mail | Web and mail addresses in message text open in the browser or mail app; http, https, and mailto only | 🚧 | rendering-security.md |
 | Mail | Message laid out against the reading pane's own width, so a newsletter's own mobile rules apply | ⬜ | reading-zoom.md |
 | Mail | Fixed-width messages reflowed to fit at every pane width, live during resize | ⬜ | reading-zoom.md |
 | Mail | Offline-first bodies: synced bodies auto-download after every sync under a per-account cap, so opens are instant | ⬜ | |

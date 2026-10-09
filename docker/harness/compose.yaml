@@ -5,9 +5,11 @@
 # management API, creates the two harness accounts (astra1@example.test,
 # astra2@example.test, password astra-harness), creates each one's custom folder
 # (Projects for astra1, Archive2 for astra2), delivers three pinned notes to astra1's
-# INBOX through the harness's own SMTP submission port, then reports healthy once
-# seeding is done (the healthcheck gates on a post-seed marker, so healthy means
-# ready, not merely started).
+# INBOX through the harness's own SMTP submission port, and files one rich MIME note
+# (html body with a remote image and an inline cid: png, plus a text attachment) into
+# Projects through the same submission port followed by an IMAP move, then reports
+# healthy once seeding is done (the healthcheck gates on a post-seed marker, so healthy
+# means ready, not merely started).
 #
 # TLS ROUTE (the recorded decision): IMAP rides implicit TLS on container port 993,
 # published on 127.0.0.1:2143, with the server's self-signed certificate. A no-TLS

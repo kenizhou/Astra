@@ -19,7 +19,9 @@
 //! delivered: Stalwart runs them through its delivery path into the INBOX, exactly the
 //! mail the gated list test reads back through the product's own dial and sync. The
 //! submission rides the seed script rather than the engine because the engine's
-//! send path needs the draft flow, which no slice has ported yet.
+//! send path needs the draft flow, which no slice has ported yet. The same seed files
+//! one rich MIME note into Projects (submission into the INBOX, then an IMAP move),
+//! the message the gated reading test opens in `reading`.
 //!
 //! The JMAP-detection test cannot dial `https://example.test/.well-known/jmap` (the
 //! harness domain resolves nowhere), so it rebases the probe onto the harness's plain
@@ -58,6 +60,12 @@ use crate::{
     reference::{MessageRef, RowRef},
     Account, App, AppObserver, FolderRef, Intent, Surface,
 };
+
+// The gated reading test: its own file, so this one stays under the 500-line cap the
+// gate enforces. The explicit path because this file is loaded through `#[path]` and
+// so owns no directory a bare `mod` would resolve into.
+#[path = "tests_live_harness/reading.rs"]
+mod reading;
 
 /// The harness connection details from the environment, or `None` to skip.
 fn harness() -> Option<(String, String, String, String)> {

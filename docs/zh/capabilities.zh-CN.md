@@ -35,8 +35,8 @@
 | 邮件 | 把文件夹拖入另一文件夹或其账户；把邮件拖到文件夹上 | ⬜ | folder-pane.md |
 | 邮件 | 邮件行菜单中的移至文件夹操作，限同一账户内 | ⬜ | folder-pane.md |
 | 邮件 | 线程会话视图：含已发回复的完整会话，跨文件夹 | 🚧 | mail-calendar capabilities |
-| 邮件 | 阅读视图：净化后的 HTML、内联 CID 图片、收件人头、远程图片门控、重试 | ⬜ | |
-| 邮件 | 邮件文本中的网页与邮件地址在浏览器或邮件应用中打开；仅 http、https、mailto | ⬜ | rendering-security.md |
+| 邮件 | 阅读视图：净化后的 HTML、内联 CID 图片、收件人头、远程图片门控、重试 | 🚧 | |
+| 邮件 | 邮件文本中的网页与邮件地址在浏览器或邮件应用中打开；仅 http、https、mailto | 🚧 | rendering-security.md |
 | 邮件 | 邮件按阅读窗格自身宽度排版，使 newsletter 自身的移动端规则生效 | ⬜ | reading-zoom.md |
 | 邮件 | 固定宽度的邮件在每个窗格宽度下重排适配，缩放窗口时实时生效 | ⬜ | reading-zoom.md |
 | 邮件 | 离线优先正文：每次同步后按每账户上限自动下载，打开即时 | ⬜ | |
