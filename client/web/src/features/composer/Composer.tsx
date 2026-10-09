@@ -119,6 +119,9 @@ function sendErrorMessage(err: unknown): string {
   return 'The message was not sent';
 }
 
+/** A reply whose original arrived with no Message-ID: nothing to thread under. */
+const REPLY_WITHOUT_ORIGIN = 'The original message has no Message-ID to reply under';
+
 /**
  * The submit intent the composition's origin calls for, read at click time.
  * A plain composition sends as a fresh mail; one a request opened sends
@@ -176,13 +179,18 @@ export function ComposerPane() {
   const bcc = useComposerStore((s) => s.bcc);
   const subject = useComposerStore((s) => s.subject);
   const initialContent = useComposerStore((s) => s.editor.content);
+  const request = useComposerStore((s) => s.request);
   // A field's visibility is derived from its data: a toggle the user pressed
   // opens it, and a value the draft carries keeps it open, so a resumed
-  // draft never hides the recipients it came with.
+  // draft never hides the recipients it came with. The kind the composition
+  // answers scopes what is offered at all: the threaded submits carry no
+  // bcc, and the forward's no cc either, so those toggles never stand.
+  const ccOffered = request === null || request.kind !== 'forward';
+  const bccOffered = request === null;
   const [ccToggled, setCcToggled] = useState(false);
   const [bccToggled, setBccToggled] = useState(false);
-  const ccShown = ccToggled || cc !== '';
-  const bccShown = bccToggled || bcc !== '';
+  const ccShown = ccOffered && (ccToggled || cc !== '');
+  const bccShown = bccOffered && (bccToggled || bcc !== '');
   // The send's own state, local to the pane: an in-flight submit disarms its
   // button so one gesture cannot queue two sends, and a refused one says why.
   const [sending, setSending] = useState(false);
@@ -269,9 +277,20 @@ export function ComposerPane() {
     // The submit reads the pane's state at click time, so the document is
     // the one on screen: no flush window stands between the words and the
     // queue. A blank To would be refused before the queue with nothing
-    // published, so the button never offers it.
+    // published, so the button never offers it. A reply whose original
+    // carried no Message-ID is refused here too: the core would reject the
+    // blank threading header after the queue, a dead end with the words
+    // already spent, so the pane says it and keeps them.
     const state = useComposerStore.getState();
     if (state.to.trim() === '') {
+      return;
+    }
+    if (
+      state.request !== null &&
+      state.request.kind !== 'forward' &&
+      state.request.inReplyTo === null
+    ) {
+      setSendError(REPLY_WITHOUT_ORIGIN);
       return;
     }
     setSendError(null);
@@ -347,7 +366,9 @@ export function ComposerPane() {
         cc={cc}
         bcc={bcc}
         subject={subject}
+        ccOffered={ccOffered}
         ccShown={ccShown}
+        bccOffered={bccOffered}
         bccShown={bccShown}
         onField={(field, value) => useComposerStore.getState().setField(field, value)}
         onToggleCc={() => setCcToggled((toggled) => !toggled)}

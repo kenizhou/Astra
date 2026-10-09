@@ -54,6 +54,17 @@ const pendingRequest: ComposeRequestSnapshot = {
   document: { blocks: [], attachments: [] },
 };
 
+/** The same request as a forward: no recipients, no threading header. */
+function forwardRequest(): ComposeRequestSnapshot {
+  return {
+    ...pendingRequest,
+    kind: 'forward',
+    to: '',
+    subject: 'Fwd: Quarterly report',
+    in_reply_to: undefined,
+  };
+}
+
 function resetStores(): void {
   useAccountStore.setState({ accounts: [{ accountId: 'work', displayName: 'Work' }] });
   useDraftStore.setState({ snapshot: null });
@@ -281,6 +292,55 @@ describe('leaving the composer', () => {
   });
 });
 
+describe('the fields the request kind scopes', () => {
+  it('offers the cc a reply carries and hides the bcc it cannot', () => {
+    act(() => {
+      useComposerStore.getState().openRequest(pendingRequest, 'Work');
+    });
+    render(<ComposerPane />);
+
+    expect(screen.getByRole('button', { name: 'Show Cc' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Show Bcc' })).toBeNull();
+    expect(screen.queryByRole('textbox', { name: 'Bcc' })).toBeNull();
+  });
+
+  it('shows the cc a reply-all prefilled, still without a bcc', () => {
+    act(() => {
+      useComposerStore.getState().openRequest(
+        { ...pendingRequest, kind: 'reply_all', cc: 'bob@example.test' },
+        'Work',
+      );
+    });
+    render(<ComposerPane />);
+
+    expect((screen.getByRole('textbox', { name: 'Cc' }) as HTMLInputElement).value).toBe(
+      'bob@example.test',
+    );
+    expect(screen.getByRole('button', { name: 'Hide Cc' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Show Bcc' })).toBeNull();
+  });
+
+  it('hides the cc and bcc a forward cannot carry', () => {
+    act(() => {
+      useComposerStore.getState().openRequest(forwardRequest(), 'Work');
+    });
+    render(<ComposerPane />);
+
+    expect(screen.queryByRole('button', { name: 'Show Cc' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Show Bcc' })).toBeNull();
+    expect(screen.queryByRole('textbox', { name: 'Cc' })).toBeNull();
+    expect(screen.queryByRole('textbox', { name: 'Bcc' })).toBeNull();
+  });
+
+  it('offers every field on a plain composition', () => {
+    newMessage();
+    render(<ComposerPane />);
+
+    expect(screen.getByRole('button', { name: 'Show Cc' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Show Bcc' })).toBeTruthy();
+  });
+});
+
 describe('the app start resume', () => {
   const view: ResumeView = {
     account: 'work',
@@ -369,5 +429,37 @@ describe('the app start resume', () => {
     expect(error).toHaveBeenCalledTimes(1);
     expect(useComposerStore.getState().open).toBe(false);
     error.mockRestore();
+  });
+
+  it('spends a standing request when the resume opens, so the send rides the plain submit', async () => {
+    ipc.draftResume.mockResolvedValue(view);
+    act(() => {
+      useComposerStore.getState().openRequest(pendingRequest, 'Work');
+    });
+    useComposeRequestStore.getState().applySnapshot(pendingRequest);
+    render(<ComposerPane />);
+    renderHook(() => useDraftResumeAtStart());
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // The resumed draft's fields stand in the pane and the request is spent.
+    expect((screen.getByRole('textbox', { name: 'To' }) as HTMLInputElement).value).toBe(
+      'you@test.local',
+    );
+    expect(useComposerStore.getState().request).toBeNull();
+    expect(useComposeRequestStore.getState().snapshot).toBeNull();
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    });
+
+    expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
+      '{"submit_rich_mail":{"from":"work","to":"you@test.local","cc":"cc@test.local","bcc":"quiet@test.local","subject":"Later",' +
+        `"document":{"blocks":[{"Paragraph":{"content":[${plainRun('Half written')}]}},{"Paragraph":{"content":[${plainRun(
+          'Second line',
+        )}]}}],"attachments":[]},"blobs":[]}}`,
+    );
   });
 });

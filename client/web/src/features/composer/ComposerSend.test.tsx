@@ -394,4 +394,20 @@ describe('the threaded sends', () => {
     expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toContain('"submit_rich_reply"');
     expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toContain('"in_reply_to":"orig-1@server.test"');
   });
+
+  it('refuses a reply whose original carried no threading header, keeping the words', () => {
+    openRequest(replyRequest({ in_reply_to: undefined }));
+    render(<ComposerPane />);
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    });
+
+    expect(ipc.dispatch).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert').textContent).toBe(
+      'The original message has no Message-ID to reply under',
+    );
+    expect(useComposerStore.getState().open).toBe(true);
+    expect(useComposerStore.getState().request).toEqual({ kind: 'reply', inReplyTo: null });
+  });
 });

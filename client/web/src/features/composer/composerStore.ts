@@ -117,7 +117,11 @@ export const useComposerStore = create<ComposerStoreState>((set) => ({
       fromLabel: account.label,
     }),
 
-  hydrate: (view, account, composition) =>
+  hydrate: (view, account, composition) => {
+    // A resumed composition is a plain one: whatever request the pane held,
+    // or the store still has pending, is spent here so the resumed send
+    // rides the plain submit with the resumed fields.
+    useComposeRequestStore.getState().dismiss();
     set(() => {
       const editor = documentToEditor(documentFromPlainText(view.body_text));
       const state = {
@@ -131,8 +135,9 @@ export const useComposerStore = create<ComposerStoreState>((set) => ({
         subject: view.subject,
         editor,
       };
-      return { ...state, savedFingerprint: fingerprintOf(state) };
-    }),
+      return { ...state, request: null, savedFingerprint: fingerprintOf(state) };
+    });
+  },
 
   openRequest: (snapshot, fromLabel) =>
     set({
