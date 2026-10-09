@@ -46,10 +46,55 @@ export interface AccountFolderRow {
   folders: FolderRow[];
 }
 
-/** The mailbox-list snapshot the pane renders after every pull. */
+/** How the mailbox list is grouped, crossing as a snake_case word. */
+export type ViewMode = 'flat' | 'threaded';
+
+/**
+ * The identity a mailbox-list row is matched by, crossing externally
+ * tagged: the message or thread it shows, bound to the account holding it.
+ * A provider key or thread id is unique only within its account, so the
+ * account is part of the key.
+ */
+export type RowKey =
+  | { message: { account: string; key: string } }
+  | { thread: { account: string; thread_id: string } };
+
+/** One mailbox-list row: a message in flat mode, a conversation in threaded. */
+export interface MessageRowView {
+  /** The row's identity: what an action on the row names. */
+  key: RowKey;
+  /** The account the row's mail belongs to, carried beside the key. */
+  account_id: string;
+  /** The sender's display name, empty when the header carried none. */
+  sender_name: string;
+  /** The sender's bare address, empty when there is no sender. */
+  sender_address: string;
+  /** The subject, empty if none. */
+  subject: string;
+  /** When the message was sent, as a whole-second UTC instant string. */
+  sent_at: string;
+  /** Whether the message is unread. */
+  unread: boolean;
+  /** Whether the message is flagged. */
+  flagged: boolean;
+  /** Whether the message has a non-inline attachment. */
+  has_attachments: boolean;
+  /** How many messages the conversation holds; absent on a flat row. */
+  thread_count?: number;
+}
+
+/** The mailbox-list snapshot the panes render after every pull. */
 export interface MailboxListSnapshot {
   /** Every account's sorted folder list, one entry per configured account. */
   account_folders: AccountFolderRow[];
+  /** The message rows in display order; absent while no mail is listed. */
+  rows?: MessageRowView[];
+  /** The selected row's key; absent with nothing selected. */
+  selection?: RowKey;
+  /** How many rows the visible window holds; absent at rest. */
+  visible_limit?: number;
+  /** The mode the rows are grouped in; absent when flat, the default. */
+  view_mode?: ViewMode;
 }
 
 /** One account's position between sync passes, crossing as a snake_case word. */

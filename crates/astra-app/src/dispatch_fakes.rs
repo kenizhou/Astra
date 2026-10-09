@@ -19,11 +19,12 @@ use std::{
 use async_trait::async_trait;
 use engine_api::{
     AccountId, CalendarWrites, Capabilities, EmailAddress, Engine, Mailbox, MailboxEdit,
-    MailboxEditReceipt, MailboxId, MailboxRole, MailboxWrites, Provider, SyncWindow,
+    MailboxEditReceipt, MailboxId, MailboxRole, MailboxWrites, Message, Provider, SyncWindow,
 };
 use engine_core::sync::{SyncState, SyncUpdate};
 use engine_provider::{
-    ConnectionInfo, EmailChunk, EmailStream, ProviderError, ProviderResult, ScopeSync,
+    ConnectionInfo, EmailChunk, EmailStream, MailEdit, MailEditReceipt, ProviderError,
+    ProviderResult, ScopeSync,
 };
 
 use crate::{Account, App, AppObserver, MailboxConnector, Surface};
@@ -41,22 +42,36 @@ impl AppObserver for RecordingObserver {
 }
 
 /// A minimal JMAP-shaped fake: a fixed set of mailboxes, a snapshot on the first
-/// folder-list sync of a scope and an empty delta afterwards, and no mail at all (the
-/// pane this milestone renders reads folders, not messages). Counts the email passes
-/// it has served, so a test can prove which path drove a sync.
+/// folder-list sync of a scope and an empty delta afterwards, a fixed set of
+/// messages served on the first email pass of a scope (and merely re-presented
+/// afterwards, so a re-sync never undoes a local edit), and an `edit_mail` that
+/// records every call and answers success. Counts the email passes it has
+/// served, so a test can prove which path drove a sync.
 pub(super) struct FakeProvider {
     /// The account's whole tree, served as the first folder-list snapshot.
     pub(super) mailboxes: Vec<Mailbox>,
+    /// The account's whole mailbox, served as the first email pass.
+    pub(super) messages: Vec<Message>,
     /// How many email sync passes this provider has served.
     pub(super) syncs: Arc<AtomicUsize>,
+    /// Every `edit_mail` this provider was asked to apply, in order.
+    pub(super) edits: Arc<Mutex<Vec<MailEdit>>>,
 }
 
 impl FakeProvider {
-    /// A provider listing `mailboxes` as the account's whole tree.
+    /// A provider listing `mailboxes` as the account's whole tree, holding no mail.
     pub(super) fn with(mailboxes: Vec<Mailbox>) -> Self {
+        Self::with_mail(mailboxes, Vec::new())
+    }
+
+    /// A provider whose account also holds `messages`, so the list reads have rows
+    /// to project.
+    pub(super) fn with_mail(mailboxes: Vec<Mailbox>, messages: Vec<Message>) -> Self {
         Self {
             mailboxes,
+            messages,
             syncs: Arc::new(AtomicUsize::new(0)),
+            edits: Arc::new(Mutex::new(Vec::new())),
         }
     }
 }
@@ -103,12 +118,34 @@ impl Provider for FakeProvider {
         } else {
             "email-1"
         };
+        // The first pass delivers the whole mailbox; a later pass re-presents the same
+        // keys with nothing changed, so a reconcile never tombstones what a local edit
+        // moved (the store shows queued keyword changes until the server answers).
+        let changed = if cursor.is_some() {
+            Vec::new()
+        } else {
+            self.messages.clone()
+        };
+        let present = self
+            .messages
+            .iter()
+            .map(|message| message.id.key().clone())
+            .collect();
         Box::pin(futures::stream::iter(vec![Ok(EmailChunk::reconcile_last(
-            Vec::new(),
-            Vec::new(),
-            Some(0),
+            changed,
+            present,
+            Some(self.messages.len()),
             SyncState::new(state),
         ))]))
+    }
+
+    async fn edit_mail(
+        &self,
+        _account: &AccountId,
+        edit: &MailEdit,
+    ) -> ProviderResult<MailEditReceipt> {
+        self.edits.lock().unwrap().push(edit.clone());
+        Ok(MailEditReceipt::new(edit.target().clone()))
     }
 }
 
@@ -226,4 +263,79 @@ pub(super) fn folder_keys(
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// A message `key` filed in `mailbox` about `subject`, from Ada, delivered at a fixed
+/// base instant, unread and unflagged. Every list fixture starts here and mutates the
+/// axis under test.
+pub(super) fn mail(key: &str, mailbox: &str, subject: &str) -> Message {
+    let mut message = Message::new(
+        engine_core::ids::MessageId::try_from(key).unwrap(),
+        engine_core::membership::Memberships::of_one(MailboxId::try_from(mailbox).unwrap()),
+    );
+    message.envelope.subject = Some(subject.to_owned());
+    message.envelope.from = vec![EmailAddress::named("Ada Lovelace", "ada@example.test")];
+    message.received_at = Some(engine_api::UtcDateTime::new(2026, 10, 9, 8, 0, 0).unwrap());
+    message
+}
+
+/// Delivers `message` at `hour` past the fixture base instant, so list order is fixed
+/// without depending on store insertion order.
+pub(super) fn delivered_at(mut message: Message, hour: u8, minute: u8) -> Message {
+    message.received_at = Some(engine_api::UtcDateTime::new(2026, 10, 9, hour, minute, 0).unwrap());
+    message
+}
+
+/// Marks `message` read (the `$seen` keyword), the state a mark-read flips away from.
+pub(super) fn read(mut message: Message) -> Message {
+    message
+        .keywords
+        .insert(engine_api::Keyword::system(engine_api::SystemKeyword::Seen));
+    message
+}
+
+/// Flags `message` (the `$flagged` keyword).
+pub(super) fn flagged(mut message: Message) -> Message {
+    message.keywords.insert(engine_api::Keyword::system(
+        engine_api::SystemKeyword::Flagged,
+    ));
+    message
+}
+
+/// Puts `message` on provider-assigned thread `thread`, so several messages group into
+/// one conversation the way a JMAP server threads them.
+pub(super) fn threaded(mut message: Message, thread: &str) -> Message {
+    message.thread = Some(engine_core::mail::ThreadRef::provider_assigned(
+        engine_core::ids::ThreadId::try_from(thread).unwrap(),
+    ));
+    message
+}
+
+/// The message-row keys a snapshot lists, in display order; the shape every list
+/// assertion reads before it looks at any row's fields.
+pub(super) fn row_keys(snapshot: &astra_viewmodel::MailboxListSnapshot) -> Vec<String> {
+    snapshot
+        .rows
+        .iter()
+        .map(|row| match &row.key {
+            astra_viewmodel::RowKey::Message { key, .. } => key.as_str().to_owned(),
+            astra_viewmodel::RowKey::Thread { thread_id, .. } => thread_id.as_str().to_owned(),
+        })
+        .collect()
+}
+
+/// The one row a snapshot lists under `key`; panics when it is absent, which is the
+/// assertion.
+pub(super) fn row<'a>(
+    snapshot: &'a astra_viewmodel::MailboxListSnapshot,
+    key: &str,
+) -> &'a astra_viewmodel::MessageRowView {
+    snapshot
+        .rows
+        .iter()
+        .find(|row| match &row.key {
+            astra_viewmodel::RowKey::Message { key: row_key, .. } => row_key.as_str() == key,
+            astra_viewmodel::RowKey::Thread { thread_id, .. } => thread_id.as_str() == key,
+        })
+        .unwrap_or_else(|| panic!("no row keyed {key}"))
 }

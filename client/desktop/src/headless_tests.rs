@@ -45,6 +45,7 @@ fn snapshot(folders: &[&str]) -> MailboxListSnapshot {
             expanded: true,
             folders: folders.iter().map(|name| row(name)).collect(),
         }],
+        ..Default::default()
     }
 }
 
@@ -88,6 +89,7 @@ fn the_tree_diff_counts_a_folder_held_by_any_account() {
                 folders: vec![row("Projects")],
             },
         ],
+        ..Default::default()
     };
     assert!(tree_diff(&split, &["INBOX", "Projects"]).is_empty());
 }

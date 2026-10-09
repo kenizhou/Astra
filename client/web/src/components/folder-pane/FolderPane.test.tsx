@@ -22,7 +22,7 @@ vi.mock('@/services/ipc', async (importOriginal) => ({
 import { FolderPane } from './FolderPane';
 import { useFolderStore } from '@/stores/folderStore';
 import type { MailboxListSnapshot } from '@/services/surfaces';
-import fixtureJson from './__fixtures__/mailbox_list.json';
+import fixtureJson from '@/services/__fixtures__/mailbox_list.json';
 
 const fixture = fixtureJson as MailboxListSnapshot;
 

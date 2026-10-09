@@ -37,8 +37,9 @@ vi.mock('@/services/ipc', () => ipc);
 import { hydrate, mountSurfaceEvents } from './surfaceEvents';
 import { useAccountStore } from '@/stores/accountStore';
 import { useFolderStore } from '@/stores/folderStore';
+import { useListStore } from '@/stores/listStore';
 import { useUiStore } from '@/stores/uiStore';
-import mailboxFixture from '@/components/folder-pane/__fixtures__/mailbox_list.json';
+import mailboxFixture from '@/services/__fixtures__/mailbox_list.json';
 
 function emit(surface: string) {
   for (const handler of wire.handlers) {
@@ -49,6 +50,13 @@ function emit(surface: string) {
 function resetStores() {
   useFolderStore.setState({ accounts: [], selected: null });
   useAccountStore.setState({ accounts: [] });
+  useListStore.setState({
+    rows: [],
+    viewMode: 'flat',
+    visibleLimit: 0,
+    selection: null,
+    selectedKey: null,
+  });
   useUiStore.setState({
     engineState: 'starting',
     sync: [],
@@ -65,7 +73,7 @@ beforeEach(() => {
 });
 
 describe('the surface_changed listener', () => {
-  it('a mailbox_list change pulls the snapshot into the folder and account stores', async () => {
+  it('a mailbox_list change pulls the snapshot into the folder, account, and list stores', async () => {
     ipc.mailboxList.mockResolvedValue(mailboxFixture);
     mountSurfaceEvents();
     await vi.waitFor(() => expect(wire.handlers).toHaveLength(1));
@@ -78,6 +86,11 @@ describe('the surface_changed listener', () => {
       'Home',
     ]);
     expect(useFolderStore.getState().accounts[0]?.folders).toHaveLength(4);
+    expect(useListStore.getState().rows.map((r) => r.subject)).toEqual([
+      'Quarterly report',
+      'Your weekly digest',
+    ]);
+    expect(useListStore.getState().visibleLimit).toBe(50);
     expect(ipc.syncProgress).not.toHaveBeenCalled();
   });
 

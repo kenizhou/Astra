@@ -5,18 +5,14 @@
 use engine_api::AccountId;
 use serde::{Deserialize, Serialize};
 
-use crate::reference::FolderRef;
+use crate::reference::{FolderRef, RowRef};
 
 /// How the mailbox list is grouped.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ViewMode {
-    /// A flat list of messages, newest first.
-    #[default]
-    Flat,
-    /// Conversations grouped by thread, newest activity first.
-    Threaded,
-}
+///
+/// Defined in the view-model, beside the rows it groups, so the intent that
+/// changes the mode and the snapshot that carries it name one type; re-exported
+/// here to keep the protocol the one import a host needs.
+pub use astra_viewmodel::ViewMode;
 
 /// What the folder pane asks the runtime to do to an account's folders.
 ///
@@ -86,6 +82,25 @@ pub enum Intent {
     /// the IPC. Any navigation that changes the list (select account or folder, switch
     /// view mode) resets the window to the first page.
     ShowMore,
+    /// Mark one row read (`read`) or unread: a message in the flat list, or a whole
+    /// conversation in the threaded list (every message on the thread). The write goes
+    /// through the engine's outbox, so the flipped row state shows at once and reaches
+    /// the server when the device can.
+    MarkRead {
+        /// The row to mark, bound to its owning account.
+        row: RowRef,
+        /// Whether the row's mail counts as read.
+        read: bool,
+    },
+    /// Flag one row (`flagged`) or unflag it: a message in the flat list, or a whole
+    /// conversation in the threaded list. As [`Intent::MarkRead`], an outbox write whose
+    /// outcome the republished snapshot carries.
+    SetFlagged {
+        /// The row to flag, bound to its owning account.
+        row: RowRef,
+        /// Whether the row's mail carries the flag.
+        flagged: bool,
+    },
     /// A change to an account's folder tree ([`FolderIntent`]).
     Folders(FolderIntent),
 }

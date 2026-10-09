@@ -54,6 +54,26 @@ describe('the intent wire', () => {
     expect(JSON.stringify(intents.setViewMode('flat'))).toBe('{"set_view_mode":"flat"}');
   });
 
+  it('carries the row reference with mark read', () => {
+    expect(
+      JSON.stringify(intents.markRead({ message: { account: 'work', key: 'imap:v1:u1' } }, true)),
+    ).toBe('{"mark_read":{"row":{"message":{"account":"work","key":"imap:v1:u1"}},"read":true}}');
+    expect(
+      JSON.stringify(intents.markRead({ thread: { account: 'work', thread_id: 'th-7' } }, false)),
+    ).toBe('{"mark_read":{"row":{"thread":{"account":"work","thread_id":"th-7"}},"read":false}}');
+  });
+
+  it('carries the row reference with set flagged', () => {
+    expect(
+      JSON.stringify(intents.setFlagged({ message: { account: 'home', key: 'jmap:e2' } }, true)),
+    ).toBe('{"set_flagged":{"row":{"message":{"account":"home","key":"jmap:e2"}},"flagged":true}}');
+    expect(
+      JSON.stringify(
+        intents.setFlagged({ thread: { account: 'home', thread_id: 'th-7' } }, false),
+      ),
+    ).toBe('{"set_flagged":{"row":{"thread":{"account":"home","thread_id":"th-7"}},"flagged":false}}');
+  });
+
   it('omits a top level create parent and carries a nested one', () => {
     expect(JSON.stringify(intents.createFolder('work', 'Archive'))).toBe(
       '{"folders":{"create":{"account":"work","name":"Archive"}}}',

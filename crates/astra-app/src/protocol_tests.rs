@@ -5,7 +5,7 @@
 use engine_api::AccountId;
 
 use super::{FolderIntent, Intent, Surface, ViewMode};
-use crate::reference::FolderRef;
+use crate::reference::{FolderRef, MessageRef, RowRef, ThreadRef};
 
 /// A well-formed account id, the way every test names one.
 fn account(value: &str) -> AccountId {
@@ -85,6 +85,42 @@ fn show_more_crosses_as_a_bare_renamed_word() {
 }
 
 #[test]
+fn mark_read_carries_the_row_and_the_new_state() {
+    round_trips(
+        &Intent::MarkRead {
+            row: RowRef::Message(MessageRef::from_parts("work", "imap:v1:u1".to_owned()).unwrap()),
+            read: true,
+        },
+        r#"{"mark_read":{"row":{"message":{"account":"work","key":"imap:v1:u1"}},"read":true}}"#,
+    );
+    round_trips(
+        &Intent::MarkRead {
+            row: RowRef::Thread(ThreadRef::from_parts("work", "th-7".to_owned()).unwrap()),
+            read: false,
+        },
+        r#"{"mark_read":{"row":{"thread":{"account":"work","thread_id":"th-7"}},"read":false}}"#,
+    );
+}
+
+#[test]
+fn set_flagged_carries_the_row_and_the_new_state() {
+    round_trips(
+        &Intent::SetFlagged {
+            row: RowRef::Message(MessageRef::from_parts("home", "jmap:e2".to_owned()).unwrap()),
+            flagged: true,
+        },
+        r#"{"set_flagged":{"row":{"message":{"account":"home","key":"jmap:e2"}},"flagged":true}}"#,
+    );
+    round_trips(
+        &Intent::SetFlagged {
+            row: RowRef::Thread(ThreadRef::from_parts("home", "th-7".to_owned()).unwrap()),
+            flagged: false,
+        },
+        r#"{"set_flagged":{"row":{"thread":{"account":"home","thread_id":"th-7"}},"flagged":false}}"#,
+    );
+}
+
+#[test]
 fn folders_carries_the_folder_intent() {
     // A top-level create omits `parent` entirely; a nested one carries it.
     round_trips(
@@ -145,4 +181,18 @@ fn a_malformed_account_id_is_refused_on_the_wire() {
     let folder = r#"{"select_folder":{"folder":{"account":"","key":"INBOX"}}}"#;
     assert!(serde_json::from_str::<Intent>(folder).is_err());
     assert!(serde_json::from_str::<FolderRef>(r#"{"account":"","key":"INBOX"}"#).is_err());
+}
+
+#[test]
+fn a_malformed_row_reference_is_refused_on_the_wire() {
+    // The message row's key half validates too, exactly as the account does: a blank key
+    // cannot name a message, and a thread row's account is the half that routes.
+    let blank_account = r#"{"mark_read":{"row":{"message":{"account":"","key":"x"}},"read":true}}"#;
+    assert!(serde_json::from_str::<Intent>(blank_account).is_err());
+    let blank_key =
+        r#"{"set_flagged":{"row":{"message":{"account":"work","key":""}},"flagged":true}}"#;
+    assert!(serde_json::from_str::<Intent>(blank_key).is_err());
+    let thread =
+        r#"{"mark_read":{"row":{"thread":{"account":"","thread_id":"th-7"}},"read":true}}"#;
+    assert!(serde_json::from_str::<Intent>(thread).is_err());
 }
