@@ -113,11 +113,11 @@ time; log) and grows only on demand.
   (1200x800, min 800x600). No tray, no autostart, no global shortcuts in
   SP1 (they arrive with the settings slice).
 - Commands: `dispatch`, `mailbox_list`, `sync_progress`, plus account
-  setup: `add_account(config_toml)` and `imap_test_connection`. The
-  server-recommendation step (`detect_account_settings`) is a known
-  deferral to the SP2 accounts slice, where the autodetect strategies
-  port; the manual-IMAP-first defaults live client-side in the setup
-  flow.
+  setup: `add_account(config_toml)`, `detect_account_settings`, and
+  `imap_test_connection`. The server-recommendation command
+  (`detect_account_settings`) landed with SP2a account discovery,
+  discharging the SP1 deferral; the manual-IMAP-first defaults live
+  client-side in the setup flow.
 - Events: `surface_changed` (name + nothing else; the client pulls),
   reserved names `engine:*` are not used: the app is the only engine
   consumer.
