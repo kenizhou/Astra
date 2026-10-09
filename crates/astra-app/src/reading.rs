@@ -34,24 +34,26 @@ impl<P: Provider> App<P> {
 
     /// Opens one message in the reading pane: renders its body through the
     /// pipeline, publishes the snapshot, and marks the message read through the
-    /// same write path [`Intent::MarkRead`](crate::Intent::MarkRead) drives
-    /// (skipped when it already is, so a re-open edits nothing).
+    /// same write path [`Intent::MarkRead`](crate::Intent::MarkRead) drives.
     ///
-    /// A message the store no longer holds opens nothing: the pane is cleared
-    /// rather than left showing whatever was open before. The open is claimed
-    /// before the first `await`, so a close or a newer open that lands while the
-    /// body is in flight drops the render that arrives after it: an older open
-    /// must not win by finishing last.
+    /// The read state is re-resolved at the moment of that decision, the way
+    /// mail-calendar's open does, so a read that landed while the body was in
+    /// flight (another intent, another client of the same mailbox) is not edited
+    /// again. A message the store no longer holds opens nothing: the pane is
+    /// cleared rather than left showing whatever was open before. The open is
+    /// claimed before the first `await`, so a close or a newer open that lands
+    /// while the body is in flight drops the render that arrives after it: an
+    /// older open must not win by finishing last.
     pub(crate) async fn open_message(&self, message: MessageRef) {
         *self
             .open_reading
             .lock()
             .expect("open-reading mutex poisoned") = Some(message.clone());
         match self.render_open(&message).await {
-            Some(rendered) => {
+            Some(snapshot) => {
                 if self.still_open(&message) {
-                    self.reading.publish(Some(rendered.snapshot));
-                    if rendered.unread {
+                    self.reading.publish(Some(snapshot));
+                    if self.message_unread(&message).await {
                         self.mark_read(RowRef::Message(message), true).await;
                     }
                 }
@@ -84,9 +86,9 @@ impl<P: Provider> App<P> {
             return;
         };
         match self.render_open(&message).await {
-            Some(rendered) => {
+            Some(snapshot) => {
                 if self.still_open(&message) {
-                    self.reading.publish(Some(rendered.snapshot));
+                    self.reading.publish(Some(snapshot));
                 }
             }
             None => {
@@ -95,6 +97,17 @@ impl<P: Provider> App<P> {
                 }
             }
         }
+    }
+
+    /// Whether `message` is unread **right now**, re-resolved from the store:
+    /// the mark-read gate of an open, read at the moment of the decision the way
+    /// mail-calendar reads it, so the state the render began with is not the
+    /// state the edit is decided on. `false` for a message the store no longer
+    /// holds: there is nothing left to edit.
+    async fn message_unread(&self, message: &MessageRef) -> bool {
+        resolve(&self.engine, message)
+            .await
+            .is_some_and(|original| !original.has_system_keyword(SystemKeyword::Seen))
     }
 
     /// Whether `message` is still what the pane has open: the guard that keeps
@@ -122,28 +135,18 @@ impl<P: Provider> App<P> {
     /// Renders `message` through this app's engine and its account's first
     /// provider; `None` when the account is gone, holds no provider, or the
     /// message does not resolve.
-    async fn render_open(&self, message: &MessageRef) -> Option<Rendered> {
+    async fn render_open(&self, message: &MessageRef) -> Option<ReadingSnapshot> {
         let handle = self.account_handle(&message.account).await?;
         let provider = handle.providers.first()?;
         render_reading(&self.engine, provider, message).await
     }
 }
 
-/// The pipeline's answer for one open: the snapshot to publish, and whether the
-/// message it rendered was unread when resolved (the open's mark-read gate,
-/// mirroring mail-calendar's skip-when-seen so a re-open edits nothing).
-pub(crate) struct Rendered {
-    /// The snapshot the pane renders.
-    pub snapshot: ReadingSnapshot,
-    /// Whether the resolved message carried no `$seen` keyword.
-    pub unread: bool,
-}
-
 /// Renders `message` (its account and provider key bound together) into the
 /// reading snapshot: resolve it in the store, fetch the body through the
 /// engine's cache-first reads, sanitise the HTML and resolve its inline `cid:`
-/// images into `data:` URIs, gate the remote sources behind placeholders, and
-/// list the attachment metadata. `None` when the message is not in the
+/// images into `data:` URIs, gate every remote reference behind placeholders,
+/// and list the attachment metadata. `None` when the message is not in the
 /// account's synced set or its body cannot be fetched.
 ///
 /// This is the non-mutating read path; the mark-read is the caller's decision,
@@ -152,7 +155,7 @@ pub(crate) async fn render_reading<P: Provider>(
     engine: &Engine,
     provider: &P,
     message: &MessageRef,
-) -> Option<Rendered> {
+) -> Option<ReadingSnapshot> {
     let original = resolve(engine, message).await?;
     let body = engine
         .message_body(provider, &message.account, &original)
@@ -168,7 +171,7 @@ pub(crate) async fn render_reading<P: Provider>(
     // The HTML is the engine's raw, unsanitised part. Sanitise first (the cheap
     // pass that also tells us whether the body references inline images), fetch
     // the parts only when it does, then resolve them into the body and gate the
-    // remote sources. `plain` is the text view and passes through untouched.
+    // remote references. `plain` is the text view and passes through untouched.
     let (html, remote_image_count) = match body.html() {
         Some(raw) => {
             let cleaned = sanitise::sanitise(raw);
@@ -193,34 +196,31 @@ pub(crate) async fn render_reading<P: Provider>(
         .iter()
         .map(attachment_row)
         .collect();
-    Some(Rendered {
-        unread: !original.has_system_keyword(SystemKeyword::Seen),
-        snapshot: ReadingSnapshot {
-            message: MessageKey {
-                account: message.account.clone(),
-                key: message.key.clone(),
-            },
-            subject: original.envelope.subject.clone().unwrap_or_default(),
-            // The sender the reading header names, split the way the snapshot
-            // carries it: the display name (the bare address when the header
-            // carried none) beside the address itself.
-            from_name: sender_name(&original),
-            from_address: original
-                .envelope
-                .from
-                .first()
-                .map_or_else(String::new, |from| from.email.clone()),
-            // The same instant the list row is ordered by: the delivery date,
-            // falling back to the Date header, whole seconds in UTC.
-            sent_at: original
-                .received_at
-                .or(original.sent_at)
-                .map_or_else(String::new, format_instant),
-            html,
-            plain: body.plain().map(str::to_owned),
-            attachments,
-            remote_image_count,
+    Some(ReadingSnapshot {
+        message: MessageKey {
+            account: message.account.clone(),
+            key: message.key.clone(),
         },
+        subject: original.envelope.subject.clone().unwrap_or_default(),
+        // The sender the reading header names, split the way the snapshot
+        // carries it: the display name (the bare address when the header
+        // carried none) beside the address itself.
+        from_name: sender_name(&original),
+        from_address: original
+            .envelope
+            .from
+            .first()
+            .map_or_else(String::new, |from| from.email.clone()),
+        // The same instant the list row is ordered by: the delivery date,
+        // falling back to the Date header, whole seconds in UTC.
+        sent_at: original
+            .received_at
+            .or(original.sent_at)
+            .map_or_else(String::new, format_instant),
+        html,
+        plain: body.plain().map(str::to_owned),
+        attachments,
+        remote_image_count,
     })
 }
 

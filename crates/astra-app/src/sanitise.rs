@@ -17,12 +17,15 @@
 //! Two transforms of Astra's own follow the ammonia pass, both pure functions
 //! over the sanitised string: an inline `cid:` image is resolved into a
 //! self-contained `data:` URI from the engine's decoded parts (skipped with alt
-//! text over a size cap, so a huge image cannot balloon the snapshot), and a
-//! remote `src` is rewritten to a `data-astra-src` placeholder and counted, so
-//! nothing remote loads until the reader opts in. A remote reference inside CSS
-//! (`url(...)` or `@import`) is neither rewritten nor counted: the reading
-//! document's content security policy is what blocks that load, the same
-//! boundary mail-calendar leans on.
+//! text over a size cap, so a huge image cannot balloon the snapshot), and every
+//! remote reference is rewritten to a placeholder and counted, so nothing
+//! remote loads until the reader opts in. A remote reference is an `src`
+//! attribute over http(s) or a protocol-relative `//` (rewritten to a
+//! `data-astra-src` attribute) or a CSS `url(...)`/`@import` of the same shapes
+//! (rewritten behind the inert `data-astra-style-url:` scheme), the vectors
+//! mail-calendar's own remote detector scans for; the reading document's
+//! content security policy is defence in depth behind the rewrite, not the
+//! boundary itself.
 
 use std::{collections::HashSet, sync::OnceLock};
 
@@ -270,27 +273,49 @@ fn base64_encode_into(bytes: &[u8], out: &mut String) {
     }
 }
 
-/// The gated body: the HTML with every remote source now a placeholder, and how
-/// many remote references are blocked until the reader opts in.
+/// The gated body: the HTML with every remote reference now a placeholder, and
+/// how many are blocked until the reader opts in.
 pub(crate) struct Gated {
-    /// The HTML whose remote sources are `data-astra-src` placeholders.
+    /// The HTML whose remote sources are `data-astra-src` placeholders and whose
+    /// remote CSS references are `data-astra-style-url:` ones.
     pub html: String,
-    /// How many remote sources were rewritten, one per placeholder: the count a
-    /// surface offers the "show remote images" toggle for.
+    /// How many remote references were rewritten, source and CSS alike: the
+    /// count a surface offers the "show remote images" toggle for.
     pub remote_image_count: u32,
 }
 
-/// Rewrites every remote source reference in `html` to a `data-astra-src`
-/// placeholder carrying the original URL, and counts them, so nothing remote
-/// loads until a surface resolves the placeholders on the reader's opt-in.
+/// Rewrites every remote reference in `html` to a placeholder carrying the
+/// original URL, and counts them, so nothing remote loads until a surface
+/// resolves the placeholders on the reader's opt-in.
 ///
-/// A remote source is an `src` attribute value over `http(s)` or a
-/// protocol-relative `//`; the value is carried verbatim (the sanitiser has
-/// already escaped it). Local sources are untouched: `data:` is already-inlined
-/// bytes and `cid:` an inert unresolved reference. Only `src` is rewritten: an
-/// `href` fetches nothing until clicked, and CSS-borne `url(...)` loads are the
-/// reading document's content security policy to block.
+/// Two kinds of reference are gated, both over `http(s)` or a
+/// protocol-relative `//` and both carried verbatim (the sanitiser has already
+/// escaped the markup): an `src` attribute value becomes a `data-astra-src`
+/// attribute, and a CSS `url(...)` or `@import` (in a style attribute or a
+/// `style` block) is prefixed with the inert `data-astra-style-url:` scheme.
+/// Local references are untouched: `data:` is already-inlined bytes, `cid:` an
+/// inert unresolved reference, and a relative `url()` names no remote origin.
+/// An `href` is never rewritten: it fetches nothing until clicked.
 pub(crate) fn gate_remote_sources(html: &str) -> Gated {
+    let (src_gated, src_count) = rewrite_remote_srcs(html);
+    let (css_gated, css_count) = rewrite_remote_css(&src_gated);
+    Gated {
+        html: css_gated,
+        remote_image_count: src_count + css_count,
+    }
+}
+
+/// Whether `value` opens a remote reference: an `http(s)` scheme or a
+/// protocol-relative `//`.
+fn starts_remote(value: &str) -> bool {
+    value
+        .get(..4)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("http"))
+        || value.starts_with("//")
+}
+
+/// Rewrites each remote `src` attribute to a `data-astra-src` placeholder.
+fn rewrite_remote_srcs(html: &str) -> (String, u32) {
     let lower = html.to_ascii_lowercase();
     let mut out = String::with_capacity(html.len());
     let mut count: u32 = 0;
@@ -304,15 +329,8 @@ pub(crate) fn gate_remote_sources(html: &str) -> Gated {
         let value_end = value_start + quote_rel;
         let token_end = value_end + 1;
         let value = &html[value_start..value_end];
-        let remote = {
-            let trimmed = value.trim_start();
-            let scheme_remote = trimmed
-                .get(..4)
-                .is_some_and(|prefix| prefix.eq_ignore_ascii_case("http"));
-            scheme_remote || trimmed.starts_with("//")
-        };
         out.push_str(&html[cursor..token_start]);
-        if remote {
+        if starts_remote(value.trim_start()) {
             out.push_str("data-astra-src=\"");
             out.push_str(value);
             out.push('"');
@@ -323,9 +341,110 @@ pub(crate) fn gate_remote_sources(html: &str) -> Gated {
         cursor = token_end;
     }
     out.push_str(&html[cursor..]);
-    Gated {
-        html: out,
-        remote_image_count: count,
+    (out, count)
+}
+
+/// The CSS tokens whose follower may be a remote load. The scan takes the
+/// earliest of them at each step, so an `@import url(...)` is rewritten (and
+/// counted) once, by its `url(`.
+const CSS_MARKERS: [&str; 2] = ["url(", "@import"];
+
+/// The placeholder scheme a remote CSS reference is rewritten behind: no user
+/// agent fetches an unknown scheme, and a surface can strip the prefix to
+/// restore the reference on opt-in.
+const CSS_PLACEHOLDER: &str = "data-astra-style-url:";
+
+/// The bytes that may sit between a CSS token and its URL: CSS whitespace and
+/// the quotes a URL may be wrapped in, the same run mail-calendar's detector
+/// trims (`url( 'https://x' )`, `@import "https://x"`).
+const CSS_SKIP: &[u8] = b" \t\n\r'\"";
+
+/// Rewrites each remote CSS reference, a `url(...)` or `@import` whose URL is
+/// remote, to the `data-astra-style-url:` placeholder scheme and counts it.
+///
+/// Scanned on the serialised output, so a style attribute and a `style` block
+/// are covered alike; a marker whose follower is not remote (`data:`, `cid:`,
+/// relative) is copied through untouched. The detection is mail-calendar's
+/// (`css_marker_loads_remote`): the marker, then a run of CSS whitespace and
+/// quotes, then the remote check. An `@import` whose target is a `url(...)` is
+/// scanned past the at-rule rather than through it, so the inner `url(` is
+/// rewritten (and counted) on its own, once.
+fn rewrite_remote_css(html: &str) -> (String, u32) {
+    let lower = html.to_ascii_lowercase();
+    let bytes = lower.as_bytes();
+    let mut out = String::with_capacity(html.len());
+    let mut count: u32 = 0;
+    let mut cursor = 0;
+    // The earliest of the markers from here; both must be probed, because
+    // either may sit inside the other's reference.
+    while let Some((marker, at)) = CSS_MARKERS
+        .iter()
+        .filter_map(|marker| lower[cursor..].find(marker).map(|at| (*marker, at)))
+        .min_by_key(|&(_, at)| at)
+    {
+        let marker_start = cursor + at;
+        let after_marker = marker_start + marker.len();
+        // The URL opens at the first byte past the whitespace-and-quotes run,
+        // remembering the quote (if any) that closes it.
+        let mut value_start = after_marker;
+        let mut quote = None;
+        while let Some(&byte) = bytes.get(value_start) {
+            if CSS_SKIP.contains(&byte) {
+                quote = matches!(byte, b'"' | b'\'').then_some(byte);
+                value_start += 1;
+            } else {
+                break;
+            }
+        }
+        let remote = starts_remote(&lower[value_start..]);
+        if !remote && marker == "@import" {
+            // A local @import may still wrap a remote url(); resume inside it
+            // rather than past its terminator.
+            out.push_str(&html[cursor..after_marker]);
+            cursor = after_marker;
+            continue;
+        }
+        let Some(end) = css_reference_end(html, value_start, quote, marker) else {
+            // The reference never closes: malformed hostile input, copy the
+            // remainder untouched rather than guessing at its extent.
+            out.push_str(&html[cursor..]);
+            return (out, count);
+        };
+        out.push_str(&html[cursor..value_start]);
+        if remote {
+            out.push_str(CSS_PLACEHOLDER);
+            count += 1;
+        }
+        out.push_str(&html[value_start..end]);
+        cursor = end;
+    }
+    out.push_str(&html[cursor..]);
+    (out, count)
+}
+
+/// Where the CSS reference opening at `value_start` ends (a past-the-end index):
+/// at its closing quote when quoted, else at the `)` that closes a `url(`, else
+/// at the `;` that ends a bare `@import` target. `None` when no such byte
+/// follows, the malformed case.
+fn css_reference_end(
+    html: &str,
+    value_start: usize,
+    quote: Option<u8>,
+    marker: &str,
+) -> Option<usize> {
+    match quote {
+        Some(quote) => {
+            let close = html[value_start..].find(quote as char)?;
+            Some(value_start + close + 1)
+        }
+        None if marker == "url(" => {
+            let close = html[value_start..].find(')')?;
+            Some(value_start + close + 1)
+        }
+        None => {
+            let close = html[value_start..].find(';')?;
+            Some(value_start + close + 1)
+        }
     }
 }
 

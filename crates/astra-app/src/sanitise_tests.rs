@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Tests for the reading body's sanitiser: what it strips, what it keeps because
-//! stripping it makes real mail illegible, how an inline `cid:` image resolves into a
-//! `data:` URI, and how a remote source becomes a placeholder. The strip-and-keep
-//! vectors port mail-calendar's sanitisation tests; the inline size cap and the remote
-//! placeholder rewrite are Astra's own, per the SP2c design.
+//! stripping it makes real mail illegible, and how an inline `cid:` image
+//! resolves into a `data:` URI. The strip-and-keep vectors port mail-calendar's
+//! sanitisation tests; the inline size cap is Astra's own, per the SP2c design.
+//! The remote gate's tests live in `sanitise_remote_tests`, split out for the
+//! file-length cap.
 
 use engine_api::InlinePart;
 
-use super::{gate_remote_sources, inline_cid_images, sanitise, INLINE_IMAGE_CAP_BYTES};
+use super::{inline_cid_images, sanitise, INLINE_IMAGE_CAP_BYTES};
 
 /// An inline part, the shape the engine's parts read hands the rewrite.
 fn part(cid: &str, media: &str, bytes: &[u8]) -> InlinePart {
@@ -292,100 +293,5 @@ fn base64_matches_rfc4648_vectors() {
     );
 }
 
-#[test]
-fn remote_sources_are_rewritten_to_placeholders_and_counted() {
-    let gated = gate_remote_sources(
-        r#"<p>x</p><img src="https://tracker.example/p.gif?id=42"><img src="//cdn.example/a.png">"#,
-    );
-    assert!(
-        gated
-            .html
-            .contains(r#"data-astra-src="https://tracker.example/p.gif?id=42""#),
-        "{}",
-        gated.html
-    );
-    assert!(
-        gated
-            .html
-            .contains(r#"data-astra-src="//cdn.example/a.png""#),
-        "{}",
-        gated.html
-    );
-    // No plain src with a remote or protocol-relative value survives.
-    assert!(!gated.html.contains(r#" src="http"#), "{}", gated.html);
-    assert!(!gated.html.contains(r#" src="//"#), "{}", gated.html);
-    assert_eq!(gated.remote_image_count, 2, "one per rewritten source");
-    assert!(gated.html.contains("<p>x</p>"), "the rest is untouched");
-}
-
-#[test]
-fn remote_sources_rewrite_case_insensitively() {
-    // A sender may author SRC= or HTTP://; the scan matches either and the value
-    // is carried verbatim.
-    let gated = gate_remote_sources(r#"<img SRC="HTTP://x.example/a.png">"#);
-    assert!(
-        gated
-            .html
-            .contains(r#"data-astra-src="HTTP://x.example/a.png""#),
-        "{}",
-        gated.html
-    );
-    assert_eq!(gated.remote_image_count, 1);
-}
-
-#[test]
-fn local_sources_are_untouched_by_the_remote_gate() {
-    // data: (already inlined bytes) and cid: (an unresolved inert reference) load
-    // nothing remote, so neither is rewritten nor counted.
-    let html = r#"<img src="data:image/png;base64,aGVsbG8="><img src="cid:logo@x">"#;
-    let gated = gate_remote_sources(html);
-    assert_eq!(gated.html, html);
-    assert_eq!(gated.remote_image_count, 0);
-}
-
-#[test]
-fn a_plain_remote_link_is_not_a_load_and_is_not_counted() {
-    // An <a href> fetches nothing until clicked; it stays a link, uncounted.
-    let gated = gate_remote_sources(r#"<a href="https://x.example">l</a>"#);
-    assert!(
-        gated.html.contains(r#"href="https://x.example""#),
-        "{}",
-        gated.html
-    );
-    assert!(!gated.html.contains("data-astra-src"), "{}", gated.html);
-    assert_eq!(gated.remote_image_count, 0);
-}
-
-#[test]
-fn inlined_and_remote_images_carry_the_same_body_through_both_transforms() {
-    // The pipeline's composition: sanitise, resolve the cid: images, then gate the
-    // remote sources, in that order, over one body that carries all three kinds.
-    let raw = concat!(
-        r#"<p>Body</p><img src="cid:logo@x">"#,
-        r#"<img src="https://tracker.example/p.png">"#,
-        r#"<img src="data:image/gif;base64,R0lGOD">"#,
-    );
-    let cleaned = sanitise(raw);
-    let inlined = inline_cid_images(&cleaned.html, &[part("logo@x", "image/png", b"hello")]);
-    let gated = gate_remote_sources(&inlined);
-    assert!(
-        gated
-            .html
-            .contains("src=\"data:image/png;base64,aGVsbG8=\""),
-        "{}",
-        gated.html
-    );
-    assert!(
-        gated
-            .html
-            .contains(r#"data-astra-src="https://tracker.example/p.png""#),
-        "{}",
-        gated.html
-    );
-    assert!(
-        gated.html.contains("src=\"data:image/gif;base64,R0lGOD\""),
-        "{}",
-        gated.html
-    );
-    assert_eq!(gated.remote_image_count, 1);
-}
+#[path = "sanitise_remote_tests.rs"]
+mod remote;

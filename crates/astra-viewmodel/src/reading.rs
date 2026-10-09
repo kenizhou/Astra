@@ -130,7 +130,8 @@ pub struct ReadingSnapshot {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<AttachmentRow>,
     /// How many remote references the sanitised HTML carries, all of them
-    /// blocked until the reader opts in.
+    /// blocked until the reader opts in: remote image sources and remote CSS
+    /// loads (`url(...)` and `@import`) alike.
     ///
     /// `0` means the body has nothing remote to load, and a surface offers no
     /// toggle for it.
