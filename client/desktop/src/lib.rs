@@ -6,11 +6,12 @@
 //! main window `tauri.conf.json` declares, with the IPC command surface registered
 //! and the boot hook that builds the managed state behind it. The app's async
 //! runtime lives in [`runtime`], the observer port and its rate limiter in
-//! `observer`, the credential store port in `credential_store`, and the exit hook
-//! that stops sync in `exit`.
+//! `observer`, the credential store port in `credential_store`, the background
+//! LLM client in `ai`, and the exit hook that stops sync in `exit`.
 
 pub mod runtime;
 
+mod ai;
 mod app_state;
 mod boot;
 mod commands;
@@ -30,6 +31,7 @@ mod commands_fakes;
 
 use tauri::{Emitter, Manager};
 
+pub use ai::{repair_json, LlmClient, LlmError};
 pub(crate) use app_state::{AppPort, AppState, HostAccount, HostProvider};
 pub(crate) use boot::AccountDials;
 pub use credential_store::CredentialStoreError;

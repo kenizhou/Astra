@@ -40,6 +40,9 @@ astra-app = { path = "../../crates/astra-app" }
 astra-account = { path = "../../crates/astra-account" }
 # The immutable snapshots the pull commands hand the webview.
 astra-viewmodel = { path = "../../crates/astra-viewmodel" }
+# The AI foundation the background LLM client rides: the tier registry, the
+# correlation id, and the ledger store its per-attempt rows land in.
+astra-ai = { path = "../../crates/astra-ai" }
 # The engine facade: the `Provider` trait the host's boxed provider type names.
 engine-api.workspace = true
 # The OS secure store the account credentials live in (Credential Manager,
@@ -64,8 +67,19 @@ tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
 astra-autodetect = { path = "../../crates/astra-autodetect" }
 # The MX and SRV lookups behind that seam, over the system's configured DNS.
 hickory-resolver.workspace = true
+# The background LLM client's transport. The host builds the client (the
+# engine's TLS policy, as autodetection does); the AI module only sends over
+# it, so no TLS feature is needed here.
+reqwest.workspace = true
 
 [dev-dependencies]
 # The composer document the drafts intents carry; the command-surface fakes
 # render the saved document to the plain text a stored draft resumes as.
 astra-composer = { path = "../../crates/astra-composer" }
+# Reading the LLM ledger rows back in the client tests, through the test's
+# own connection into the file-backed store the client records into.
+rusqlite = { workspace = true, features = ["fallible_uint"] }
+# Building the tests' HTTP client over the engine's TLS policy, the same way
+# autodetection builds its fetcher; the plain-HTTP fixture never exercises
+# the TLS path, but the client build needs the installed provider.
+engine-tls.workspace = true
