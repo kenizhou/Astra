@@ -82,16 +82,21 @@ fn parse_addresses(field: &str) -> Vec<EmailAddress> {
 /// A fresh `Message-ID` for a composition's first save, from the wall clock: the outbox
 /// keys on it for idempotency, so it has to be unique per message and stable across the
 /// saves of one composition, which the process counter and the clock together give.
-pub(super) fn mint_message_id() -> MessageIdHeader {
+///
+/// The fallback form keeps the counter, so even a mint whose primary form the header
+/// rules refuse can never collide with another mint's. `None` only if both forms are
+/// refused, which the caller treats as any other build failure rather than guessing an
+/// id two compositions could share.
+pub(super) fn mint_message_id() -> Option<MessageIdHeader> {
     use std::sync::atomic::{AtomicU64, Ordering};
     static SEQ: AtomicU64 = AtomicU64::new(0);
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_nanos());
-    MessageIdHeader::new(format!("draft-{nanos}-{seq}@astra.local")).unwrap_or_else(|_| {
-        MessageIdHeader::new("draft@astra.local").expect("a syntactically valid header")
-    })
+    MessageIdHeader::new(format!("draft-{nanos}-{seq}@astra.local"))
+        .ok()
+        .or_else(|| MessageIdHeader::new(format!("draft-{seq}@astra.local")).ok())
 }
 
 /// The wall clock as a whole-second UTC instant, the same shape the reading snapshot

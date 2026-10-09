@@ -46,11 +46,18 @@ async fn the_autosave_fires_after_the_idle_and_not_before() {
     );
 
     tokio::time::sleep(Duration::from_secs(2)).await;
-    assert_eq!(
-        puts.lock().unwrap().len(),
-        1,
-        "the idle fire retried the save and this time it landed"
-    );
+    {
+        let landed = puts.lock().unwrap();
+        assert_eq!(
+            landed.len(),
+            1,
+            "the idle fire retried the save and this time it landed"
+        );
+        assert!(
+            landed[0].0.text_body.contains("on a train"),
+            "the settled words are the parked ones"
+        );
+    }
     assert_eq!(
         app.draft_status().map(|status| status.state),
         Some(DraftSaveState::Saved)
@@ -110,5 +117,110 @@ async fn a_discard_cancels_the_armed_autosave() {
     assert!(
         puts.lock().unwrap().is_empty(),
         "a discarded composition must not store anything after it is gone"
+    );
+}
+
+/// The race the fire's openness check exists for, driven at its one reachable window.
+/// The fire takes its arm at the deadline and then queues on the save gate; holding the
+/// gate across the deadline parks the fire exactly there, and a discard landing in that
+/// window completes first. The fire's save must then be a no-op: a re-store would write
+/// the discarded words under a fresh `Message-ID` nothing can name any more, and would
+/// publish a saved hint for a composition that is gone.
+#[tokio::test(start_paused = true)]
+async fn the_deadline_fire_does_not_re_store_a_discarded_composition() {
+    let provider = fakes::FakeProvider::with(vec![fakes::inbox()]);
+    let puts = provider.draft_puts();
+    let deletes = provider.draft_deletes();
+    let surfaces = Arc::new(Mutex::new(Vec::new()));
+    let app = app_over(provider, Duration::from_secs(30), &surfaces);
+    drive(&app);
+
+    app.dispatch(save("compose-1", "gone words")).await.unwrap();
+    assert_eq!(puts.lock().unwrap().len(), 1);
+
+    let gate = Arc::clone(&app.save_gate);
+    let held_gate = gate.lock().await;
+    tokio::time::sleep(Duration::from_secs(31)).await;
+    let discard = {
+        let app = Arc::clone(&app);
+        tokio::spawn(async move {
+            app.dispatch(crate::Intent::Drafts(crate::DraftsIntent::Discard {
+                composition: super::composition("compose-1"),
+            }))
+            .await
+            .unwrap();
+        })
+    };
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    drop(held_gate);
+    discard.await.unwrap();
+    // Let the fire run what the gate release woke before reading the outcome: the
+    // assertion is that it does nothing, not that it has not been polled yet.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    assert_eq!(
+        puts.lock().unwrap().len(),
+        1,
+        "the fire must not re-store a discarded composition under a new message id"
+    );
+    assert!(
+        app.draft_status().is_none(),
+        "a discarded composition leaves no hint, not even the fire's"
+    );
+    assert_eq!(
+        super::deleted(&deletes),
+        vec!["draft-1".to_owned()],
+        "the discard still removed the copy that was stored"
+    );
+}
+
+/// The close side of the same race, through the same window: the fire has taken its
+/// arm and queues on the gate a close is waiting behind. Whichever of the two the gate
+/// grants first, the fire must never begin a save against a composition the close has
+/// already forgotten.
+#[tokio::test(start_paused = true)]
+async fn the_deadline_fire_does_not_re_store_a_closed_composition() {
+    let provider = fakes::FakeProvider::with(vec![fakes::inbox()]);
+    let puts = provider.draft_puts();
+    let deletes = provider.draft_deletes();
+    let surfaces = Arc::new(Mutex::new(Vec::new()));
+    let app = app_over(provider, Duration::from_secs(30), &surfaces);
+    drive(&app);
+
+    app.dispatch(save("compose-1", "kept words")).await.unwrap();
+    assert_eq!(puts.lock().unwrap().len(), 1);
+
+    let gate = Arc::clone(&app.save_gate);
+    let held_gate = gate.lock().await;
+    tokio::time::sleep(Duration::from_secs(31)).await;
+    let close = {
+        let app = Arc::clone(&app);
+        tokio::spawn(async move {
+            app.dispatch(crate::Intent::Drafts(crate::DraftsIntent::Close {
+                composition: super::composition("compose-1"),
+            }))
+            .await
+            .unwrap();
+        })
+    };
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    drop(held_gate);
+    close.await.unwrap();
+    // Let the fire run what the gate release woke before reading the outcome: the
+    // assertion is that it does nothing, not that it has not been polled yet.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    assert_eq!(
+        puts.lock().unwrap().len(),
+        1,
+        "the fire must not re-store a closed composition under a new message id"
+    );
+    assert!(
+        app.draft_status().is_none(),
+        "a closed composition leaves no hint, not even the fire's"
+    );
+    assert!(
+        super::deleted(&deletes).is_empty(),
+        "a close never removes the draft"
     );
 }

@@ -78,7 +78,9 @@ impl<P: Provider> App<P> {
             subject: newest.envelope.subject.clone().unwrap_or_default(),
             body_text: body.plain().unwrap_or_default().to_owned(),
         };
-        self.adopt_stored_draft(&composition, account, &newest);
+        if !self.adopt_stored_draft(&composition, account, &newest) {
+            return None;
+        }
         Some(resumed)
     }
 
@@ -94,18 +96,28 @@ impl<P: Provider> App<P> {
     /// No digest is recorded: the body the composer opens with is text derived from the
     /// stored draft, and re-rendering it produces a different message than the one on
     /// the server, so the first save after a resume always writes.
+    ///
+    /// Answers whether the composition was adopted: `false` when no header could be
+    /// named, in which case the caller reports no resume at all rather than handing the
+    /// composer a copy its saves will not supersede.
     fn adopt_stored_draft(
         &self,
         composition: &CompositionId,
         account: &AccountId,
         stored: &Message,
-    ) {
+    ) -> bool {
         let message_id = stored
             .envelope
             .message_id
             .first()
             .cloned()
-            .unwrap_or_else(super::mint_message_id);
+            .or_else(super::mint_message_id);
+        let Some(message_id) = message_id else {
+            // Neither the draft's own header nor a new one: nothing to key the saves on,
+            // so the composition is left unknown and the stored copy where it is.
+            log::warn!("drafts: the resumed draft has no id to save under");
+            return false;
+        };
         let mut drafts = self.drafts.lock().expect("drafts mutex poisoned");
         // A composer that has just opened has saved nothing, whatever a composition of
         // this name did before it: the hint is per composer.
@@ -132,6 +144,7 @@ impl<P: Provider> App<P> {
         {
             self.draft_status.publish(None);
         }
+        true
     }
 }
 

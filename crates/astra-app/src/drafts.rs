@@ -19,8 +19,8 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use astra_composer::ComposerDocument;
 use astra_viewmodel::{DraftSaveState, DraftStatusSnapshot};
 use engine_api::{
-    AccountId, DraftPut, DrainOutcome, MessageIdHeader, PendingOpId, PendingOpKind, Provider,
-    ProviderKey,
+    AccountId, DraftPut, DrainOutcome, MessageIdHeader, OpRejection, PendingOpId, PendingOpKind,
+    Provider, ProviderKey,
 };
 
 use crate::{App, CompositionId, DraftsIntent};
@@ -133,20 +133,29 @@ impl<P: Provider> App<P> {
         self.draft_status.get()
     }
 
-    /// Stores the composer's content in the account's Drafts folder, replacing what this
-    /// composition's previous save left there.
+    /// Stores the composer's content in the account's Drafts folder, replacing what
+    /// this composition's previous save left there: the dispatch path, which takes the
+    /// save gate for the length of the save. One save at a time, because the second of
+    /// two overlapping saves must read the stored key only after the first has recorded
+    /// what it stored.
     async fn save_draft(&self, composition: &CompositionId, held: &HeldSave) {
-        // One save at a time: the second of two overlapping saves must read the stored
-        // key only after the first has recorded what it stored, or it supersedes nothing
-        // and the server keeps two copies of the message still being written.
         let gate = Arc::clone(&self.save_gate);
         let _saving = gate.lock().await;
+        self.save_draft_gated(composition, held).await;
+    }
+
+    /// [`save_draft`](Self::save_draft) for a caller already holding the save gate: the
+    /// close and the idle fire, which must not let a forget slip in between their steps.
+    async fn save_draft_gated(&self, composition: &CompositionId, held: &HeldSave) {
         // An account already carrying this draft wins over the composer's dropdown: see
         // [`Composition::account`].
         let account = self
             .composition_account(composition)
             .unwrap_or_else(|| held.from.clone());
-        let message_id = self.record_held(composition, &account, held);
+        let Some(message_id) = self.record_held(composition, &account, held) else {
+            log::warn!("drafts: a Message-ID could not be minted for the draft");
+            return;
+        };
         // The account handle is cloned out so the guard is released before the provider
         // round-trip; an account the app no longer holds cannot be saved to.
         let Some(handle) = self.account_handle(&account).await else {
@@ -163,11 +172,11 @@ impl<P: Provider> App<P> {
         };
         let digest = digest(&draft);
         let parked = self.parked_save(&account, &message_id).await;
-        // Nothing changed since the last landed save and nothing is on its way, so there
-        // is nothing to write. Still "saved": what the user asked to keep is on the
-        // server. A parked save with different words always wins over this answer, the
-        // ordinary undo-on-a-train: the queued op is about to replace the server's copy
-        // with the version the user moved away from.
+        // Nothing changed since the last landed save and nothing is on its way, so
+        // there is nothing to write; still "saved", because what the user asked to keep
+        // is on the server. A parked save with different words always wins over this
+        // answer, the ordinary undo-on-a-train: the queued op is about to replace the
+        // server's copy with the version the user moved away from.
         if parked.is_none() && self.already_saved(composition, digest) {
             self.set_status_saved(composition);
             return;
@@ -179,12 +188,10 @@ impl<P: Provider> App<P> {
         // period, or its leaving) clears the backoff and drains, which is the engine's
         // pair for exactly this. Different words fall through to the put below, which
         // supersedes the parked copy the way it supersedes a stored one.
-        if let Some((op, payload_digest)) = parked {
-            if payload_digest == digest {
-                self.settle_parked_save(composition, &account, provider, op, digest)
-                    .await;
-                return;
-            }
+        if let Some((op, _)) = parked.filter(|(_, parked_digest)| *parked_digest == digest) {
+            self.settle_parked_save(composition, &account, provider, op, digest)
+                .await;
+            return;
         }
         let replacing = self.composition_key(composition);
         match self
@@ -211,9 +218,9 @@ impl<P: Provider> App<P> {
     }
 
     /// Settles `op`, this composition's parked save: clears the retry backoff and drains
-    /// the outbox, then adopts the key the drain resolved, because the drain report is
-    /// the only place that key is ever named and the next save must supersede the copy
-    /// it names rather than store a second beside it.
+    /// the outbox, then adopts the key the drain resolved. The drain report is the only
+    /// place that key is ever named, and the next save must supersede the copy it names
+    /// rather than store a second beside it.
     async fn settle_parked_save(
         &self,
         composition: &CompositionId,
@@ -222,9 +229,27 @@ impl<P: Provider> App<P> {
         op: PendingOpId,
         digest: u64,
     ) {
-        if let Err(err) = self.engine.retry_pending_op_now(account, op).await {
-            log::info!("drafts: the parked save cannot be retried yet: {err}");
-            return;
+        match self.engine.retry_pending_op_now(account, op).await {
+            Ok(None) => {}
+            // Said in words rather than the rejection's own name: a log line is product
+            // surface and carries no internal jargon. No drain happens, so no attempt
+            // is logged either: nothing was tried.
+            Ok(Some(refusal)) => {
+                let reason = match refusal {
+                    OpRejection::Unknown | OpRejection::NotAwaitingConfirmation => {
+                        "it is no longer queued"
+                    }
+                    OpRejection::Settled => "it has already been stored",
+                    OpRejection::InFlight => "it is being stored right now",
+                    OpRejection::AwaitingConfirmation => "it may already have been stored",
+                };
+                log::info!("drafts: the parked save cannot be retried yet: {reason}");
+                return;
+            }
+            Err(err) => {
+                log::info!("drafts: the parked save could not be read back: {err}");
+                return;
+            }
         }
         let report = match self.engine.drain_outbox(provider, account).await {
             Ok(report) => report,
@@ -251,8 +276,13 @@ impl<P: Provider> App<P> {
         }
     }
 
-    /// Removes this composition's stored draft and forgets the composition.
+    /// Removes this composition's stored draft and forgets the composition. The forget
+    /// and the removal run under the save gate, so a deadline fire that has taken its
+    /// arm as the discard lands cannot begin a save in between and re-store what the
+    /// user threw away.
     async fn discard_draft(&self, composition: &CompositionId) {
+        let gate = Arc::clone(&self.save_gate);
+        let _discarding = gate.lock().await;
         let Some(record) = self.forget(composition) else {
             // An unknown composition or one never saved: nothing is on the server, so
             // discarding it is already done.
@@ -294,9 +324,12 @@ impl<P: Provider> App<P> {
 
     /// Saves what the composition last handed over, then forgets it: the host's `Close`
     /// for a composer that is dismissed without sending, and the draft stays in Drafts
-    /// where the user will find it.
+    /// where the user will find it. Both steps run under the save gate, so a deadline
+    /// fire that has taken its arm as the close lands queues behind the close and finds
+    /// no composition left, rather than re-storing under a new record.
     async fn close_composition(&self, composition: &CompositionId) {
-        self.cancel_armed(composition);
+        let gate = Arc::clone(&self.save_gate);
+        let _closing = gate.lock().await;
         let held = self
             .drafts
             .lock()
@@ -305,26 +338,27 @@ impl<P: Provider> App<P> {
             .get(composition)
             .and_then(|record| record.held.clone());
         if let Some(held) = held {
-            self.save_draft(composition, &held).await;
+            self.save_draft_gated(composition, &held).await;
         }
         self.forget(composition);
     }
 
     /// Records `held` as the composition's current content, opening the composition's
     /// record when this is its first save, and answers the header every save of it
-    /// carries.
+    /// carries. `None` only when a header could not be minted for a fresh record, which
+    /// the caller treats as any other build failure.
     fn record_held(
         &self,
         composition: &CompositionId,
         account: &AccountId,
         held: &HeldSave,
-    ) -> MessageIdHeader {
+    ) -> Option<MessageIdHeader> {
         let mut drafts = self.drafts.lock().expect("drafts mutex poisoned");
         if let Some(record) = drafts.open.get_mut(composition) {
             record.held = Some(held.clone());
-            return record.message_id.clone();
+            return Some(record.message_id.clone());
         }
-        let message_id = mint_message_id();
+        let message_id = mint_message_id()?;
         drafts.open.insert(
             composition.clone(),
             Composition {
@@ -335,7 +369,7 @@ impl<P: Provider> App<P> {
                 held: Some(held.clone()),
             },
         );
-        message_id
+        Some(message_id)
     }
 
     /// The account a composition is already stored under, if it has been saved.
@@ -346,6 +380,17 @@ impl<P: Provider> App<P> {
             .open
             .get(composition)
             .map(|record| record.account.clone())
+    }
+
+    /// The header every save of this composition carries, or `None` when it is not
+    /// open: the fire's proof that it is still the composition its arm was taken under.
+    fn composition_message_id(&self, composition: &CompositionId) -> Option<MessageIdHeader> {
+        self.drafts
+            .lock()
+            .expect("drafts mutex poisoned")
+            .open
+            .get(composition)
+            .map(|record| record.message_id.clone())
     }
 
     /// What the server stores this composition under now.
