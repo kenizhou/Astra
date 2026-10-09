@@ -7,7 +7,8 @@ use std::sync::Arc;
 
 use astra_app::{Account, App, CompositionId, DraftResume, Intent};
 use astra_viewmodel::{
-    DraftStatusSnapshot, MailboxListSnapshot, ReadingSnapshot, SyncProgressSnapshot,
+    DraftStatusSnapshot, MailboxListSnapshot, ReadingSnapshot, SendingSnapshot,
+    SyncProgressSnapshot,
 };
 use async_trait::async_trait;
 use engine_api::{AccountId, Provider};
@@ -59,6 +60,10 @@ pub(crate) trait AppPort: Send + Sync {
     /// save to report.
     fn draft_status(&self) -> Option<DraftStatusSnapshot>;
 
+    /// The published sending snapshot, for the host's pull: every account's
+    /// sends that have not gone out, or nothing outstanding.
+    fn sending(&self) -> SendingSnapshot;
+
     /// Opens the account's latest stored draft into `composition`, so the
     /// composer that holds it saves over that copy rather than beside it; the
     /// webview's resume read. `None` when the account holds no draft or its body
@@ -98,6 +103,10 @@ impl AppPort for App<HostProvider> {
 
     fn draft_status(&self) -> Option<DraftStatusSnapshot> {
         App::draft_status(self)
+    }
+
+    fn sending(&self) -> SendingSnapshot {
+        App::sending(self)
     }
 
     async fn resume_latest_draft(

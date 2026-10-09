@@ -8,11 +8,17 @@
 import { invoke } from '@tauri-apps/api/core';
 
 import type { ComposerDocument } from './composerDocument';
+import { sendingIntents } from './sending';
+import type { MailSubmission, OutboxIntent, SendingSnapshot } from './sending';
 import type { MailboxListSnapshot, RowKey, SyncProgressSnapshot, ViewMode } from './surfaces';
 
 // The composer document's whole type set, re-exported so this module stays the
 // one import point of the wire.
 export * from './composerDocument';
+
+// The sending half (the submit payload, the outbox family, and the queue's
+// snapshot types), under the same re-export and split out for the line cap.
+export * from './sending';
 
 /** A folder bound to its owning account; unique only within the account. */
 export interface FolderRef {
@@ -91,6 +97,8 @@ export type Intent =
   | { open_message: { message: MessageRef } }
   | 'close_reading'
   | { folders: { create: { account: string; name: string; parent?: string } } }
+  | { submit_rich_mail: MailSubmission }
+  | { outbox: OutboxIntent }
   | { drafts: DraftsIntent };
 
 /** Smart constructors for every intent, in the enum's own order. */
@@ -129,6 +137,9 @@ export const intents = {
       create: parent === undefined ? { account, name } : { account, parent, name },
     },
   }),
+  // The submit and the outbox family, in the enum's own order between the
+  // folders and the drafts.
+  ...sendingIntents,
   /** Store the composer's current content in the account's Drafts folder. */
   saveDraft: (draft: DraftSave): Intent => ({
     drafts: {
@@ -416,6 +427,10 @@ export function draftResume(
   return invoke('draft_resume', { account, composition });
 }
 
+/** Pulls the sending snapshot: the outbox panel's rows, empty when every send has gone. */
+export function sending(): Promise<SendingSnapshot> {
+  return invoke('sending');
+}
 
 /** Adds one account from its config TOML: dials, persists, first sync. */
 export function addAccount(configToml: string): Promise<AddedAccount> {
