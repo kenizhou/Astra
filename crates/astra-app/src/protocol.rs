@@ -4,11 +4,13 @@
 //! dispatches. These are the pure types the runtime drives; each crosses the IPC as JSON.
 
 mod intent;
+mod intent_compose;
 mod intent_drafts;
 mod intent_outbox;
 mod status;
 
 pub use intent::{FolderIntent, Intent, ViewMode};
+pub use intent_compose::ComposeIntent;
 pub use intent_drafts::{CompositionId, DraftsIntent};
 pub use intent_outbox::OutboxIntent;
 
@@ -36,9 +38,15 @@ pub enum Surface {
     DraftStatus,
     /// The sends that have not gone out: every account's queued sends in one list.
     /// Every publish is one transition of the queue (a send joined it, left it, or
-    /// changed state), so the host repaints the panel on every signal rather than
-    /// debouncing them.
+    /// changed state), so the host repaints the panel on every signal rather
+    /// than debouncing them.
     Sending,
+    /// The composition a reply or forward asked the host to open in its
+    /// composer: the whole prefill (recipients, subject, threading header, the
+    /// quoted original) as one thing. Every publish is one request replacing
+    /// whatever it held, so the host repaints on every signal rather than
+    /// debouncing them. `None` from the pull means no request is pending.
+    ComposeRequest,
 }
 
 /// Host-resolved bytes for one composer blob handle.

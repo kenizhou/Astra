@@ -6,8 +6,8 @@ use astra_composer::{Block, ComposerDocument, DraftBlobHandle, InlineContent, Pa
 use engine_api::AccountId;
 
 use super::{
-    ComposerBlob, CompositionId, DraftsIntent, FolderIntent, Intent, OutboxIntent, Surface,
-    ViewMode,
+    ComposeIntent, ComposerBlob, CompositionId, DraftsIntent, FolderIntent, Intent, OutboxIntent,
+    Surface, ViewMode,
 };
 use crate::reference::{FolderRef, MessageRef, QueuedRef, RowRef, ThreadRef};
 
@@ -443,6 +443,42 @@ fn sending_crosses_as_a_renamed_word() {
     assert_eq!(
         serde_json::from_str::<Surface>(r#""sending""#).unwrap(),
         Surface::Sending
+    );
+}
+
+#[test]
+fn the_compose_family_names_the_message_each_variant_answers() {
+    round_trips(
+        &Intent::Compose(ComposeIntent::Reply {
+            message: MessageRef::from_parts("work", "m1".to_owned()).unwrap(),
+        }),
+        r#"{"compose":{"reply":{"message":{"account":"work","key":"m1"}}}}"#,
+    );
+    round_trips(
+        &Intent::Compose(ComposeIntent::ReplyAll {
+            message: MessageRef::from_parts("work", "m1".to_owned()).unwrap(),
+        }),
+        r#"{"compose":{"reply_all":{"message":{"account":"work","key":"m1"}}}}"#,
+    );
+    round_trips(
+        &Intent::Compose(ComposeIntent::Forward {
+            message: MessageRef::from_parts("home", "jmap:e2".to_owned()).unwrap(),
+        }),
+        r#"{"compose":{"forward":{"message":{"account":"home","key":"jmap:e2"}}}}"#,
+    );
+    // The CamelCase spelling is not the wire.
+    assert!(serde_json::from_str::<Intent>(r#"{"compose":"Reply"}"#).is_err());
+}
+
+#[test]
+fn compose_request_crosses_as_a_renamed_word() {
+    assert_eq!(
+        serde_json::to_string(&Surface::ComposeRequest).unwrap(),
+        r#""compose_request""#
+    );
+    assert_eq!(
+        serde_json::from_str::<Surface>(r#""compose_request""#).unwrap(),
+        Surface::ComposeRequest
     );
 }
 

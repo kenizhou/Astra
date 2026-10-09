@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::reference::{FolderRef, MessageRef, RowRef};
 
-use super::{ComposerBlob, DraftsIntent, OutboxIntent};
+use super::{ComposeIntent, ComposerBlob, DraftsIntent, OutboxIntent};
 
 /// How the mailbox list is grouped.
 ///
@@ -120,6 +120,13 @@ pub enum Intent {
     CloseReading,
     /// A change to an account's folder tree ([`FolderIntent`]).
     Folders(FolderIntent),
+    /// Answer one message: a reply, a reply to all its recipients, or a
+    /// forward ([`ComposeIntent`]). The arm reads the original's headers through
+    /// the engine, computes the prefilled composition per the reply rules, and
+    /// publishes it on the [`ComposeRequest`](super::Surface::ComposeRequest)
+    /// surface for the composer to hydrate from. It sends nothing: what the
+    /// composed message eventually does is a submit intent's business.
+    Compose(ComposeIntent),
     /// Send the composer's rich document through the durable outbox: the words
     /// are queued before any server is asked, so a send the app does not
     /// survive is neither lost nor delivered twice. The outcome reaches the

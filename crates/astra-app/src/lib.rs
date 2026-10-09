@@ -11,6 +11,7 @@
 
 mod accounts;
 mod boot;
+mod compose_request;
 mod dispatch;
 mod drafts;
 mod list_rows;
@@ -65,8 +66,8 @@ pub use dispatch::AppError;
 pub use drafts::{DraftResume, DRAFT_AUTOSAVE_IDLE};
 pub use preferences::{load_preferences, preferences_path, save_preferences, Preferences};
 pub use protocol::{
-    AppObserver, ComposerBlob, CompositionId, DraftsIntent, FolderIntent, Intent, OutboxIntent,
-    Surface, ViewMode,
+    AppObserver, ComposeIntent, ComposerBlob, CompositionId, DraftsIntent, FolderIntent, Intent,
+    OutboxIntent, Surface, ViewMode,
 };
 pub use reference::{FolderRef, MessageRef, QueuedRef, RowRef, ThreadRef};
 pub use surfaced::Surfaced;
@@ -105,6 +106,12 @@ pub struct App<P> {
     /// composer, and the per-composition map is the multi-composer slice's to
     /// add.
     draft_status: Surfaced<Option<astra_viewmodel::DraftStatusSnapshot>>,
+    /// The compose-request snapshot and its signal: the composition the last
+    /// reply or forward asked the host to open, or `None` when no request is
+    /// pending. One cell holding the latest request, not a queue: each request
+    /// replaces the one before it, because a composer opened on an older
+    /// request would answer a message the user has moved past.
+    compose_request: Surfaced<Option<astra_viewmodel::ComposeRequestSnapshot>>,
     /// The sending snapshot and its signal: every account's queued sends, one
     /// list, published on each transition of the queue. See `outbox`.
     sending: Surfaced<astra_viewmodel::SendingSnapshot>,
@@ -196,6 +203,7 @@ impl<P: Provider> App<P> {
             mailbox_list: Surfaced::new(Surface::MailboxList, Arc::clone(&observer)),
             reading: Surfaced::new(Surface::Reading, Arc::clone(&observer)),
             draft_status: Surfaced::new(Surface::DraftStatus, Arc::clone(&observer)),
+            compose_request: Surfaced::new(Surface::ComposeRequest, Arc::clone(&observer)),
             sending: Surfaced::new(Surface::Sending, observer),
             outbox: Mutex::new(outbox::Outbox::default()),
             drafts: Mutex::new(Drafts::default()),

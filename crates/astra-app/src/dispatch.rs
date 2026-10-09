@@ -99,6 +99,11 @@ impl<P: Provider> App<P> {
                 self.close_reading();
             }
             Intent::Folders(_change) => return Err(AppError::NotYet),
+            // The compose family: the prefill is computed and published, never
+            // returned; the composer opens on the surface's snapshot.
+            Intent::Compose(change) => {
+                self.dispatch_compose(change).await;
+            }
             // The composer's send: one verb whose outcome the queue holds and
             // the sending surface publishes, never a return value.
             Intent::SubmitRichMail {

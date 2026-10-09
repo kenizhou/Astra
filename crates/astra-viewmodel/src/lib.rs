@@ -6,6 +6,7 @@
 //! engine, grouping and ordering live here, so every surface shares one definition of
 //! what is on screen.
 
+mod compose_request;
 mod drafts;
 mod folders;
 mod reading;
@@ -14,6 +15,7 @@ mod sending;
 mod sync_progress;
 pub mod view;
 
+pub use compose_request::{ComposeKind, ComposeRequestSnapshot};
 pub use drafts::{DraftSaveState, DraftStatusSnapshot};
 pub use folders::{folder_role, sorted_folder_rows, AccountFolderRow, FolderRole, FolderRow};
 pub use reading::{AttachmentRow, MessageKey, NotAMessageRow, ReadingSnapshot};
