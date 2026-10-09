@@ -8,12 +8,20 @@ const invoke = vi.hoisted(() => vi.fn());
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke }));
 
-import type { ReadingSnapshot, RecommendationView } from './ipc';
+import type {
+  ComposerDocument,
+  DraftStatusSnapshot,
+  ReadingSnapshot,
+  RecommendationView,
+  ResumeView,
+} from './ipc';
 
 import {
   addAccount,
   detectAccountSettings,
   dispatch,
+  draftResume,
+  draftStatus,
   imapTestConnection,
   intents,
   mailboxList,
@@ -92,6 +100,99 @@ describe('the intent wire', () => {
 
   it('crosses close reading as a bare renamed word', () => {
     expect(JSON.stringify(intents.closeReading())).toBe('"close_reading"');
+  });
+
+  // Both literals are byte-for-byte the JSON astra-app's protocol_tests.rs
+  // asserts for the drafts family, so neither side of the wire can drift.
+  it('nests the drafts save under its tag with the close flag both ways', () => {
+    const document: ComposerDocument = {
+      blocks: [
+        {
+          Paragraph: {
+            content: [
+              {
+                Text: {
+                  text: 'Half written',
+                  bold: false,
+                  italic: false,
+                  underline: false,
+                  font_size: null,
+                  color: null,
+                  highlight: null,
+                  link: null,
+                },
+              },
+            ],
+          },
+        },
+      ],
+      attachments: [],
+    };
+
+    expect(
+      JSON.stringify(
+        intents.saveDraft({
+          composition: 'compose-1',
+          from: 'work',
+          to: 'you@test.local',
+          cc: '',
+          bcc: '',
+          subject: 'Later',
+          document,
+          then_close: false,
+        }),
+      ),
+    ).toBe(
+      '{"drafts":{"save":{"composition":"compose-1","from":"work","to":"you@test.local","cc":"","bcc":"","subject":"Later","document":{"blocks":[{"Paragraph":{"content":[{"Text":{"text":"Half written","bold":false,"italic":false,"underline":false,"font_size":null,"color":null,"highlight":null,"link":null}}]}}],"attachments":[]},"then_close":false}}}',
+    );
+
+    expect(
+      JSON.stringify(
+        intents.saveDraft({
+          composition: 'compose-1',
+          from: 'work',
+          to: '',
+          cc: '',
+          bcc: '',
+          subject: '',
+          document: {
+            blocks: [
+              {
+                Paragraph: {
+                  content: [
+                    {
+                      Text: {
+                        text: 'On my way out',
+                        bold: false,
+                        italic: false,
+                        underline: false,
+                        font_size: null,
+                        color: null,
+                        highlight: null,
+                        link: null,
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+            attachments: [],
+          },
+          then_close: true,
+        }),
+      ),
+    ).toBe(
+      '{"drafts":{"save":{"composition":"compose-1","from":"work","to":"","cc":"","bcc":"","subject":"","document":{"blocks":[{"Paragraph":{"content":[{"Text":{"text":"On my way out","bold":false,"italic":false,"underline":false,"font_size":null,"color":null,"highlight":null,"link":null}}]}}],"attachments":[]},"then_close":true}}}',
+    );
+  });
+
+  it('nests the drafts discard and close under their tags', () => {
+    expect(JSON.stringify(intents.discardDraft('compose-1'))).toBe(
+      '{"drafts":{"discard":{"composition":"compose-1"}}}',
+    );
+    expect(JSON.stringify(intents.closeDraft('compose-1'))).toBe(
+      '{"drafts":{"close":{"composition":"compose-1"}}}',
+    );
   });
 });
 
@@ -244,5 +345,104 @@ describe('the reading wire', () => {
     invoke.mockResolvedValue(null);
     await reading();
     expect(invoke).toHaveBeenCalledWith('reading');
+  });
+});
+
+// The literal is byte-for-byte the JSON astra-composer's types_tests.rs parses,
+// with the marks pinned the way astra-app's protocol_tests.rs asserts them, so
+// the composer document cannot drift between editor and core.
+describe('the composer document wire', () => {
+  it('carries a paragraph of one marked run with every field present', () => {
+    const raw =
+      '{"blocks":[{"Paragraph":{"content":[{"Text":{"text":"Half written","bold":false,"italic":false,"underline":false,"font_size":null,"color":null,"highlight":null,"link":null}}]}}],"attachments":[]}';
+    const wire = JSON.parse(raw) as ComposerDocument;
+
+    expect(wire.blocks).toEqual([
+      {
+        Paragraph: {
+          content: [
+            {
+              Text: {
+                text: 'Half written',
+                bold: false,
+                italic: false,
+                underline: false,
+                font_size: null,
+                color: null,
+                highlight: null,
+                link: null,
+              },
+            },
+          ],
+        },
+      },
+    ]);
+    expect(wire.attachments).toEqual([]);
+  });
+
+  it('carries an inline image with its attachment id and width', () => {
+    const raw =
+      '{"blocks":[{"Paragraph":{"content":[{"Image":{"attachment_id":"img-1","alt_text":"chart","width_px":70000}}]}}],"attachments":[]}';
+    const wire = JSON.parse(raw) as ComposerDocument;
+
+    expect(wire.blocks[0]).toEqual({
+      Paragraph: {
+        content: [{ Image: { attachment_id: 'img-1', alt_text: 'chart', width_px: 70000 } }],
+      },
+    });
+  });
+});
+
+// Both literals are byte-for-byte the JSON astra-viewmodel's drafts_tests.rs
+// asserts on the Rust side, so neither side of the wire can drift.
+describe('the draft status wire', () => {
+  it('mirrors the saved snapshot with the state and the instant', () => {
+    const wire = JSON.parse(
+      '{"composition":"compose-1","state":"saved","saved_at":"2026-10-09T08:30:00Z"}',
+    ) as DraftStatusSnapshot;
+
+    expect(wire.composition).toBe('compose-1');
+    expect(wire.state).toBe('saved');
+    expect(wire.saved_at).toBe('2026-10-09T08:30:00Z');
+  });
+
+  it('mirrors the saving snapshot with an empty instant', () => {
+    const wire = JSON.parse('{"composition":"compose-2","state":"saving","saved_at":""}') as DraftStatusSnapshot;
+
+    expect(wire.composition).toBe('compose-2');
+    expect(wire.state).toBe('saving');
+    expect(wire.saved_at).toBe('');
+  });
+
+  it('pulls the status by its command name', async () => {
+    invoke.mockResolvedValue(null);
+    await draftStatus();
+    expect(invoke).toHaveBeenCalledWith('draft_status');
+  });
+});
+
+// The literal is byte-for-byte the JSON astra-desktop's drafts_tests.rs asserts
+// for the resume view, so the composer hydrates from the fields the host sends.
+describe('the resume wire', () => {
+  it('mirrors the stored draft as one flat record', () => {
+    const wire = JSON.parse(
+      '{"account":"work","to":"you@test.local","cc":"","bcc":"","subject":"Later","body_text":"Half written"}',
+    ) as ResumeView;
+
+    expect(wire.account).toBe('work');
+    expect(wire.to).toBe('you@test.local');
+    expect(wire.cc).toBe('');
+    expect(wire.bcc).toBe('');
+    expect(wire.subject).toBe('Later');
+    expect(wire.body_text).toBe('Half written');
+  });
+
+  it('passes the account and composition to draft_resume by name', async () => {
+    invoke.mockResolvedValue(null);
+    await draftResume('work', 'compose-9');
+    expect(invoke).toHaveBeenCalledWith('draft_resume', {
+      account: 'work',
+      composition: 'compose-9',
+    });
   });
 });

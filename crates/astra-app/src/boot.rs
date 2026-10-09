@@ -84,5 +84,14 @@ where
         let app = Arc::clone(&app);
         spawn(Box::pin(async move { app.sync_added_account(&id).await }));
     }
+    // The drafts idle-autosave driver runs for the life of the app, on the same host
+    // seam: it sleeps until a composer has been quiet long enough to save, so it must
+    // never sit on the boot path.
+    {
+        let app = Arc::clone(&app);
+        spawn(Box::pin(async move {
+            app.drive_draft_autosave().await;
+        }));
+    }
     Ok(app)
 }

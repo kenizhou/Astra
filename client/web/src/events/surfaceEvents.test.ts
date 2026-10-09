@@ -29,6 +29,7 @@ const ipc = vi.hoisted(() => ({
   mailboxList: vi.fn(),
   syncProgress: vi.fn(),
   reading: vi.fn(),
+  draftStatus: vi.fn(),
   addAccount: vi.fn(),
   imapTestConnection: vi.fn(),
 }));
@@ -37,6 +38,7 @@ vi.mock('@/services/ipc', () => ipc);
 
 import { hydrate, mountSurfaceEvents } from './surfaceEvents';
 import { useAccountStore } from '@/stores/accountStore';
+import { useDraftStore } from '@/stores/draftStore';
 import { useFolderStore } from '@/stores/folderStore';
 import { useListStore } from '@/stores/listStore';
 import { useReadingStore } from '@/stores/readingStore';
@@ -75,6 +77,7 @@ function resetStores() {
     accountSetupOpen: false,
   });
   useReadingStore.setState({ snapshot: null, showRemoteImages: false });
+  useDraftStore.setState({ snapshot: null });
 }
 
 beforeEach(() => {
@@ -84,6 +87,8 @@ beforeEach(() => {
   ipc.syncProgress.mockReset();
   ipc.reading.mockReset();
   ipc.reading.mockResolvedValue(null);
+  ipc.draftStatus.mockReset();
+  ipc.draftStatus.mockResolvedValue(null);
   resetStores();
 });
 
@@ -157,6 +162,37 @@ describe('the surface_changed listener', () => {
     expect(useReadingStore.getState().showRemoteImages).toBe(false);
   });
 
+  it('a draft_status change pulls the snapshot into the draft store', async () => {
+    ipc.draftStatus.mockResolvedValue({
+      composition: 'compose-1',
+      state: 'saved',
+      saved_at: '2026-10-09T08:30:00Z',
+    });
+    mountSurfaceEvents();
+    await vi.waitFor(() => expect(wire.handlers).toHaveLength(1));
+
+    emit('draft_status');
+
+    await vi.waitFor(() =>
+      expect(useDraftStore.getState().snapshot?.composition).toBe('compose-1'),
+    );
+    expect(useDraftStore.getState().snapshot?.state).toBe('saved');
+    expect(ipc.mailboxList).not.toHaveBeenCalled();
+  });
+
+  it('a draft_status change with nothing saved clears the store', async () => {
+    useDraftStore.setState({
+      snapshot: { composition: 'compose-1', state: 'saved', saved_at: '2026-10-09T08:30:00Z' },
+    });
+    ipc.draftStatus.mockResolvedValue(null);
+    mountSurfaceEvents();
+    await vi.waitFor(() => expect(wire.handlers).toHaveLength(1));
+
+    emit('draft_status');
+
+    await vi.waitFor(() => expect(useDraftStore.getState().snapshot).toBeNull());
+  });
+
   it('an unknown surface name is ignored without a pull', async () => {
     mountSurfaceEvents();
     await vi.waitFor(() => expect(wire.handlers).toHaveLength(1));
@@ -166,6 +202,7 @@ describe('the surface_changed listener', () => {
     expect(ipc.mailboxList).not.toHaveBeenCalled();
     expect(ipc.syncProgress).not.toHaveBeenCalled();
     expect(ipc.reading).not.toHaveBeenCalled();
+    expect(ipc.draftStatus).not.toHaveBeenCalled();
   });
 
   it('disposing before the registration resolves still tears it down', async () => {
@@ -187,7 +224,9 @@ describe('hydration', () => {
     expect(ipc.mailboxList).toHaveBeenCalledTimes(1);
     expect(ipc.syncProgress).toHaveBeenCalledTimes(1);
     expect(ipc.reading).toHaveBeenCalledTimes(1);
+    expect(ipc.draftStatus).toHaveBeenCalledTimes(1);
     expect(useReadingStore.getState().snapshot).toBeNull();
+    expect(useDraftStore.getState().snapshot).toBeNull();
     expect(useUiStore.getState().engineState).toBe('running');
     expect(useUiStore.getState().accountSetupOpen).toBe(true);
   });

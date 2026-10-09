@@ -99,6 +99,12 @@ impl<P: Provider> App<P> {
                 self.close_reading();
             }
             Intent::Folders(_change) => return Err(AppError::NotYet),
+            // The composer's three verbs. Outcomes reach the user through the
+            // draft-status surface, never a return value, the same discipline the
+            // list writes follow.
+            Intent::Drafts(change) => {
+                self.dispatch_drafts(change).await;
+            }
         }
         Ok(())
     }

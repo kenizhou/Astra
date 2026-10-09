@@ -64,3 +64,8 @@ tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
 astra-autodetect = { path = "../../crates/astra-autodetect" }
 # The MX and SRV lookups behind that seam, over the system's configured DNS.
 hickory-resolver.workspace = true
+
+[dev-dependencies]
+# The composer document the drafts intents carry; the command-surface fakes
+# render the saved document to the plain text a stored draft resumes as.
+astra-composer = { path = "../../crates/astra-composer" }

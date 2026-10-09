@@ -13,6 +13,8 @@ workspace = true
 # The account layer's folder-shaping rule (which listed folders a pass syncs) and the
 # connection seams the host drives; the protocol itself names only ids.
 astra-account = { path = "../astra-account" }
+# The shared composer document a drafts save renders and stores.
+astra-composer = { path = "../astra-composer" }
 # The immutable snapshots the surfaces render, and the folder-row projection.
 astra-viewmodel = { path = "../astra-viewmodel" }
 # The engine facade: every mail read and sync goes through it (engine types via
@@ -35,9 +37,12 @@ toml.workspace = true
 ammonia.workspace = true
 # The sync-depth window's calendar arithmetic (the whole-months cutoff).
 time.workspace = true
+# The queued-save withdrawal reads an outbox op's payload back as JSON.
+serde_json.workspace = true
 # The account set behind an async RwLock only; the runtime itself is the host's, so no
-# rt feature here.
-tokio = { workspace = true, features = ["sync"] }
+# rt feature here. The time feature is the drafts autosave's sleep; the driver itself
+# is a future the host runs.
+tokio = { workspace = true, features = ["sync", "time"] }
 
 [dev-dependencies]
 # The gated live JMAP-detection test drives the detection crate's `detect` directly,
@@ -50,6 +55,7 @@ engine-core.workspace = true
 engine-provider.workspace = true
 serde_json.workspace = true
 # The test executor (`#[tokio::test]`); tests may build a runtime, the library may not.
-tokio = { workspace = true, features = ["macros", "rt"] }
+# test-util pauses the clock the autosave tests read.
+tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
 # The detection config's harness override is a `Url`.
 url.workspace = true

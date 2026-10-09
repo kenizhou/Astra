@@ -20,6 +20,11 @@ use engine_api::AccountId;
 
 use crate::{AppState, HostAccount, HostProvider};
 
+// The drafts command surface (the status pull and the resume read), split into
+// its own child module to keep this file under the size limit, the same split
+// the app core's protocol made for its drafts intents.
+pub(crate) mod drafts;
+
 /// A command failure, serialised to the webview as its display string: a sentence a
 /// surface can show, with the reason the host saw.
 #[derive(Debug, thiserror::Error)]

@@ -7,7 +7,12 @@
 
 import { invoke } from '@tauri-apps/api/core';
 
+import type { ComposerDocument } from './composerDocument';
 import type { MailboxListSnapshot, RowKey, SyncProgressSnapshot, ViewMode } from './surfaces';
+
+// The composer document's whole type set, re-exported so this module stays the
+// one import point of the wire.
+export * from './composerDocument';
 
 /** A folder bound to its owning account; unique only within the account. */
 export interface FolderRef {
@@ -35,6 +40,38 @@ export type { RowKey, ViewMode };
 /** One mailbox-list row an action names: a message, or a whole conversation. */
 export type RowRef = RowKey;
 
+/** One open composition, named by the client when it opens the composer. */
+export type CompositionId = string;
+
+/** The fields a draft save carries, beside the composer document itself. */
+export interface DraftSave {
+  /** Which composer this is, so the save supersedes its own previous copy. */
+  composition: CompositionId;
+  /** The account to store it under: the composer's From dropdown. */
+  from: string;
+  /** The `To` recipients, comma-separated; may be empty. */
+  to: string;
+  /** The `Cc` recipients, comma-separated; may be empty. */
+  cc: string;
+  /** The `Bcc` recipients, comma-separated; may be empty. */
+  bcc: string;
+  /** The subject line; may be empty. */
+  subject: string;
+  /** The shared composer document. */
+  document: ComposerDocument;
+  /** Forget the composition once the save settles: the composer is leaving. */
+  then_close: boolean;
+}
+
+/**
+ * What the composer asks the runtime to do with the draft it is holding,
+ * nested under the `drafts` tag of the intent that carries it.
+ */
+export type DraftsIntent =
+  | { save: DraftSave }
+  | { discard: { composition: CompositionId } }
+  | { close: { composition: CompositionId } };
+
 /**
  * One host intent: the single inbound channel of the unidirectional loop. A
  * bare string is a unit variant; a single keyed object is a carrying variant.
@@ -53,7 +90,8 @@ export type Intent =
   | { set_flagged: { row: RowRef; flagged: boolean } }
   | { open_message: { message: MessageRef } }
   | 'close_reading'
-  | { folders: { create: { account: string; name: string; parent?: string } } };
+  | { folders: { create: { account: string; name: string; parent?: string } } }
+  | { drafts: DraftsIntent };
 
 /** Smart constructors for every intent, in the enum's own order. */
 export const intents = {
@@ -90,6 +128,29 @@ export const intents = {
     folders: {
       create: parent === undefined ? { account, name } : { account, parent, name },
     },
+  }),
+  /** Store the composer's current content in the account's Drafts folder. */
+  saveDraft: (draft: DraftSave): Intent => ({
+    drafts: {
+      save: {
+        composition: draft.composition,
+        from: draft.from,
+        to: draft.to,
+        cc: draft.cc,
+        bcc: draft.bcc,
+        subject: draft.subject,
+        document: draft.document,
+        then_close: draft.then_close,
+      },
+    },
+  }),
+  /** Remove the composition's stored draft and forget the composition. */
+  discardDraft: (composition: CompositionId): Intent => ({
+    drafts: { discard: { composition } },
+  }),
+  /** Save what the composition last handed over, then forget it. */
+  closeDraft: (composition: CompositionId): Intent => ({
+    drafts: { close: { composition } },
   }),
 };
 
@@ -138,6 +199,42 @@ export interface ReadingSnapshot {
   attachments?: AttachmentRow[];
   /** How many remote references the sanitised HTML carries, all blocked. */
   remote_image_count: number;
+}
+
+/** The state of a composition's most recent draft save. */
+export type DraftSaveState = 'saving' | 'saved';
+
+/**
+ * One composition's most recent draft save, as the composer renders its quiet
+ * hint. `composition` names whose save moved, so a surface matching it against
+ * its own composer discards a stale one.
+ */
+export interface DraftStatusSnapshot {
+  /** The composition whose save moved, exactly as the client minted its id. */
+  composition: string;
+  /** How the most recent save of that composition ended up. */
+  state: DraftSaveState;
+  /** When the save landed, as a whole-second UTC instant string; empty in flight. */
+  saved_at: string;
+}
+
+/**
+ * A stored draft, as the composer that resumes it needs to open: the fields to
+ * hydrate and the body as plain text.
+ */
+export interface ResumeView {
+  /** The account whose Drafts folder the draft was in. */
+  account: string;
+  /** The `To` field, comma-joined. */
+  to: string;
+  /** The `Cc` field, comma-joined. */
+  cc: string;
+  /** The `Bcc` field, comma-joined. */
+  bcc: string;
+  /** The subject. */
+  subject: string;
+  /** The body as plain text: what the composer opens without a markup parser. */
+  body_text: string;
 }
 
 /** How a mail connection is secured, crossing as a snake_case word. */
@@ -302,6 +399,23 @@ export function syncProgress(): Promise<SyncProgressSnapshot> {
 export function reading(): Promise<ReadingSnapshot | null> {
   return invoke('reading');
 }
+
+/** Pulls the draft-status snapshot: the composer's save hint, or null when none. */
+export function draftStatus(): Promise<DraftStatusSnapshot | null> {
+  return invoke('draft_status');
+}
+
+/**
+ * Opens the account's latest stored draft into the composition the caller
+ * minted for the composer it is about to open; null when there is no draft.
+ */
+export function draftResume(
+  account: string,
+  composition: CompositionId,
+): Promise<ResumeView | null> {
+  return invoke('draft_resume', { account, composition });
+}
+
 
 /** Adds one account from its config TOML: dials, persists, first sync. */
 export function addAccount(configToml: string): Promise<AddedAccount> {

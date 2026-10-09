@@ -3,23 +3,19 @@
 //! is a typed error rather than a panic, the pull commands return what the app
 //! published, and the add-account flow rolls back when the credential store refuses.
 
-use std::{
-    path::PathBuf,
-    sync::{Arc, Mutex},
-};
+use std::sync::Arc;
 
-use astra_app::{AppError, FolderIntent, Intent, MessageRef, ViewMode};
-use astra_viewmodel::{MailboxListSnapshot, ReadingSnapshot, SyncProgressSnapshot};
+use astra_app::{FolderIntent, Intent, MessageRef, ViewMode};
+use astra_viewmodel::{MailboxListSnapshot, SyncProgressSnapshot};
 use engine_api::EmailAddress;
 
 use crate::{
-    app_state::{AppPort, AppState, HostAccount, HostProvider},
+    app_state::HostProvider,
     commands::{
         add_account_with, dispatch_intent, imap_test_with, mailbox_list_of, sync_progress_of,
         AddedAccount, CommandError, ImapTestOutcome,
     },
-    credential_store::{AccountCredentialStore, CredentialStoreError},
-    AccountDials,
+    commands_fakes::{state, FakeApp, FakeStore},
 };
 
 /// A config TOML for one account, built the way the setup flow builds one.
@@ -35,153 +31,6 @@ fn config_toml(username: &str) -> String {
         accepted_certificate: None,
     };
     astra_account::build_config_toml(&setup).expect("the setup builds a config")
-}
-
-/// A scratch directory for one test's account index.
-fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir()
-        .join("astra-desktop-tests")
-        .join(format!("{name}-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("the scratch directory creates");
-    dir
-}
-
-/// A fake app core behind the same seam the commands hold: records what it was asked
-/// and answers with preset snapshots.
-struct FakeApp {
-    dispatched: Mutex<Vec<Intent>>,
-    added: Mutex<Vec<String>>,
-    synced: Mutex<Vec<String>>,
-    mailbox_list: MailboxListSnapshot,
-    sync_progress: SyncProgressSnapshot,
-    reading: Mutex<Option<ReadingSnapshot>>,
-}
-
-impl FakeApp {
-    fn new() -> Arc<Self> {
-        Self::with_snapshots(
-            MailboxListSnapshot::default(),
-            SyncProgressSnapshot::default(),
-        )
-    }
-
-    /// A fake whose pull commands answer with the given snapshots.
-    fn with_snapshots(
-        mailbox_list: MailboxListSnapshot,
-        sync_progress: SyncProgressSnapshot,
-    ) -> Arc<Self> {
-        Arc::new(Self {
-            dispatched: Mutex::new(Vec::new()),
-            added: Mutex::new(Vec::new()),
-            synced: Mutex::new(Vec::new()),
-            mailbox_list,
-            sync_progress,
-            reading: Mutex::new(None),
-        })
-    }
-}
-
-#[async_trait::async_trait]
-impl AppPort for FakeApp {
-    async fn dispatch(&self, intent: Intent) -> Result<(), AppError> {
-        // The reading pane's contract: an open publishes the one snapshot, a close empties it.
-        match &intent {
-            Intent::OpenMessage { .. } => {
-                *self.reading.lock().unwrap() = Some(reading::open_snapshot());
-            }
-            Intent::CloseReading => *self.reading.lock().unwrap() = None,
-            _ => {}
-        }
-        self.dispatched.lock().unwrap().push(intent);
-        Ok(())
-    }
-
-    fn mailbox_list(&self) -> MailboxListSnapshot {
-        self.mailbox_list.clone()
-    }
-
-    fn sync_progress(&self) -> SyncProgressSnapshot {
-        self.sync_progress.clone()
-    }
-
-    fn reading(&self) -> Option<ReadingSnapshot> {
-        self.reading.lock().unwrap().clone()
-    }
-
-    async fn add_new_account_deferred(&self, account: HostAccount) {
-        self.added
-            .lock()
-            .unwrap()
-            .push(account.id.as_str().to_owned());
-    }
-
-    async fn sync_added_account(&self, id: &engine_api::AccountId) {
-        self.synced.lock().unwrap().push(id.as_str().to_owned());
-    }
-}
-
-/// An in-memory credential store whose persist can be told to refuse.
-struct FakeStore {
-    refuse: bool,
-    entries: Mutex<Vec<(String, String)>>,
-}
-
-impl FakeStore {
-    fn accepting() -> Arc<Self> {
-        Arc::new(Self {
-            refuse: false,
-            entries: Mutex::new(Vec::new()),
-        })
-    }
-
-    fn refusing() -> Arc<Self> {
-        Arc::new(Self {
-            refuse: true,
-            entries: Mutex::new(Vec::new()),
-        })
-    }
-
-    fn stored(&self, account_id: &str) -> Option<String> {
-        self.entries
-            .lock()
-            .unwrap()
-            .iter()
-            .find(|(id, _)| id == account_id)
-            .map(|(_, toml)| toml.clone())
-    }
-}
-
-impl AccountCredentialStore for FakeStore {
-    fn persist(&self, account_id: &str, config_toml: &str) -> Result<(), CredentialStoreError> {
-        if self.refuse {
-            return Err(CredentialStoreError(
-                "the platform store refused the write".to_owned(),
-            ));
-        }
-        self.entries
-            .lock()
-            .unwrap()
-            .push((account_id.to_owned(), config_toml.to_owned()));
-        Ok(())
-    }
-
-    fn delete(&self, account_id: &str) -> Result<(), CredentialStoreError> {
-        self.entries
-            .lock()
-            .unwrap()
-            .retain(|(id, _)| id != account_id);
-        Ok(())
-    }
-}
-
-/// A state over a fake app and store, with a real runtime and a scratch index.
-fn state(name: &str, app: Arc<FakeApp>, store: Arc<FakeStore>) -> AppState {
-    AppState {
-        app,
-        runtime: crate::runtime::build_runtime().expect("the test runtime builds"),
-        connections: Arc::new(AccountDials::empty(&scratch(name))),
-        credential_store: store,
-    }
 }
 
 /// A dial that succeeds without touching the network, returning no providers.

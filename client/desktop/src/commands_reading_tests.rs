@@ -1,38 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Tests for the reading command: the pull returns the snapshot the app
 //! published for the open message, and `None` once the pane is closed. Its own
-//! file because `commands_tests.rs` sits at the size cap; a child module so the
-//! fake app and the state builder above stay shared.
+//! file because `commands_tests.rs` sits at the size cap; the fake app and the
+//! state builder live in `commands_fakes`.
 
-use astra_viewmodel::{AttachmentRow, MessageKey, ReadingSnapshot};
-use engine_api::{AccountId, ProviderKey};
+use astra_viewmodel::ReadingSnapshot;
 
 use super::*;
+use crate::app_state::AppState;
 use crate::commands::reading_of;
-
-/// The snapshot the fake app publishes for the message an open names: the same
-/// shape `astra-viewmodel`'s wire tests pin, carrying one attachment.
-pub(super) fn open_snapshot() -> ReadingSnapshot {
-    ReadingSnapshot {
-        message: MessageKey {
-            account: AccountId::try_from("work").expect("an account id"),
-            key: ProviderKey::new("imap:v1:u42").expect("a provider key"),
-        },
-        subject: "Quarterly report".to_owned(),
-        from_name: "Ada Lovelace".to_owned(),
-        from_address: "ada@example.test".to_owned(),
-        sent_at: "2026-10-09T08:30:00Z".to_owned(),
-        html: Some("<p>See the report.</p>".to_owned()),
-        plain: Some("See the report.".to_owned()),
-        attachments: vec![AttachmentRow {
-            id: 1,
-            file_name: "report.pdf".to_owned(),
-            media_type: "application/pdf".to_owned(),
-            size: 2048,
-        }],
-        remote_image_count: 2,
-    }
-}
+use crate::commands_fakes::open_snapshot;
 
 /// Waits until the pull answers `want`, then asserts it settled there: the
 /// dispatches run on the runtime, so the test meets them where they land.

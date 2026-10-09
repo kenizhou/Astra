@@ -178,6 +178,7 @@ dependencies = [
  "ammonia",
  "astra-account",
  "astra-autodetect",
+ "astra-composer",
  "astra-viewmodel",
  "async-trait",
  "engine-api",
@@ -212,12 +213,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "astra-composer"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "astra-desktop"
 version = "0.1.0"
 dependencies = [
  "astra-account",
  "astra-app",
  "astra-autodetect",
+ "astra-composer",
  "astra-viewmodel",
  "async-trait",
  "engine-api",
