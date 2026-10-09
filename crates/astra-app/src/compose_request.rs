@@ -107,6 +107,13 @@ impl<P: Provider> App<P> {
             &handle.identity,
             body.as_ref(),
         );
+        // The submit arms re-resolve this message to thread the outgoing
+        // reply or forward under the original's chain; the snapshot carries
+        // no reference, so the original is held here beside it.
+        *self
+            .compose_source
+            .lock()
+            .expect("compose-source mutex poisoned") = Some(message.clone());
         self.compose_request.publish(Some(snapshot));
     }
 }

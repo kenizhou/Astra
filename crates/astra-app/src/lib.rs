@@ -24,6 +24,7 @@ mod reference;
 mod row_cache;
 mod sanitise;
 mod snapshot;
+mod submit;
 mod surfaced;
 mod sync;
 mod sync_account;
@@ -112,6 +113,13 @@ pub struct App<P> {
     /// replaces the one before it, because a composer opened on an older
     /// request would answer a message the user has moved past.
     compose_request: Surfaced<Option<astra_viewmodel::ComposeRequestSnapshot>>,
+    /// The message the pending compose request was computed from, held beside
+    /// the snapshot rather than read back out of it (the snapshot's contract
+    /// carries no reference, and no bare key crosses modules): the submit
+    /// arms re-resolve it through the reading resolve path to thread the
+    /// outgoing reply or forward under the original's `References` chain.
+    /// Replaced by each request that publishes, like the snapshot beside it.
+    compose_source: Mutex<Option<crate::reference::MessageRef>>,
     /// The sending snapshot and its signal: every account's queued sends, one
     /// list, published on each transition of the queue. See `outbox`.
     sending: Surfaced<astra_viewmodel::SendingSnapshot>,
@@ -204,6 +212,7 @@ impl<P: Provider> App<P> {
             reading: Surfaced::new(Surface::Reading, Arc::clone(&observer)),
             draft_status: Surfaced::new(Surface::DraftStatus, Arc::clone(&observer)),
             compose_request: Surfaced::new(Surface::ComposeRequest, Arc::clone(&observer)),
+            compose_source: Mutex::new(None),
             sending: Surfaced::new(Surface::Sending, observer),
             outbox: Mutex::new(outbox::Outbox::default()),
             drafts: Mutex::new(Drafts::default()),

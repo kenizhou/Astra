@@ -83,3 +83,9 @@ pub trait AppObserver: Send + Sync {
 #[cfg(test)]
 #[path = "protocol_tests.rs"]
 mod tests;
+
+// The submit family's threaded arms, split from the tests above so that file
+// stays under the 500-line cap.
+#[cfg(test)]
+#[path = "protocol_submit_tests.rs"]
+mod submit_tests;

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Sending: the submit arm through the durable outbox, the outbox family over
-//! the engine's queue ops, and the [`Sending`](crate::Surface::Sending) surface
-//! that publishes the queue itself.
+//! The outbox family over the engine's queue ops, and the
+//! [`Sending`](crate::Surface::Sending) surface that publishes the queue
+//! itself. The submit arms that feed the queue live in `submit`; this is
+//! what the outbox panel asks of the sends already in it.
 //!
 //! The engine owns the queue and every decision about it: what is due, whether
 //! a failure parks or settles, and whether an op can be withdrawn at all. This
@@ -16,19 +17,10 @@
 
 use std::collections::HashMap;
 
-use astra_composer::{render, ComposerDocument};
 use astra_viewmodel::{queued_row, SendingSnapshot};
-use engine_api::{
-    AccountId, Confirmation, Draft, DraftAttachment, EmailAddress, OpRejection, PendingOpKind,
-    Provider, SubmitOutcome,
-};
+use engine_api::{AccountId, Confirmation, OpRejection, PendingOpKind, Provider};
 
-use crate::{
-    drafts::{mint_message_id, now_instant, parse_addresses},
-    protocol::ComposerBlob,
-    reference::QueuedRef,
-    App, OutboxIntent,
-};
+use crate::{drafts::now_instant, reference::QueuedRef, App, OutboxIntent};
 
 /// The sending state beside the queue itself: what the app adds that the store
 /// does not hold.
@@ -65,61 +57,6 @@ impl<P: Provider> App<P> {
                     .await;
             }
         }
-    }
-
-    /// Renders the composer's document and submits it through the account's
-    /// durable outbox, then drains the account so the send and anything else
-    /// due happens in this gesture rather than at the next refresh.
-    ///
-    /// A refusal before the queue (no account, no recipient, a document that
-    /// will not build) sends nothing and queues nothing: the honest answer over
-    /// a blank message. Whatever the attempt came to, the queue holds it and
-    /// the sending snapshot published below is what tells the user.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn submit_rich_mail(
-        &self,
-        from: AccountId,
-        to: String,
-        cc: String,
-        bcc: String,
-        subject: String,
-        document: ComposerDocument,
-        blobs: Vec<ComposerBlob>,
-    ) {
-        let Some(handle) = self.account_handle(&from).await else {
-            log::warn!("send: the account to send from is no longer configured");
-            return;
-        };
-        let Some(provider) = handle.providers.first() else {
-            log::warn!("send: the account has no provider to send through");
-            return;
-        };
-        let Some(draft) = submit_draft(
-            &handle.identity,
-            &to,
-            &cc,
-            &bcc,
-            &subject,
-            &document,
-            &blobs,
-        ) else {
-            log::warn!("send: the message could not be built for sending");
-            return;
-        };
-        let at = self.account_ordinal(&from).await;
-        log::info!("send[a{at}]: submitting a message");
-        match self.engine.submit_mail(provider, &from, &draft).await {
-            Ok(outcome) => log_sent(&outcome, at),
-            // The engine records what became of the attempt on the op itself,
-            // so the queue answers whether the message is lost, and the
-            // snapshot below is where the user reads it.
-            Err(err) => log::info!("send[a{at}]: the send did not complete: {err}"),
-        }
-        self.drain_account(&from).await;
-        self.rebuild_sending().await;
-        // A delivered send's copy reaches the store at the next sync; the
-        // cached lists must not outlive it.
-        self.invalidate_list_cache();
     }
 
     /// Withdraws a queued send so it is never delivered, or dismisses one the
@@ -208,7 +145,7 @@ impl<P: Provider> App<P> {
     /// Re-reads every account's outbox and publishes the sending snapshot,
     /// but only when it moved: a gesture that changed nothing says nothing,
     /// and a host that opens the panel pulls the snapshot regardless.
-    async fn rebuild_sending(&self) {
+    pub(crate) async fn rebuild_sending(&self) {
         let mut rows = Vec::new();
         for id in self.account_ids().await {
             let queued = self.engine.outbox(&id).await.unwrap_or_default();
@@ -254,7 +191,7 @@ impl<P: Provider> App<P> {
     /// One account's drain pass. When a send moved, the queue is in the store
     /// and so is published here rather than waiting for the sync that follows,
     /// which a silent server can hold for as long as it likes.
-    async fn drain_account(&self, id: &AccountId) {
+    pub(crate) async fn drain_account(&self, id: &AccountId) {
         let Some(handle) = self.account_handle(id).await else {
             return;
         };
@@ -282,18 +219,6 @@ impl<P: Provider> App<P> {
     }
 }
 
-/// Logs how a successful submission ended, in the two shapes it can take: the
-/// copy filed in Sent, or delivered with the copy unfiled, which is the user's
-/// mail gone and their record of it missing, and must be said aloud.
-fn log_sent(outcome: &SubmitOutcome, at: usize) {
-    match outcome.sent_copy.unfiled_detail() {
-        None => log::info!("send[a{at}]: delivered, and the copy is filed in Sent"),
-        Some(detail) => {
-            log::warn!("send[a{at}]: delivered, but the Sent copy was not filed: {detail}");
-        }
-    }
-}
-
 /// A refusal in words, for the log: product surface language, never the
 /// engine's own variant names.
 fn refusal_words(refusal: OpRejection) -> &'static str {
@@ -304,71 +229,6 @@ fn refusal_words(refusal: OpRejection) -> &'static str {
         OpRejection::AwaitingConfirmation => "it may already have been delivered",
         OpRejection::NotAwaitingConfirmation => "it is not waiting for an answer",
     }
-}
-
-/// Builds the draft a send submits: the document through the composer's
-/// deterministic renderer (so a sent message is byte-identical to a draft
-/// stored from the same document), a fresh `Message-ID` (the op is idempotent
-/// by it), and every attachment's bytes resolved from the host's blobs.
-///
-/// `None` when the message must not go: no resolvable recipient, a document
-/// that will not render, or an attachment whose bytes the host did not
-/// resolve. A message silently missing its files is worse than one not sent.
-fn submit_draft(
-    identity: &EmailAddress,
-    to: &str,
-    cc: &str,
-    bcc: &str,
-    subject: &str,
-    document: &ComposerDocument,
-    blobs: &[ComposerBlob],
-) -> Option<Draft> {
-    let to = parse_addresses(to);
-    let cc = parse_addresses(cc);
-    let bcc = parse_addresses(bcc);
-    if to.is_empty() && cc.is_empty() && bcc.is_empty() {
-        return None;
-    }
-    let output = render(document).ok()?;
-    let message_id = mint_message_id()?;
-    let mut draft = Draft::new(
-        message_id,
-        identity.clone(),
-        to,
-        subject.to_owned(),
-        output.plain_text,
-    )
-    .with_cc(cc)
-    .with_bcc(bcc);
-    draft.html_body = Some(output.html);
-    let mut bytes: HashMap<&str, &[u8]> = blobs
-        .iter()
-        .map(|blob| (blob.handle.as_str(), blob.bytes.as_slice()))
-        .collect();
-    for attachment in output.inline_attachments.iter().chain(&output.attachments) {
-        let content = attachment
-            .blob
-            .as_ref()
-            .and_then(|handle| bytes.remove(handle.as_str()))?
-            .to_vec();
-        draft = match &attachment.cid {
-            Some(cid) => {
-                let content_id = engine_api::ContentIdHeader::new(cid.as_str()).ok()?;
-                draft.with_attachment(DraftAttachment::inline(
-                    attachment.file_name.clone(),
-                    attachment.media_type.clone(),
-                    content_id,
-                    content,
-                ))
-            }
-            None => draft.with_attachment(DraftAttachment::attachment(
-                attachment.file_name.clone(),
-                attachment.media_type.clone(),
-                content,
-            )),
-        };
-    }
-    Some(draft)
 }
 
 #[cfg(test)]

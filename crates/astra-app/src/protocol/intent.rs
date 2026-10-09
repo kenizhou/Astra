@@ -4,7 +4,7 @@
 //! [`DraftsIntent`](super::DraftsIntent)) beside it or one module away.
 
 use astra_composer::ComposerDocument;
-use engine_api::AccountId;
+use engine_api::{AccountId, MessageIdHeader};
 use serde::{Deserialize, Serialize};
 
 use crate::reference::{FolderRef, MessageRef, RowRef};
@@ -152,6 +152,59 @@ pub enum Intent {
         /// references; empty while the editor produces no attachments. A
         /// handle with no bytes fails the send rather than sending a message
         /// silently missing its files.
+        blobs: Vec<ComposerBlob>,
+    },
+    /// Send the composer's rich document as a reply: the same durable-outbox
+    /// discipline as [`Intent::SubmitRichMail`], with the threading the reply
+    /// answers under. The `in_reply_to` header is the original's own
+    /// `Message-ID`, the value the compose request prefilled and a saved
+    /// draft resumes with; the `References` chain is re-resolved from the
+    /// original at submit, so the reply joins the conversation it answers
+    /// whatever the composer held.
+    SubmitRichReply {
+        /// The account to send from: the composer's From dropdown, one of the
+        /// configured accounts.
+        from: AccountId,
+        /// The `To` recipients, comma-separated.
+        to: String,
+        /// The `Cc` recipients, comma-separated; may be empty.
+        cc: String,
+        /// The original's own `Message-ID`, the header the reply answers:
+        /// the compose request's `in_reply_to` handed back, so the reply
+        /// threads under the message it answers even when the original has
+        /// since left the store.
+        in_reply_to: MessageIdHeader,
+        /// The subject line; may be empty.
+        subject: String,
+        /// The shared composer document, rendered by the composer crate's
+        /// deterministic renderer on the way out, so a sent message is
+        /// byte-identical to a draft stored from the same document.
+        document: ComposerDocument,
+        /// Host-resolved bytes for every attachment handle the document
+        /// references; empty while the editor produces no attachments.
+        blobs: Vec<ComposerBlob>,
+    },
+    /// Send the composer's rich document as a forward: the same
+    /// durable-outbox discipline, carrying the original's `References` chain
+    /// and no `In-Reply-To`, because a forward continues a conversation
+    /// without answering a message. The chain is re-resolved from the
+    /// original at submit: a forward whose original will not resolve sends
+    /// nothing, since the original is the only source of the conversation it
+    /// belongs to.
+    SubmitRichForward {
+        /// The account to send from: the composer's From dropdown, one of the
+        /// configured accounts.
+        from: AccountId,
+        /// The `To` recipients, comma-separated.
+        to: String,
+        /// The subject line; may be empty.
+        subject: String,
+        /// The shared composer document, rendered by the composer crate's
+        /// deterministic renderer on the way out, so a sent message is
+        /// byte-identical to a draft stored from the same document.
+        document: ComposerDocument,
+        /// Host-resolved bytes for every attachment handle the document
+        /// references; empty while the editor produces no attachments.
         blobs: Vec<ComposerBlob>,
     },
     /// What the outbox panel asks the runtime to do with a queued send
