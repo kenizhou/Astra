@@ -75,6 +75,28 @@ const startTlsView: RecommendationView = {
   detected: { outcome: 'mail', source_kind: 'ImapSrv' },
 };
 
+const untrustedImapView: RecommendationView = {
+  recommendation: {
+    Imap: {
+      email: 'user@example.test',
+      imap_host: 'imap.example.test',
+      imap_security: 'implicit_tls',
+      smtp_security: 'implicit_tls',
+      incoming: {
+        protocol: 'IMAP',
+        hostname: 'imap.example.test',
+        port: 993,
+        security: 'SSL/TLS',
+        username: 'user@example.test',
+      },
+      is_trusted: false,
+      source: 'http://autoconfig.example.test/mail/config-v1.1.xml',
+    },
+  },
+  choices: [{ capability: 'Mail', on: true, server_found: true }],
+  detected: { outcome: 'mail', source_kind: 'Autoconfig' },
+};
+
 const googleView: RecommendationView = {
   recommendation: { Google: { email: 'user@gmail.example' } },
   choices: [],
@@ -360,5 +382,44 @@ describe('the account discovery step', () => {
 
     expect(screen.getByText('Calendar and contacts')).toBeTruthy();
     expect(screen.getByLabelText('Calendar')).toHaveProperty('checked', true);
+  });
+});
+
+describe('the untrusted-approval gate', () => {
+  it('discloses an untrusted imap recommendation and withholds the form until it is approved', async () => {
+    await detectEmail(untrustedImapView);
+
+    expect(
+      screen.getByText(
+        'These settings were discovered over an unencrypted connection and must be approved before use.',
+      ),
+    ).toBeTruthy();
+    expect(screen.getByLabelText('I trust these settings')).toHaveProperty('checked', false);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Set up manually' }));
+
+    expect(screen.getByText('Recommended setup')).toBeTruthy();
+    expect(screen.queryByLabelText('Mail server')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Test connection' })).toBeNull();
+  });
+
+  it('an approved untrusted recommendation hands the discovered host onto the form', async () => {
+    await detectEmail(untrustedImapView);
+    fireEvent.click(screen.getByLabelText('I trust these settings'));
+    fireEvent.click(screen.getByRole('button', { name: 'Set up manually' }));
+
+    expect(screen.getByLabelText('Mail server')).toHaveProperty('value', 'imap.example.test');
+    expect(screen.getByLabelText('Port')).toHaveProperty('value', '993');
+    expect(screen.getByRole('button', { name: 'Test connection' })).toBeTruthy();
+  });
+
+  it('a trusted recommendation shows no disclosure and continues immediately', async () => {
+    await detectEmail(imapView);
+
+    expect(screen.queryByText(/discovered over an unencrypted connection/)).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Set up manually' }));
+
+    expect(screen.getByLabelText('Mail server')).toHaveProperty('value', 'imap.example.test');
   });
 });

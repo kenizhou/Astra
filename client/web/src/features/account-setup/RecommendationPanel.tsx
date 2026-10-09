@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The recommendation panel: what detection found for the address, the uses it
 // offers as toggles, and the one way this build continues, onto the manual
-// form carrying whatever the recommendation could prefill.
+// form carrying whatever the recommendation could prefill. A recommendation
+// discovered over an unencrypted hop continues only after explicit approval.
 
 import { useState } from 'react';
 
@@ -78,6 +79,11 @@ export function RecommendationPanel({ view, onCancel, onManual }: Recommendation
   const [choices, setChoices] = useState<SetupChoice[]>(() =>
     view.choices.map((choice) => ({ ...choice })),
   );
+  const [approved, setApproved] = useState(false);
+
+  const rec = view.recommendation;
+  const needsApproval = 'Imap' in rec && !rec.Imap.is_trusted;
+  const canContinue = !needsApproval || approved;
 
   const toggle = (index: number) => () => {
     setChoices((prev) =>
@@ -89,6 +95,24 @@ export function RecommendationPanel({ view, onCancel, onManual }: Recommendation
     <div className="grid gap-3">
       <p className="text-xs text-muted-foreground">Recommended setup</p>
       <FoundLine view={view} />
+
+      {needsApproval && (
+        <div className="grid gap-2 rounded-[var(--radius-xs)] border border-warning bg-accent p-3 text-xs">
+          <p className="font-medium text-warning">
+            These settings were discovered over an unencrypted connection and must be approved
+            before use.
+          </p>
+          <label className="flex items-center gap-2 text-[13px] text-foreground">
+            <input
+              type="checkbox"
+              checked={approved}
+              onChange={() => setApproved((prev) => !prev)}
+              className="size-4 accent-[var(--primary)]"
+            />
+            I trust these settings
+          </label>
+        </div>
+      )}
 
       {choices.length > 0 && (
         <div className="grid gap-2 rounded-[var(--radius-xs)] border border-border p-3">
@@ -115,7 +139,8 @@ export function RecommendationPanel({ view, onCancel, onManual }: Recommendation
         <button
           type="button"
           onClick={onManual}
-          className="rounded-[var(--radius-xs)] bg-primary px-3 py-1.5 text-[13px] text-primary-foreground hover:opacity-90"
+          disabled={!canContinue}
+          className="rounded-[var(--radius-xs)] bg-primary px-3 py-1.5 text-[13px] text-primary-foreground hover:opacity-90 disabled:opacity-40"
         >
           Set up manually
         </button>
