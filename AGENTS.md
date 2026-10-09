@@ -105,3 +105,5 @@ reference decision is forbidden: disagreements are escalated in the PR.
 - The allowScripts record in client/web/package.json is what that approval writes; npm 11.19 only warns when it is missing, and the committed record keeps fresh installs and CI silent.
 - rustdoc denies public docs linking private items (private_intra-doc_links): name a private constant in prose, never as a doc link, or `cargo doc --workspace --no-deps` fails.
 - vitest fake timers freeze React's scheduler: a zustand set between assertions never re-renders; wrap mid-test store mutations in act() from @testing-library/react.
+- Pull requests merge with squash and merge, subject "PR title (#number)",
+  branch deleted after; merge commits are not used.
