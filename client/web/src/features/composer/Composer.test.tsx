@@ -3,8 +3,8 @@
 // the idle autosave dispatches the save intent with the exact payload and
 // stays quiet while nothing changed, the badge follows the status surface
 // for its own composition only, discard and close cross with exact payloads
-// and shut the pane, and the app start resume hydrates the stored draft
-// into the composer once.
+// and shut the pane (clearing any pending compose request behind them), and
+// the app start resume hydrates the stored draft into the composer once.
 import { act, cleanup, fireEvent, render, renderHook, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { JSONContent } from '@tiptap/react';
@@ -28,11 +28,13 @@ vi.mock('./Editor', () => ({
   },
 }));
 
-import type { ComposerDocument, ResumeView } from '@/services/ipc';
+import type { ComposerDocument, ComposeRequestSnapshot, ResumeView } from '@/services/ipc';
 import { useAccountStore } from '@/stores/accountStore';
+import { useComposeRequestStore } from '@/stores/composeRequestStore';
 import { useDraftStore } from '@/stores/draftStore';
 
-import { ComposerPane, useComposerStore, useDraftResumeAtStart } from './Composer';
+import { ComposerPane, useDraftResumeAtStart } from './Composer';
+import { useComposerStore } from './composerStore';
 import { documentToEditor } from './documentWire';
 
 const UUID =
@@ -40,6 +42,17 @@ const UUID =
 
 const plainRun = (text: string): string =>
   `{"Text":{"text":"${text}","bold":false,"italic":false,"underline":false,"font_size":null,"color":null,"highlight":null,"link":null}}`;
+
+/** A pending request, standing in the store while the composer is open. */
+const pendingRequest: ComposeRequestSnapshot = {
+  kind: 'reply',
+  from: 'work',
+  to: 'ada@example.test',
+  cc: '',
+  subject: 'Re: Quarterly report',
+  in_reply_to: 'orig-1@server.test',
+  document: { blocks: [], attachments: [] },
+};
 
 function resetStores(): void {
   useAccountStore.setState({ accounts: [{ accountId: 'work', displayName: 'Work' }] });
@@ -56,7 +69,9 @@ function resetStores(): void {
     subject: '',
     editor: documentToEditor(emptyDocument()),
     savedFingerprint: null,
+    request: null,
   });
+  useComposeRequestStore.setState({ snapshot: null });
 }
 
 function emptyDocument(): ComposerDocument {
@@ -244,6 +259,25 @@ describe('leaving the composer', () => {
     );
     expect(useComposerStore.getState().open).toBe(false);
     expect(screen.queryByRole('region', { name: 'Composer' })).toBeNull();
+  });
+
+  it('clears a pending compose request behind every close path', () => {
+    newMessage();
+    render(<ComposerPane />);
+    act(() => {
+      useComposeRequestStore.getState().applySnapshot(pendingRequest);
+    });
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+    });
+    expect(useComposeRequestStore.getState().snapshot).toBeNull();
+
+    act(() => {
+      useComposeRequestStore.getState().applySnapshot(pendingRequest);
+      useComposerStore.getState().closePane();
+    });
+    expect(useComposeRequestStore.getState().snapshot).toBeNull();
   });
 });
 

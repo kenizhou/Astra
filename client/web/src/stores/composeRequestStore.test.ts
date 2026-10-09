@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The compose-request store: the snapshot a pull lands, and the null that
-// clears it when no request is pending.
+// The compose-request store: the snapshot a pull lands, the null that clears
+// it when no request is pending, and the dismiss the composer's close takes
+// to leave nothing pending behind a shut pane.
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { useComposeRequestStore } from './composeRequestStore';
@@ -42,6 +43,14 @@ describe('the compose request store', () => {
     useComposeRequestStore.getState().applySnapshot(snapshot());
 
     useComposeRequestStore.getState().applySnapshot(null);
+
+    expect(useComposeRequestStore.getState().snapshot).toBeNull();
+  });
+
+  it('dismisses the pending request locally, the composer having left', () => {
+    useComposeRequestStore.getState().applySnapshot(snapshot());
+
+    useComposeRequestStore.getState().dismiss();
 
     expect(useComposeRequestStore.getState().snapshot).toBeNull();
   });

@@ -1,20 +1,28 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The composer pane and its session: a New message action or an app start
-// resume opens a composition with a minted id, the fields and the trimmed
-// editor edit it, the idle autosave hands the whole draft to the core, and
-// the status surface's own composition badges the save. Discard removes the
-// stored copy and closes the pane locally; Close hands the whole current
-// draft over as a final save that forgets the composition, then closes the
-// pane too. Send submits the current document to the durable outbox; an
-// accepted send clears the stored draft and closes, a refused one keeps the
-// pane open with its words and says why, and neither its error nor its
-// in-flight submit outlives its own composition.
+// The composer pane and its session: a New message action, an app start
+// resume, or a landed compose request opens a composition with a minted id,
+// the fields and the trimmed editor edit it, the idle autosave hands the
+// whole draft to the core, and the status surface's own composition badges
+// the save. A composition a request opened carries its kind and threading
+// header until the pane leaves, so its saves keep the quote and its send
+// rides the threaded submit. Discard removes the stored copy and closes the
+// pane locally; Close hands the whole current draft over as a final save
+// that forgets the composition, then closes the pane too; every close
+// dismisses the request the composition came from. Send submits the current
+// document to the durable outbox; an accepted send clears the stored draft
+// and closes, a refused one keeps the pane open with its words and says
+// why, and neither its error nor its in-flight submit outlives its own
+// composition. The session's state itself lives in composerStore.
 
 import { useEffect, useRef, useState } from 'react';
-import { create } from 'zustand';
-import type { JSONContent } from '@tiptap/react';
 
-import { dispatch, draftResume, intents, type CompositionId, type ResumeView } from '@/services/ipc';
+import {
+  dispatch,
+  draftResume,
+  intents,
+  type CompositionId,
+  type Intent,
+} from '@/services/ipc';
 import { isTauri } from '@/events/surfaceEvents';
 import { useAccountStore } from '@/stores/accountStore';
 import { useDraftStore } from '@/stores/draftStore';
@@ -22,119 +30,13 @@ import { useDraftStore } from '@/stores/draftStore';
 import { ComposerFields } from './ComposerFields';
 import { Editor } from './Editor';
 import {
-  documentFromPlainText,
-  documentToEditor,
-  editorToDocument,
-  type EditorDocument,
-} from './documentWire';
+  fingerprintOf,
+  mintCompositionId,
+  useComposerStore,
+  type CompositionRequest,
+} from './composerStore';
+import { editorToDocument, type EditorDocument } from './documentWire';
 import { useAutosave } from './useAutosave';
-
-/** Mints one composition's id: a UUID, unique across restarts. */
-export function mintCompositionId(): CompositionId {
-  return crypto.randomUUID();
-}
-
-/** The account a composition sends from. */
-interface SendAccount {
-  id: string;
-  label: string;
-}
-
-interface ComposerStoreState {
-  /** Whether the composer pane is up. */
-  open: boolean;
-  /** Whether the app start resume has been attempted, once per session. */
-  resumeAttempted: boolean;
-  composition: CompositionId | null;
-  from: string;
-  fromLabel: string;
-  to: string;
-  cc: string;
-  bcc: string;
-  subject: string;
-  /** The document split for the editor, retained blocks and attachments. */
-  editor: EditorDocument;
-  /** What the last handover carried; equal content costs no dispatch. */
-  savedFingerprint: string | null;
-  newMessage: (account: SendAccount) => void;
-  /** Opens a resumed draft under the composition the resume pull named. */
-  hydrate: (view: ResumeView, account: SendAccount, composition: CompositionId) => void;
-  setField: (field: 'to' | 'cc' | 'bcc' | 'subject', value: string) => void;
-  setEditorContent: (content: JSONContent[]) => void;
-  closePane: () => void;
-}
-
-const emptyEditor = (): EditorDocument => documentToEditor(documentFromPlainText(''));
-
-/** What a handover would carry, as comparable text. */
-function fingerprintOf(state: {
-  from: string;
-  to: string;
-  cc: string;
-  bcc: string;
-  subject: string;
-  editor: EditorDocument;
-}): string {
-  return JSON.stringify([
-    state.from,
-    state.to,
-    state.cc,
-    state.bcc,
-    state.subject,
-    editorToDocument(state.editor),
-  ]);
-}
-
-const closedState = {
-  open: false,
-  composition: null,
-  from: '',
-  fromLabel: '',
-  to: '',
-  cc: '',
-  bcc: '',
-  subject: '',
-  editor: emptyEditor(),
-  savedFingerprint: null,
-};
-
-export const useComposerStore = create<ComposerStoreState>((set) => ({
-  ...closedState,
-  resumeAttempted: false,
-
-  newMessage: (account) =>
-    set({
-      ...closedState,
-      open: true,
-      composition: mintCompositionId(),
-      from: account.id,
-      fromLabel: account.label,
-    }),
-
-  hydrate: (view, account, composition) =>
-    set(() => {
-      const editor = documentToEditor(documentFromPlainText(view.body_text));
-      const state = {
-        open: true,
-        composition,
-        from: account.id,
-        fromLabel: account.label,
-        to: view.to,
-        cc: view.cc,
-        bcc: view.bcc,
-        subject: view.subject,
-        editor,
-      };
-      return { ...state, savedFingerprint: fingerprintOf(state) };
-    }),
-
-  setField: (field, value) => set({ [field]: value }),
-
-  setEditorContent: (content) =>
-    set((state) => ({ editor: { ...state.editor, content } })),
-
-  closePane: () => set({ ...closedState }),
-}));
 
 /**
  * The app start resume: once, when the first account is known, the stored
@@ -215,6 +117,54 @@ function sendErrorMessage(err: unknown): string {
     return err;
   }
   return 'The message was not sent';
+}
+
+/**
+ * The submit intent the composition's origin calls for, read at click time.
+ * A plain composition sends as a fresh mail; one a request opened sends
+ * through its own threaded submit, the reply under its original, the forward
+ * answering no one. The threaded wires carry no bcc and the forward's no cc
+ * either, so those fields are the plain send's alone.
+ */
+function submitIntent(state: {
+  request: CompositionRequest | null;
+  from: string;
+  to: string;
+  cc: string;
+  bcc: string;
+  subject: string;
+  editor: EditorDocument;
+}): Intent {
+  const document = editorToDocument(state.editor);
+  if (state.request === null) {
+    return intents.submitRichMail({
+      from: state.from,
+      to: state.to,
+      cc: state.cc,
+      bcc: state.bcc,
+      subject: state.subject,
+      document,
+      blobs: [],
+    });
+  }
+  if (state.request.kind === 'forward') {
+    return intents.submitRichForward({
+      from: state.from,
+      to: state.to,
+      subject: state.subject,
+      document,
+      blobs: [],
+    });
+  }
+  return intents.submitRichReply({
+    from: state.from,
+    to: state.to,
+    cc: state.cc,
+    in_reply_to: state.request.inReplyTo ?? '',
+    subject: state.subject,
+    document,
+    blobs: [],
+  });
 }
 
 export function ComposerPane() {
@@ -327,17 +277,7 @@ export function ComposerPane() {
     setSendError(null);
     setSending(true);
     const run = ++sendEpoch.current;
-    void dispatch(
-      intents.submitRichMail({
-        from: state.from,
-        to: state.to,
-        cc: state.cc,
-        bcc: state.bcc,
-        subject: state.subject,
-        document: editorToDocument(state.editor),
-        blobs: [],
-      }),
-    )
+    void dispatch(submitIntent(state))
       .then(() => {
         if (sendEpoch.current !== run) {
           // The composition this send belonged to is gone; its settlement

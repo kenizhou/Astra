@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The reading pane: the right-hand column of the shell. Nothing open draws
-// the empty state; a pulled snapshot draws its header, its body (the
-// sandboxed HTML, the plain fallback, or a no-body note), and its attachment
-// rows, with the close button crossing back as close_reading.
+// the empty state with the compose actions standing disabled; a pulled
+// snapshot draws its header, its body (the sandboxed HTML, the plain
+// fallback, or a no-body note), and its attachment rows, with the compose
+// actions dispatching the family for the open message and the close button
+// crossing back as close_reading.
 
 import { AttachmentList } from '@/components/reading-pane/AttachmentList';
 import { MessageHtml } from '@/components/reading-pane/MessageHtml';
+import { ReadingActions } from '@/components/reading-pane/ReadingActions';
 import { ReadingHeader } from '@/components/reading-pane/ReadingHeader';
 import { dispatch, intents } from '@/services/ipc';
 import { useReadingStore } from '@/stores/readingStore';
@@ -41,6 +44,9 @@ export function ReadingPane() {
         aria-label="Reading pane"
         className="flex w-[440px] shrink-0 flex-col border-l border-border bg-background"
       >
+        <div className="flex h-[var(--pane-header-h)] shrink-0 items-center border-b border-border bg-surface px-3">
+          <ReadingActions message={null} />
+        </div>
         <p className="p-4 text-sm text-muted-foreground">Select a message to read it.</p>
       </aside>
     );
@@ -51,7 +57,8 @@ export function ReadingPane() {
       aria-label="Reading pane"
       className="flex w-[440px] shrink-0 flex-col overflow-hidden border-l border-border bg-background"
     >
-      <div className="flex h-[var(--pane-header-h)] shrink-0 items-center justify-end border-b border-border bg-surface px-3">
+      <div className="flex h-[var(--pane-header-h)] shrink-0 items-center justify-between gap-2 border-b border-border bg-surface px-3">
+        <ReadingActions message={snapshot.message} />
         <button
           type="button"
           aria-label="Close reading pane"
