@@ -20,6 +20,7 @@ import { useSendingStore } from '@/stores/sendingStore';
 import { useUiStore } from '@/stores/uiStore';
 
 import { OutboxPanel, OutboxStatus } from './OutboxPanel';
+import { SendResultToast } from './SendResultToast';
 import { useSendResultStore } from './sendResult';
 
 const work: QueuedKey = { account: 'work', op: 3 };
@@ -39,7 +40,7 @@ function reset(): void {
   ipc.dispatch.mockResolvedValue(undefined);
   useSendingStore.getState().applySnapshot({ rows: [] });
   useSendResultStore.getState().dismiss();
-  useSendResultStore.setState({ settled: [] });
+  useSendResultStore.setState({ settled: [], answered: [] });
   useUiStore.getState().setOutboxOpen(false);
 }
 
@@ -228,5 +229,38 @@ describe('the row actions', () => {
     // The actions never reached the queue, so the sends' later genuine
     // deliveries still deserve their toast.
     expect(useSendResultStore.getState().settled).toEqual([]);
+  });
+
+  it('clears the settled mark when the engine refuses the removal in flight, and the later delivery toasts', async () => {
+    useSendingStore.getState().applySnapshot({ rows: [row('queued')] });
+    useUiStore.getState().setOutboxOpen(true);
+    render(
+      <>
+        <OutboxPanel />
+        <SendResultToast />
+      </>,
+    );
+    ipc.dispatch.mockClear();
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    // The engine answered; the mark stands until a snapshot judges it.
+    expect(useSendResultStore.getState().settled).toEqual(['work/3']);
+
+    // The send went in flight under the click, so the engine refused and the
+    // row never left; the snapshot that follows takes the mark back off.
+    act(() => {
+      useSendingStore.getState().applySnapshot({ rows: [row('sending')] });
+    });
+    expect(useSendResultStore.getState().settled).toEqual([]);
+
+    act(() => {
+      useSendingStore.getState().applySnapshot({ rows: [] });
+    });
+    expect(screen.getByRole('status').textContent).toBe('Message sent');
   });
 });

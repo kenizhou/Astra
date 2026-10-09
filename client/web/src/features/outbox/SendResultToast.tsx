@@ -18,6 +18,11 @@ export function SendResultToast() {
   // store, and a row held before and gone after is a send that finished.
   useEffect(() => {
     return useSendingStore.subscribe((state, prev) => {
+      // A removal the engine answered, whose row still stands in this
+      // snapshot, was refused by it (the send went in flight under the
+      // click); the mark comes off before the diff, so the send's later
+      // genuine delivery still counts.
+      useSendResultStore.getState().unsettleRefused(state.snapshot.rows);
       const settled = useSendResultStore.getState().settled;
       const delivered = vanishedKeys(prev.snapshot.rows, state.snapshot.rows).filter(
         (key) => !settled.includes(key),

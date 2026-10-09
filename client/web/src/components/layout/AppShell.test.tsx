@@ -50,7 +50,7 @@ beforeEach(() => {
   useSendingStore.getState().applySnapshot({ rows: [] });
   useUiStore.getState().setOutboxOpen(false);
   useSendResultStore.getState().dismiss();
-  useSendResultStore.setState({ settled: [] });
+  useSendResultStore.setState({ settled: [], answered: [] });
 });
 
 afterEach(cleanup);

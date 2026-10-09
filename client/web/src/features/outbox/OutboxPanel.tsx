@@ -6,7 +6,8 @@
 // opening the panel asks the host to rebuild the queue, and the removal
 // verbs mark their row so the send-result toast never reads the user's own
 // hand as a delivery, with the mark taken back when the host refuses the
-// action. The status bar's toggle carries the outstanding count.
+// action and judged by the snapshot that follows when the engine answers.
+// The status bar's toggle carries the outstanding count.
 
 import { useEffect } from 'react';
 
@@ -35,14 +36,18 @@ const actionClass =
 /**
  * Dispatches a removal verb with its settled mark recorded first, so the
  * toast never reads the user's own hand as a delivery. A dispatch the host
- * refused never reached the queue: the mark comes back off, and the send's
- * later genuine delivery still toasts.
+ * refused never reached the queue: the mark comes back off at once. One the
+ * engine answered leaves the judging to the snapshot that follows, which
+ * takes the mark back off a row still standing (the send went in flight
+ * under the click), so the send's later genuine delivery still toasts.
  */
 function dispatchRemoval(intent: Intent, queued: QueuedKey): void {
-  useSendResultStore.getState().noteUserSettled(queued);
-  void dispatch(intent).catch(() => {
-    useSendResultStore.getState().unsettle(queued);
-  });
+  const sendResult = useSendResultStore.getState();
+  sendResult.noteUserSettled(queued);
+  void dispatch(intent).then(
+    () => sendResult.noteEngineAnswered(queued),
+    () => sendResult.unsettle(queued),
+  );
 }
 
 /** One queued send, with the actions its state accepts. */

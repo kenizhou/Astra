@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The send-result toast: a row that leaves the queue without this session's
 // own hand removing it is a delivery, and the toast says the one honest word
-// for it; a row the user withdrew or settled themselves stays quiet, and the
-// toast leaves again after its moment.
+// for it; a row the user withdrew or settled themselves stays quiet, a
+// removal the host or the engine refused gives its mark back, and the toast
+// leaves again after its moment.
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -12,10 +13,10 @@ import { useSendingStore } from '@/stores/sendingStore';
 import { SendResultToast } from './SendResultToast';
 import { SEND_TOAST_MS, keyOf, useSendResultStore, vanishedKeys } from './sendResult';
 
-function row(key: QueuedKey): QueuedRow {
+function row(key: QueuedKey, state: QueuedRow['state'] = 'queued'): QueuedRow {
   return {
     queued: key,
-    state: 'queued',
+    state,
     subject: 'Quarterly review',
     arrived_at: '2026-10-09T08:30:00Z',
   };
@@ -31,7 +32,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   useSendingStore.getState().applySnapshot({ rows: [] });
   useSendResultStore.getState().dismiss();
-  useSendResultStore.setState({ settled: [] });
+  useSendResultStore.setState({ settled: [], answered: [] });
 });
 
 afterEach(() => {
@@ -126,6 +127,61 @@ describe('the toast on the sending signal', () => {
     act(() => {
       vi.advanceTimersByTime(1);
     });
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+});
+
+describe('removals the engine refused', () => {
+  it('gives the mark back when the row still stands after the answer, so the later delivery toasts', () => {
+    render(<SendResultToast />);
+    const key = { account: 'work', op: 6 };
+    queue(row(key));
+    act(() => {
+      const store = useSendResultStore.getState();
+      store.noteUserSettled(key);
+      store.noteEngineAnswered(key);
+    });
+
+    // The send went in flight under the click, so the engine refused and the
+    // row never left; the snapshot that follows takes the mark back off.
+    queue(row(key, 'sending'));
+    expect(useSendResultStore.getState().settled).toEqual([]);
+
+    queue();
+    expect(screen.getByRole('status').textContent).toBe('Message sent');
+  });
+
+  it('keeps the mark when the engine took the removal, so the removal stays quiet', () => {
+    render(<SendResultToast />);
+    const key = { account: 'work', op: 8 };
+    queue(row(key));
+    act(() => {
+      const store = useSendResultStore.getState();
+      store.noteUserSettled(key);
+      store.noteEngineAnswered(key);
+    });
+
+    queue();
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('keeps the mark through snapshots that land before the engine answers', () => {
+    render(<SendResultToast />);
+    const key = { account: 'work', op: 9 };
+    queue(row(key));
+    act(() => {
+      useSendResultStore.getState().noteUserSettled(key);
+    });
+
+    // A snapshot pulled before the click's removal was processed still holds
+    // the row; the engine has not answered, so the mark must hold.
+    queue(row(key, 'sending'));
+    expect(useSendResultStore.getState().settled).toEqual(['work/9']);
+
+    act(() => {
+      useSendResultStore.getState().noteEngineAnswered(key);
+    });
+    queue();
     expect(screen.queryByRole('status')).toBeNull();
   });
 });

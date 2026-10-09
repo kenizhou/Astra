@@ -36,9 +36,12 @@ recipients a second time. Every rule below bends to it.
   that changed state under the click cannot send twice: the confirmation pair is
   answered exactly once, by the row that asked.
 - **A submit that cannot build a message sends nothing and queues nothing**: no
-  account to send from, no provider with a submission leg, no resolvable recipient,
-  a document that will not render, or an attachment whose bytes the host did not
-  resolve. A message silently missing its files is worse than one not sent.
+  account to send from, no resolvable recipient, a document that will not
+  render, or an attachment whose bytes the host did not resolve. A message
+  silently missing its files is worse than one not sent. A mail-only account
+  is the honest exception: the submit check asks only whether the account has
+  a provider, so its send is queued, the first drain settles it Failed, and
+  it stands in the outbox with its payload.
 
 ## The durable queue
 
@@ -118,9 +121,10 @@ first.
 - **The outcome is never worded as a failed send.** A send that delivered and filed
   ends quietly; the send-result toast watches the queue and says "Message sent"
   when a send leaves it without the user's own hand removing it. A removal the
-  user made themselves (Cancel, Mark as sent) is not read as a delivery, and a
-  removal the host refused is put back, so the send's later genuine delivery still
-  counts.
+  user made themselves (Cancel, Mark as sent) is not read as a delivery, while
+  a refused removal gives its mark back: the host's refusal at once, the
+  engine's, because the send went in flight under the click, on the snapshot
+  that follows, so the send's later genuine delivery still counts.
 - **The retry of a standing unfiled-copy question is not shipped** and is recorded
   as a gap below.
 
