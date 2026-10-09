@@ -44,9 +44,9 @@ this row ports.
 | Mail | Overflow menu with Save as .eml, writing the message exactly as delivered | ⬜ | reading-actions.md |
 | Mail | Print a message with subject and header lines through the platform print dialog | ⬜ | reading-actions.md |
 | Mail | Attachments: list, save, and open received files; attach files in the composer | ⬜ | |
-| Composer | Rich HTML composer for new mail, reply, reply all, and forward, with editable To, Cc, and Bcc | ⬜ | |
+| Composer | Rich HTML composer for new mail, reply, reply all, and forward, with editable To, Cc, and Bcc | 🚧 | |
 | Composer | A forward opens holding the original's attachments, removable one by one | ⬜ | sending.md |
-| Composer | Drafts stored on the server while you type; one draft across devices; taken away on send | ⬜ | drafts.md |
+| Composer | Drafts stored on the server while you type; one draft across devices; taken away on send | 🚧 | drafts.md |
 | Composer | A Drafts row opens back into the composer and saves over the same copy | ⬜ | |
 | Mail | Open a message in its own window carrying the whole reading view | ⬜ | reading-window.md |
 | Composer | From account picker with an app-level default send account | ⬜ | |
