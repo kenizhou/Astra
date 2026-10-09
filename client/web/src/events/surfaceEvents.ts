@@ -7,14 +7,15 @@
 
 import { listen } from '@tauri-apps/api/event';
 
-import { mailboxList, syncProgress } from '@/services/ipc';
+import { mailboxList, reading, syncProgress } from '@/services/ipc';
 import { useAccountStore } from '@/stores/accountStore';
 import { useFolderStore } from '@/stores/folderStore';
 import { useListStore } from '@/stores/listStore';
+import { useReadingStore } from '@/stores/readingStore';
 import { useUiStore } from '@/stores/uiStore';
 
 /** The surfaces a change can name, as the event payload carries them. */
-export type Surface = 'mailbox_list' | 'sync_progress';
+export type Surface = 'mailbox_list' | 'sync_progress' | 'reading';
 
 /**
  * Tauri presence guard, evaluated at module load so jsdom tests that install
@@ -85,6 +86,11 @@ export function pullSurface(surface: Surface): Promise<void> {
       useListStore.getState().applySnapshot(snapshot);
     });
   }
+  if (surface === 'reading') {
+    return reading().then((snapshot) => {
+      useReadingStore.getState().applySnapshot(snapshot);
+    });
+  }
   return syncProgress().then((snapshot) => {
     useUiStore.getState().applySyncProgress(snapshot);
   });
@@ -104,7 +110,7 @@ export function mountSurfaceEvents(): () => void {
     'surface_changed',
     (event) => {
       const { surface } = event.payload;
-      if (surface === 'mailbox_list' || surface === 'sync_progress') {
+      if (surface === 'mailbox_list' || surface === 'sync_progress' || surface === 'reading') {
         void pullSurface(surface);
       }
     },
@@ -114,8 +120,10 @@ export function mountSurfaceEvents(): () => void {
 }
 
 /**
- * The first pull at mount: both surfaces, the engine marked running once they
+ * The first pull at mount: every surface, the engine marked running once they
  * land, and the account setup flow opened when there is no account to show.
+ * The reading pull also carries a snapshot the host published before the
+ * mount, so the pane and the list highlight start truthful.
  */
 export async function hydrate(): Promise<void> {
   if (!isTauri) {
@@ -127,6 +135,8 @@ export async function hydrate(): Promise<void> {
   useListStore.getState().applySnapshot(snapshot);
   const progress = await syncProgress();
   useUiStore.getState().applySyncProgress(progress);
+  const openReading = await reading();
+  useReadingStore.getState().applySnapshot(openReading);
   useUiStore.getState().markRunning();
   if (snapshot.account_folders.length === 0) {
     useUiStore.getState().setAccountSetupOpen(true);
