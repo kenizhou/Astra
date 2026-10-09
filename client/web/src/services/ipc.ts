@@ -15,6 +15,21 @@ export interface FolderRef {
   key: string;
 }
 
+/** A message bound to its owning account by its provider key. */
+export interface MessageRef {
+  account: string;
+  key: string;
+}
+
+/** A conversation bound to its owning account by its thread id. */
+export interface ThreadRef {
+  account: string;
+  thread_id: string;
+}
+
+/** One mailbox-list row an action names: a message, or a whole conversation. */
+export type RowRef = { message: MessageRef } | { thread: ThreadRef };
+
 /** How the mailbox list is grouped, crossing as a plain word. */
 export type ViewMode = 'flat' | 'threaded';
 
@@ -32,6 +47,8 @@ export type Intent =
   | { set_folder_expanded: { folder: FolderRef; expanded: boolean } }
   | { select_folder: { folder: FolderRef } }
   | { set_view_mode: ViewMode }
+  | { mark_read: { row: RowRef; read: boolean } }
+  | { set_flagged: { row: RowRef; flagged: boolean } }
   | { folders: { create: { account: string; name: string; parent?: string } } };
 
 /** Smart constructors for every intent, in the enum's own order. */
@@ -54,6 +71,12 @@ export const intents = {
   setViewMode: (mode: ViewMode): Intent => ({ set_view_mode: mode }),
   /** Grow the visible mailbox-list window by one page. */
   showMore: (): Intent => 'show_more',
+  /** Mark one row (a message, or a whole conversation) read or unread. */
+  markRead: (row: RowRef, read: boolean): Intent => ({ mark_read: { row, read } }),
+  /** Flag or unflag one row (a message, or a whole conversation). */
+  setFlagged: (row: RowRef, flagged: boolean): Intent => ({
+    set_flagged: { row, flagged },
+  }),
   /** Make a folder, at the top of the account or inside a parent. */
   createFolder: (account: string, name: string, parent?: string): Intent => ({
     folders: {

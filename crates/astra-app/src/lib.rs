@@ -12,6 +12,8 @@
 mod accounts;
 mod boot;
 mod dispatch;
+mod list_rows;
+mod mail_writes;
 mod preferences;
 mod protocol;
 mod reference;
@@ -38,14 +40,18 @@ use std::{
 use engine_api::{AccountId, Engine, Provider};
 use tokio::sync::RwLock;
 
-use crate::{preferences::PreferencesState, row_cache::CachedRows, window::PAGE};
+use crate::{
+    preferences::PreferencesState,
+    row_cache::{CachedMailRows, CachedRows},
+    window::PAGE,
+};
 
 pub use accounts::{Account, MailboxConnector};
 pub use boot::{boot, BootError, SpawnedTask};
 pub use dispatch::AppError;
 pub use preferences::{load_preferences, preferences_path, save_preferences, Preferences};
 pub use protocol::{AppObserver, FolderIntent, Intent, Surface, ViewMode};
-pub use reference::FolderRef;
+pub use reference::{FolderRef, MessageRef, RowRef, ThreadRef};
 pub use surfaced::Surfaced;
 
 /// The app runtime: owns one [`Engine`] shared across every configured [`Account`],
@@ -94,6 +100,10 @@ pub struct App<P> {
     /// re-showing the same list costs nothing. `None` after a sync invalidates it,
     /// until the next read reloads it.
     row_cache: Mutex<Option<CachedRows>>,
+    /// The shown folder's cached load: the newest rows of the selected folder's account,
+    /// so re-projecting the same list costs nothing. `None` after a sync or a write
+    /// invalidates it, until the next read reloads it.
+    mail_row_cache: Mutex<Option<CachedMailRows>>,
     /// Bumped on every [`invalidate_list_cache`](App::invalidate_list_cache). A row
     /// load captures this before reading the store and refuses to cache its result if
     /// the value moved while the read was in flight: so a slow pre-sync load cannot
@@ -139,6 +149,7 @@ impl<P: Provider> App<P> {
             visible_limit: Mutex::new(PAGE),
             generation: AtomicU64::new(0),
             row_cache: Mutex::new(None),
+            mail_row_cache: Mutex::new(None),
             row_cache_generation: AtomicU64::new(0),
             connector,
         }

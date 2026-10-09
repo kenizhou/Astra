@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Tests for the dispatch loop: the intent-to-use-case table, the snapshot it
 //! rebuilds, the window it grows, the preferences it writes through, and the boot
-//! sequence that assembles the whole runtime. The fixtures live in `dispatch_fakes`.
+//! sequence that assembles the whole runtime. The fixtures live in `dispatch_fakes`;
+//! the message-list tests live in `dispatch_list_tests`.
 
 use std::{
     future::Future,
@@ -18,6 +19,9 @@ use crate::{boot, reference::FolderRef, AppError, FolderIntent, Intent, Surface,
 
 #[path = "dispatch_fakes.rs"]
 mod fakes;
+
+#[path = "dispatch_list_tests.rs"]
+mod list;
 
 use fakes::{account, app, app_with_prefs, folder, inbox, key, scratch, NoConnector};
 

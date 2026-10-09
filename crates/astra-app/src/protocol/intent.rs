@@ -5,7 +5,7 @@
 use engine_api::AccountId;
 use serde::{Deserialize, Serialize};
 
-use crate::reference::FolderRef;
+use crate::reference::{FolderRef, RowRef};
 
 /// How the mailbox list is grouped.
 ///
@@ -82,6 +82,25 @@ pub enum Intent {
     /// the IPC. Any navigation that changes the list (select account or folder, switch
     /// view mode) resets the window to the first page.
     ShowMore,
+    /// Mark one row read (`read`) or unread: a message in the flat list, or a whole
+    /// conversation in the threaded list (every message on the thread). The write goes
+    /// through the engine's outbox, so the flipped row state shows at once and reaches
+    /// the server when the device can.
+    MarkRead {
+        /// The row to mark, bound to its owning account.
+        row: RowRef,
+        /// Whether the row's mail counts as read.
+        read: bool,
+    },
+    /// Flag one row (`flagged`) or unflag it: a message in the flat list, or a whole
+    /// conversation in the threaded list. As [`Intent::MarkRead`], an outbox write whose
+    /// outcome the republished snapshot carries.
+    SetFlagged {
+        /// The row to flag, bound to its owning account.
+        row: RowRef,
+        /// Whether the row's mail carries the flag.
+        flagged: bool,
+    },
     /// A change to an account's folder tree ([`FolderIntent`]).
     Folders(FolderIntent),
 }

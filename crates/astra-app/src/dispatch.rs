@@ -78,6 +78,15 @@ impl<P: Provider> App<P> {
                 self.bump_generation();
                 self.rebuild_snapshot().await;
             }
+            // Discard-and-resync writes: the outcome reaches the user through the
+            // republished snapshot (the store shows a queued keyword change at once),
+            // never through a return value.
+            Intent::MarkRead { row, read } => {
+                self.mark_read(row, read).await;
+            }
+            Intent::SetFlagged { row, flagged } => {
+                self.set_flagged(row, flagged).await;
+            }
             Intent::Folders(_change) => return Err(AppError::NotYet),
         }
         Ok(())
