@@ -83,6 +83,20 @@ describe('the toast on the sending signal', () => {
     expect(screen.queryByRole('status')).toBeNull();
   });
 
+  it('toasts the delivery of a send whose removal the host refused', () => {
+    render(<SendResultToast />);
+    const key = { account: 'work', op: 5 };
+    queue(row(key));
+    act(() => {
+      const store = useSendResultStore.getState();
+      store.noteUserSettled(key);
+      store.unsettle(key);
+    });
+    queue();
+
+    expect(screen.getByRole('status').textContent).toBe('Message sent');
+  });
+
   it('toasts again for a later delivery after the first one left', () => {
     render(<SendResultToast />);
     queue(row({ account: 'work', op: 1 }));

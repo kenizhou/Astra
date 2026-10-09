@@ -2,8 +2,9 @@
 // The send-result decision core: which queued sends count as delivered. A
 // row leaving the queue is a delivery only when this session's own hands did
 // not remove it: Cancel withdraws a send and Mark as sent settles one, and
-// the panel's own click is feedback enough for those. Pure helpers over
-// snapshots, so the policy stays pinned by tests without a clock.
+// the panel's own click is feedback enough for those. A removal the host
+// refused never reached the queue, so its mark comes back off. Pure helpers
+// over snapshots, so the policy stays pinned by tests without a clock.
 
 import { create } from 'zustand';
 
@@ -34,6 +35,11 @@ interface SendResultStoreState {
   dismiss: () => void;
   /** Records a removal the user made themselves: Cancel, or Mark as sent. */
   noteUserSettled: (queued: QueuedKey) => void;
+  /**
+   * Takes a recorded removal back: the action never reached the queue, so
+   * the send's later genuine delivery still counts.
+   */
+  unsettle: (queued: QueuedKey) => void;
 }
 
 export const useSendResultStore = create<SendResultStoreState>((set) => ({
@@ -46,4 +52,7 @@ export const useSendResultStore = create<SendResultStoreState>((set) => ({
 
   noteUserSettled: (queued) =>
     set((state) => ({ settled: [...state.settled, keyOf(queued)] })),
+
+  unsettle: (queued) =>
+    set((state) => ({ settled: state.settled.filter((key) => key !== keyOf(queued)) })),
 }));

@@ -5,11 +5,12 @@
 // cannot be called back, an unconfirmed one offers only the user's answer),
 // opening the panel asks the host to rebuild the queue, and the removal
 // verbs mark their row so the send-result toast never reads the user's own
-// hand as a delivery. The status bar's toggle carries the outstanding count.
+// hand as a delivery, with the mark taken back when the host refuses the
+// action. The status bar's toggle carries the outstanding count.
 
 import { useEffect } from 'react';
 
-import { dispatch, intents, type QueuedRow } from '@/services/ipc';
+import { dispatch, intents, type Intent, type QueuedKey, type QueuedRow } from '@/services/ipc';
 import { useSendingStore } from '@/stores/sendingStore';
 import { useUiStore } from '@/stores/uiStore';
 
@@ -31,6 +32,19 @@ function arrivalWord(arrivedAt: string): string {
 const actionClass =
   'rounded-[var(--radius-xs)] px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
+/**
+ * Dispatches a removal verb with its settled mark recorded first, so the
+ * toast never reads the user's own hand as a delivery. A dispatch the host
+ * refused never reached the queue: the mark comes back off, and the send's
+ * later genuine delivery still toasts.
+ */
+function dispatchRemoval(intent: Intent, queued: QueuedKey): void {
+  useSendResultStore.getState().noteUserSettled(queued);
+  void dispatch(intent).catch(() => {
+    useSendResultStore.getState().unsettle(queued);
+  });
+}
+
 /** One queued send, with the actions its state accepts. */
 function OutboxRow({ row }: { row: QueuedRow }) {
   const actions: Array<{ label: string; run: () => void }> = [];
@@ -42,20 +56,13 @@ function OutboxRow({ row }: { row: QueuedRow }) {
     });
     actions.push({
       label: 'Cancel',
-      run: () => {
-        // The user's own withdrawal is not a delivery; the toast stays quiet.
-        useSendResultStore.getState().noteUserSettled(row.queued);
-        void dispatch(intents.cancelQueuedSend(row.queued));
-      },
+      run: () => dispatchRemoval(intents.cancelQueuedSend(row.queued), row.queued),
     });
   }
   if (row.state === 'unconfirmed') {
     actions.push({
       label: 'Mark as sent',
-      run: () => {
-        useSendResultStore.getState().noteUserSettled(row.queued);
-        void dispatch(intents.confirmQueuedSent(row.queued));
-      },
+      run: () => dispatchRemoval(intents.confirmQueuedSent(row.queued), row.queued),
     });
     actions.push({
       label: 'Send again',

@@ -7,9 +7,10 @@
 // draft over as a final save that forgets the composition, then closes the
 // pane too. Send submits the current document to the durable outbox; an
 // accepted send clears the stored draft and closes, a refused one keeps the
-// pane open with its words and says why.
+// pane open with its words and says why, and neither its error nor its
+// in-flight submit outlives its own composition.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { create } from 'zustand';
 import type { JSONContent } from '@tiptap/react';
 
@@ -236,6 +237,10 @@ export function ComposerPane() {
   // button so one gesture cannot queue two sends, and a refused one says why.
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  // The send's epoch: each composition's submits settle only against
+  // themselves, so one left in flight when the pane moved on can neither
+  // close the next composition nor stick its error under it.
+  const sendEpoch = useRef(0);
 
   const autosave = useAutosave({
     isDirty: () => {
@@ -271,6 +276,16 @@ export function ComposerPane() {
     }
     return useComposerStore.subscribe(() => autosave.noteEdit());
   }, [open, autosave]);
+
+  // A composition inherits nothing from the one before it: the pane's own
+  // state resets on the new, close, and hydrate paths, and so does the
+  // send's error line and in-flight flag, with the epoch moved past
+  // whatever was still in flight.
+  useEffect(() => {
+    sendEpoch.current += 1;
+    setSending(false);
+    setSendError(null);
+  }, [composition]);
 
   if (!open || composition === null) {
     return null;
@@ -311,6 +326,7 @@ export function ComposerPane() {
     }
     setSendError(null);
     setSending(true);
+    const run = ++sendEpoch.current;
     void dispatch(
       intents.submitRichMail({
         from: state.from,
@@ -323,12 +339,20 @@ export function ComposerPane() {
       }),
     )
       .then(() => {
+        if (sendEpoch.current !== run) {
+          // The composition this send belonged to is gone; its settlement
+          // must not touch whatever the pane shows now.
+          return;
+        }
         // The submit carries no composition id, so the stored draft the
         // autosave left behind goes with an explicit discard.
         void dispatch(intents.discardDraft(composition));
         useComposerStore.getState().closePane();
       })
       .catch((err: unknown) => {
+        if (sendEpoch.current !== run) {
+          return;
+        }
         setSending(false);
         setSendError(sendErrorMessage(err));
       });

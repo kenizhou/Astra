@@ -212,4 +212,21 @@ describe('the row actions', () => {
 
     expect(useSendResultStore.getState().settled).toEqual(['work/3', 'work/7']);
   });
+
+  it('takes the settled marks back when the host refuses the removals', async () => {
+    openWith([row('queued'), row('unconfirmed', { queued: { account: 'work', op: 7 } })]);
+    ipc.dispatch.mockRejectedValue(new Error('the host is unreachable'));
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Mark as sent' }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // The actions never reached the queue, so the sends' later genuine
+    // deliveries still deserve their toast.
+    expect(useSendResultStore.getState().settled).toEqual([]);
+  });
 });
