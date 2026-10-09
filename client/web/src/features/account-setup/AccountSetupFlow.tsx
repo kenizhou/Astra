@@ -6,7 +6,7 @@
 // Nothing is persisted until the test passes, and detection failing only ever
 // lands on the manual form.
 
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 
 import {
   addAccount,
@@ -55,6 +55,7 @@ function errorText(err: unknown): string {
 
 export function AccountSetupFlow() {
   const open = useUiStore((s) => s.accountSetupOpen);
+  const detectEpoch = useRef(0);
   const [step, setStep] = useState<SetupStep>('detect');
   const [detectBusy, setDetectBusy] = useState(false);
   const [view, setView] = useState<RecommendationView | null>(null);
@@ -71,6 +72,9 @@ export function AccountSetupFlow() {
   }
 
   const close = () => {
+    // Every detect still in flight belongs to a session that just ended;
+    // its settlement must not touch whatever the next open shows.
+    detectEpoch.current += 1;
     setStep('detect');
     setDetectBusy(false);
     setView(null);
@@ -90,9 +94,13 @@ export function AccountSetupFlow() {
   };
 
   const onDetect = async (email: string) => {
+    const run = ++detectEpoch.current;
     setDetectBusy(true);
     try {
       const answered = await detectWithGuard(email);
+      if (detectEpoch.current !== run) {
+        return;
+      }
       if ('Manual' in answered.recommendation) {
         goManual(manualDefaults(email), missNote(answered.recommendation.Manual.reason));
       } else {
@@ -100,9 +108,14 @@ export function AccountSetupFlow() {
         setStep('recommendation');
       }
     } catch (err) {
+      if (detectEpoch.current !== run) {
+        return;
+      }
       goManual(manualDefaults(email), detectFallbackNote(err));
     } finally {
-      setDetectBusy(false);
+      if (detectEpoch.current === run) {
+        setDetectBusy(false);
+      }
     }
   };
 
