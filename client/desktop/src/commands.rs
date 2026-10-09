@@ -25,6 +25,9 @@ use crate::{AppState, HostAccount, HostProvider};
 // the app core's protocol made for its drafts intents.
 pub(crate) mod drafts;
 
+// The sending command surface (the queue pull), under the same split.
+pub(crate) mod sending;
+
 /// A command failure, serialised to the webview as its display string: a sentence a
 /// surface can show, with the reason the host saw.
 #[derive(Debug, thiserror::Error)]

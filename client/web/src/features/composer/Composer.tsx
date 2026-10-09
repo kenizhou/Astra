@@ -3,10 +3,14 @@
 // resume opens a composition with a minted id, the fields and the trimmed
 // editor edit it, the idle autosave hands the whole draft to the core, and
 // the status surface's own composition badges the save. Discard removes the
-// stored copy and closes the pane locally; Close asks the core to save the
-// held content and forget the composition, then closes the pane too.
+// stored copy and closes the pane locally; Close hands the whole current
+// draft over as a final save that forgets the composition, then closes the
+// pane too. Send submits the current document to the durable outbox; an
+// accepted send clears the stored draft and closes, a refused one keeps the
+// pane open with its words and says why, and neither its error nor its
+// in-flight submit outlives its own composition.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { create } from 'zustand';
 import type { JSONContent } from '@tiptap/react';
 
@@ -202,6 +206,17 @@ function SaveBadge({ composition }: { composition: CompositionId }) {
   return <span className="text-xs text-muted-foreground">{`Saved ${time} UTC`}</span>;
 }
 
+/** A refused send in words the pane can show, whatever the host handed back. */
+function sendErrorMessage(err: unknown): string {
+  if (err instanceof Error) {
+    return err.message;
+  }
+  if (typeof err === 'string') {
+    return err;
+  }
+  return 'The message was not sent';
+}
+
 export function ComposerPane() {
   const open = useComposerStore((s) => s.open);
   const composition = useComposerStore((s) => s.composition);
@@ -218,6 +233,14 @@ export function ComposerPane() {
   const [bccToggled, setBccToggled] = useState(false);
   const ccShown = ccToggled || cc !== '';
   const bccShown = bccToggled || bcc !== '';
+  // The send's own state, local to the pane: an in-flight submit disarms its
+  // button so one gesture cannot queue two sends, and a refused one says why.
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  // The send's epoch: each composition's submits settle only against
+  // themselves, so one left in flight when the pane moved on can neither
+  // close the next composition nor stick its error under it.
+  const sendEpoch = useRef(0);
 
   const autosave = useAutosave({
     isDirty: () => {
@@ -254,6 +277,16 @@ export function ComposerPane() {
     return useComposerStore.subscribe(() => autosave.noteEdit());
   }, [open, autosave]);
 
+  // A composition inherits nothing from the one before it: the pane's own
+  // state resets on the new, close, and hydrate paths, and so does the
+  // send's error line and in-flight flag, with the epoch moved past
+  // whatever was still in flight.
+  useEffect(() => {
+    sendEpoch.current += 1;
+    setSending(false);
+    setSendError(null);
+  }, [composition]);
+
   if (!open || composition === null) {
     return null;
   }
@@ -264,9 +297,67 @@ export function ComposerPane() {
   };
 
   const close = (): void => {
-    void dispatch(intents.closeDraft(composition));
+    // The final save carries the whole current draft and asks the core to
+    // forget the composition once it lands; the pane leaves now.
+    const state = useComposerStore.getState();
+    void dispatch(
+      intents.saveDraft({
+        composition,
+        from: state.from,
+        to: state.to,
+        cc: state.cc,
+        bcc: state.bcc,
+        subject: state.subject,
+        document: editorToDocument(state.editor),
+        then_close: true,
+      }),
+    );
     useComposerStore.getState().closePane();
   };
+
+  const send = (): void => {
+    // The submit reads the pane's state at click time, so the document is
+    // the one on screen: no flush window stands between the words and the
+    // queue. A blank To would be refused before the queue with nothing
+    // published, so the button never offers it.
+    const state = useComposerStore.getState();
+    if (state.to.trim() === '') {
+      return;
+    }
+    setSendError(null);
+    setSending(true);
+    const run = ++sendEpoch.current;
+    void dispatch(
+      intents.submitRichMail({
+        from: state.from,
+        to: state.to,
+        cc: state.cc,
+        bcc: state.bcc,
+        subject: state.subject,
+        document: editorToDocument(state.editor),
+        blobs: [],
+      }),
+    )
+      .then(() => {
+        if (sendEpoch.current !== run) {
+          // The composition this send belonged to is gone; its settlement
+          // must not touch whatever the pane shows now.
+          return;
+        }
+        // The submit carries no composition id, so the stored draft the
+        // autosave left behind goes with an explicit discard.
+        void dispatch(intents.discardDraft(composition));
+        useComposerStore.getState().closePane();
+      })
+      .catch((err: unknown) => {
+        if (sendEpoch.current !== run) {
+          return;
+        }
+        setSending(false);
+        setSendError(sendErrorMessage(err));
+      });
+  };
+  const sendGated = to.trim() === '';
 
   return (
     <section
@@ -276,6 +367,15 @@ export function ComposerPane() {
       <div className="flex h-[var(--pane-header-h)] shrink-0 items-center justify-between gap-2 border-b border-border bg-surface px-3">
         <SaveBadge composition={composition} />
         <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={send}
+            disabled={sendGated || sending}
+            title={sendGated ? 'Add a recipient first' : 'Send'}
+            className="rounded-[var(--radius-xs)] bg-primary px-2 py-1 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-50"
+          >
+            Send
+          </button>
           <button
             type="button"
             onClick={discard}
@@ -293,6 +393,14 @@ export function ComposerPane() {
           </button>
         </div>
       </div>
+      {sendError !== null && (
+        <p
+          role="alert"
+          className="shrink-0 border-b border-border bg-background px-3 py-1.5 text-xs text-destructive"
+        >
+          {sendError}
+        </p>
+      )}
       <ComposerFields
         fromLabel={fromLabel}
         to={to}

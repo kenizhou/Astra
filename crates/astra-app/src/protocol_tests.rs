@@ -2,11 +2,14 @@
 //! Tests for the protocol: the exact JSON wire shape every intent, folder intent, view
 //! mode, and surface crosses the IPC in, and that each reads back identical.
 
-use astra_composer::{Block, ComposerDocument, InlineContent, Paragraph, TextRun};
+use astra_composer::{Block, ComposerDocument, DraftBlobHandle, InlineContent, Paragraph, TextRun};
 use engine_api::AccountId;
 
-use super::{CompositionId, DraftsIntent, FolderIntent, Intent, Surface, ViewMode};
-use crate::reference::{FolderRef, MessageRef, RowRef, ThreadRef};
+use super::{
+    ComposerBlob, CompositionId, DraftsIntent, FolderIntent, Intent, OutboxIntent, Surface,
+    ViewMode,
+};
+use crate::reference::{FolderRef, MessageRef, QueuedRef, RowRef, ThreadRef};
 
 /// A well-formed account id, the way every test names one.
 fn account(value: &str) -> AccountId {
@@ -338,4 +341,112 @@ fn a_malformed_row_reference_is_refused_on_the_wire() {
     let thread =
         r#"{"mark_read":{"row":{"thread":{"account":"","thread_id":"th-7"}},"read":true}}"#;
     assert!(serde_json::from_str::<Intent>(thread).is_err());
+}
+
+#[test]
+fn submit_rich_mail_carries_the_recipients_the_document_and_the_blobs() {
+    round_trips(
+        &Intent::SubmitRichMail {
+            from: account("work"),
+            to: "you@test.local".to_owned(),
+            cc: String::new(),
+            bcc: String::new(),
+            subject: "On its way".to_owned(),
+            document: document("Sent words"),
+            blobs: Vec::new(),
+        },
+        concat!(
+            r#"{"submit_rich_mail":{"from":"work","to":"you@test.local","#,
+            r#""cc":"","bcc":"","subject":"On its way","#,
+            r#""document":{"blocks":[{"Paragraph":{"content":"#,
+            r#"[{"Text":{"text":"Sent words","bold":false,"italic":false,"underline":false,"#,
+            r#""font_size":null,"color":null,"highlight":null,"link":null}}]}}],"#,
+            r#""attachments":[]},"blobs":[]}}"#
+        ),
+    );
+    // A submit with host-resolved attachment bytes carries them beside the document.
+    round_trips(
+        &Intent::SubmitRichMail {
+            from: account("work"),
+            to: "you@test.local".to_owned(),
+            cc: String::new(),
+            bcc: String::new(),
+            subject: String::new(),
+            document: document("With a file"),
+            blobs: vec![ComposerBlob::new(
+                DraftBlobHandle::new("blob-1").unwrap(),
+                vec![1, 2, 3],
+            )],
+        },
+        concat!(
+            r#"{"submit_rich_mail":{"from":"work","to":"you@test.local","#,
+            r#""cc":"","bcc":"","subject":"","#,
+            r#""document":{"blocks":[{"Paragraph":{"content":"#,
+            r#"[{"Text":{"text":"With a file","bold":false,"italic":false,"underline":false,"#,
+            r#""font_size":null,"color":null,"highlight":null,"link":null}}]}}],"#,
+            r#""attachments":[]},"blobs":[{"handle":"blob-1","bytes":[1,2,3]}]}}"#
+        ),
+    );
+}
+
+#[test]
+fn the_outbox_family_crosses_with_the_queued_reference() {
+    round_trips(&Intent::Outbox(OutboxIntent::Show), r#"{"outbox":"show"}"#);
+    round_trips(
+        &Intent::Outbox(OutboxIntent::Cancel {
+            queued: queued("work", 3),
+        }),
+        r#"{"outbox":{"cancel":{"queued":{"account":"work","op":3}}}}"#,
+    );
+    round_trips(
+        &Intent::Outbox(OutboxIntent::SendNow {
+            queued: queued("home", 1),
+        }),
+        r#"{"outbox":{"send_now":{"queued":{"account":"home","op":1}}}}"#,
+    );
+    round_trips(
+        &Intent::Outbox(OutboxIntent::ConfirmSent {
+            queued: queued("work", 7),
+        }),
+        r#"{"outbox":{"confirm_sent":{"queued":{"account":"work","op":7}}}}"#,
+    );
+    round_trips(
+        &Intent::Outbox(OutboxIntent::ConfirmNotSent {
+            queued: queued("home", 2),
+        }),
+        r#"{"outbox":{"confirm_not_sent":{"queued":{"account":"home","op":2}}}}"#,
+    );
+    // The CamelCase spelling is not the wire.
+    assert!(serde_json::from_str::<Intent>(r#"{"outbox":"Show"}"#).is_err());
+}
+
+#[test]
+fn a_malformed_queued_reference_is_refused_on_the_wire() {
+    // The account half validates on the way in, exactly as a folder or message reference:
+    // a blank id cannot name the outbox an action routes to.
+    let cancel = r#"{"outbox":{"cancel":{"queued":{"account":"","op":3}}}}"#;
+    assert!(serde_json::from_str::<Intent>(cancel).is_err());
+    assert!(QueuedRef::from_parts("", 3).is_none());
+    assert_eq!(
+        queued("work", 3).op.get(),
+        3,
+        "the op id reads back as the store assigned it"
+    );
+}
+
+#[test]
+fn sending_crosses_as_a_renamed_word() {
+    assert_eq!(
+        serde_json::to_string(&Surface::Sending).unwrap(),
+        r#""sending""#
+    );
+    assert_eq!(
+        serde_json::from_str::<Surface>(r#""sending""#).unwrap(),
+        Surface::Sending
+    );
+}
+
+/// A queued-send reference, the way every outbox test names one.
+fn queued(account_value: &str, op: u64) -> QueuedRef {
+    QueuedRef::from_parts(account_value, op).unwrap()
 }

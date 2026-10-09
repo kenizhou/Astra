@@ -2,7 +2,7 @@
 //! Keeping the message being composed on the server: saving one, discarding one, and
 //! the per-composition record that joins the two. Resuming a stored draft lives in
 //! [`resume`], the idle autosave in [`autosave`], the draft builder and its digest in
-//! [`build`].
+//! [`build`], the record accessors in [`record`].
 //!
 //! Two rules decide almost everything here, both mail-calendar's. The stored copy is
 //! named by the **key the provider answered with**, because three of the four adapters
@@ -19,17 +19,20 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use astra_composer::ComposerDocument;
 use astra_viewmodel::{DraftSaveState, DraftStatusSnapshot};
 use engine_api::{
-    AccountId, DraftPut, DrainOutcome, MessageIdHeader, OpRejection, PendingOpId, PendingOpKind,
-    Provider, ProviderKey,
+    AccountId, DrainOutcome, MessageIdHeader, OpRejection, PendingOpId, Provider, ProviderKey,
 };
 
 use crate::{App, CompositionId, DraftsIntent};
 
 mod autosave;
 mod build;
+mod record;
 mod resume;
 
-use build::{build_draft, digest, mint_message_id, now_instant};
+use build::{build_draft, digest};
+// The build helpers the send path shares: the recipient split, the message-id
+// mint, and the instant stamp.
+pub(crate) use build::{mint_message_id, now_instant, parse_addresses};
 pub use resume::DraftResume;
 
 /// How long a composer sits untouched before its draft is saved.
@@ -110,10 +113,18 @@ impl<P: Provider> App<P> {
                     subject,
                     document,
                 };
-                self.save_draft(&composition, &held).await;
                 if then_close {
+                    // The save and the forget run as one unit under the gate, in
+                    // `close_composition`'s shape: a deadline fire queued on the
+                    // gate lands either wholly before the pair or wholly after
+                    // it, never between the save and the forget, where it would
+                    // re-open the composition its composer has left.
+                    let gate = Arc::clone(&self.save_gate);
+                    let _closing = gate.lock().await;
+                    self.save_draft_gated(&composition, &held).await;
                     self.forget(&composition);
                 } else {
+                    self.save_draft(&composition, &held).await;
                     self.arm_autosave(&composition);
                 }
             }
@@ -341,132 +352,6 @@ impl<P: Provider> App<P> {
             self.save_draft_gated(composition, &held).await;
         }
         self.forget(composition);
-    }
-
-    /// Records `held` as the composition's current content, opening the composition's
-    /// record when this is its first save, and answers the header every save of it
-    /// carries. `None` only when a header could not be minted for a fresh record, which
-    /// the caller treats as any other build failure.
-    fn record_held(
-        &self,
-        composition: &CompositionId,
-        account: &AccountId,
-        held: &HeldSave,
-    ) -> Option<MessageIdHeader> {
-        let mut drafts = self.drafts.lock().expect("drafts mutex poisoned");
-        if let Some(record) = drafts.open.get_mut(composition) {
-            record.held = Some(held.clone());
-            return Some(record.message_id.clone());
-        }
-        let message_id = mint_message_id()?;
-        drafts.open.insert(
-            composition.clone(),
-            Composition {
-                account: account.clone(),
-                message_id: message_id.clone(),
-                key: None,
-                saved: None,
-                held: Some(held.clone()),
-            },
-        );
-        Some(message_id)
-    }
-
-    /// The account a composition is already stored under, if it has been saved.
-    fn composition_account(&self, composition: &CompositionId) -> Option<AccountId> {
-        self.drafts
-            .lock()
-            .expect("drafts mutex poisoned")
-            .open
-            .get(composition)
-            .map(|record| record.account.clone())
-    }
-
-    /// The header every save of this composition carries, or `None` when it is not
-    /// open: the fire's proof that it is still the composition its arm was taken under.
-    fn composition_message_id(&self, composition: &CompositionId) -> Option<MessageIdHeader> {
-        self.drafts
-            .lock()
-            .expect("drafts mutex poisoned")
-            .open
-            .get(composition)
-            .map(|record| record.message_id.clone())
-    }
-
-    /// What the server stores this composition under now.
-    fn composition_key(&self, composition: &CompositionId) -> Option<ProviderKey> {
-        self.drafts
-            .lock()
-            .expect("drafts mutex poisoned")
-            .open
-            .get(composition)
-            .and_then(|record| record.key.clone())
-    }
-
-    /// Whether the last save put exactly this content on the server.
-    fn already_saved(&self, composition: &CompositionId, digest: u64) -> bool {
-        self.drafts
-            .lock()
-            .expect("drafts mutex poisoned")
-            .open
-            .get(composition)
-            .is_some_and(|record| record.saved == Some(digest))
-    }
-
-    /// Records what the save stored, and under which key.
-    fn record_save(&self, composition: &CompositionId, key: ProviderKey, digest: u64) {
-        if let Some(record) = self
-            .drafts
-            .lock()
-            .expect("drafts mutex poisoned")
-            .open
-            .get_mut(composition)
-        {
-            record.key = Some(key);
-            record.saved = Some(digest);
-        }
-    }
-
-    /// The parked save of this composition, if the outbox still holds one, with a digest
-    /// of the words it carries.
-    ///
-    /// Matched on the `Message-ID`, which every save of one composition shares, so this
-    /// finds the op whatever text it carries; the digest says whether those words are
-    /// the composer's current ones, which is the difference between settling the parked
-    /// copy and superseding it.
-    async fn parked_save(
-        &self,
-        account: &AccountId,
-        message_id: &MessageIdHeader,
-    ) -> Option<(PendingOpId, u64)> {
-        let queued = self.engine.outbox(account).await.ok()?;
-        queued
-            .iter()
-            .filter(|row| row.kind == Some(PendingOpKind::MailDraftPut))
-            .find_map(|row| {
-                let put = serde_json::from_value::<DraftPut>(row.payload.clone()).ok()?;
-                (put.draft.message_id == *message_id).then_some((row.id, digest(&put.draft)))
-            })
-    }
-
-    /// Drops the composition and its hint, answering with what was known about it.
-    ///
-    /// The hint goes with it: a host that reuses a composition id must not open a fresh
-    /// composer already saying the last one had saved.
-    fn forget(&self, composition: &CompositionId) -> Option<Composition> {
-        let record = {
-            let mut drafts = self.drafts.lock().expect("drafts mutex poisoned");
-            drafts.armed.remove(composition);
-            drafts.open.remove(composition)
-        };
-        if self
-            .draft_status
-            .get()
-            .is_some_and(|status| status.composition == composition.as_str())
-        {
-            self.draft_status.publish(None);
-        }
-        record
     }
 
     /// Publishes the in-flight hint.

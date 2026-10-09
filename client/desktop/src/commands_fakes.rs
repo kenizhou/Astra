@@ -10,9 +10,10 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use astra_app::{AppError, CompositionId, DraftResume, DraftsIntent, Intent};
+use astra_app::{AppError, CompositionId, DraftResume, DraftsIntent, Intent, OutboxIntent};
 use astra_viewmodel::{
-    DraftSaveState, DraftStatusSnapshot, MailboxListSnapshot, ReadingSnapshot, SyncProgressSnapshot,
+    DraftSaveState, DraftStatusSnapshot, MailboxListSnapshot, ReadingSnapshot, SendingSnapshot,
+    SyncProgressSnapshot,
 };
 use engine_api::{AccountId, ProviderKey};
 
@@ -55,6 +56,18 @@ pub(crate) fn open_snapshot() -> ReadingSnapshot {
     }
 }
 
+/// The instant the fake stamps every queued send with, the same whole-second
+/// UTC instant the drafts fake fixes its landed save at.
+pub(crate) const ARRIVED_AT: &str = "2026-10-09T08:30:00Z";
+
+/// The fake's outbox: the next op id it assigns and the snapshot the pull
+/// answers with, under one lock so a dispatch and its publish cannot tear.
+#[derive(Default)]
+pub(crate) struct SendingQueue {
+    next_op: u64,
+    snapshot: SendingSnapshot,
+}
+
 /// A fake app core behind the same seam the commands hold: records what it was
 /// asked and answers with preset snapshots.
 pub(crate) struct FakeApp {
@@ -72,6 +85,9 @@ pub(crate) struct FakeApp {
     /// The (account, composition) pairs the resume was asked to open, so a test
     /// can assert the command hands the webview's ids through to the core.
     pub(crate) resumed_into: Mutex<Vec<(String, String)>>,
+    /// The sending snapshot the pull answers with: what the fake's submit and
+    /// outbox dispatches last published over its own op counter.
+    pub(crate) sending: Mutex<SendingQueue>,
 }
 
 impl FakeApp {
@@ -97,6 +113,7 @@ impl FakeApp {
             draft_status: Mutex::new(None),
             stored_draft: Mutex::new(None),
             resumed_into: Mutex::new(Vec::new()),
+            sending: Mutex::new(SendingQueue::default()),
         })
     }
 
@@ -156,6 +173,56 @@ impl FakeApp {
             }
         }
     }
+
+    /// The outbox contract the sending commands observe: a submit queues a
+    /// send under the next op id, a withdrawal or a delivered answer removes
+    /// it, a send now marks it in flight, and a not-delivered answer puts it
+    /// back in the queue. A show changes nothing: a gesture that changed
+    /// nothing says nothing, and the host pulls regardless.
+    fn play_sending(&self, intent: &Intent) {
+        let mut queue = self.sending.lock().unwrap();
+        match intent {
+            Intent::SubmitRichMail { from, subject, .. } => {
+                queue.next_op += 1;
+                let op = queue.next_op;
+                queue.snapshot.rows.push(astra_viewmodel::QueuedRow {
+                    queued: astra_viewmodel::QueuedKey {
+                        account: from.clone(),
+                        op,
+                    },
+                    state: astra_viewmodel::QueuedState::Queued,
+                    subject: subject.clone(),
+                    arrived_at: ARRIVED_AT.to_owned(),
+                });
+            }
+            Intent::Outbox(action) => {
+                let acted = |row: &astra_viewmodel::QueuedRow, queued: &astra_app::QueuedRef| {
+                    row.queued.account == queued.account && row.queued.op == queued.op.get()
+                };
+                match action {
+                    OutboxIntent::Show => {}
+                    OutboxIntent::Cancel { queued } | OutboxIntent::ConfirmSent { queued } => {
+                        queue.snapshot.rows.retain(|row| !acted(row, queued));
+                    }
+                    OutboxIntent::SendNow { queued } => {
+                        for row in &mut queue.snapshot.rows {
+                            if acted(row, queued) {
+                                row.state = astra_viewmodel::QueuedState::Sending;
+                            }
+                        }
+                    }
+                    OutboxIntent::ConfirmNotSent { queued } => {
+                        for row in &mut queue.snapshot.rows {
+                            if acted(row, queued) {
+                                row.state = astra_viewmodel::QueuedState::Queued;
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -172,6 +239,7 @@ impl AppPort for FakeApp {
         if let Intent::Drafts(drafts) = &intent {
             self.play_drafts(drafts);
         }
+        self.play_sending(&intent);
         self.dispatched.lock().unwrap().push(intent);
         Ok(())
     }
@@ -190,6 +258,10 @@ impl AppPort for FakeApp {
 
     fn draft_status(&self) -> Option<DraftStatusSnapshot> {
         self.draft_status.lock().unwrap().clone()
+    }
+
+    fn sending(&self) -> SendingSnapshot {
+        self.sending.lock().unwrap().snapshot.clone()
     }
 
     async fn resume_latest_draft(

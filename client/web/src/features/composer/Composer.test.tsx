@@ -222,16 +222,25 @@ describe('leaving the composer', () => {
     expect(screen.queryByRole('region', { name: 'Composer' })).toBeNull();
   });
 
-  it('closes through the close intent and closes the pane locally', () => {
+  it('closes through a final save with then_close and closes the pane locally', () => {
     const composition = newMessage();
     render(<ComposerPane />);
 
+    act(() => {
+      const store = useComposerStore.getState();
+      store.setField('to', 'you@test.local');
+      store.setField('subject', 'Later');
+      store.setEditorContent([
+        { type: 'paragraph', content: [{ type: 'text', text: 'Final window' }] },
+      ]);
+    });
     act(() => {
       fireEvent.click(screen.getByRole('button', { name: 'Close composer' }));
     });
 
     expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
-      `{"drafts":{"close":{"composition":"${composition}"}}}`,
+      `{"drafts":{"save":{"composition":"${composition}","from":"work","to":"you@test.local","cc":"","bcc":"","subject":"Later",` +
+        `"document":{"blocks":[{"Paragraph":{"content":[${plainRun('Final window')}]}}],"attachments":[]},"then_close":true}}}`,
     );
     expect(useComposerStore.getState().open).toBe(false);
     expect(screen.queryByRole('region', { name: 'Composer' })).toBeNull();

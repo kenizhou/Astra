@@ -10,7 +10,11 @@
 //! [`CertificateException`] recorded for that one server. That is the recorded TLS
 //! route for this harness (the decision sits in `docker/harness/compose.yaml` and
 //! `scripts/dev/harness.sh`): the account layer dials TLS only, so a no-TLS port is
-//! unreachable through the connect path under test.
+//! unreachable through the connect path under test. The same certificate serves the
+//! SMTP submission listener (implicit TLS on `127.0.0.1:2025`), and the harness
+//! account carries that leg beside the IMAP one: both name the same server, so the
+//! one accepted exception covers the submission dial too, and the providers the dial
+//! returns carry the SMTP binding the outbox drain delivers through.
 //!
 //! The seed script (`docker/harness/stalwart/seed.sh`) also delivers three pinned
 //! notes to astra1's INBOX through the harness's own SMTP submission port (implicit
@@ -18,12 +22,14 @@
 //! certificate the IMAP seeding does). The notes are genuinely submitted and
 //! delivered: Stalwart runs them through its delivery path into the INBOX, exactly the
 //! mail the gated list test reads back through the product's own dial and sync. The
-//! submission rides the seed script rather than the engine because the engine's
-//! send path needs the draft flow, which no slice has ported yet. The same seed files
-//! one rich MIME note into Projects (submission into the INBOX, then an IMAP move),
-//! the message the gated reading test opens in `reading`. The gated drafts test needs
-//! no seed: it round-trips the drafts family against the account's real Drafts folder,
-//! storing and removing copies through the product's own dispatches.
+//! same seed files one rich MIME note into Projects (submission into the INBOX, then
+//! an IMAP move), the message the gated reading test opens in `reading`. The gated
+//! drafts test needs no seed: it round-trips the drafts family against the account's
+//! real Drafts folder, storing and removing copies through the product's own
+//! dispatches. The gated send test (`send`) needs no seed either: it submits its own
+//! mail from astra1 to astra2 through the engine's real send path, reads the delivery
+//! back on the recipient's account, and withdraws both copies afterwards so the
+//! harness keeps its seeded shape for the suites that pin it.
 //!
 //! The JMAP-detection test cannot dial `https://example.test/.well-known/jmap` (the
 //! harness domain resolves nowhere), so it rebases the probe onto the harness's plain
@@ -53,7 +59,7 @@ use engine_api::{AccountId, EmailAddress, Engine, Provider, SyncScope};
 
 use astra_account::{
     connect_mail_providers, AccountConfig, AccountError, AccountShape, CertificateException,
-    ConnectionSecurity, ImapAccount, ImapConnections, Secret,
+    ConnectionSecurity, ImapAccount, ImapConnections, Secret, SmtpAccount,
 };
 use astra_autodetect::{detect, DetectConfig, Detected, SourceKind};
 use astra_viewmodel::{FolderRole, MailboxListSnapshot, MessageRowView, RowKey};
@@ -63,13 +69,15 @@ use crate::{
     Account, App, AppObserver, FolderRef, Intent, Surface,
 };
 
-// The gated reading and drafts tests: their own files, so this one stays under the
-// 500-line cap the gate enforces. The explicit paths because this file is loaded through
-// `#[path]` and so owns no directory a bare `mod` would resolve into.
+// The gated reading, drafts, and send tests: their own files, so this one stays
+// under the 500-line cap the gate enforces. The explicit paths because this file is
+// loaded through `#[path]` and so owns no directory a bare `mod` would resolve into.
 #[path = "tests_live_harness/drafts.rs"]
 mod drafts;
 #[path = "tests_live_harness/reading.rs"]
 mod reading;
+#[path = "tests_live_harness/send.rs"]
+mod send;
 
 /// The harness connection details from the environment, or `None` to skip.
 fn harness() -> Option<(String, String, String, String)> {
@@ -96,8 +104,15 @@ fn jmap_base() -> Option<String> {
     )
 }
 
+/// The harness's SMTP submission port from the environment: the compose file publishes
+/// Stalwart's implicit-TLS submission listener on `127.0.0.1:2025`.
+fn harness_smtp_port() -> String {
+    std::env::var("ASTRA_HARNESS_SMTP_PORT").unwrap_or_else(|_| "2025".to_owned())
+}
+
 /// The harness account, with the certificate exceptions its owner has accepted (none
-/// for the first dial).
+/// for the first dial). Both legs name the same server, so one accepted certificate
+/// covers the IMAP dial and the SMTP submission alike.
 fn account(
     host: &str,
     port: &str,
@@ -113,7 +128,11 @@ fn account(
             password: Some(Secret::new(password.to_owned())),
             security: ConnectionSecurity::ImplicitTls,
         }),
-        smtp: None,
+        smtp: Some(SmtpAccount {
+            addr: format!("{host}:{}", harness_smtp_port()),
+            server_name: host.to_owned(),
+            security: ConnectionSecurity::ImplicitTls,
+        }),
         certificate_exceptions: exceptions,
         shape: AccountShape::default(),
     }
@@ -248,6 +267,16 @@ async fn a_dial_pins_the_rejected_certificate_and_binds_the_inbox_and_the_custom
     assert!(
         bound.contains(&"Projects".to_owned()),
         "the custom folder astra1 seeds is bound; the bound list is {bound:?}",
+    );
+    // The submission leg rides the same walk: both legs name the one server whose
+    // certificate was just accepted, and every provider the dial returns carries the
+    // SMTP binding the outbox drain delivers through. A send queued against this
+    // account has a provider that can take it.
+    assert!(
+        providers
+            .iter()
+            .all(|provider| provider.connection_info().capabilities.submission()),
+        "the dial bound no submission provider beside the folders",
     );
 }
 

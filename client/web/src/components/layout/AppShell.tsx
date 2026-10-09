@@ -2,12 +2,16 @@
 // The desktop shell: the frameless title bar over the folder pane, the
 // message list, the reading pane, and the composer pane when a composition
 // is open, with the status bar under them, all coloured through the theme
-// tokens. The New message action floats over the panes' corner, and the
-// app start resume opens the stored draft into the composer. The account
-// setup flow rides above everything when it is open.
+// tokens. The New message action floats over the panes' corner, the app
+// start resume opens the stored draft into the composer, the outbox panel
+// rides above the status bar's corner when the status bar's toggle opens
+// it, and the send-result toast says when a queued send has gone out. The
+// account setup flow rides above everything when it is open.
 
 import { AccountSetupFlow } from '@/features/account-setup/AccountSetupFlow';
 import { ComposerPane, NewMessageAction, useDraftResumeAtStart } from '@/features/composer/Composer';
+import { OutboxPanel } from '@/features/outbox/OutboxPanel';
+import { SendResultToast } from '@/features/outbox/SendResultToast';
 import { FolderPane } from '@/components/folder-pane/FolderPane';
 import { useAccountStore } from '@/stores/accountStore';
 import { MessageList } from './MessageList';
@@ -30,6 +34,8 @@ export function AppShell() {
       </div>
       <StatusBar />
       <NewMessageAction disabled={accountCount === 0} />
+      <OutboxPanel />
+      <SendResultToast />
       <AccountSetupFlow />
     </div>
   );

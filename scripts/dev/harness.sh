@@ -72,6 +72,7 @@ show_env() {
   printf 'export ASTRA_HARNESS_IMAP_PORT=2143\n'
   printf 'export ASTRA_HARNESS_IMAP_USER=astra1@example.test\n'
   printf 'export ASTRA_HARNESS_IMAP_PASSWORD=astra-harness\n'
+  printf 'export ASTRA_HARNESS_SMTP_PORT=2025\n'
   printf 'export ASTRA_HARNESS_JMAP_URL=http://127.0.0.1:2080\n'
 }
 

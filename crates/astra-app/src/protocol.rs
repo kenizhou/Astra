@@ -5,11 +5,14 @@
 
 mod intent;
 mod intent_drafts;
+mod intent_outbox;
 mod status;
 
 pub use intent::{FolderIntent, Intent, ViewMode};
 pub use intent_drafts::{CompositionId, DraftsIntent};
+pub use intent_outbox::OutboxIntent;
 
+use astra_composer::DraftBlobHandle;
 use serde::{Deserialize, Serialize};
 
 /// A surface a host observes and pulls an immutable snapshot for.
@@ -31,6 +34,33 @@ pub enum Surface {
     /// rather than debouncing them; `None` from the pull means no composition has a
     /// save to report.
     DraftStatus,
+    /// The sends that have not gone out: every account's queued sends in one list.
+    /// Every publish is one transition of the queue (a send joined it, left it, or
+    /// changed state), so the host repaints the panel on every signal rather than
+    /// debouncing them.
+    Sending,
+}
+
+/// Host-resolved bytes for one composer blob handle.
+///
+/// A document's attachments name their bytes by an opaque handle, because the
+/// bytes themselves are too large to cross the IPC inside the document; the
+/// host resolves each handle and hands the bytes back beside the document at
+/// submit, so the message that goes out carries its files.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ComposerBlob {
+    /// The opaque blob handle the document's attachment named.
+    pub handle: DraftBlobHandle,
+    /// The attachment bytes for that handle.
+    pub bytes: Vec<u8>,
+}
+
+impl ComposerBlob {
+    /// Builds a resolved composer blob.
+    #[must_use]
+    pub fn new(handle: DraftBlobHandle, bytes: Vec<u8>) -> Self {
+        Self { handle, bytes }
+    }
 }
 
 /// A host implements this to learn a [`Surface`] changed, then pulls its snapshot.

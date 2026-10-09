@@ -99,6 +99,25 @@ impl<P: Provider> App<P> {
                 self.close_reading();
             }
             Intent::Folders(_change) => return Err(AppError::NotYet),
+            // The composer's send: one verb whose outcome the queue holds and
+            // the sending surface publishes, never a return value.
+            Intent::SubmitRichMail {
+                from,
+                to,
+                cc,
+                bcc,
+                subject,
+                document,
+                blobs,
+            } => {
+                self.submit_rich_mail(from, to, cc, bcc, subject, document, blobs)
+                    .await;
+            }
+            // The outbox family: the same discard-and-resync discipline the
+            // list writes follow, over the engine's queue ops.
+            Intent::Outbox(change) => {
+                self.dispatch_outbox(change).await;
+            }
             // The composer's three verbs. Outcomes reach the user through the
             // draft-status surface, never a return value, the same discipline the
             // list writes follow.

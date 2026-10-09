@@ -70,7 +70,10 @@ impl io::Write for HashSink {
 }
 
 /// Splits a comma-separated recipient field into addresses, dropping blanks.
-fn parse_addresses(field: &str) -> Vec<EmailAddress> {
+///
+/// Shared with the send path, which splits the composer's recipient fields the
+/// same way a save does.
+pub(crate) fn parse_addresses(field: &str) -> Vec<EmailAddress> {
     field
         .split(',')
         .map(str::trim)
@@ -87,7 +90,10 @@ fn parse_addresses(field: &str) -> Vec<EmailAddress> {
 /// rules refuse can never collide with another mint's. `None` only if both forms are
 /// refused, which the caller treats as any other build failure rather than guessing an
 /// id two compositions could share.
-pub(super) fn mint_message_id() -> Option<MessageIdHeader> {
+///
+/// Also the mint a send uses: a send is its own message, idempotent by the same
+/// header, unique per submit.
+pub(crate) fn mint_message_id() -> Option<MessageIdHeader> {
     use std::sync::atomic::{AtomicU64, Ordering};
     static SEQ: AtomicU64 = AtomicU64::new(0);
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
@@ -100,8 +106,8 @@ pub(super) fn mint_message_id() -> Option<MessageIdHeader> {
 }
 
 /// The wall clock as a whole-second UTC instant, the same shape the reading snapshot
-/// stamps its messages with.
-pub(super) fn now_instant() -> String {
+/// stamps its messages with. The sending rows stamp their arrivals with it too.
+pub(crate) fn now_instant() -> String {
     let now = time::OffsetDateTime::now_utc();
     UtcDateTime::new(
         now.year(),

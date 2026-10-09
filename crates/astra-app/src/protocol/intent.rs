@@ -3,12 +3,13 @@
 //! enums its variants carry ([`ViewMode`], [`FolderIntent`], and
 //! [`DraftsIntent`](super::DraftsIntent)) beside it or one module away.
 
+use astra_composer::ComposerDocument;
 use engine_api::AccountId;
 use serde::{Deserialize, Serialize};
 
 use crate::reference::{FolderRef, MessageRef, RowRef};
 
-use super::DraftsIntent;
+use super::{ComposerBlob, DraftsIntent, OutboxIntent};
 
 /// How the mailbox list is grouped.
 ///
@@ -119,6 +120,36 @@ pub enum Intent {
     CloseReading,
     /// A change to an account's folder tree ([`FolderIntent`]).
     Folders(FolderIntent),
+    /// Send the composer's rich document through the durable outbox: the words
+    /// are queued before any server is asked, so a send the app does not
+    /// survive is neither lost nor delivered twice. The outcome reaches the
+    /// user through the [`Sending`](super::Surface::Sending) surface, never a
+    /// return value.
+    SubmitRichMail {
+        /// The account to send from: the composer's From dropdown, one of the
+        /// configured accounts.
+        from: AccountId,
+        /// The `To` recipients, comma-separated.
+        to: String,
+        /// The `Cc` recipients, comma-separated; may be empty.
+        cc: String,
+        /// The `Bcc` recipients, comma-separated; may be empty.
+        bcc: String,
+        /// The subject line; may be empty.
+        subject: String,
+        /// The shared composer document, rendered by the composer crate's
+        /// deterministic renderer on the way out, so a sent message is
+        /// byte-identical to a draft stored from the same document.
+        document: ComposerDocument,
+        /// Host-resolved bytes for every attachment handle the document
+        /// references; empty while the editor produces no attachments. A
+        /// handle with no bytes fails the send rather than sending a message
+        /// silently missing its files.
+        blobs: Vec<ComposerBlob>,
+    },
+    /// What the outbox panel asks the runtime to do with a queued send
+    /// ([`OutboxIntent`]): show the queue, or act on one send in it.
+    Outbox(OutboxIntent),
     /// What the composer asks the runtime to do with the draft it is holding
     /// ([`DraftsIntent`]): save it, discard it, or save and close.
     Drafts(DraftsIntent),

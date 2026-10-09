@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The shell's composer wiring: the New message action opens the composer
-// pane with the first account as its From, stays inert without an account,
-// and the app start resume pulls the stored draft into the pane when the
-// host has one.
+// The shell's composer and outbox wiring: the New message action opens the
+// composer pane with the first account as its From, stays inert without an
+// account, the app start resume pulls the stored draft into the pane when the
+// host has one, and the status bar's outbox toggle opens the outbox panel.
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -22,8 +22,11 @@ vi.mock('@/events/surfaceEvents', async (importOriginal) => ({
 import { AppShell } from './AppShell';
 import type { ResumeView } from '@/services/ipc';
 import { useAccountStore } from '@/stores/accountStore';
+import { useSendingStore } from '@/stores/sendingStore';
+import { useUiStore } from '@/stores/uiStore';
 import { useComposerStore } from '@/features/composer/Composer';
 import { documentToEditor } from '@/features/composer/documentWire';
+import { useSendResultStore } from '@/features/outbox/sendResult';
 
 beforeEach(() => {
   ipc.dispatch.mockReset();
@@ -44,6 +47,10 @@ beforeEach(() => {
     editor: documentToEditor({ blocks: [{ Paragraph: { content: [] } }], attachments: [] }),
     savedFingerprint: null,
   });
+  useSendingStore.getState().applySnapshot({ rows: [] });
+  useUiStore.getState().setOutboxOpen(false);
+  useSendResultStore.getState().dismiss();
+  useSendResultStore.setState({ settled: [], answered: [] });
 });
 
 afterEach(cleanup);
@@ -97,5 +104,20 @@ describe('the shell composer wiring', () => {
     expect((screen.getByRole('textbox', { name: 'Subject' }) as HTMLInputElement).value).toBe(
       'Later',
     );
+  });
+});
+
+describe('the shell outbox wiring', () => {
+  it('opens the outbox panel from the status bar and asks the host for the queue', () => {
+    render(<AppShell />);
+
+    expect(screen.queryByRole('region', { name: 'Outbox' })).toBeNull();
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Outbox' }));
+    });
+
+    expect(screen.getByRole('region', { name: 'Outbox' })).toBeTruthy();
+    expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe('{"outbox":"show"}');
   });
 });

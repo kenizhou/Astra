@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Background mail-sync orchestration: the app methods that reconcile and sync whole
-//! accounts, the outbox drain that follows a pass, and the window every pass syncs
-//! within. The per-account pass itself lives in `sync_account`; the fan-out here is
-//! what [`Intent::RefreshMail`](crate::Intent::RefreshMail) drives.
+//! accounts, and the window every pass syncs within. The per-account pass itself lives
+//! in `sync_account`; the outbox drain a pass ends with lives in `outbox`; the fan-out
+//! here is what [`Intent::RefreshMail`](crate::Intent::RefreshMail) drives.
 
 use std::time::Instant;
 
@@ -89,30 +89,6 @@ impl<P: Provider> App<P> {
     pub(crate) fn sync_tuning(&self) -> StreamTuning {
         StreamTuning::new(STREAM_FETCH_BATCH, STREAM_CHUNK_SIZE)
             .within(sync_window(NEW_ACCOUNT_SYNC_DEPTH_MONTHS))
-    }
-
-    /// Drains every account's outbox through its first provider.
-    ///
-    /// A provider failure is not an error: the engine parks each op against its own
-    /// retryable class for a later pass, and the queue still owes the attempt.
-    pub(crate) async fn drain_outboxes(&self) {
-        for id in self.account_ids().await {
-            let Some(account) = self.account_handle(&id).await else {
-                continue;
-            };
-            let Some(provider) = account.providers.first() else {
-                continue;
-            };
-            let at = self.account_ordinal(&id).await;
-            match self.engine.drain_outbox(provider, &id).await {
-                Ok(report) if report.is_idle() => {}
-                Ok(report) => log::info!(
-                    "outbox[a{at}]: drain attempted {} queued write(s)",
-                    report.attempted.len(),
-                ),
-                Err(err) => log::warn!("outbox[a{at}]: a drain pass failed: {err}"),
-            }
-        }
     }
 
     /// Puts back what the previous run left unfinished in the outbox.

@@ -30,6 +30,7 @@ const ipc = vi.hoisted(() => ({
   syncProgress: vi.fn(),
   reading: vi.fn(),
   draftStatus: vi.fn(),
+  sending: vi.fn(),
   addAccount: vi.fn(),
   imapTestConnection: vi.fn(),
 }));
@@ -42,6 +43,7 @@ import { useDraftStore } from '@/stores/draftStore';
 import { useFolderStore } from '@/stores/folderStore';
 import { useListStore } from '@/stores/listStore';
 import { useReadingStore } from '@/stores/readingStore';
+import { useSendingStore } from '@/stores/sendingStore';
 import { useUiStore } from '@/stores/uiStore';
 import mailboxFixture from '@/services/__fixtures__/mailbox_list.json';
 
@@ -78,6 +80,7 @@ function resetStores() {
   });
   useReadingStore.setState({ snapshot: null, showRemoteImages: false });
   useDraftStore.setState({ snapshot: null });
+  useSendingStore.setState({ snapshot: { rows: [] } });
 }
 
 beforeEach(() => {
@@ -89,6 +92,8 @@ beforeEach(() => {
   ipc.reading.mockResolvedValue(null);
   ipc.draftStatus.mockReset();
   ipc.draftStatus.mockResolvedValue(null);
+  ipc.sending.mockReset();
+  ipc.sending.mockResolvedValue({ rows: [] });
   resetStores();
 });
 
@@ -193,6 +198,55 @@ describe('the surface_changed listener', () => {
     await vi.waitFor(() => expect(useDraftStore.getState().snapshot).toBeNull());
   });
 
+  it('a sending change pulls the snapshot into the sending store', async () => {
+    ipc.sending.mockResolvedValue({
+      rows: [
+        {
+          queued: { account: 'work', op: 3 },
+          state: 'queued',
+          subject: 'Quarterly review',
+          arrived_at: '2026-10-09T08:30:00Z',
+        },
+      ],
+    });
+    mountSurfaceEvents();
+    await vi.waitFor(() => expect(wire.handlers).toHaveLength(1));
+
+    emit('sending');
+
+    await vi.waitFor(() => expect(useSendingStore.getState().snapshot.rows).toHaveLength(1));
+    expect(useSendingStore.getState().snapshot.rows[0]).toEqual({
+      queued: { account: 'work', op: 3 },
+      state: 'queued',
+      subject: 'Quarterly review',
+      arrived_at: '2026-10-09T08:30:00Z',
+    });
+    expect(ipc.mailboxList).not.toHaveBeenCalled();
+    expect(ipc.draftStatus).not.toHaveBeenCalled();
+  });
+
+  it('a sending change with nothing outstanding empties the store', async () => {
+    useSendingStore.setState({
+      snapshot: {
+        rows: [
+          {
+            queued: { account: 'work', op: 3 },
+            state: 'sending',
+            subject: 'Quarterly review',
+            arrived_at: '2026-10-09T08:30:00Z',
+          },
+        ],
+      },
+    });
+    ipc.sending.mockResolvedValue({ rows: [] });
+    mountSurfaceEvents();
+    await vi.waitFor(() => expect(wire.handlers).toHaveLength(1));
+
+    emit('sending');
+
+    await vi.waitFor(() => expect(useSendingStore.getState().snapshot.rows).toHaveLength(0));
+  });
+
   it('an unknown surface name is ignored without a pull', async () => {
     mountSurfaceEvents();
     await vi.waitFor(() => expect(wire.handlers).toHaveLength(1));
@@ -203,6 +257,7 @@ describe('the surface_changed listener', () => {
     expect(ipc.syncProgress).not.toHaveBeenCalled();
     expect(ipc.reading).not.toHaveBeenCalled();
     expect(ipc.draftStatus).not.toHaveBeenCalled();
+    expect(ipc.sending).not.toHaveBeenCalled();
   });
 
   it('disposing before the registration resolves still tears it down', async () => {
@@ -225,8 +280,10 @@ describe('hydration', () => {
     expect(ipc.syncProgress).toHaveBeenCalledTimes(1);
     expect(ipc.reading).toHaveBeenCalledTimes(1);
     expect(ipc.draftStatus).toHaveBeenCalledTimes(1);
+    expect(ipc.sending).toHaveBeenCalledTimes(1);
     expect(useReadingStore.getState().snapshot).toBeNull();
     expect(useDraftStore.getState().snapshot).toBeNull();
+    expect(useSendingStore.getState().snapshot.rows).toHaveLength(0);
     expect(useUiStore.getState().engineState).toBe('running');
     expect(useUiStore.getState().accountSetupOpen).toBe(true);
   });

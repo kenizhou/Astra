@@ -2,7 +2,7 @@
 //! Tests for the typed references: the single construction point validating the halves
 //! of each, and the wire form every reference crosses in.
 
-use super::{FolderRef, MessageRef, RowRef, ThreadRef};
+use super::{FolderRef, MessageRef, QueuedRef, RowRef, ThreadRef};
 
 #[test]
 fn from_parts_needs_a_well_formed_account_half() {
@@ -85,5 +85,18 @@ fn a_folder_reference_crosses_as_its_two_halves() {
     let json = serde_json::to_string(&reference).unwrap();
     assert_eq!(json, r#"{"account":"acct-1","key":"INBOX"}"#);
     let back: FolderRef = serde_json::from_str(&json).unwrap();
+    assert_eq!(back, reference);
+}
+
+#[test]
+fn a_queued_reference_crosses_as_its_account_and_op_number() {
+    // The op half is the store-assigned integer, bare on the wire: a `PendingOpId`
+    // serialises as the number it wraps, so the reference crosses like every other
+    // reference's two halves.
+    let reference = QueuedRef::from_parts("acct-1", 3).unwrap();
+    assert_eq!(reference.op.get(), 3);
+    let json = serde_json::to_string(&reference).unwrap();
+    assert_eq!(json, r#"{"account":"acct-1","op":3}"#);
+    let back: QueuedRef = serde_json::from_str(&json).unwrap();
     assert_eq!(back, reference);
 }

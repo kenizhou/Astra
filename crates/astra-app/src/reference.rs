@@ -7,8 +7,8 @@
 //! A reference is built **once**, at the IPC boundary, from the very row the host acted
 //! on; both halves travel together from there on.
 
-use engine_api::{AccountId, ProviderKey};
-use serde::{Deserialize, Serialize};
+use engine_api::{AccountId, PendingOpId, ProviderKey};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// A folder of one account, identified by its owning account and folder key **together**.
 ///
@@ -72,6 +72,75 @@ pub struct ThreadRef {
     /// The thread's id, as projected into the mailbox-list snapshot (a resolved thread
     /// id, or a lone message's own key). A plain identifier, not a provider key.
     pub thread_id: String,
+}
+
+/// A **queued** send, identified by its owning account and outbox op id
+/// **together**.
+///
+/// The outbox is account-scoped, so an op id means nothing without the account
+/// whose queue it belongs to, exactly as a folder key means nothing without its
+/// account. Unlike every other reference here it names a message that does
+/// **not** exist on any server yet: the identity is the durable op, not a
+/// provider key.
+///
+/// The op id crosses the wire as the bare number the store assigned it,
+/// because [`PendingOpId`] carries no serialisation of its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueuedRef {
+    /// The account whose outbox holds the send (the row's account).
+    pub account: AccountId,
+    /// The durable op's id, as projected into the sending snapshot's rows.
+    pub op: PendingOpId,
+}
+
+impl QueuedRef {
+    /// Builds a queued-send reference from a host's `account` id and outbox op
+    /// id; the single construction point, at the IPC boundary. Returns `None`
+    /// for a malformed account id, so the caller can drop the intent rather
+    /// than route an action into the wrong account's queue.
+    ///
+    /// The op id needs no validation of its own: it is a store-assigned
+    /// integer, and one that names nothing is refused by the store as
+    /// `OpRejection::Unknown` rather than guessed at here.
+    #[must_use]
+    pub fn from_parts(account: &str, op: u64) -> Option<Self> {
+        Some(Self {
+            account: AccountId::try_from(account).ok()?,
+            op: PendingOpId::new(op),
+        })
+    }
+}
+
+impl Serialize for QueuedRef {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        /// The reference's two halves as the wire carries them.
+        #[derive(Serialize)]
+        struct Wire<'a> {
+            account: &'a AccountId,
+            op: u64,
+        }
+        Wire {
+            account: &self.account,
+            op: self.op.get(),
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for QueuedRef {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        /// The reference's two halves as the wire carries them.
+        #[derive(Deserialize)]
+        struct Wire {
+            account: AccountId,
+            op: u64,
+        }
+        let Wire { account, op } = Wire::deserialize(deserializer)?;
+        Ok(Self {
+            account,
+            op: PendingOpId::new(op),
+        })
+    }
 }
 
 impl ThreadRef {
