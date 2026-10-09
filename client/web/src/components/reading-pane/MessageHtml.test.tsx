@@ -7,7 +7,12 @@ import { useState } from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { MessageHtml, READING_CSP, enableRemoteImages } from './MessageHtml';
+import {
+  MessageHtml,
+  READING_CSP_GATED,
+  READING_CSP_REMOTE,
+  enableRemoteImages,
+} from './MessageHtml';
 
 /** The sanitised body the Rust gate emits for the rich message: one inline
  * data URI left alone, one remote src behind a placeholder, one remote CSS
@@ -48,15 +53,17 @@ describe('the message body', () => {
     expect(frameDoc()).toBe(sanitisedHtml);
   });
 
-  it('locks the iframe down: empty sandbox, csp allowing only data images', () => {
+  it('locks the iframe down: empty sandbox, gated csp allowing only data images', () => {
     render(<Harness />);
 
     const sandbox = frame().getAttribute('sandbox') ?? '';
     expect(sandbox).toBe('');
     expect(sandbox).not.toContain('allow-same-origin');
     expect(sandbox).not.toContain('allow-popups');
-    expect(frame().getAttribute('csp')).toBe(READING_CSP);
-    expect(READING_CSP).toBe("default-src 'none'; img-src data:; style-src 'unsafe-inline'");
+    expect(frame().getAttribute('csp')).toBe(READING_CSP_GATED);
+    expect(READING_CSP_GATED).toBe(
+      "default-src 'none'; img-src data:; style-src 'unsafe-inline'",
+    );
   });
 
   it('keeps every remote reference out of the doc and offers the blocked count', () => {
@@ -79,6 +86,30 @@ describe('the message body', () => {
     expect(frameDoc()).not.toContain('data-astra-style-url');
     expect(screen.queryByText('2 remote images blocked.')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Show remote images' })).toBeNull();
+  });
+
+  it('widens the csp with the opt-in: remote images and styles join, defaults never lift', () => {
+    render(<Harness />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show remote images' }));
+
+    expect(frame().getAttribute('csp')).toBe(READING_CSP_REMOTE);
+    expect(READING_CSP_REMOTE).toBe(
+      "default-src 'none'; img-src data: https:; style-src 'unsafe-inline' https:",
+    );
+    // The csp and the srcdoc transform ride the same state: a widened csp
+    // never coexists with gated placeholders, and vice versa.
+    expect(frameDoc()).not.toContain('data-astra-src');
+  });
+
+  it('carries hostile quotes and markup verbatim into the srcdoc with no breakout', () => {
+    const hostile = '<p>"> quoted</p><p></iframe><script>never runs</script></p>';
+    render(<Harness html={hostile} count={0} />);
+
+    // The doc is the snapshot's sanitised HTML untouched: the attribute value
+    // carries the quote and the closing tag verbatim, so no client-side
+    // escape or breakout creeps in between snapshot and frame.
+    expect(frameDoc()).toBe(hostile);
   });
 
   it('draws no affordance when nothing is blocked', () => {

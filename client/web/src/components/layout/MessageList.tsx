@@ -43,7 +43,10 @@ export function MessageList() {
 
   // The highlight follows the open message first: the reading snapshot is
   // the record of what is open, and the local click selection covers the
-  // gap before the reading pull lands.
+  // gap before the reading pull lands. Known gap for the thread slice: in
+  // the threaded view this message key names no thread row, so it outranks
+  // the clicked thread row's local selection and nothing highlights until
+  // the open key maps to the thread it belongs to.
   const openKey: RowKey | null =
     openSnapshot === null ? null : { message: openSnapshot.message };
   const highlight = openKey ?? selectedKey;

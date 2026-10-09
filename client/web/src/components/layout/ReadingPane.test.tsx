@@ -86,12 +86,21 @@ describe('the reading pane', () => {
     useReadingStore.getState().applySnapshot(snapshot());
     render(<ReadingPane />);
 
+    expect(screen.getByTitle('Message body').getAttribute('csp')).toBe(
+      "default-src 'none'; img-src data:; style-src 'unsafe-inline'",
+    );
+
     fireEvent.click(screen.getByRole('button', { name: 'Show remote images' }));
 
     expect(useReadingStore.getState().showRemoteImages).toBe(true);
     expect(frameDoc()).toContain('src="https://tracker.example/p.png"');
     expect(frameDoc()).toContain('url(https://x.example/a.png)');
     expect(screen.queryByText('2 remote images blocked.')).toBeNull();
+    // The csp widens with the same opt-in, so a csp-honouring runtime loads
+    // what the rewrite restored.
+    expect(screen.getByTitle('Message body').getAttribute('csp')).toBe(
+      "default-src 'none'; img-src data: https:; style-src 'unsafe-inline' https:",
+    );
   });
 
   it('keeps the toggle state over a republish of the same message', () => {

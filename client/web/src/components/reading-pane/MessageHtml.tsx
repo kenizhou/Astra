@@ -1,14 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The message body: the sanitised HTML rides in a srcdoc iframe locked to an
-// empty sandbox (no same origin, no popups, no scripts) under a csp that
-// allows nothing to load but data images and inline styles, so the rewritten
-// placeholders are defended in depth behind a barrier that holds even if one
-// leaks through. The toggle rewrites the placeholders back to live remote
-// references client-side, per message, and clears the blocked-count
-// affordance.
+// empty sandbox (no same origin, no popups, no scripts). The csp widens with
+// the reader's opt-in, in step with the placeholder rewrite the toggle runs:
+// gated, nothing loads but data images and inline styles; opted in, remote
+// images and remote CSS join. The Rust-side placeholder rewrite is the
+// primary barrier; the csp is defence in depth holding even if a reference
+// leaks through, and `default-src 'none'` never lifts, so no scripts, frames,
+// or fetches load in either state.
 
-/** The framed document's barrier: nothing loads but data images and styles. */
-export const READING_CSP = "default-src 'none'; img-src data:; style-src 'unsafe-inline'";
+/** The framed document's barrier while remote references stay gated. */
+export const READING_CSP_GATED =
+  "default-src 'none'; img-src data:; style-src 'unsafe-inline'";
+
+/** The barrier once the reader opts in: remote images and remote CSS join,
+ * `default-src 'none'` unchanged so no scripts, frames, or fetches load. */
+export const READING_CSP_REMOTE =
+  "default-src 'none'; img-src data: https:; style-src 'unsafe-inline' https:";
 
 /**
  * Rewrites the sanitiser's placeholders back to the remote references they
@@ -37,6 +44,7 @@ export function MessageHtml({
   onShowRemoteImages,
 }: MessageHtmlProps) {
   const doc = showRemoteImages ? enableRemoteImages(html) : html;
+  const csp = showRemoteImages ? READING_CSP_REMOTE : READING_CSP_GATED;
   const blocked = remoteImageCount > 0 && !showRemoteImages;
   const noun = remoteImageCount === 1 ? 'image' : 'images';
   return (
@@ -58,7 +66,7 @@ export function MessageHtml({
       <iframe
         title="Message body"
         sandbox=""
-        csp={READING_CSP}
+        csp={csp}
         srcDoc={doc}
         className="min-h-0 w-full flex-1 border-0 bg-background"
       />
