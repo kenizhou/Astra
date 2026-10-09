@@ -140,6 +140,7 @@ dependencies = [
 name = "astra-account"
 version = "0.1.0"
 dependencies = [
+ "astra-autodetect",
  "async-stream",
  "async-trait",
  "engine-api",
