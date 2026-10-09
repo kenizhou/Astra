@@ -10,6 +10,7 @@ import { listen } from '@tauri-apps/api/event';
 import { mailboxList, syncProgress } from '@/services/ipc';
 import { useAccountStore } from '@/stores/accountStore';
 import { useFolderStore } from '@/stores/folderStore';
+import { useListStore } from '@/stores/listStore';
 import { useUiStore } from '@/stores/uiStore';
 
 /** The surfaces a change can name, as the event payload carries them. */
@@ -81,6 +82,7 @@ export function pullSurface(surface: Surface): Promise<void> {
     return mailboxList().then((snapshot) => {
       useAccountStore.getState().applySnapshot(snapshot);
       useFolderStore.getState().applySnapshot(snapshot);
+      useListStore.getState().applySnapshot(snapshot);
     });
   }
   return syncProgress().then((snapshot) => {
@@ -122,6 +124,7 @@ export async function hydrate(): Promise<void> {
   const snapshot = await mailboxList();
   useAccountStore.getState().applySnapshot(snapshot);
   useFolderStore.getState().applySnapshot(snapshot);
+  useListStore.getState().applySnapshot(snapshot);
   const progress = await syncProgress();
   useUiStore.getState().applySyncProgress(progress);
   useUiStore.getState().markRunning();

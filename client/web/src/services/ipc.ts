@@ -7,7 +7,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 
-import type { MailboxListSnapshot, SyncProgressSnapshot } from './surfaces';
+import type { MailboxListSnapshot, RowKey, SyncProgressSnapshot, ViewMode } from './surfaces';
 
 /** A folder bound to its owning account; unique only within the account. */
 export interface FolderRef {
@@ -27,11 +27,13 @@ export interface ThreadRef {
   thread_id: string;
 }
 
-/** One mailbox-list row an action names: a message, or a whole conversation. */
-export type RowRef = { message: MessageRef } | { thread: ThreadRef };
+// The row an intent names and the snapshot's row key are one concept, so the
+// protocol names one type for it, exactly as the Rust side re-exports its
+// RowKey into the protocol.
+export type { RowKey, ViewMode };
 
-/** How the mailbox list is grouped, crossing as a plain word. */
-export type ViewMode = 'flat' | 'threaded';
+/** One mailbox-list row an action names: a message, or a whole conversation. */
+export type RowRef = RowKey;
 
 /**
  * One host intent: the single inbound channel of the unidirectional loop. A

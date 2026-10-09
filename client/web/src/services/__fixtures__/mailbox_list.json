@@ -58,5 +58,30 @@
         }
       ]
     }
-  ]
+  ],
+  "rows": [
+    {
+      "key": { "message": { "account": "work", "key": "imap:v1:u42" } },
+      "account_id": "work",
+      "sender_name": "Ada Lovelace",
+      "sender_address": "ada@example.test",
+      "subject": "Quarterly report",
+      "sent_at": "2026-10-09T08:30:00Z",
+      "unread": true,
+      "flagged": true,
+      "has_attachments": true
+    },
+    {
+      "key": { "message": { "account": "work", "key": "jmap:e2" } },
+      "account_id": "work",
+      "sender_name": "",
+      "sender_address": "notifications@example.test",
+      "subject": "Your weekly digest",
+      "sent_at": "2026-10-08T16:05:00Z",
+      "unread": false,
+      "flagged": false,
+      "has_attachments": false
+    }
+  ],
+  "visible_limit": 50
 }
