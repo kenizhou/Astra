@@ -10,14 +10,17 @@
 //! produces this TOML from a host's setup UI lives in [`build_config_toml`], and the
 //! connections a dialled account's folders are bound through in [`ImapConnections`].
 
+mod autodetect;
 mod config;
 mod credentials;
 mod imap;
 mod pass_folders;
 mod reconnect;
 mod setup;
+mod setup_choices;
 mod tls;
 
+pub use autodetect::{recommend, MissReason, OauthRoutes, ServerSummary, SetupRecommendation};
 pub use config::{
     load, load_str, AccountConfig, AccountShape, ConfigError, ConnectionSecurity, ImapAccount,
     Secret, SmtpAccount,
@@ -29,6 +32,7 @@ pub use reconnect::{ReconnectingImapProvider, Redial};
 pub use setup::{
     build_config_toml, imap_default_port, smtp_default_port, AccountSetup, SetupCredential,
 };
+pub use setup_choices::{Capability, SetupChoice};
 pub use tls::{account_tls, setup_trust_policy, CertificateException};
 
 /// An error shaping an account's connection config or connecting its providers.

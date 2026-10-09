@@ -24,6 +24,13 @@
 #   eval "$(scripts/dev/harness.sh env)"
 #   cargo test -p astra-app tests_live_harness -- --nocapture
 #
+# JMAP ROUTE (the recorded decision, also in docker/harness/compose.yaml): the
+# harness also publishes Stalwart's built-in HTTP listener (JMAP + management) on
+# 127.0.0.1:2080 as plain HTTP. The gated JMAP-detection test cannot resolve
+# https://example.test, so it rebases the well-known probe onto that origin through
+# the detection crate's dev-harness `well_known_base_override`, which also waives
+# the probe's HTTPS requirement for the one hop; no host trust store is touched.
+#
 # POSIX-safe constructs only (no arrays, no `[[ ]]`): the script runs under any sh,
 # with bash 5 the floor per AGENTS.md.
 
@@ -63,6 +70,7 @@ show_env() {
   printf 'export ASTRA_HARNESS_IMAP_PORT=2143\n'
   printf 'export ASTRA_HARNESS_IMAP_USER=astra1@example.test\n'
   printf 'export ASTRA_HARNESS_IMAP_PASSWORD=astra-harness\n'
+  printf 'export ASTRA_HARNESS_JMAP_URL=http://127.0.0.1:2080\n'
 }
 
 usage() {
@@ -80,7 +88,7 @@ case "$cmd" in
     require_docker
     info "starting the harness (bootstrap + seed; blocks until healthy)"
     (cd "$HARNESS_ROOT" && docker compose up -d --wait)
-    info "harness healthy: IMAP 127.0.0.1:2143 (implicit TLS), SMTP submission 127.0.0.1:2025"
+    info "harness healthy: IMAP 127.0.0.1:2143 (implicit TLS), SMTP submission 127.0.0.1:2025, JMAP 127.0.0.1:2080"
     info "run the gated test with: eval \"\$(scripts/dev/harness.sh env)\""
     ;;
   down)

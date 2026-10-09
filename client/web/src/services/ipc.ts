@@ -110,6 +110,101 @@ export type ImapTestOutcome =
   | { rejected_certificate: { certificate: RejectedCertificateView; reason: string } }
   | { failed: { message: string } };
 
+/** Why detection routed to manual setup; crosses as a bare word. */
+export type MissReason = 'InvalidEmail' | 'NothingFound' | 'NetworkError' | 'OauthOnlyProvider';
+
+/** A detected server rendered for the confirmation card. */
+export interface ServerSummary {
+  protocol: string;
+  hostname: string;
+  port: number;
+  security: string;
+  username: string;
+}
+
+/** The JMAP route's prefilled form. */
+export interface JmapRecommendation {
+  email: string;
+  server_url: string;
+  is_trusted: boolean;
+  source: string;
+  caldav_url?: string;
+  carddav_url?: string;
+}
+
+/** The password form's prefilled IMAP/SMTP settings. */
+export interface ImapRecommendation {
+  email: string;
+  imap_host: string;
+  smtp_host?: string;
+  imap_security: ConnectionSecurity;
+  smtp_security: ConnectionSecurity;
+  incoming: ServerSummary;
+  outgoing?: ServerSummary;
+  caldav_url?: string;
+  carddav_url?: string;
+  oauth_issuer?: string;
+  is_trusted: boolean;
+  source: string;
+}
+
+/** The calendar-and-contacts-only route. */
+export interface DavRecommendation {
+  email: string;
+  caldav_url?: string;
+  carddav_url?: string;
+}
+
+/**
+ * Where the email-first setup step routes, with everything the target form
+ * needs prefilled. The variants cross externally tagged, names as declared on
+ * the Rust side; optional fields are absent rather than null when unset.
+ */
+export type SetupRecommendation =
+  | { Jmap: JmapRecommendation }
+  | { Imap: ImapRecommendation }
+  | { Microsoft: { email: string } }
+  | { Google: { email: string } }
+  | { Dav: DavRecommendation }
+  | { Manual: { reason: MissReason } };
+
+/** One use an account can be put to; crosses as a bare word. */
+export type Capability = 'Mail' | 'Calendar' | 'Contacts' | 'Colleagues';
+
+/** One use a setup route offers, as the wizard renders its toggles. */
+export interface SetupChoice {
+  capability: Capability;
+  on: boolean;
+  server_found: boolean;
+}
+
+/** The lookup strategy a detection result came from; crosses as a bare word. */
+export type SourceKind =
+  | 'JmapWellKnown'
+  | 'JmapSrv'
+  | 'Autoconfig'
+  | 'AutoconfigWellKnown'
+  | 'Ispdb'
+  | 'ImapSrv'
+  | 'MxAutoconfig'
+  | 'MxIspdb';
+
+/** What one detection run found, before routing. */
+export type DetectedOutcome = 'jmap' | 'mail' | 'dav' | { nothing: { network_error: boolean } };
+
+/** The summary line of a detection run: the outcome and the winning strategy. */
+export interface DetectedSummary {
+  outcome: DetectedOutcome;
+  source_kind: SourceKind | null;
+}
+
+/** The result of one detection run, as the setup flow reads it. */
+export interface RecommendationView {
+  recommendation: SetupRecommendation;
+  choices: SetupChoice[];
+  detected: DetectedSummary;
+}
+
 /** Dispatches one intent onto the app's runtime. */
 export function dispatch(intent: Intent): Promise<void> {
   return invoke('dispatch', { intent });
@@ -133,4 +228,9 @@ export function addAccount(configToml: string): Promise<AddedAccount> {
 /** Tests one setup's connection once, before anything is stored. */
 export function imapTestConnection(setup: AccountSetup): Promise<ImapTestOutcome> {
   return invoke('imap_test_connection', { setup });
+}
+
+/** Detects the mail-server settings for one email, bounded to five seconds. */
+export function detectAccountSettings(email: string): Promise<RecommendationView> {
+  return invoke('detect_account_settings', { email });
 }

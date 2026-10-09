@@ -21,9 +21,20 @@
 #
 # SMTP submission rides implicit TLS on 465, published on 127.0.0.1:2025.
 #
+# JMAP ROUTE (the recorded decision): Stalwart serves JMAP on its built-in HTTP
+# listener (container port 8080, also the management API), published here on
+# 127.0.0.1:2080 as plain HTTP. The gated JMAP-detection test cannot dial
+# `https://example.test/.well-known/jmap` (the harness domain resolves nowhere), so
+# it rebases the probe onto this origin through the detection crate's dev-harness
+# `well_known_base_override`, which also waives the probe's HTTPS requirement for
+# that one hop; no host trust store is touched, exactly like mail-calendar's live
+# JMAP tests, which publish the same plaintext 8080. Publishing 443 instead would
+# gain nothing: the override is needed either way, and the waiver is already
+# pinned by the crate's unit tests.
+#
 # Ports are loopback only (a test mail server is never published on the other
 # interfaces), and the 2xxx host block keeps this harness clear of the mail-calendar
-# harness's 12xxx and the engine harness's 11xxx should both ever run beside it.
+# harness's 12xxx and 28080 and the engine harness's 11xxx should both ever run beside it.
 # Determinism: both images in ./stalwart/Dockerfile are pinned by digest, and the whole
 # setup is driven from fixed inputs. Start from a clean slate with
 # `scripts/dev/harness.sh reset` before an `up` a measurement depends on.
@@ -54,6 +65,7 @@ services:
     ports:
       - "127.0.0.1:2143:993" # IMAP, implicit TLS
       - "127.0.0.1:2025:465" # SMTP submission, implicit TLS
+      - "127.0.0.1:2080:8080" # HTTP: JMAP + management, for the gated detection test
     # Healthy only once the custom folders are seeded: the marker is written at the end
     # of the entrypoint, and HTTP liveness must also answer. This is the readiness
     # signal tests wait on, not a sleep.

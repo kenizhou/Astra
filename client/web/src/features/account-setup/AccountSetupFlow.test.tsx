@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The account setup flow: a failed test connection surfaces the message and
-// stops, a certificate rejection offers the fingerprint for an accepted retry,
-// and a passing test carries through add_account and the first refresh.
+// The manual setup form behind the wizard's manual toggle: a failed test
+// connection surfaces the message and stops, a certificate rejection offers
+// the fingerprint for an accepted retry, a passing test carries through
+// add_account and the first refresh, and the connection security crosses to
+// the test command. The discovery step's tests live in AccountDiscovery.test.
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -11,6 +13,7 @@ const ipc = vi.hoisted(() => ({
   syncProgress: vi.fn(),
   addAccount: vi.fn(),
   imapTestConnection: vi.fn(),
+  detectAccountSettings: vi.fn(),
 }));
 
 vi.mock('@/services/ipc', async (importOriginal) => ({
@@ -48,6 +51,7 @@ beforeEach(() => {
   ipc.addAccount.mockReset();
   ipc.dispatch.mockReset();
   ipc.dispatch.mockResolvedValue(undefined);
+  ipc.detectAccountSettings.mockReset();
   useUiStore.setState({ accountSetupOpen: true });
 });
 
@@ -56,7 +60,7 @@ afterEach(() => {
   useUiStore.setState({ accountSetupOpen: false });
 });
 
-describe('the account setup flow', () => {
+describe('the manual setup flow', () => {
   it('renders nothing while closed', () => {
     useUiStore.setState({ accountSetupOpen: false });
     const { container } = render(<AccountSetupFlow />);
@@ -68,6 +72,7 @@ describe('the account setup flow', () => {
       failed: { message: 'the server refused the sign in' },
     });
     render(<AccountSetupFlow />);
+    fireEvent.click(screen.getByRole('button', { name: 'Set up manually' }));
     fillForm();
     fireEvent.click(screen.getByRole('button', { name: 'Test connection' }));
 
@@ -80,6 +85,7 @@ describe('the account setup flow', () => {
     ipc.imapTestConnection.mockResolvedValue({ ok: { account_id: 'work' } });
     ipc.addAccount.mockResolvedValue({ account_id: 'work', email: 'work@example.net' });
     render(<AccountSetupFlow />);
+    fireEvent.click(screen.getByRole('button', { name: 'Set up manually' }));
     fillForm();
     fireEvent.click(screen.getByRole('button', { name: 'Test connection' }));
 
@@ -108,6 +114,7 @@ describe('the account setup flow', () => {
     ipc.imapTestConnection.mockResolvedValueOnce({ ok: { account_id: 'work' } });
     ipc.addAccount.mockResolvedValue({ account_id: 'work', email: 'work@example.net' });
     render(<AccountSetupFlow />);
+    fireEvent.click(screen.getByRole('button', { name: 'Set up manually' }));
     fillForm();
     fireEvent.click(screen.getByRole('button', { name: 'Test connection' }));
 
@@ -140,6 +147,7 @@ describe('the account setup flow', () => {
     ipc.imapTestConnection.mockResolvedValue({ ok: { account_id: 'work' } });
     ipc.addAccount.mockRejectedValue('the account could not be connected: no route to host');
     render(<AccountSetupFlow />);
+    fireEvent.click(screen.getByRole('button', { name: 'Set up manually' }));
     fillForm();
     fireEvent.click(screen.getByRole('button', { name: 'Test connection' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Add account' }));
@@ -147,5 +155,21 @@ describe('the account setup flow', () => {
     expect(await screen.findByText(/no route to host/)).toBeTruthy();
     expect(useUiStore.getState().accountSetupOpen).toBe(true);
     expect(ipc.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('carries the start_tls security through the tested setup', async () => {
+    ipc.imapTestConnection.mockResolvedValue({ ok: { account_id: 'work' } });
+    render(<AccountSetupFlow />);
+    fireEvent.click(screen.getByRole('button', { name: 'Set up manually' }));
+    fillForm();
+    fireEvent.change(screen.getByLabelText('Connection security'), {
+      target: { value: 'start_tls' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Test connection' }));
+
+    await screen.findByText('The connection works. Ready to add.');
+    const setup = ipc.imapTestConnection.mock.calls[0]![0];
+    expect(setup.imap_security).toBe('start_tls');
+    expect(setup.imap_host).toBe('imap.example.net:993');
   });
 });

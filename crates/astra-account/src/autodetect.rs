@@ -1,0 +1,345 @@
+// SPDX-License-Identifier: GPL-3.0-only
+//! Maps a protocol-neutral [`Detected`] result onto a concrete setup route the wizard
+//! can prefill; encoding what *this* product can actually connect.
+//!
+//! The detection crate reports what a domain advertises; this layer decides what to do
+//! with it, using facts that live in the account layer, not the detector: our engine
+//! speaks implicit TLS and STARTTLS (but no plaintext), a build that carries the
+//! Microsoft or Google OAuth registrations routes those domains to a browser sign-in
+//! rather than IMAP, and the setup builders take a bare host with an assumed standard
+//! port. Keeping the decision here means `astra-autodetect` stays product-neutral.
+
+use serde::{Deserialize, Serialize};
+
+use astra_autodetect::{Detected, DetectedServer, SocketKind};
+
+use crate::setup::{imap_default_port, smtp_default_port};
+use crate::ConnectionSecurity;
+
+/// Where the email-first setup step should route, with everything the target form needs
+/// prefilled.
+///
+/// The `Imap` variant is much larger than `Microsoft`/`Manual`, but a recommendation is
+/// built once per detection and crosses the IPC as serde JSON, so the size disparity has
+/// no practical cost.
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SetupRecommendation {
+    /// The domain speaks JMAP; route to the JMAP form.
+    Jmap {
+        /// The typed email address.
+        email: String,
+        /// The JMAP base URL to prefill.
+        server_url: String,
+        /// Whether the settings were obtained tamper-resistantly (see [`Detected`]).
+        is_trusted: bool,
+        /// Provenance, for diagnostics.
+        source: String,
+        /// A CalDAV endpoint found beside the JMAP server, for an account whose session
+        /// turns out to offer no calendars.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        caldav_url: Option<String>,
+        /// A CardDAV endpoint found beside the JMAP server, for an account whose session
+        /// turns out to offer no contacts.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        carddav_url: Option<String>,
+    },
+    /// IMAP/SMTP settings were found; route to the password form.
+    Imap {
+        /// The typed email address.
+        email: String,
+        /// The incoming server for the setup builder (`host`, or `host:port` when the
+        /// port is non-standard).
+        imap_host: String,
+        /// The outgoing server for the builder, or `None` when the provider publishes no
+        /// SMTP this engine can use.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        smtp_host: Option<String>,
+        /// How the incoming (IMAP) connection is secured: the client passes this straight
+        /// back on connect so the engine dials implicit TLS or STARTTLS as detected.
+        imap_security: ConnectionSecurity,
+        /// How the outgoing (SMTP) connection is secured; meaningful only when `smtp_host`
+        /// is `Some` (implicit TLS otherwise, unused).
+        smtp_security: ConnectionSecurity,
+        /// The incoming server, summarised for the confirmation card.
+        incoming: ServerSummary,
+        /// The outgoing server for the card; `None` exactly when `smtp_host` is.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        outgoing: Option<ServerSummary>,
+        /// A CalDAV endpoint discovered for the account (RFC 6764), or `None` when none
+        /// was found. When present, the client offers calendar sync **pre-selected**
+        /// (opt-out), reusing the IMAP credentials; when `None`, it offers an opt-in
+        /// manual CalDAV field. This is a discovery hint: the engine does the real
+        /// authenticated collection discovery at connect.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        caldav_url: Option<String>,
+        /// A CardDAV endpoint discovered for the account, or `None` when none was found, in
+        /// which case contacts are looked for at the calendar's endpoint.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        carddav_url: Option<String>,
+        /// The OAuth issuer the provider's own autoconfig named, when it named one. It is
+        /// the first authorization server tried at sign-in; `None` is the ordinary case,
+        /// and the well-known probe then answers instead.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        oauth_issuer: Option<String>,
+        /// Whether the settings were obtained tamper-resistantly.
+        is_trusted: bool,
+        /// Provenance, for diagnostics.
+        source: String,
+    },
+    /// The domain is Microsoft-hosted; steer to the Microsoft 365 sign-in.
+    Microsoft {
+        /// The typed email address.
+        email: String,
+    },
+    /// The domain is Google-hosted (consumer Gmail or a Google Workspace domain); steer to
+    /// the native Google sign-in (Gmail + Google Calendar over Google's own APIs), which
+    /// the client gates behind Early Access.
+    Google {
+        /// The typed email address.
+        email: String,
+    },
+    /// No mail server was found, but the domain names a calendar or address-book server:
+    /// route to an account used for calendar and contacts only.
+    Dav {
+        /// The typed email address, the login to prefill.
+        email: String,
+        /// The CalDAV endpoint found, or `None`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        caldav_url: Option<String>,
+        /// The CardDAV endpoint found, or `None`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        carddav_url: Option<String>,
+    },
+    /// Nothing usable; fall back to manual setup with a reason.
+    Manual {
+        /// Why detection did not produce a usable route.
+        reason: MissReason,
+    },
+}
+
+/// A detected server rendered for the confirmation card.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServerSummary {
+    /// The protocol label (`"IMAP"` / `"SMTP"`).
+    pub protocol: String,
+    /// The hostname.
+    pub hostname: String,
+    /// The port.
+    pub port: u16,
+    /// The connection-security label for the card: `"SSL/TLS"` (implicit TLS) or
+    /// `"STARTTLS"`.
+    pub security: String,
+    /// The login username the config prescribes.
+    pub username: String,
+}
+
+/// Why detection routed to manual setup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MissReason {
+    /// The typed text had no usable email domain.
+    InvalidEmail,
+    /// Every lookup came back clean-empty.
+    NothingFound,
+    /// Every lookup failed on transport; likely offline.
+    NetworkError,
+    /// A config exists but offers only OAuth at a provider we have no integration for.
+    OauthOnlyProvider,
+}
+
+/// Which browser sign-in routes this build can actually offer.
+///
+/// A route needs an OAuth client registration, and a build carries one only if it was
+/// given one. Routing to a sign-in the build cannot start would put the user in front of
+/// a button that fails at the provider, so the host states what its build carries and
+/// detection offers only that.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OauthRoutes {
+    /// Whether the native Google (Gmail + Google Calendar) sign-in can be offered.
+    pub google: bool,
+    /// Whether the Microsoft 365 sign-in can be offered.
+    pub microsoft: bool,
+}
+
+/// Consumer Google domains that always route to the native Google sign-in, without waiting on
+/// detection: the domain is already in the typed address, so no lookup (and no privacy
+/// disclosure) is needed. A Google **Workspace** custom domain instead reveals Google via its
+/// incoming host ([`is_google_family`]), the same way Microsoft-hosted domains are detected.
+const GOOGLE_CONSUMER_DOMAINS: &[&str] = &["gmail.com", "googlemail.com"];
+
+/// Whether the typed address's domain is a consumer Google domain.
+fn is_google_consumer_domain(email: &str) -> bool {
+    email
+        .rsplit('@')
+        .next()
+        .map(str::to_ascii_lowercase)
+        .is_some_and(|domain| GOOGLE_CONSUMER_DOMAINS.contains(&domain.as_str()))
+}
+
+/// Turns a detection result for `email` into a routed, prefilled recommendation, offering only
+/// the browser sign-ins `routes` says this build carries a registration for.
+#[must_use]
+pub fn recommend(email: &str, detected: Detected, routes: OauthRoutes) -> SetupRecommendation {
+    // A consumer Google address routes to the native Google sign-in regardless of what
+    // detection turned up (the domain is already local: no lookup needed, and gmail.com's
+    // ISPDB entry is an IMAP app-password we deliberately supersede). A Workspace domain is
+    // caught downstream by its Google incoming host.
+    if routes.google && is_google_consumer_domain(email) {
+        return SetupRecommendation::Google {
+            email: email.to_owned(),
+        };
+    }
+    match detected {
+        Detected::Jmap(jmap) => SetupRecommendation::Jmap {
+            email: email.to_owned(),
+            server_url: jmap.base_url,
+            is_trusted: jmap.is_trusted,
+            source: jmap.source.url,
+            caldav_url: jmap.dav.caldav_url,
+            carddav_url: jmap.dav.carddav_url,
+        },
+        Detected::Mail(settings) => recommend_mail(email, &settings, routes),
+        Detected::Dav(dav) => SetupRecommendation::Dav {
+            email: email.to_owned(),
+            caldav_url: dav.caldav_url,
+            carddav_url: dav.carddav_url,
+        },
+        Detected::Nothing { network_error } => SetupRecommendation::Manual {
+            reason: if network_error {
+                MissReason::NetworkError
+            } else {
+                MissReason::NothingFound
+            },
+        },
+    }
+}
+
+/// The mail-settings branch: Microsoft-family first, then a TLS+password incoming, else
+/// a reasoned fall-back to manual.
+fn recommend_mail(
+    email: &str,
+    settings: &astra_autodetect::DetectedMailSettings,
+    routes: OauthRoutes,
+) -> SetupRecommendation {
+    if settings.incoming.iter().any(is_microsoft_family) {
+        // Microsoft retired Basic auth, so ISPDB's listed password methods are stale;
+        // the only route that works is the browser OAuth sign-in. A build without the
+        // registration to start one has nothing to offer this domain, and the prefilled IMAP
+        // form ISPDB would produce is a login that cannot succeed: so say so instead.
+        return if routes.microsoft {
+            SetupRecommendation::Microsoft {
+                email: email.to_owned(),
+            }
+        } else {
+            SetupRecommendation::Manual {
+                reason: MissReason::OauthOnlyProvider,
+            }
+        };
+    }
+
+    if routes.google && settings.incoming.iter().any(is_google_family) {
+        // A Google Workspace domain (its incoming host is Google's). A build with the
+        // native Gmail/Calendar registration routes it to the Google browser sign-in rather
+        // than the IMAP app-password ISPDB would otherwise prefill. Without the
+        // registration, that app-password route is the one below and it still works;
+        // unlike Microsoft's.
+        return SetupRecommendation::Google {
+            email: email.to_owned(),
+        };
+    }
+
+    // The document's first choice, which is its preference order. There is no
+    // connectable-or-not filter here: the parser only ever yields TLS or STARTTLS
+    // servers offering a password or `OAuth2`, and this client speaks both. A filter that
+    // cannot reject anything is a gate that would stay green over a broken build. Which of
+    // the two credentials is actually asked for is settled against the live server at
+    // sign-in, not against this document.
+    let Some(incoming) = settings.incoming.first() else {
+        return SetupRecommendation::Manual {
+            reason: MissReason::NothingFound,
+        };
+    };
+    let outgoing = settings.outgoing.first();
+    let imap_security = security_of(incoming.socket);
+
+    SetupRecommendation::Imap {
+        email: email.to_owned(),
+        imap_host: host_field(incoming, imap_default_port(imap_security)),
+        smtp_host: outgoing
+            .map(|server| host_field(server, smtp_default_port(security_of(server.socket)))),
+        imap_security,
+        smtp_security: outgoing.map_or(ConnectionSecurity::ImplicitTls, |s| security_of(s.socket)),
+        incoming: summary(incoming, "IMAP"),
+        outgoing: outgoing.map(|server| summary(server, "SMTP")),
+        caldav_url: settings.dav.caldav_url.clone(),
+        carddav_url: settings.dav.carddav_url.clone(),
+        oauth_issuer: settings.oauth_issuer.clone(),
+        is_trusted: settings.is_trusted,
+        source: settings.source.url.clone(),
+    }
+}
+
+/// Maps a detected socket kind onto the account layer's connection-security setting the
+/// client passes back on connect.
+const fn security_of(socket: SocketKind) -> ConnectionSecurity {
+    match socket {
+        SocketKind::Tls => ConnectionSecurity::ImplicitTls,
+        SocketKind::StartTls => ConnectionSecurity::StartTls,
+    }
+}
+
+/// The confirmation-card security label for a detected socket kind.
+const fn security_label(socket: SocketKind) -> &'static str {
+    match socket {
+        SocketKind::Tls => "SSL/TLS",
+        SocketKind::StartTls => "STARTTLS",
+    }
+}
+
+/// Whether a server hostname belongs to Microsoft 365 / Outlook.
+fn is_microsoft_family(server: &DetectedServer) -> bool {
+    let host = server.hostname.to_ascii_lowercase();
+    host == "outlook.office365.com"
+        || host.ends_with(".office365.com")
+        || host.ends_with(".outlook.com")
+}
+
+/// Whether a server hostname belongs to Google (consumer Gmail or Google Workspace; both use
+/// `imap.gmail.com`/`smtp.gmail.com`). Catches a Workspace custom domain whose autoconfig/MX
+/// reveals Google's mail hosts.
+fn is_google_family(server: &DetectedServer) -> bool {
+    let host = server.hostname.to_ascii_lowercase();
+    host.ends_with(".gmail.com")
+        || host.ends_with(".google.com")
+        || host.ends_with(".googlemail.com")
+        || host == "gmail.com"
+        || host == "googlemail.com"
+}
+
+/// The setup-builder host field: a bare host on the standard port, else `host:port`.
+fn host_field(server: &DetectedServer, default_port: u16) -> String {
+    if server.port == default_port {
+        server.hostname.clone()
+    } else {
+        format!("{}:{}", server.hostname, server.port)
+    }
+}
+
+/// Summarises a server for the confirmation card.
+fn summary(server: &DetectedServer, protocol: &str) -> ServerSummary {
+    ServerSummary {
+        protocol: protocol.to_owned(),
+        hostname: server.hostname.clone(),
+        port: server.port,
+        security: security_label(server.socket).to_owned(),
+        username: server.username.clone(),
+    }
+}
+
+#[cfg(test)]
+#[path = "autodetect_tests.rs"]
+mod autodetect_tests;
+
+#[cfg(test)]
+#[path = "autodetect_dav_tests.rs"]
+mod autodetect_dav_tests;

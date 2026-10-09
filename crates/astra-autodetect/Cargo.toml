@@ -1,0 +1,46 @@
+[package]
+name = "astra-autodetect"
+description = "Email-first automatic mail-server-settings detection for Astra Mail: a JMAP well-known probe, Mozilla autoconfig, the ISPDB, IMAP/SMTP SRV records, and a host-resolved MX fallback, raced in priority order."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# Object-safe async trait for the fetcher, so the strategies take `Arc<dyn Fetch>` and
+# tests can inject a virtual-time fake in place of real HTTP.
+async-trait = { workspace = true }
+# The shared TLS trust store (Mozilla roots plus OS store) behind the HTTPS fetcher;
+# the same policy every account connection uses, so detection trusts exactly what
+# sync trusts.
+engine-tls = { workspace = true, features = ["reqwest"] }
+# A quiet diagnostic trail of which strategy and URL was tried (domain only, never the
+# local part).
+log = { workspace = true }
+# Mozilla's compiled-in Public Suffix List; derives a provider's registrable domain
+# from an MX hostname for the MX fallback.
+psl = { workspace = true }
+# Streaming pull-parser for the Mozilla autoconfig XML; no custom-entity expansion, so
+# a hostile document cannot balloon in memory.
+quick-xml = { workspace = true }
+# The HTTP client for every lookup. Redirects are disabled and followed by hand so
+# each hop's scheme is inspected for the trust decision.
+reqwest = { workspace = true }
+# Serialisation for the detection types that cross the Tauri IPC.
+serde = { workspace = true }
+# Classifies a JMAP well-known probe response: a 2xx JSON object advertising
+# `capabilities` is a JMAP session.
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+# `timeout`/`sleep` bound each request and the whole run; the orchestrator spawns the
+# strategies onto this runtime.
+tokio = { workspace = true, features = ["rt", "time", "macros"] }
+url = { workspace = true }
+
+[dev-dependencies]
+# Virtual time (`start_paused`) drives the orchestrator's priority and deadline tests
+# without real waits; a multi-thread runtime backs the one-shot TCP mock-server tests.
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util"] }

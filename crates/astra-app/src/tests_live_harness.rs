@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Gated live test against the local Stalwart harness (docker/harness): the product's
-//! IMAP connect path, over real TLS, against a server whose certificate nobody trusts.
+//! Gated live tests against the local Stalwart harness (docker/harness): the
+//! product's IMAP connect path, over real TLS, against a server whose certificate
+//! nobody trusts; and the product's detection path, over the real HTTP fetcher,
+//! against a server whose domain resolves nowhere.
 //!
 //! The harness serves implicit TLS on `127.0.0.1:2143` with a self-signed certificate,
 //! so the first dial is refused as a certificate rejection and the test pins the
@@ -10,7 +12,14 @@
 //! `scripts/dev/harness.sh`): the account layer dials TLS only, so a no-TLS port is
 //! unreachable through the connect path under test.
 //!
-//! The test skips unless `ASTRA_LIVE_HARNESS=1`, so the offline `cargo test` stays
+//! The JMAP-detection test cannot dial `https://example.test/.well-known/jmap` (the
+//! harness domain resolves nowhere), so it rebases the probe onto the harness's plain
+//! HTTP JMAP origin (`127.0.0.1:2080`) through the detection crate's dev-harness
+//! `well_known_base_override`, the seam whose waiver that crate's unit tests already
+//! pin. This mirrors mail-calendar's live JMAP tests, which publish the same
+//! plaintext listener; no host trust store is touched.
+//!
+//! The tests skip unless `ASTRA_LIVE_HARNESS=1`, so the offline `cargo test` stays
 //! green. Against a running harness:
 //!
 //! ```sh
@@ -19,12 +28,15 @@
 //! cargo test -p astra-app tests_live_harness -- --nocapture
 //! ```
 
+use std::time::Duration;
+
 use engine_api::{AccountId, Provider, SyncScope};
 
 use astra_account::{
     connect_mail_providers, AccountConfig, AccountError, AccountShape, CertificateException,
     ConnectionSecurity, ImapAccount, ImapConnections, Secret,
 };
+use astra_autodetect::{detect, DetectConfig, Detected, SourceKind};
 
 /// The harness connection details from the environment, or `None` to skip.
 fn harness() -> Option<(String, String, String, String)> {
@@ -38,6 +50,17 @@ fn harness() -> Option<(String, String, String, String)> {
     let password =
         std::env::var("ASTRA_HARNESS_IMAP_PASSWORD").unwrap_or_else(|_| "astra-harness".to_owned());
     Some((host, port, user, password))
+}
+
+/// The harness's plain-HTTP JMAP origin from the environment, or `None` to skip.
+fn jmap_base() -> Option<String> {
+    if std::env::var("ASTRA_LIVE_HARNESS").ok().as_deref() != Some("1") {
+        return None;
+    }
+    Some(
+        std::env::var("ASTRA_HARNESS_JMAP_URL")
+            .unwrap_or_else(|_| "http://127.0.0.1:2080".to_owned()),
+    )
 }
 
 /// The harness account, with the certificate exceptions its owner has accepted (none
@@ -110,5 +133,58 @@ async fn a_dial_pins_the_rejected_certificate_and_binds_the_inbox_and_the_custom
     assert!(
         bound.contains(&"Projects".to_owned()),
         "the custom folder astra1 seeds is bound; the bound list is {bound:?}",
+    );
+}
+
+/// Detection for a harness user runs the real well-known probe over the real HTTP
+/// fetcher: `/.well-known/jmap` redirects to the session, the session's anonymous
+/// JSON advertises `capabilities`, and the account layer routes the find onto the
+/// JMAP form the wizard prefills. The run is clamped to the host command's five
+/// second bound, so it also proves the probe fits that budget.
+#[tokio::test]
+async fn detection_returns_the_jmap_recommendation_for_a_harness_user() {
+    let Some(base) = jmap_base() else {
+        eprintln!("skipping live harness test: ASTRA_LIVE_HARNESS is not 1");
+        return;
+    };
+    let config = DetectConfig {
+        overall_deadline: Duration::from_secs(5),
+        well_known_base_override: Some(url::Url::parse(&base).expect("the harness JMAP URL")),
+        ..DetectConfig::default()
+    };
+
+    let email = "astra1@example.test";
+    let detected = detect(email, None, &config)
+        .await
+        .expect("the detection run against the harness");
+
+    let Detected::Jmap(jmap) = detected else {
+        panic!("the harness domain speaks JMAP over its well-known, got {detected:?}");
+    };
+    assert_eq!(jmap.base_url, base, "the stored base is the harness origin");
+    assert!(
+        jmap.is_trusted,
+        "the harness override is the sanctioned trusted route"
+    );
+    assert_eq!(
+        jmap.source.kind,
+        SourceKind::JmapWellKnown,
+        "the apex well-known (rebased) is the winning source"
+    );
+
+    let recommendation = astra_account::recommend(
+        email,
+        Detected::Jmap(jmap),
+        astra_account::OauthRoutes {
+            google: false,
+            microsoft: false,
+        },
+    );
+    let astra_account::SetupRecommendation::Jmap { server_url, .. } = recommendation else {
+        panic!("a JMAP find routes to the JMAP form, got {recommendation:?}");
+    };
+    assert_eq!(
+        server_url, base,
+        "the JMAP form is prefilled with the harness origin"
     );
 }

@@ -7,8 +7,8 @@ this row ports.
 
 | Area | Feature | Status | Source |
 |---|---|---|---|
-| Accounts | IMAP/SMTP account setup wizard with manual server entry | 🚧 | accounts.md |
-| Accounts | Auto-detect from email address (JMAP probe, SRV, autoconfig, ISPDB, MX) | ⬜ | account-autodetect.md |
+| Accounts | IMAP/SMTP account setup wizard with server discovery and manual server entry | 🚧 | accounts.md |
+| Accounts | Auto-detect from email address (JMAP probe, SRV, autoconfig, ISPDB, MX), with results from an unencrypted hop disclosed and needing explicit approval | 🚧 | account-autodetect.md |
 | Mail | Folder pane across accounts with nested folders and persisted expansion | 🚧 | folder-pane.md |
 | Mail | Flat and threaded message list with windowed paging | ⬜ | |
 | Calendar | Day, work week, and month grids with drag to create, move, resize | ⬜ | calendar.md |

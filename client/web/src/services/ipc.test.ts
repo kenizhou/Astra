@@ -8,7 +8,17 @@ const invoke = vi.hoisted(() => vi.fn());
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke }));
 
-import { addAccount, dispatch, imapTestConnection, intents, mailboxList, syncProgress } from './ipc';
+import type { RecommendationView } from './ipc';
+
+import {
+  addAccount,
+  detectAccountSettings,
+  dispatch,
+  imapTestConnection,
+  intents,
+  mailboxList,
+  syncProgress,
+} from './ipc';
 
 describe('the intent wire', () => {
   it('crosses unit variants as bare renamed words', () => {
@@ -97,6 +107,62 @@ describe('the command wrappers', () => {
         imap_security: 'implicit_tls',
         smtp_security: 'implicit_tls',
       },
+    });
+  });
+});
+
+// Both literals are byte-for-byte the JSON astra-desktop's detection_tests.rs
+// asserts on the Rust side, so neither side of the wire can drift.
+describe('the detection wire', () => {
+  it('mirrors the manual recommendation an unknown domain yields', () => {
+    const wire = JSON.parse(
+      '{"recommendation":{"Manual":{"reason":"NothingFound"}},"choices":[],"detected":{"outcome":{"nothing":{"network_error":false}},"source_kind":null}}',
+    ) as RecommendationView;
+
+    expect(wire.recommendation).toEqual({ Manual: { reason: 'NothingFound' } });
+    expect(wire.choices).toEqual([]);
+    expect(wire.detected).toEqual({ outcome: { nothing: { network_error: false } }, source_kind: null });
+  });
+
+  it('mirrors the found imap recommendation with its choices', () => {
+    const wire = JSON.parse(
+      '{"recommendation":{"Imap":{"email":"user@example.test","imap_host":"imap.example.test","imap_security":"implicit_tls","smtp_security":"implicit_tls","incoming":{"protocol":"IMAP","hostname":"imap.example.test","port":993,"security":"SSL/TLS","username":"user@example.test"},"is_trusted":true,"source":"https://autoconfig.example.test/mail/config-v1.1.xml"}},"choices":[{"capability":"Mail","on":true,"server_found":true},{"capability":"Calendar","on":false,"server_found":false},{"capability":"Contacts","on":false,"server_found":false}],"detected":{"outcome":"mail","source_kind":"Autoconfig"}}',
+    ) as RecommendationView;
+
+    expect(wire.recommendation).toEqual({
+      Imap: {
+        email: 'user@example.test',
+        imap_host: 'imap.example.test',
+        imap_security: 'implicit_tls',
+        smtp_security: 'implicit_tls',
+        incoming: {
+          protocol: 'IMAP',
+          hostname: 'imap.example.test',
+          port: 993,
+          security: 'SSL/TLS',
+          username: 'user@example.test',
+        },
+        is_trusted: true,
+        source: 'https://autoconfig.example.test/mail/config-v1.1.xml',
+      },
+    });
+    expect(wire.choices).toEqual([
+      { capability: 'Mail', on: true, server_found: true },
+      { capability: 'Calendar', on: false, server_found: false },
+      { capability: 'Contacts', on: false, server_found: false },
+    ]);
+    expect(wire.detected).toEqual({ outcome: 'mail', source_kind: 'Autoconfig' });
+  });
+
+  it('asks the host to detect the settings for one email', async () => {
+    invoke.mockResolvedValue({
+      recommendation: { Manual: { reason: 'NothingFound' } },
+      choices: [],
+      detected: { outcome: { nothing: { network_error: false } }, source_kind: null },
+    });
+    await detectAccountSettings('user@nothing-here.invalid');
+    expect(invoke).toHaveBeenCalledWith('detect_account_settings', {
+      email: 'user@nothing-here.invalid',
     });
   });
 });

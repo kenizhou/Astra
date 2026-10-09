@@ -10,6 +10,9 @@ publish = false
 workspace = true
 
 [dependencies]
+# The protocol-neutral detection result (`Detected`) the recommendation layer routes onto
+# a concrete setup form.
+astra-autodetect = { path = "../astra-autodetect" }
 engine-api.workspace = true
 # The engine's sync cursors and raw MIME type appear in the `Provider` trait's own
 # method signatures (`SyncState`, `SyncUpdate`, `RawMime`) and are re-exported by
