@@ -12,6 +12,7 @@
 mod accounts;
 mod boot;
 mod dispatch;
+mod drafts;
 mod list_rows;
 mod mail_writes;
 mod preferences;
@@ -44,12 +45,14 @@ mod dispatch_fakes;
 use std::{
     path::PathBuf,
     sync::{atomic::AtomicU64, Arc, Mutex},
+    time::Duration,
 };
 
 use engine_api::{AccountId, Engine, Provider};
 use tokio::sync::RwLock;
 
 use crate::{
+    drafts::Drafts,
     preferences::PreferencesState,
     row_cache::{CachedMailRows, CachedRows},
     window::PAGE,
@@ -58,8 +61,11 @@ use crate::{
 pub use accounts::{Account, MailboxConnector};
 pub use boot::{boot, BootError, SpawnedTask};
 pub use dispatch::AppError;
+pub use drafts::{DraftResume, DRAFT_AUTOSAVE_IDLE};
 pub use preferences::{load_preferences, preferences_path, save_preferences, Preferences};
-pub use protocol::{AppObserver, FolderIntent, Intent, Surface, ViewMode};
+pub use protocol::{
+    AppObserver, CompositionId, DraftsIntent, FolderIntent, Intent, Surface, ViewMode,
+};
 pub use reference::{FolderRef, MessageRef, RowRef, ThreadRef};
 pub use surfaced::Surfaced;
 
@@ -91,6 +97,24 @@ pub struct App<P> {
     /// body, or `None` when nothing is open. One cell, because SP2c has one
     /// reading pane; the per-reader map is the multi-window slice's to add.
     reading: Surfaced<Option<astra_viewmodel::ReadingSnapshot>>,
+    /// The draft-status snapshot and its signal: the composition whose save moved
+    /// and how it ended, or `None` when no composition has a save to report.
+    /// One cell for the same reason the reading pane has one: SP2d has one
+    /// composer, and the per-composition map is the multi-composer slice's to
+    /// add.
+    draft_status: Surfaced<Option<astra_viewmodel::DraftStatusSnapshot>>,
+    /// The open compositions and their stored-copy facts. See `drafts`.
+    drafts: Mutex<Drafts>,
+    /// Held for the length of a draft save, so the read of the stored key and the write
+    /// of the new one cannot be split by another save of the same composition.
+    save_gate: Arc<tokio::sync::Mutex<()>>,
+    /// Woken whenever an autosave arm moves, so the driver re-reads the earliest
+    /// deadline instead of sleeping past it.
+    autosave_armed: tokio::sync::Notify,
+    /// How long a composer sits untouched before its draft is saved. The product
+    /// default is [`DRAFT_AUTOSAVE_IDLE`]; a seam so tests (and only they) need
+    /// not wait real time.
+    autosave_idle: Duration,
     /// The message the reading pane is showing, so a refresh knows what to
     /// re-render (or to close, when the message is gone). Held beside the
     /// snapshot rather than read back out of it: what is open and what was last
@@ -162,7 +186,12 @@ impl<P: Provider> App<P> {
             accounts: RwLock::new(accounts.into_iter().map(Arc::new).collect()),
             scope: Mutex::new(Scope::default()),
             mailbox_list: Surfaced::new(Surface::MailboxList, Arc::clone(&observer)),
-            reading: Surfaced::new(Surface::Reading, observer),
+            reading: Surfaced::new(Surface::Reading, Arc::clone(&observer)),
+            draft_status: Surfaced::new(Surface::DraftStatus, observer),
+            drafts: Mutex::new(Drafts::default()),
+            save_gate: Arc::new(tokio::sync::Mutex::new(())),
+            autosave_armed: tokio::sync::Notify::new(),
+            autosave_idle: DRAFT_AUTOSAVE_IDLE,
             open_reading: Mutex::new(None),
             sync_progress,
             pane: Mutex::new(PreferencesState::new(None)),
@@ -189,6 +218,17 @@ impl<P: Provider> App<P> {
             .map_or_else(Scope::default, Scope::Folder);
         self.pane = pane;
         self.scope = Mutex::new(scope);
+        self
+    }
+
+    /// Names how long a composer sits untouched before its draft is saved, in place of
+    /// the product's [`DRAFT_AUTOSAVE_IDLE`]. Call it before the first dispatch: the
+    /// autosave driver reads the interval each time it arms, and the honest uses are a
+    /// test shortening it so thirty seconds cost nothing and a host with a stated
+    /// product opinion applying it everywhere.
+    #[must_use]
+    pub fn with_draft_autosave_idle(mut self, idle: Duration) -> Self {
+        self.autosave_idle = idle;
         self
     }
 }

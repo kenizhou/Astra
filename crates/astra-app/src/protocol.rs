@@ -4,9 +4,11 @@
 //! dispatches. These are the pure types the runtime drives; each crosses the IPC as JSON.
 
 mod intent;
+mod intent_drafts;
 mod status;
 
 pub use intent::{FolderIntent, Intent, ViewMode};
+pub use intent_drafts::{CompositionId, DraftsIntent};
 
 use serde::{Deserialize, Serialize};
 
@@ -23,6 +25,12 @@ pub enum Surface {
     /// message is open. Every publish is one message's body, so the host repaints the
     /// pane on every signal rather than debouncing them.
     Reading,
+    /// The draft-save hint of the composition that saved: whether its words are on the
+    /// server or still on their way. Every publish is one transition of one
+    /// composition's save, so the host repaints the composer's hint on every signal
+    /// rather than debouncing them; `None` from the pull means no composition has a
+    /// save to report.
+    DraftStatus,
 }
 
 /// A host implements this to learn a [`Surface`] changed, then pulls its snapshot.

@@ -20,8 +20,9 @@ use std::{
 
 use async_trait::async_trait;
 use engine_api::{
-    AccountId, CalendarWrites, Capabilities, EmailAddress, Engine, Mailbox, MailboxEdit,
-    MailboxEditReceipt, MailboxId, MailboxRole, MailboxWrites, Message, Provider, SyncWindow,
+    AccountId, CalendarWrites, Capabilities, Draft, EmailAddress, Engine, Mailbox, MailboxEdit,
+    MailboxEditReceipt, MailboxId, MailboxRole, MailboxWrites, Message, Provider, ProviderKey,
+    SyncWindow, SystemKeyword, UtcDateTime,
 };
 use engine_core::raw::RawMime;
 use engine_core::sync::{SyncState, SyncUpdate};
@@ -64,13 +65,27 @@ pub(super) struct FakeProvider {
     pub(super) updates: Arc<Mutex<Vec<Message>>>,
     /// Raw RFC 5322 sources by provider key, served through `fetch_message_source`,
     /// so the reading pipeline's body, inline-part, and attachment reads have bytes
-    /// to decode. A message without one fails its source fetch.
-    pub(super) sources: HashMap<String, Vec<u8>>,
+    /// to decode. A message without one fails its source fetch. Behind a mutex because
+    /// a draft the provider stores registers its source as it goes out.
+    pub(super) sources: Mutex<HashMap<String, Vec<u8>>>,
     /// How many email sync passes this provider has served.
     pub(super) syncs: Arc<AtomicUsize>,
     /// Every `edit_mail` this provider was asked to apply, in order.
     pub(super) edits: Arc<Mutex<Vec<MailEdit>>>,
+    /// Every draft this provider was asked to store, each with the key that save said
+    /// it was superseding. The pair, not just the draft: whether a save names the copy
+    /// it replaces is the whole draft contract, and a log of drafts alone cannot tell a
+    /// correct save from one storing a second copy.
+    pub(super) draft_puts: DraftPutLog,
+    /// Every stored draft this provider was asked to remove.
+    pub(super) draft_deletes: Arc<Mutex<Vec<ProviderKey>>>,
+    /// Draft saves left to refuse as retryable ("no route to host"), so a test can model
+    /// an outage the outbox rides out.
+    offline_saves: Mutex<u32>,
 }
+
+/// Every draft save the fake was asked to store, each `(draft, replacing)` pair.
+type DraftPutLog = Arc<Mutex<Vec<(Draft, Option<ProviderKey>)>>>;
 
 impl FakeProvider {
     /// A provider listing `mailboxes` as the account's whole tree, holding no mail.
@@ -95,17 +110,76 @@ impl FakeProvider {
             mailboxes,
             messages: Arc::new(Mutex::new(messages)),
             updates: Arc::new(Mutex::new(Vec::new())),
-            sources: sources.into_iter().collect(),
+            sources: Mutex::new(sources.into_iter().collect()),
             syncs: Arc::new(AtomicUsize::new(0)),
             edits: Arc::new(Mutex::new(Vec::new())),
+            draft_puts: Arc::new(Mutex::new(Vec::new())),
+            draft_deletes: Arc::new(Mutex::new(Vec::new())),
+            offline_saves: Mutex::new(0),
         }
+    }
+
+    /// A provider whose next `saves` draft saves fail retryably and which then works:
+    /// the outage a queued draft save is supposed to ride out.
+    pub(super) fn saving_nothing_for(saves: u32) -> Self {
+        let provider = Self::with(vec![inbox()]);
+        *provider.offline_saves.lock().unwrap() = saves;
+        provider
+    }
+
+    /// Every recorded draft save, each `(draft, replacing)`, for the contract assertions.
+    pub(super) fn draft_puts(&self) -> DraftPutLog {
+        Arc::clone(&self.draft_puts)
+    }
+
+    /// Every recorded draft removal, for the discard assertions.
+    pub(super) fn draft_deletes(&self) -> Arc<Mutex<Vec<ProviderKey>>> {
+        Arc::clone(&self.draft_deletes)
+    }
+
+    /// Records that the server now holds `draft` under `key`, so the account's next
+    /// sync pass presents it to the store the way a real Drafts folder would.
+    fn store_draft(&self, key: &str, draft: &Draft) {
+        let mut message = Message::new(
+            engine_core::ids::MessageId::try_from(key).unwrap(),
+            engine_core::membership::Memberships::of_one(MailboxId::try_from("drafts").unwrap()),
+        );
+        message
+            .keywords
+            .insert(engine_api::Keyword::system(SystemKeyword::Draft));
+        message.envelope.subject = Some(draft.subject.clone());
+        message.envelope.from = vec![draft.from.clone()];
+        message.envelope.to = draft.to.clone();
+        message.envelope.cc = draft.cc.clone();
+        message.envelope.message_id = vec![draft.message_id.clone()];
+        let puts = self.draft_puts.lock().unwrap().len();
+        message.received_at =
+            Some(UtcDateTime::new(2026, 10, 9, 9, u8::try_from(puts).unwrap(), 0).unwrap());
+        let source = format!(
+            "From: {}\r\nTo: {}\r\nSubject: {}\r\n\r\n{}",
+            draft.from.email,
+            draft
+                .to
+                .iter()
+                .map(|to| to.email.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+            draft.subject,
+            draft.text_body,
+        );
+        self.messages.lock().unwrap().push(message.clone());
+        self.updates.lock().unwrap().push(message);
+        self.sources
+            .lock()
+            .unwrap()
+            .insert(key.to_owned(), source.into_bytes());
     }
 }
 
 #[async_trait]
 impl Provider for FakeProvider {
     fn connection_info(&self) -> ConnectionInfo {
-        ConnectionInfo::new(Capabilities::none().with_mail())
+        ConnectionInfo::new(Capabilities::none().with_mail().with_mail_drafts())
     }
 
     async fn sync_mailboxes(
@@ -172,6 +246,8 @@ impl Provider for FakeProvider {
         message: &Message,
     ) -> ProviderResult<RawMime> {
         self.sources
+            .lock()
+            .unwrap()
             .get(message.id.key().as_str())
             .cloned()
             .map(RawMime::new)
@@ -185,6 +261,49 @@ impl Provider for FakeProvider {
     ) -> ProviderResult<MailEditReceipt> {
         self.edits.lock().unwrap().push(edit.clone());
         Ok(MailEditReceipt::new(edit.target().clone()))
+    }
+
+    /// Stores a draft, answering with a key that **moves on every save**, which is what
+    /// three of the four real adapters do. A fake echoing the key back would let a caller
+    /// that never passes `replacing` pass this suite and store a second copy per save
+    /// against a real server. The stored copy joins the server's mailbox, so a later sync
+    /// pass presents it to the store and a resume can read it back.
+    async fn put_draft(
+        &self,
+        _account: &AccountId,
+        draft: &Draft,
+        replacing: Option<&ProviderKey>,
+    ) -> ProviderResult<ProviderKey> {
+        {
+            let mut offline = self.offline_saves.lock().unwrap();
+            if *offline > 0 {
+                *offline -= 1;
+                return Err(ProviderError::retryable("no route to host"));
+            }
+        }
+        let key = {
+            let mut puts = self.draft_puts.lock().unwrap();
+            puts.push((draft.clone(), replacing.cloned()));
+            ProviderKey::new(format!("draft-{}", puts.len())).unwrap()
+        };
+        self.store_draft(key.as_str(), draft);
+        Ok(key)
+    }
+
+    /// Removes a stored draft from the server's mailbox along with its source, the way a
+    /// real Drafts folder would, so a later pass reconciles it away.
+    async fn delete_draft(&self, _account: &AccountId, draft: &ProviderKey) -> ProviderResult<()> {
+        self.draft_deletes.lock().unwrap().push(draft.clone());
+        self.messages
+            .lock()
+            .unwrap()
+            .retain(|message| message.id.key() != draft);
+        self.updates
+            .lock()
+            .unwrap()
+            .retain(|message| message.id.key() != draft);
+        self.sources.lock().unwrap().remove(draft.as_str());
+        Ok(())
     }
 }
 

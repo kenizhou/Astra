@@ -178,6 +178,7 @@ dependencies = [
  "ammonia",
  "astra-account",
  "astra-autodetect",
+ "astra-composer",
  "astra-viewmodel",
  "async-trait",
  "engine-api",

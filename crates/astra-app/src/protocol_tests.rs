@@ -2,9 +2,10 @@
 //! Tests for the protocol: the exact JSON wire shape every intent, folder intent, view
 //! mode, and surface crosses the IPC in, and that each reads back identical.
 
+use astra_composer::{Block, ComposerDocument, InlineContent, Paragraph, TextRun};
 use engine_api::AccountId;
 
-use super::{FolderIntent, Intent, Surface, ViewMode};
+use super::{CompositionId, DraftsIntent, FolderIntent, Intent, Surface, ViewMode};
 use crate::reference::{FolderRef, MessageRef, RowRef, ThreadRef};
 
 /// A well-formed account id, the way every test names one.
@@ -206,6 +207,123 @@ fn a_malformed_account_id_is_refused_on_the_wire() {
     let folder = r#"{"select_folder":{"folder":{"account":"","key":"INBOX"}}}"#;
     assert!(serde_json::from_str::<Intent>(folder).is_err());
     assert!(serde_json::from_str::<FolderRef>(r#"{"account":"","key":"INBOX"}"#).is_err());
+}
+
+/// A composition id, the way every drafts test names one.
+fn composition(value: &str) -> CompositionId {
+    CompositionId::new(value).unwrap()
+}
+
+/// A one-paragraph document carrying `text`, the smallest document a save can hold.
+fn document(text: &str) -> ComposerDocument {
+    ComposerDocument {
+        blocks: vec![Block::Paragraph(Paragraph {
+            content: vec![InlineContent::Text(TextRun {
+                text: text.to_owned(),
+                bold: false,
+                italic: false,
+                underline: false,
+                font_size: None,
+                color: None,
+                highlight: None,
+                link: None,
+            })],
+        })],
+        attachments: Vec::new(),
+    }
+}
+
+#[test]
+fn a_drafts_save_carries_the_composition_the_document_and_the_close_flag() {
+    round_trips(
+        &Intent::Drafts(DraftsIntent::Save {
+            composition: composition("compose-1"),
+            from: account("work"),
+            to: "you@test.local".to_owned(),
+            cc: String::new(),
+            bcc: String::new(),
+            subject: "Later".to_owned(),
+            document: document("Half written"),
+            then_close: false,
+        }),
+        concat!(
+            r#"{"drafts":{"save":{"composition":"compose-1","from":"work","#,
+            r#""to":"you@test.local","cc":"","bcc":"","subject":"Later","#,
+            r#""document":{"blocks":[{"Paragraph":{"content":"#,
+            r#"[{"Text":{"text":"Half written","bold":false,"italic":false,"underline":false,"#,
+            r#""font_size":null,"color":null,"highlight":null,"link":null}}]}}],"#,
+            r#""attachments":[]},"then_close":false}}}"#
+        ),
+    );
+    // The leaving flag is pinned the other way round too: a save that closes the
+    // composer behind it is the same wire with `then_close` true.
+    round_trips(
+        &Intent::Drafts(DraftsIntent::Save {
+            composition: composition("compose-1"),
+            from: account("work"),
+            to: String::new(),
+            cc: String::new(),
+            bcc: String::new(),
+            subject: String::new(),
+            document: document("On my way out"),
+            then_close: true,
+        }),
+        concat!(
+            r#"{"drafts":{"save":{"composition":"compose-1","from":"work","#,
+            r#""to":"","cc":"","bcc":"","subject":"","#,
+            r#""document":{"blocks":[{"Paragraph":{"content":"#,
+            r#"[{"Text":{"text":"On my way out","bold":false,"italic":false,"underline":false,"#,
+            r#""font_size":null,"color":null,"highlight":null,"link":null}}]}}],"#,
+            r#""attachments":[]},"then_close":true}}}"#
+        ),
+    );
+}
+
+#[test]
+fn a_drafts_discard_and_close_name_the_composition() {
+    round_trips(
+        &Intent::Drafts(DraftsIntent::Discard {
+            composition: composition("compose-1"),
+        }),
+        r#"{"drafts":{"discard":{"composition":"compose-1"}}}"#,
+    );
+    round_trips(
+        &Intent::Drafts(DraftsIntent::Close {
+            composition: composition("compose-1"),
+        }),
+        r#"{"drafts":{"close":{"composition":"compose-1"}}}"#,
+    );
+}
+
+#[test]
+fn a_blank_composition_id_is_refused_on_the_wire() {
+    // The constructor rejects blanks, so a blank id would merge every composer's
+    // draft into one entry and each save would supersede a different composer's copy.
+    assert!(CompositionId::new("").is_none());
+    assert!(CompositionId::new("   ").is_none());
+    assert!(CompositionId::new("compose-1").is_some());
+    // And so the wire refuses one, exactly as a reference refuses a blank key.
+    let blank = r#"{"drafts":{"close":{"composition":""}}}"#;
+    assert!(serde_json::from_str::<Intent>(blank).is_err());
+    let spaces = r#"{"drafts":{"close":{"composition":"   "}}}"#;
+    assert!(serde_json::from_str::<Intent>(spaces).is_err());
+    assert_eq!(
+        composition("compose-1").as_str(),
+        "compose-1",
+        "the id reads back as the host gave it"
+    );
+}
+
+#[test]
+fn draft_status_crosses_as_a_renamed_word() {
+    assert_eq!(
+        serde_json::to_string(&Surface::DraftStatus).unwrap(),
+        r#""draft_status""#
+    );
+    assert_eq!(
+        serde_json::from_str::<Surface>(r#""draft_status""#).unwrap(),
+        Surface::DraftStatus
+    );
 }
 
 #[test]

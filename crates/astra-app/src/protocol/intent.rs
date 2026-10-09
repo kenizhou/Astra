@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! The [`Intent`] enum: the single inbound channel of the unidirectional loop, with the
-//! two enums its variants carry ([`ViewMode`] and [`FolderIntent`]) beside it.
+//! enums its variants carry ([`ViewMode`], [`FolderIntent`], and
+//! [`DraftsIntent`](super::DraftsIntent)) beside it or one module away.
 
 use engine_api::AccountId;
 use serde::{Deserialize, Serialize};
 
 use crate::reference::{FolderRef, MessageRef, RowRef};
+
+use super::DraftsIntent;
 
 /// How the mailbox list is grouped.
 ///
@@ -116,4 +119,7 @@ pub enum Intent {
     CloseReading,
     /// A change to an account's folder tree ([`FolderIntent`]).
     Folders(FolderIntent),
+    /// What the composer asks the runtime to do with the draft it is holding
+    /// ([`DraftsIntent`]): save it, discard it, or save and close.
+    Drafts(DraftsIntent),
 }

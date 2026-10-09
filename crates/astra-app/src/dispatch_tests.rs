@@ -436,7 +436,7 @@ async fn boot_primes_the_cached_list_and_spawns_each_accounts_first_sync() {
     );
     assert_eq!(
         spawned.load(Ordering::SeqCst),
-        2,
-        "each account's first sync is spawned, not awaited"
+        3,
+        "each account's first sync and the autosave driver are spawned, not awaited"
     );
 }
