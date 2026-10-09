@@ -224,3 +224,77 @@ async fn the_deadline_fire_does_not_re_store_a_closed_composition() {
         "a close never removes the draft"
     );
 }
+
+/// The then_close side of the same race: a save that closes the composer behind it
+/// runs its save and its forget as one unit under the gate, so a deadline fire queued
+/// on the gate can never begin a save against a composition that save has already
+/// forgotten, and never re-stores its words under a fresh `Message-ID`. Whichever of
+/// the two the gate grants first, the last stored copy must be the closing save's.
+#[tokio::test(start_paused = true)]
+async fn the_deadline_fire_does_not_re_store_a_then_closed_composition() {
+    let provider = fakes::FakeProvider::with(vec![fakes::inbox()]);
+    let puts = provider.draft_puts();
+    let surfaces = Arc::new(Mutex::new(Vec::new()));
+    let app = app_over(provider, Duration::from_secs(30), &surfaces);
+    drive(&app);
+
+    app.dispatch(save("compose-1", "typed so far"))
+        .await
+        .unwrap();
+    assert_eq!(puts.lock().unwrap().len(), 1);
+
+    let gate = Arc::clone(&app.save_gate);
+    let held_gate = gate.lock().await;
+    tokio::time::sleep(Duration::from_secs(31)).await;
+    let leaving = {
+        let app = Arc::clone(&app);
+        tokio::spawn(async move {
+            app.dispatch(crate::Intent::Drafts(crate::DraftsIntent::Save {
+                composition: super::composition("compose-1"),
+                from: super::account("work"),
+                to: String::new(),
+                cc: String::new(),
+                bcc: String::new(),
+                subject: "Later".to_owned(),
+                document: super::document("typed on the way out"),
+                then_close: true,
+            }))
+            .await
+            .unwrap();
+        })
+    };
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    drop(held_gate);
+    leaving.await.unwrap();
+    // Let the fire run what the gate release woke before reading the outcome: the
+    // assertion is that it does nothing, not that it has not been polled yet.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    {
+        let stored = puts.lock().unwrap();
+        assert_eq!(
+            stored.len(),
+            2,
+            "exactly the leaving save stored; the fire added nothing"
+        );
+        assert!(
+            stored[1].0.text_body.contains("typed on the way out"),
+            "the last stored copy is the closing save's words"
+        );
+        assert_eq!(
+            stored[0].0.message_id, stored[1].0.message_id,
+            "both saves are the same message, so the fire never re-opened the composition"
+        );
+    }
+    assert!(
+        app.draft_status().is_none(),
+        "a closed composition leaves no hint, not even the fire's"
+    );
+    // The arm went with the composition: nothing fires again later.
+    tokio::time::sleep(Duration::from_secs(60)).await;
+    assert_eq!(
+        puts.lock().unwrap().len(),
+        2,
+        "the forgotten composition is never saved again"
+    );
+}

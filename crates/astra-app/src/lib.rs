@@ -15,6 +15,7 @@ mod dispatch;
 mod drafts;
 mod list_rows;
 mod mail_writes;
+mod outbox;
 mod preferences;
 mod protocol;
 mod reading;
@@ -64,9 +65,10 @@ pub use dispatch::AppError;
 pub use drafts::{DraftResume, DRAFT_AUTOSAVE_IDLE};
 pub use preferences::{load_preferences, preferences_path, save_preferences, Preferences};
 pub use protocol::{
-    AppObserver, CompositionId, DraftsIntent, FolderIntent, Intent, Surface, ViewMode,
+    AppObserver, ComposerBlob, CompositionId, DraftsIntent, FolderIntent, Intent, OutboxIntent,
+    Surface, ViewMode,
 };
-pub use reference::{FolderRef, MessageRef, RowRef, ThreadRef};
+pub use reference::{FolderRef, MessageRef, QueuedRef, RowRef, ThreadRef};
 pub use surfaced::Surfaced;
 
 /// The app runtime: owns one [`Engine`] shared across every configured [`Account`],
@@ -103,6 +105,12 @@ pub struct App<P> {
     /// composer, and the per-composition map is the multi-composer slice's to
     /// add.
     draft_status: Surfaced<Option<astra_viewmodel::DraftStatusSnapshot>>,
+    /// The sending snapshot and its signal: every account's queued sends, one
+    /// list, published on each transition of the queue. See `outbox`.
+    sending: Surfaced<astra_viewmodel::SendingSnapshot>,
+    /// The sending state beside the engine's queue: the arrival stamps this
+    /// session's reads have noted, which the store holds no counterpart of.
+    outbox: Mutex<outbox::Outbox>,
     /// The open compositions and their stored-copy facts. See `drafts`.
     drafts: Mutex<Drafts>,
     /// Held for the length of a draft save, so the read of the stored key and the write
@@ -187,7 +195,9 @@ impl<P: Provider> App<P> {
             scope: Mutex::new(Scope::default()),
             mailbox_list: Surfaced::new(Surface::MailboxList, Arc::clone(&observer)),
             reading: Surfaced::new(Surface::Reading, Arc::clone(&observer)),
-            draft_status: Surfaced::new(Surface::DraftStatus, observer),
+            draft_status: Surfaced::new(Surface::DraftStatus, Arc::clone(&observer)),
+            sending: Surfaced::new(Surface::Sending, observer),
+            outbox: Mutex::new(outbox::Outbox::default()),
             drafts: Mutex::new(Drafts::default()),
             save_gate: Arc::new(tokio::sync::Mutex::new(())),
             autosave_armed: tokio::sync::Notify::new(),

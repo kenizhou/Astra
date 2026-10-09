@@ -22,16 +22,25 @@ use async_trait::async_trait;
 use engine_api::{
     AccountId, CalendarWrites, Capabilities, Draft, EmailAddress, Engine, Mailbox, MailboxEdit,
     MailboxEditReceipt, MailboxId, MailboxRole, MailboxWrites, Message, Provider, ProviderKey,
-    SyncWindow, SystemKeyword, UtcDateTime,
+    SubmissionReceipt, SyncWindow, SystemKeyword, UtcDateTime,
 };
 use engine_core::raw::RawMime;
 use engine_core::sync::{SyncState, SyncUpdate};
 use engine_provider::{
-    ConnectionInfo, EmailChunk, EmailStream, MailEdit, MailEditReceipt, ProviderError,
+    ConnectionInfo, EmailChunk, EmailStream, HandOver, MailEdit, MailEditReceipt, ProviderError,
     ProviderResult, ScopeSync,
 };
 
 use crate::{Account, App, AppObserver, MailboxConnector, Surface};
+
+// The message fixtures and the row helpers that read a snapshot back: a child
+// module so this file stays under the 500-line limit beside the SMTP leg. The
+// re-export keeps every test module's `fakes::…` paths unchanged.
+mod mail;
+pub(super) use mail::{
+    delivered_at, folder_keys, mail, pane_rows, read, row, row_keys, sending_signals, sent_copy,
+    threaded,
+};
 
 /// Records the surfaces the app signals, so a test can assert the loop fired.
 pub(super) struct RecordingObserver {
@@ -79,9 +88,30 @@ pub(super) struct FakeProvider {
     pub(super) draft_puts: DraftPutLog,
     /// Every stored draft this provider was asked to remove.
     pub(super) draft_deletes: Arc<Mutex<Vec<ProviderKey>>>,
+    /// Every submit this provider was asked to deliver, in order: the send
+    /// log the outbox assertions read.
+    pub(super) submits: Arc<Mutex<Vec<Draft>>>,
+    /// How the SMTP leg answers each submit, one entry per attempt in order;
+    /// the script runs out into plain delivery.
+    send_script: Mutex<Vec<ScriptedSend>>,
     /// Draft saves left to refuse as retryable ("no route to host"), so a test can model
     /// an outage the outbox rides out.
     offline_saves: Mutex<u32>,
+}
+
+/// How the fake's SMTP leg answers one submit attempt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ScriptedSend {
+    /// Delivered, and the copy filed in Sent.
+    Delivered,
+    /// The server could not be reached: a retryable failure that never handed
+    /// the message over, so a recovery would rightly try again.
+    Unreachable,
+    /// The server refused it for good: a permanent failure, nothing delivered.
+    Refused,
+    /// The message was handed over and no answer came back: the one outcome
+    /// that must never be retried without asking.
+    Silent,
 }
 
 /// Every draft save the fake was asked to store, each `(draft, replacing)` pair.
@@ -115,8 +145,23 @@ impl FakeProvider {
             edits: Arc::new(Mutex::new(Vec::new())),
             draft_puts: Arc::new(Mutex::new(Vec::new())),
             draft_deletes: Arc::new(Mutex::new(Vec::new())),
+            submits: Arc::new(Mutex::new(Vec::new())),
+            send_script: Mutex::new(Vec::new()),
             offline_saves: Mutex::new(0),
         }
+    }
+
+    /// Scripts the SMTP leg's answers to the next submits, one entry per
+    /// attempt in order; attempts past the script's end are delivered. The
+    /// shape the outbox tests model every send outcome with.
+    pub(super) fn submitting(self, script: Vec<ScriptedSend>) -> Self {
+        *self.send_script.lock().unwrap() = script;
+        self
+    }
+
+    /// Every recorded submit, in order, for the delivery assertions.
+    pub(super) fn submits(&self) -> Arc<Mutex<Vec<Draft>>> {
+        Arc::clone(&self.submits)
     }
 
     /// A provider whose next `saves` draft saves fail retryably and which then works:
@@ -179,7 +224,12 @@ impl FakeProvider {
 #[async_trait]
 impl Provider for FakeProvider {
     fn connection_info(&self) -> ConnectionInfo {
-        ConnectionInfo::new(Capabilities::none().with_mail().with_mail_drafts())
+        ConnectionInfo::new(
+            Capabilities::none()
+                .with_mail()
+                .with_mail_drafts()
+                .with_submission(),
+        )
     }
 
     async fn sync_mailboxes(
@@ -305,6 +355,56 @@ impl Provider for FakeProvider {
         self.sources.lock().unwrap().remove(draft.as_str());
         Ok(())
     }
+
+    /// Delivers a message over the scripted SMTP leg: the one attempt shape
+    /// whose every honest outcome the outbox exists to hold. The hand-over is
+    /// committed only where a real transport would have crossed its point of
+    /// no return (the message went out, the answer is what was lost), so a
+    /// recovery reading the record draws the same conclusion it would against
+    /// a live server.
+    async fn submit_email(
+        &self,
+        _account: &AccountId,
+        draft: &Draft,
+        hand_over: &HandOver<'_>,
+    ) -> ProviderResult<SubmissionReceipt> {
+        let attempt = self.submits.lock().unwrap().len() + 1;
+        self.submits.lock().unwrap().push(draft.clone());
+        let answer = self
+            .send_script
+            .lock()
+            .unwrap()
+            .get(attempt - 1)
+            .copied()
+            .unwrap_or(ScriptedSend::Delivered);
+        match answer {
+            ScriptedSend::Delivered => {
+                let handed_over = hand_over.commit().await?;
+                let key = ProviderKey::new(format!("sent-{attempt}")).unwrap();
+                let copy = sent_copy(key.as_str(), draft);
+                self.messages.lock().unwrap().push(copy.clone());
+                self.updates.lock().unwrap().push(copy);
+                Ok(SubmissionReceipt::filed(
+                    key,
+                    draft.message_id.clone(),
+                    &handed_over,
+                ))
+            }
+            // No connection, so no byte left the device: no hand-over record.
+            ScriptedSend::Unreachable => Err(ProviderError::retryable("no route to host")),
+            // The dialogue answered no before any data was sent: nothing was
+            // delivered, and no hand-over was crossed.
+            ScriptedSend::Refused => Err(ProviderError::permanent("relay access denied")),
+            // The message was handed to the transport and the connection died
+            // before the acknowledgement: the record must say it may have gone.
+            ScriptedSend::Silent => {
+                hand_over.commit().await?;
+                Err(ProviderError::needs_confirmation(
+                    "the server took the message but did not answer",
+                ))
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -394,106 +494,4 @@ pub(super) fn scratch(name: &str) -> PathBuf {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir
-}
-
-/// How many folder rows the pane holds across every account.
-pub(super) fn pane_rows(snapshot: &astra_viewmodel::MailboxListSnapshot) -> usize {
-    snapshot
-        .account_folders
-        .iter()
-        .map(|account| account.folders.len())
-        .sum()
-}
-
-/// The folder keys the pane draws for `account`, in order.
-pub(super) fn folder_keys(
-    snapshot: &astra_viewmodel::MailboxListSnapshot,
-    account: &str,
-) -> Vec<String> {
-    snapshot
-        .account_folders
-        .iter()
-        .find(|row| row.account_id.as_str() == account)
-        .map(|row| {
-            row.folders
-                .iter()
-                .map(|folder| folder.key.as_str().to_owned())
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-/// A message `key` filed in `mailbox` about `subject`, from Ada, delivered at a fixed
-/// base instant, unread and unflagged. Every list fixture starts here and mutates the
-/// axis under test.
-pub(super) fn mail(key: &str, mailbox: &str, subject: &str) -> Message {
-    let mut message = Message::new(
-        engine_core::ids::MessageId::try_from(key).unwrap(),
-        engine_core::membership::Memberships::of_one(MailboxId::try_from(mailbox).unwrap()),
-    );
-    message.envelope.subject = Some(subject.to_owned());
-    message.envelope.from = vec![EmailAddress::named("Ada Lovelace", "ada@example.test")];
-    message.received_at = Some(engine_api::UtcDateTime::new(2026, 10, 9, 8, 0, 0).unwrap());
-    message
-}
-
-/// Delivers `message` at `hour` past the fixture base instant, so list order is fixed
-/// without depending on store insertion order.
-pub(super) fn delivered_at(mut message: Message, hour: u8, minute: u8) -> Message {
-    message.received_at = Some(engine_api::UtcDateTime::new(2026, 10, 9, hour, minute, 0).unwrap());
-    message
-}
-
-/// Marks `message` read (the `$seen` keyword), the state a mark-read flips away from.
-pub(super) fn read(mut message: Message) -> Message {
-    message
-        .keywords
-        .insert(engine_api::Keyword::system(engine_api::SystemKeyword::Seen));
-    message
-}
-
-/// Flags `message` (the `$flagged` keyword).
-pub(super) fn flagged(mut message: Message) -> Message {
-    message.keywords.insert(engine_api::Keyword::system(
-        engine_api::SystemKeyword::Flagged,
-    ));
-    message
-}
-
-/// Puts `message` on provider-assigned thread `thread`, so several messages group into
-/// one conversation the way a JMAP server threads them.
-pub(super) fn threaded(mut message: Message, thread: &str) -> Message {
-    message.thread = Some(engine_core::mail::ThreadRef::provider_assigned(
-        engine_core::ids::ThreadId::try_from(thread).unwrap(),
-    ));
-    message
-}
-
-/// The message-row keys a snapshot lists, in display order; the shape every list
-/// assertion reads before it looks at any row's fields.
-pub(super) fn row_keys(snapshot: &astra_viewmodel::MailboxListSnapshot) -> Vec<String> {
-    snapshot
-        .rows
-        .iter()
-        .map(|row| match &row.key {
-            astra_viewmodel::RowKey::Message { key, .. } => key.as_str().to_owned(),
-            astra_viewmodel::RowKey::Thread { thread_id, .. } => thread_id.as_str().to_owned(),
-        })
-        .collect()
-}
-
-/// The one row a snapshot lists under `key`; panics when it is absent, which is the
-/// assertion.
-pub(super) fn row<'a>(
-    snapshot: &'a astra_viewmodel::MailboxListSnapshot,
-    key: &str,
-) -> &'a astra_viewmodel::MessageRowView {
-    snapshot
-        .rows
-        .iter()
-        .find(|row| match &row.key {
-            astra_viewmodel::RowKey::Message { key: row_key, .. } => row_key.as_str() == key,
-            astra_viewmodel::RowKey::Thread { thread_id, .. } => thread_id.as_str() == key,
-        })
-        .unwrap_or_else(|| panic!("no row keyed {key}"))
 }
