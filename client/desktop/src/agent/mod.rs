@@ -22,6 +22,10 @@ mod supervisor;
 mod commands_tests;
 
 #[cfg(test)]
+#[path = "e2e_tests.rs"]
+mod e2e_tests;
+
+#[cfg(test)]
 #[path = "relay_tests.rs"]
 mod relay_tests;
 

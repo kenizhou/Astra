@@ -144,6 +144,16 @@ this row ports.
 | Virtual permission tools mapping | ⬜ | SPA0 |
 | Shell completions | ⬜ | SP-CLI |
 
+## Astra: AI foundation (SPA0)
+
+| Feature | Status | Notes |
+|---|---|---|
+| Tier and use-case registry from `ASTRA_LLM_*` env (chains, per-tier fallback, protocol per provider prefix) | 🚧 | six use cases, five tiers; ai-foundation.md |
+| Background LLM client: dual protocol, retryable chain fallback, quota and auth terminal | 🚧 | one ledger row per attempt; no feature consumes it until A2; ai-foundation.md |
+| Product AI ledger (`llm_calls`, `audit_log`) beside the engine store | 🚧 | ai.sqlite, shared by host and CLI; rusqlite per the recorded decision; ai-foundation.md |
+| Untrusted-content wrapper and DLP policy types | 🚧 | allow-only until A1; ai-foundation.md |
+| Offline agent loop e2e: prompt, gated approval, tool run, one correlation id across both ledgers | 🚧 | real sidecar bundle plus the stub CLI, in the desktop test suite; ai-foundation.md |
+
 ## Astra: AI (inbox-zero port, phases per spec 9.3)
 
 | Phase | Feature | Status |

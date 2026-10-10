@@ -30,6 +30,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+      # The offline agent e2e hosts the real sidecar bundle: install the
+      # sidecar's dependencies and build it before the Rust tests run (the
+      # test self-builds through esbuild when dist is absent, which needs
+      # node_modules present; the sidecar job below runs its node tests).
+      - name: Build the sidecar bundle for the agent e2e
+        run: |
+          npm --prefix sidecar ci
+          npm --prefix sidecar run build
       - name: Format
         run: cargo fmt --all --check
       - name: Clippy
@@ -38,6 +46,24 @@ jobs:
         run: cargo test --workspace
       - name: Gate
         run: cargo run -p xtask -- gate
+  # The sidecar package on its own: dependencies installed from the lock,
+  # the node test suite, and the esbuild bundle. The build precedes the
+  # tests because index.test.ts drives the built bundle over real stdio.
+  # esbuild's postinstall approval is committed in sidecar/package.json
+  # under allowScripts, so npm ci runs it without an interactive step.
+  sidecar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install sidecar dependencies
+        run: npm --prefix sidecar ci
+      - name: Build the sidecar bundle
+        run: npm --prefix sidecar run build
+      - name: Sidecar node tests
+        run: npm --prefix sidecar test
   # The desktop host on its shipping platform: clippy and a build of the Tauri
   # crate (windows-latest needs no extra system libraries for it), then the web
   # client the shell loads. The esbuild postinstall approval lives in

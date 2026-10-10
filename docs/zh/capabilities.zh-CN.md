@@ -145,6 +145,16 @@
 | 虚拟权限工具映射 | ⬜ | SPA0 |
 | Shell 补全 | ⬜ | SP-CLI |
 
+## Astra：AI 基础（SPA0）
+
+| 功能 | 状态 | 备注 |
+|---|---|---|
+| 来自 `ASTRA_LLM_*` 环境变量的层级与用例注册表（链、按层回退、按提供方前缀选协议） | 🚧 | 六个用例、五个层级；ai-foundation.md |
+| 后台 LLM 客户端：双协议、可重试链式回退、配额与鉴权终局 | 🚧 | 每次尝试一行账本；A2 前无特性消费；ai-foundation.md |
+| 引擎存储之侧的产品 AI 账本（`llm_calls`、`audit_log`） | 🚧 | ai.sqlite，宿主与 CLI 共用；记录在案的 rusqlite 决定；ai-foundation.md |
+| 非受信内容包裹器与 DLP 策略类型 | 🚧 | A1 前仅允许；ai-foundation.md |
+| 离线 agent 循环端到端：提问、门控批准、工具执行、两本账一个相关性 id | 🚧 | 真实 sidecar bundle 加 stub CLI，在桌面测试套件中；ai-foundation.md |
+
 ## Astra：AI（inbox-zero 移植，阶段见规范 9.3）
 
 | 阶段 | 功能 | 状态 |
