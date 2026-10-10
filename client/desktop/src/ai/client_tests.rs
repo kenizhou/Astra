@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Client tests against the one-shot HTTP fixture: the dual-protocol wire
-//! shapes pinned byte-relevantly from the fixture's capture, the fallback and
-//! terminal error classes with their ledger rows, the env spellings read at
-//! startup, and the pure classification helpers (rejection classes,
-//! Retry-After). The fixture, the client builders, and the ledger reader live
-//! in the sibling `fixture` module; the repair_json cases in `wire_tests`.
+//! shapes pinned byte-relevantly from the fixture's capture, the
+//! retryable-then-success chain walk with its ledger rows, the env spellings
+//! read at startup, and the pure classification helpers (rejection classes,
+//! Retry-After). The terminal and exhausted-chain failure classes live in
+//! `client_failure_tests`; the fixture, client builders, and ledger reader in
+//! the sibling `fixture` module; the repair_json cases in `wire_tests`.
 
 use std::time::Duration;
 
 use astra_ai::{CorrelationId, LlmUseCase};
 use reqwest::header::{HeaderMap, HeaderValue, RETRY_AFTER};
 
-use super::{classify_rejection, retry_after, LlmClient, LlmError, Rejection};
+use super::{classify_rejection, retry_after, LlmClient, Rejection};
 use crate::ai::fixture::{self, env_at, llm_client, row, runtime, Ledger};
 
 #[test]
@@ -171,89 +172,6 @@ fn a_retryable_primary_falls_through_to_the_fallback_entry() {
 }
 
 #[test]
-fn a_quota_rejection_is_terminal_with_one_row_and_a_typed_error() {
-    let fixture = fixture::serve(vec![fixture::response(
-        "429 Too Many Requests",
-        &[("Content-Type", "application/json")],
-        r#"{"error":{"type":"insufficient_quota","message":"You exceeded your current quota, please check your plan and billing details."}}"#,
-    )]);
-    let ledger = Ledger::open("quota");
-    let client = llm_client(
-        &ledger.store(),
-        &[(
-            "ASTRA_LLM_ECONOMY",
-            "openai:gpt-4o-mini,anthropic:claude-3-5-haiku-latest",
-        )],
-        &env_at(&fixture.base, &[("openai", "k1"), ("anthropic", "k2")]),
-    );
-    let correlation = CorrelationId::new("corr-quota".to_string());
-
-    let error = runtime()
-        .block_on(|| client.complete(LlmUseCase::AgentTool, "Triage", &correlation))
-        .expect_err("an exhausted quota is terminal for the call");
-
-    assert!(
-        matches!(error, LlmError::Quota(ref message) if message.contains("insufficient_quota")),
-        "the error is typed quota: {error:?}",
-    );
-    assert_eq!(
-        fixture.request_count(),
-        1,
-        "quota never reaches the fallback entry",
-    );
-    assert_eq!(
-        ledger.rows(),
-        vec![row(
-            "corr-quota",
-            "agent_tool",
-            "economy",
-            "gpt-4o-mini",
-            (0, 0),
-            None,
-            "error:quota",
-        )],
-    );
-}
-
-#[test]
-fn an_auth_rejection_is_terminal_for_the_call() {
-    let fixture = fixture::serve(vec![fixture::response(
-        "401 Unauthorized",
-        &[("Content-Type", "application/json")],
-        r#"{"error":{"message":"Incorrect API key provided"}}"#,
-    )]);
-    let ledger = Ledger::open("auth");
-    let client = llm_client(
-        &ledger.store(),
-        &[("ASTRA_LLM_DEFAULT", "openai:gpt-4o-mini")],
-        &env_at(&fixture.base, &[("openai", "a-bad-key")]),
-    );
-    let correlation = CorrelationId::new("corr-auth".to_string());
-
-    let error = runtime()
-        .block_on(|| client.complete(LlmUseCase::Summarise, "Summarise", &correlation))
-        .expect_err("a rejected credential is terminal for the call");
-
-    assert!(
-        matches!(error, LlmError::Auth(_)),
-        "the error is typed auth: {error:?}",
-    );
-    assert_eq!(fixture.request_count(), 1);
-    assert_eq!(
-        ledger.rows(),
-        vec![row(
-            "corr-auth",
-            "summarise",
-            "default",
-            "gpt-4o-mini",
-            (0, 0),
-            None,
-            "error:auth",
-        )],
-    );
-}
-
-#[test]
 fn the_cost_field_is_parsed_when_the_response_carries_one() {
     let fixture = fixture::serve(vec![fixture::response(
         "200 OK",
@@ -285,115 +203,6 @@ fn the_cost_field_is_parsed_when_the_response_carries_one() {
             "ok",
         )],
         "the OpenRouter-style usage cost lands as micros",
-    );
-}
-
-#[test]
-fn a_malformed_two_xx_envelope_advances_the_chain() {
-    let fixture = fixture::serve(vec![
-        fixture::response("200 OK", &[("Content-Type", "text/plain")], "just words"),
-        fixture::response(
-            "200 OK",
-            &[("Content-Type", "application/json")],
-            r#"{"choices":[{"message":{"content":"recovered"}}],"usage":{"prompt_tokens":1,"completion_tokens":2}}"#,
-        ),
-    ]);
-    let ledger = Ledger::open("bad-envelope");
-    let client = llm_client(
-        &ledger.store(),
-        &[("ASTRA_LLM_DEFAULT", "openai:gpt-4o-mini,openai:gpt-4o")],
-        &env_at(&fixture.base, &[("openai", "test-openai-key")]),
-    );
-    let correlation = CorrelationId::new("corr-envelope".to_string());
-
-    let text = runtime()
-        .block_on(|| client.complete(LlmUseCase::Summarise, "Summarise", &correlation))
-        .expect("the second entry answers");
-
-    assert_eq!(text, "recovered");
-    assert_eq!(
-        ledger.rows(),
-        vec![
-            row(
-                "corr-envelope",
-                "summarise",
-                "default",
-                "gpt-4o-mini",
-                (0, 0),
-                None,
-                "error:bad_response",
-            ),
-            row(
-                "corr-envelope",
-                "summarise",
-                "default",
-                "gpt-4o",
-                (1, 2),
-                None,
-                "ok",
-            ),
-        ],
-    );
-}
-
-#[test]
-fn an_entry_without_a_key_is_not_configured_and_writes_nothing() {
-    let fixture = fixture::serve(Vec::new());
-    let ledger = Ledger::open("no-key");
-    let client = llm_client(
-        &ledger.store(),
-        &[("ASTRA_LLM_DEFAULT", "openai:gpt-4o-mini")],
-        &env_at(&fixture.base, &[]),
-    );
-    let correlation = CorrelationId::new("corr-nokey".to_string());
-
-    let error = runtime()
-        .block_on(|| client.complete(LlmUseCase::Summarise, "Summarise", &correlation))
-        .expect_err("no key stands behind the only entry");
-
-    assert!(
-        matches!(error, LlmError::NotConfigured(ref message) if message.contains("ASTRA_LLM_API_KEY")),
-        "the error names the env spelling: {error:?}",
-    );
-    assert_eq!(fixture.request_count(), 0, "no HTTP attempt was made");
-    assert!(ledger.rows().is_empty(), "no row lands without an attempt");
-}
-
-#[test]
-fn an_unknown_provider_is_skipped_and_the_chain_continues() {
-    let fixture = fixture::serve(vec![fixture::response(
-        "200 OK",
-        &[("Content-Type", "application/json")],
-        r#"{"choices":[{"message":{"content":"answered"}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}"#,
-    )]);
-    let ledger = Ledger::open("unknown-provider");
-    let client = llm_client(
-        &ledger.store(),
-        &[(
-            "ASTRA_LLM_DEFAULT",
-            "groq:llama-3.1-8b-instant,openai:gpt-4o-mini",
-        )],
-        &env_at(&fixture.base, &[("openai", "test-openai-key")]),
-    );
-    let correlation = CorrelationId::new("corr-skip".to_string());
-
-    let text = runtime()
-        .block_on(|| client.complete(LlmUseCase::Summarise, "Summarise", &correlation))
-        .expect("the openai entry behind the unknown provider completes");
-
-    assert_eq!(text, "answered");
-    assert_eq!(fixture.request_count(), 1, "only the openai entry attempts");
-    assert_eq!(
-        ledger.rows(),
-        vec![row(
-            "corr-skip",
-            "summarise",
-            "default",
-            "gpt-4o-mini",
-            (1, 1),
-            None,
-            "ok",
-        )],
     );
 }
 

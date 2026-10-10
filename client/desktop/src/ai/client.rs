@@ -209,7 +209,7 @@ impl LlmClient {
             .map_err(|e| LlmError::NotConfigured(e.to_string()))?;
         let mut attempted = 0usize;
         let mut last_failure = String::new();
-        for entry in chain {
+        for (index, entry) in chain.iter().enumerate() {
             let Some(request) = self.request_for(entry, prompt) else {
                 continue;
             };
@@ -218,7 +218,10 @@ impl LlmClient {
                 Attempt::Done(text) => return Ok(text),
                 Attempt::Terminal(error) => return Err(error),
                 Attempt::Retry { message, wait } => {
-                    if let Some(wait) = wait {
+                    // A wait only serves an entry still to come: the chain's
+                    // last entry skips it, no dead wait before the terminal
+                    // error.
+                    if let Some(wait) = wait.filter(|_| index + 1 < chain.len()) {
                         tokio::time::sleep(wait).await;
                     }
                     last_failure = message;
@@ -270,7 +273,9 @@ impl LlmClient {
 
     /// Sends one wire request, classifies the outcome, and lands exactly one
     /// ledger row: outcome and error class truthful, tokens and cost carried
-    /// when the response parsed them.
+    /// when the response parsed them. Non-2xx bodies are classified but
+    /// never reported: an endpoint can echo the request's credentials back,
+    /// and error strings are logged.
     async fn attempt(
         &self,
         request: &WireRequest,
@@ -329,9 +334,13 @@ impl LlmClient {
             return Attempt::Terminal(LlmError::Auth(message));
         }
         if !status.is_success() {
+            // The body is classified but never reported: a hostile or
+            // mistyped endpoint can echo the request's credentials back in a
+            // non-2xx body, and error strings are logged. Messages stay
+            // status-level (the kylins precedent).
             return match classify_rejection(status.as_u16(), &body) {
                 Rejection::Quota => {
-                    let message = format!("{} returned HTTP {status}: {body}", request.url);
+                    let message = format!("{} returned HTTP {status}", request.url);
                     self.record(entry, use_case, correlation, started, None, "error:quota");
                     Attempt::Terminal(LlmError::Quota(message))
                 }
@@ -349,7 +358,7 @@ impl LlmClient {
                     Attempt::Retry { message, wait }
                 }
                 Rejection::Http => {
-                    let message = format!("{} returned HTTP {status}: {body}", request.url);
+                    let message = format!("{} returned HTTP {status}", request.url);
                     self.record(
                         entry,
                         use_case,
@@ -421,3 +430,7 @@ impl LlmClient {
 #[cfg(test)]
 #[path = "client_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "client_failure_tests.rs"]
+mod failure_tests;
