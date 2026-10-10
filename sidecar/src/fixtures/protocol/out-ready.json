@@ -1,0 +1,1 @@
+{"type":"ready","models":["claude-sonnet-4"],"harnesses":["mock","pi"]}

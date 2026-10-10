@@ -106,5 +106,8 @@ reference decision is forbidden: disagreements are escalated in the PR.
 - rustdoc denies public docs linking private items (private_intra-doc_links): name a private constant in prose, never as a doc link, or `cargo doc --workspace --no-deps` fails.
 - vitest fake timers freeze React's scheduler: a zustand set between assertions never re-renders; wrap mid-test store mutations in act() from @testing-library/react.
 - astra-desktop bundles astra-cli as externalBin and tauri-build checks the staged file exists on every cargo invocation of the crate: run node client/desktop/scripts/stage-cli.mjs --placeholder-ok once on a fresh checkout, or even cargo check -p astra-desktop fails.
+- Node on Windows injects SYSTEMROOT, HOMEDRIVE, TEMP, and friends into every spawned child even when the spawn env omits them; env-scrub assertions must allow that fixed platform set.
+- Git Bash printf collapses backslash escapes inside single-quoted arguments on this host; write JSON fixtures containing Windows paths with node, never printf.
+- sidecar npm test runs its e2e file against dist/index.cjs; run npm run build in sidecar first or those tests fail on a fresh checkout.
 - Pull requests merge with squash and merge, subject "PR title (#number)",
   branch deleted after; merge commits are not used.

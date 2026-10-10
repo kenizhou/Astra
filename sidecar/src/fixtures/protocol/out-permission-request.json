@@ -1,0 +1,1 @@
+{"type":"permission_request","id":"perm-4242-1","tool_call_id":"call-3","tool":"save_draft","level":"confirm","args":{"account":"acct-1","subject":"Re: Friday"}}
