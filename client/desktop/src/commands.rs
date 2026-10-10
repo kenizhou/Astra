@@ -54,6 +54,9 @@ pub(crate) enum CommandError {
     /// The settings-detection run could not produce a recommendation.
     #[error("the settings could not be detected: {0}")]
     Detect(String),
+    /// The agent sidecar is unavailable or refused the request.
+    #[error("the agent is unavailable: {0}")]
+    Agent(String),
 }
 
 impl Serialize for CommandError {

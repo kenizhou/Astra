@@ -51,6 +51,31 @@ pub enum LlmError {
     Unreachable(String),
 }
 
+/// One use case's resolved primary endpoint: the provider, the model, the
+/// base URL, and the key. The agent sidecar's init envelope carries the
+/// same endpoint in band; nothing else may read the key.
+pub struct LlmEndpoint {
+    /// The provider id, for example `openai` or `anthropic`.
+    pub provider: String,
+    /// The provider's model name.
+    pub model: String,
+    /// The endpoint base URL, override or protocol default.
+    pub base_url: String,
+    /// The provider key.
+    pub api_key: String,
+}
+
+impl std::fmt::Debug for LlmEndpoint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The key is deliberately absent: it is never printed.
+        f.debug_struct("LlmEndpoint")
+            .field("provider", &self.provider)
+            .field("model", &self.model)
+            .field("base_url", &self.base_url)
+            .finish_non_exhaustive()
+    }
+}
+
 /// How a non-2xx response rejects the request: the inbox-zero error classes
 /// (`shouldFallbackToNextModel` and the insufficient-credit classifiers)
 /// ported onto raw HTTP statuses and bodies.
@@ -237,6 +262,31 @@ impl LlmClient {
         Err(LlmError::Unreachable(format!(
             "all {attempted} entries failed for use case {use_case}; last: {last_failure}"
         )))
+    }
+
+    /// The resolved primary endpoint for a use case: the first chain
+    /// entry's provider, model, base URL, and key, as the agent sidecar's
+    /// in-band model config delivery needs them. `None` when the use case
+    /// resolves to no entry, the provider names no known protocol, or no
+    /// key stands behind it: the same screening [`LlmClient::complete`]
+    /// applies, so the sidecar is only configured with an endpoint the
+    /// background client would have used itself.
+    pub fn primary_endpoint(&self, use_case: LlmUseCase) -> Option<LlmEndpoint> {
+        let chain = self.registry.resolve(use_case).ok()?;
+        let entry = chain.iter().find(|entry| {
+            wire::protocol_for(&entry.provider).is_some() && self.keys.contains_key(&entry.provider)
+        })?;
+        let protocol = wire::protocol_for(&entry.provider).expect("the entry was just screened");
+        Some(LlmEndpoint {
+            provider: entry.provider.clone(),
+            model: entry.model.clone(),
+            base_url: self
+                .base_urls
+                .get(&entry.provider)
+                .cloned()
+                .unwrap_or_else(|| protocol.default_base().to_string()),
+            api_key: self.keys.get(&entry.provider).cloned()?,
+        })
     }
 
     /// Builds the wire request for one chain entry, or `None` (logged, never

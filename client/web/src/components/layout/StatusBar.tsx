@@ -4,6 +4,7 @@
 // count. The engine's own startup shows first; until the first pull lands
 // nothing else can be true yet.
 
+import { AgentStatus } from '@/features/agent/AgentPanel';
 import { OutboxStatus } from '@/features/outbox/OutboxPanel';
 import { useAccountStore } from '@/stores/accountStore';
 import { useFolderStore } from '@/stores/folderStore';
@@ -51,6 +52,7 @@ export function StatusBar() {
       </div>
       <div className="flex min-w-0 items-center gap-2">
         <OutboxStatus />
+        <AgentStatus />
         <span className="truncate">{selected === null ? 'No folder selected' : selected.key}</span>
       </div>
     </footer>

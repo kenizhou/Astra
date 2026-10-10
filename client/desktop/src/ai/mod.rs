@@ -6,7 +6,7 @@
 mod client;
 mod wire;
 
-pub use client::{LlmClient, LlmError};
+pub use client::{LlmClient, LlmEndpoint, LlmError};
 pub use wire::repair_json;
 
 #[cfg(test)]

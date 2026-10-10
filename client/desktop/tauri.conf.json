@@ -4,11 +4,11 @@
   "identifier": "com.kenizhou.astra",
   "build": {
     "beforeDevCommand": {
-      "script": "node client/desktop/scripts/stage-cli.mjs --placeholder-ok",
+      "script": "node client/desktop/scripts/stage-cli.mjs --placeholder-ok && npm --prefix sidecar run build",
       "cwd": "../.."
     },
     "beforeBuildCommand": {
-      "script": "node client/desktop/scripts/stage-cli.mjs --placeholder-ok && cargo build --release --bin astra-cli && node client/desktop/scripts/stage-cli.mjs",
+      "script": "node client/desktop/scripts/stage-cli.mjs --placeholder-ok && cargo build --release --bin astra-cli && node client/desktop/scripts/stage-cli.mjs && npm --prefix sidecar ci && npm --prefix sidecar run build",
       "cwd": "../.."
     },
     "devUrl": "http://localhost:5173",
@@ -38,6 +38,9 @@
     "externalBin": [
       "bin/astra-cli"
     ],
+    "resources": {
+      "../../sidecar/dist/": "sidecar/"
+    },
     "icon": [
       "icons/16x16.png",
       "icons/32x32.png",

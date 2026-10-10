@@ -11,6 +11,7 @@
 
 pub mod runtime;
 
+mod agent;
 mod ai;
 mod app_state;
 mod boot;
@@ -31,7 +32,8 @@ mod commands_fakes;
 
 use tauri::{Emitter, Manager};
 
-pub use ai::{repair_json, LlmClient, LlmError};
+pub(crate) use agent::SidecarRelay;
+pub use ai::{repair_json, LlmClient, LlmEndpoint, LlmError};
 pub(crate) use app_state::{AppPort, AppState, HostAccount, HostProvider};
 pub(crate) use boot::AccountDials;
 pub use credential_store::CredentialStoreError;
@@ -73,7 +75,11 @@ pub fn run() {
             commands::compose::compose_request,
             commands::add_account,
             commands::imap_test_connection,
-            commands::detect_account_settings
+            commands::detect_account_settings,
+            agent::commands::agent_prompt,
+            agent::commands::agent_abort,
+            agent::commands::agent_status,
+            agent::commands::permission_response
         ])
         .setup(boot::setup_host)
         .build(tauri::generate_context!())

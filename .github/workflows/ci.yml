@@ -24,6 +24,12 @@ jobs:
       # never bundles, so the placeholder is all it needs.
       - name: Stage the CLI placeholder for the externalBin check
         run: node client/desktop/scripts/stage-cli.mjs --placeholder-ok
+      # The desktop agent tests spawn the stub sidecar under a real Node,
+      # version gated at 22 or newer; the runner's default node is older,
+      # so the suite runs against a pinned one.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
       - name: Format
         run: cargo fmt --all --check
       - name: Clippy

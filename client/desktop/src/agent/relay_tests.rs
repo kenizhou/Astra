@@ -1,0 +1,337 @@
+// SPDX-License-Identifier: GPL-3.0-only
+//! The relay against the stub sidecar script under a real Node process:
+//! the init handshake, the prompt round trip with its ledger row, the
+//! permission round trip with its audit rows, the abort, the command
+//! surface, and the death drain. The tests block on their own runtime
+//! (the host's drive pattern): this crate forbids `#[tokio::test]`'s
+//! `block_on` by clippy config.
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use super::{
+    testkit::{audit_rows, llm_rows, stub_relay, CollectingSink},
+    StreamPayload,
+};
+use astra_ai::CorrelationId;
+
+/// One test's runtime, built the way the host builds its own.
+fn runtime() -> crate::runtime::AppRuntime {
+    crate::runtime::build_runtime().expect("the test runtime builds")
+}
+
+/// Waits for the predicate over the sink, up to five seconds.
+async fn until(predicate: impl Fn(&CollectingSink) -> bool, sink: &Arc<CollectingSink>) -> bool {
+    for _ in 0..1000 {
+        if predicate(sink) {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    false
+}
+
+#[test]
+fn the_init_handshake_reaches_ready() {
+    let runtime = runtime();
+    let (relay, sink, _data) = stub_relay("handshake", "echo", 3, 50);
+    runtime
+        .block_on(|| async { relay.ensure_started().await })
+        .expect("the handshake completes");
+
+    assert_eq!(relay.status().as_str(), "ready");
+    let ready = sink.ready.lock().unwrap();
+    assert_eq!(ready.len(), 1, "one ready emission");
+    assert_eq!(ready[0].0, vec!["stub-1".to_string()]);
+}
+
+#[test]
+fn a_prompt_streams_its_events_and_lands_its_ledger_row() {
+    let runtime = runtime();
+    let (relay, sink, data) = stub_relay("prompt", "echo", 3, 50);
+    let id = runtime
+        .block_on(|| async {
+            relay
+                .prompt(
+                    "summarise the inbox",
+                    Some(CorrelationId::new("corr-42".to_owned())),
+                )
+                .await
+        })
+        .expect("the prompt is sent");
+
+    // state, text delta, done: the llm_call row bypasses the stream.
+    let events = runtime.block_on(|| async { sink.await_events(3).await });
+    assert_eq!(
+        events.len(),
+        3,
+        "the stream holds exactly the turn: {events:?}"
+    );
+    for event in &events {
+        assert_eq!(event.session_id, "agent:main");
+        assert_eq!(event.correlation.as_deref(), Some("corr-42"));
+    }
+    assert!(matches!(&events[0].event, StreamPayload::State { state } if state == "thinking"));
+    assert!(
+        matches!(&events[1].event, StreamPayload::TextDelta { text } if text == "echo: summarise the inbox")
+    );
+    assert!(matches!(&events[2].event, StreamPayload::Done { prompt_id } if prompt_id == &id));
+
+    let rows = llm_rows(&data);
+    assert_eq!(rows.len(), 1, "one ledger row per sidecar call");
+    assert_eq!(rows[0].0, "corr-42");
+    assert_eq!(rows[0].1, "stub-1");
+    assert_eq!(rows[0].2, "chat");
+    assert_eq!(rows[0].3, "assistant_chat");
+}
+
+#[test]
+fn a_prompt_without_a_correlation_generates_one() {
+    let runtime = runtime();
+    let (relay, sink, data) = stub_relay("generate", "echo", 3, 50);
+    runtime
+        .block_on(|| async { relay.prompt("hello", None).await })
+        .expect("the prompt is sent");
+    let events = runtime.block_on(|| async { sink.await_events(3).await });
+
+    let correlation = events[0]
+        .correlation
+        .clone()
+        .expect("a correlation was minted");
+    assert!(!correlation.is_empty(), "the minted id is not blank");
+    for event in &events[1..] {
+        assert_eq!(event.correlation.as_deref(), Some(correlation.as_str()));
+    }
+    assert_eq!(
+        llm_rows(&data)[0].0,
+        correlation,
+        "the ledger row carries it"
+    );
+}
+
+#[test]
+fn a_permission_ask_round_trips_through_the_bridge() {
+    let runtime = runtime();
+    let (relay, sink, data) = stub_relay("permission", "ask", 3, 50);
+    runtime
+        .block_on(|| async {
+            relay
+                .prompt(
+                    "draft a reply",
+                    Some(CorrelationId::new("corr-7".to_owned())),
+                )
+                .await
+        })
+        .expect("the prompt is sent");
+
+    assert!(
+        runtime.block_on(|| async {
+            until(|sink| !sink.requests.lock().unwrap().is_empty(), &sink).await
+        }),
+        "the ask arrives"
+    );
+    let ask = sink.requests.lock().unwrap()[0].clone();
+    assert_eq!(ask.tool, "save_draft");
+    assert_eq!(ask.correlation.as_deref(), Some("corr-7"));
+    assert_eq!(relay.pending_approvals().len(), 1);
+
+    runtime
+        .block_on(|| async { relay.respond_permission(&ask.id, true, false).await })
+        .expect("the answer is delivered");
+
+    // the approved tool result, the closing delta, and the done.
+    let events = runtime.block_on(|| async { sink.await_events(3).await });
+    assert!(
+        events.iter().any(|event| matches!(
+            &event.event,
+            StreamPayload::ToolResult {
+                tool_call_id,
+                status,
+                ..
+            } if tool_call_id == "stub-call-1" && status == "ok"
+        )),
+        "the approved tool result streams: {events:?}"
+    );
+    let resolved = sink.resolved.lock().unwrap();
+    assert_eq!(resolved.len(), 1, "the settle is told to the UI");
+    assert!(resolved[0].approved);
+
+    let audit = audit_rows(&data);
+    assert!(
+        audit
+            .iter()
+            .any(|(_, verb, outcome)| verb == "permission save_draft" && outcome == "approved"),
+        "the decision is audited: {audit:?}"
+    );
+    assert!(
+        audit
+            .iter()
+            .any(|(_, verb, outcome)| verb == "save_draft" && outcome == "ok"),
+        "the tool result is audited: {audit:?}"
+    );
+}
+
+#[test]
+fn a_refused_permission_settles_the_turn_without_the_tool() {
+    let runtime = runtime();
+    let (relay, sink, _data) = stub_relay("refuse", "ask", 3, 50);
+    runtime
+        .block_on(|| async {
+            relay
+                .prompt(
+                    "draft a reply",
+                    Some(CorrelationId::new("corr-8".to_owned())),
+                )
+                .await
+        })
+        .expect("the prompt is sent");
+    assert!(
+        runtime.block_on(|| async {
+            until(|sink| !sink.requests.lock().unwrap().is_empty(), &sink).await
+        }),
+        "the ask arrives"
+    );
+    let ask = sink.requests.lock().unwrap()[0].id.clone();
+
+    runtime
+        .block_on(|| async { relay.respond_permission(&ask, false, false).await })
+        .expect("the refusal is delivered");
+
+    let events = runtime.block_on(|| async { sink.await_events(3).await });
+    assert!(
+        events.iter().any(
+            |event| matches!(&event.event, StreamPayload::ToolResult { status, .. } if status == "rejected")
+        ),
+        "the refused tool result streams: {events:?}"
+    );
+}
+
+#[test]
+fn an_abort_settles_a_hanging_prompt() {
+    let runtime = runtime();
+    let (relay, sink, _data) = stub_relay("abort", "hang", 3, 50);
+    let id = runtime
+        .block_on(|| async { relay.prompt("count every message", None).await })
+        .expect("the prompt is sent");
+
+    let events = runtime.block_on(|| async { sink.await_events(1).await });
+    assert!(
+        matches!(&events[0].event, StreamPayload::TextDelta { .. }),
+        "the hanging prompt streams first"
+    );
+
+    runtime.block_on(|| async { relay.abort(&id).await });
+    let events = runtime.block_on(|| async { sink.await_events(2).await });
+    assert!(
+        matches!(&events[1].event, StreamPayload::Done { prompt_id } if prompt_id == &id),
+        "the abort settles the turn: {events:?}"
+    );
+}
+
+#[test]
+fn a_command_round_trips_and_reports_the_scrubbed_env() {
+    let runtime = runtime();
+    let (relay, _sink, _data) = stub_relay("command", "echo", 3, 50);
+    let value = runtime
+        .block_on(|| async { relay.command("ping", serde_json::json!({})).await })
+        .expect("the ping answers");
+
+    let env = value
+        .get("env")
+        .and_then(|keys| keys.as_array())
+        .expect("the ping reports the spawn environment");
+    let names: Vec<&str> = env.iter().filter_map(|name| name.as_str()).collect();
+    assert!(names.contains(&"PATH"), "PATH survives the scrub");
+    assert!(
+        names.contains(&"ASTRA_DATA_DIR"),
+        "the data dir is injected: {names:?}"
+    );
+    assert!(
+        names.iter().all(|name| !name.starts_with("ASTRA_LLM_")),
+        "no ASTRA_LLM_* variable rides into the spawn: {names:?}"
+    );
+
+    let unknown = runtime.block_on(|| async { relay.command("nope", serde_json::json!({})).await });
+    assert!(unknown.is_err(), "an unknown command answers an error");
+}
+
+#[test]
+fn a_death_mid_prompt_drains_the_turn() {
+    let runtime = runtime();
+    let (relay, sink, _data) = stub_relay("drain", "die-mid", 5, 20);
+    runtime
+        .block_on(|| async {
+            relay
+                .prompt(
+                    "keep talking",
+                    Some(CorrelationId::new("corr-9".to_owned())),
+                )
+                .await
+        })
+        .expect("the prompt is sent");
+
+    // One delta streams, then the stub exits: the supervisor drains the
+    // turn as interrupted plus done, and the relay schedules a restart.
+    assert!(
+        runtime.block_on(|| async {
+            until(
+                |sink| {
+                    sink.agent_events
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .any(|event| matches!(&event.event, StreamPayload::Done { .. }))
+                },
+                &sink,
+            )
+            .await
+        }),
+        "the drained turn settles"
+    );
+    let events = runtime.block_on(|| async { sink.await_events(3).await });
+    assert!(
+        events.iter().any(
+            |event| matches!(&event.event, StreamPayload::State { state } if state == "interrupted")
+        ),
+        "the drain says interrupted: {events:?}"
+    );
+    assert_eq!(
+        relay.status().as_str(),
+        "restarting",
+        "the budget has room, so a restart is scheduled"
+    );
+}
+
+#[test]
+fn a_restart_returns_to_ready_and_answers_prompts_again() {
+    let runtime = runtime();
+    let (relay, sink, _data) = stub_relay("restart", "echo", 3, 50);
+    runtime
+        .block_on(|| async { relay.ensure_started().await })
+        .expect("the first start");
+
+    runtime
+        .block_on(|| async { relay.restart().await })
+        .expect("the restart re-handshakes");
+    assert_eq!(relay.status().as_str(), "ready");
+    assert_eq!(
+        sink.ready.lock().unwrap().len(),
+        2,
+        "a second ready emission for the second process"
+    );
+
+    runtime
+        .block_on(|| async {
+            relay
+                .prompt("again", Some(CorrelationId::new("corr-10".to_owned())))
+                .await
+        })
+        .expect("the prompt is sent after the restart");
+    let events = runtime.block_on(|| async { sink.await_events(3).await });
+    assert!(
+        events.iter().any(
+            |event| matches!(&event.event, StreamPayload::TextDelta { text } if text == "echo: again")
+        ),
+        "the new process answers: {events:?}"
+    );
+}

@@ -20,12 +20,15 @@ interface UiStoreState {
   accountSetupOpen: boolean;
   /** Whether the outbox panel is up over the shell's corner. */
   outboxOpen: boolean;
+  /** Whether the agent panel is up over the shell's corner. */
+  agentOpen: boolean;
   setTheme: (mode: ThemeMode) => void;
   toggleTheme: () => void;
   markRunning: () => void;
   applySyncProgress: (snapshot: SyncProgressSnapshot) => void;
   setAccountSetupOpen: (open: boolean) => void;
   setOutboxOpen: (open: boolean) => void;
+  setAgentOpen: (open: boolean) => void;
 }
 
 /** Applies the theme classes on the document root; the tokens live on them. */
@@ -41,6 +44,7 @@ export const useUiStore = create<UiStoreState>((set) => ({
   sync: [],
   accountSetupOpen: false,
   outboxOpen: false,
+  agentOpen: false,
 
   setTheme: (mode) => {
     applyThemeClass(mode);
@@ -60,4 +64,6 @@ export const useUiStore = create<UiStoreState>((set) => ({
   setAccountSetupOpen: (open) => set({ accountSetupOpen: open }),
 
   setOutboxOpen: (open) => set({ outboxOpen: open }),
+
+  setAgentOpen: (open) => set({ agentOpen: open }),
 }));

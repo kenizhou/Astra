@@ -61,8 +61,10 @@ thiserror.workspace = true
 log.workspace = true
 # The app's async runtime: every engine call the host drives runs on it, and
 # blocking host calls are polled on a thread of our own (src/runtime.rs). The
-# time feature drives the five second bound around one detection run.
-tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
+# time feature drives the five second bound around one detection run; the
+# process, io-util, and sync features drive the agent sidecar's stdio
+# connection and the relay's state channel.
+tokio = { workspace = true, features = ["rt-multi-thread", "time", "process", "io-util", "sync"] }
 # Account autodetection, whose DNS seam the host resolves for (src/detection.rs).
 astra-autodetect = { path = "../../crates/astra-autodetect" }
 # The MX and SRV lookups behind that seam, over the system's configured DNS.
@@ -71,6 +73,10 @@ hickory-resolver.workspace = true
 # engine's TLS policy, as autodetection does); the AI module only sends over
 # it, so no TLS feature is needed here.
 reqwest.workspace = true
+# The TLS policy the host builds that client over at boot: the same
+# engine-tls build autodetection's fetcher and the client tests use, now on
+# the runtime path (the llm store and client are assembled in the boot).
+engine-tls.workspace = true
 
 [dev-dependencies]
 # The composer document the drafts intents carry; the command-surface fakes
