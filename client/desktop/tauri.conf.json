@@ -4,7 +4,15 @@
   "identifier": "com.kenizhou.astra",
   "build": {
     "devUrl": "http://localhost:5173",
-    "frontendDist": "../web/dist"
+    "frontendDist": "../web/dist",
+    "beforeDevCommand": {
+      "script": "npm run dev",
+      "cwd": "../web"
+    },
+    "beforeBuildCommand": {
+      "script": "npm run build",
+      "cwd": "../web"
+    }
   },
   "app": {
     "windows": [
