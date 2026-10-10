@@ -137,8 +137,8 @@ this row ports.
 
 | Feature | Status | Notes |
 |---|---|---|
-| Read verbs with --json contract | 🚧 | eleven verbs ship: accounts, folders, messages, rules, and the stored AI reads; grows with SP2+ slices; cli.md |
-| Gated mutating verbs with --preview | 🚧 | drafts save and discard, rules create and delete; cli.md |
+| Read verbs with --json contract | 🚧 | fifteen verbs ship: accounts, folders, messages, rules, and the stored AI reads (cold, results, drafts, summary, style); grows with SP2+ slices; cli.md |
+| Gated mutating verbs with --preview | 🚧 | drafts save and discard, rules create and delete; the model-class `ai style rebuild` parses and refuses; cli.md |
 | Every invocation audited with a correlation id | 🚧 | ai.sqlite ledger; cli.md |
 | Send-class verbs parsed but refused | 🚧 | exit 3; cli.md |
 | Virtual permission tools mapping | ⬜ | SPA0 |
@@ -163,8 +163,9 @@ this row ports.
 | A1 | AI rules: prompt-to-rules, matching, deterministic execution | 🚧 | ai-rules.md |
 | A1 | Sender categorisation | 🚧 | ai-rules.md |
 | A1 | Cold email blocker | 🚧 | recorded verdicts only; nothing executes on them in A1; ai-rules.md |
-| A2 | Reply drafting with writing style | ⬜ |
-| A2 | Summarisation with cache | ⬜ |
+| A2 | Reply drafting with writing style | 🚧 | draft pool, style profiles, the reading pane arming; ai-replies.md |
+| A2 | Smart reply chips: gated surfacing, accept into the reply composer, dismissal | 🚧 | the gate and chips ship; no badge surface on categorisation yet; ai-replies.md |
+| A2 | Summarisation with cache | 🚧 | the reading pane's summarise block; ai-replies.md |
 | A2 | Assistant chat with tool budget | ⬜ |
 | A3 | Knowledge, persona, snippets, autocomplete, translate | ⬜ |
 | A4 | Digest, meeting briefs, analytics reports, split inbox | ⬜ |

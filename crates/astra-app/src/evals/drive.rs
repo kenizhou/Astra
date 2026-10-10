@@ -5,7 +5,7 @@
 //! the expectation. Public so the host's live suite drives the live-mode
 //! fixtures through the same code the offline battery runs.
 
-use astra_ai::{AiStore, CorrelationId, RuleId};
+use astra_ai::{AiStore, CorrelationId, NewDraftPoolRow, RuleId};
 #[cfg(test)]
 use astra_ai::{JudgeOutcome, JudgePath, JudgeVerdict};
 use engine_api::{AccountId, ProviderKey};
@@ -14,6 +14,7 @@ use crate::ai_rules::{
     categorise, judge_cold, match_rules, prompt_to_rules, Action, AiComplete, AiJudge, MailContext,
     Rule,
 };
+use crate::{chips_for, generate_reply, summarise, DraftConfidence, DraftContext, SummariseError};
 
 use super::{Feature, Scenario};
 
@@ -76,6 +77,9 @@ pub async fn drive(
         }
         Feature::JudgeTemplate => judge_template(scenario),
         Feature::Redaction => redaction(scenario),
+        Feature::Draft => draft(scenario, complete, &store, &correlation).await,
+        Feature::Summarise => summarise_scenario(scenario, complete, &store, &correlation).await,
+        Feature::Gate => gate(scenario, judge, &store, &correlation).await,
     }
 }
 
@@ -121,6 +125,159 @@ fn redaction(scenario: &Scenario) -> Result<(), String> {
     }
 }
 
+/// The reply drafting scenario: the thread context the fixture carries
+/// through the generation seam into the draft pool, the landed row compared
+/// as the drafting paths observe it (drafted with its confidence word and
+/// reply, or the skipped row's `drafted: false`).
+async fn draft(
+    scenario: &Scenario,
+    complete: &dyn AiComplete,
+    store: &AiStore,
+    correlation: &CorrelationId,
+) -> Result<(), String> {
+    let original = mail_context(&scenario.inputs)?;
+    let history = history_field(&scenario.inputs)?;
+    let style_note = scenario
+        .inputs
+        .get("style_note")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned);
+    let context = DraftContext {
+        original: &original,
+        history: &history,
+        style_note: style_note.as_deref(),
+    };
+    let entry = generate_reply(&context, correlation, complete, store).await;
+    let actual = match entry.and_then(|entry| {
+        entry.reply.map(|reply| {
+            (
+                reply,
+                entry.confidence.expect("a drafted row carries the score"),
+            )
+        })
+    }) {
+        Some((reply, confidence)) => serde_json::json!({
+            "drafted": true,
+            "confidence": confidence_word(confidence)?,
+            "reply": reply,
+        }),
+        None => serde_json::json!({ "drafted": false }),
+    };
+    expect(&scenario.expected, &actual)
+}
+
+/// The summarise scenario: one summarise action whose answer must survive a
+/// second read of the same body without a second seam call (the cache pin:
+/// the offline fake's strict script panics when a cached miss spends it).
+async fn summarise_scenario(
+    scenario: &Scenario,
+    complete: &dyn AiComplete,
+    store: &AiStore,
+    correlation: &CorrelationId,
+) -> Result<(), String> {
+    let mail = mail_context(&scenario.inputs)?;
+    let actual = match summarise(&mail, correlation, complete, store).await {
+        Ok(summary) => match summarise(&mail, correlation, complete, store).await {
+            Ok(again) if again == summary => serde_json::json!({ "summary": summary }),
+            _ => serde_json::json!({ "error": "cache" }),
+        },
+        Err(err) => serde_json::json!({ "error": summarise_error_word(&err) }),
+    };
+    expect(&scenario.expected, &actual)
+}
+
+/// The chips gate scenario: the fixture's pooled row (and optional dismissal
+/// marker) read through the surfacing gate, the surfaced chips compared as
+/// their whole replies, newest row first. A fixture that scripts a judge
+/// verdict the gate must never spend (below the floor, or dismissed) pins
+/// the no-spend: the offline fake's strict script panics on the unscripted
+/// call.
+async fn gate(
+    scenario: &Scenario,
+    judge: &dyn AiJudge,
+    store: &AiStore,
+    correlation: &CorrelationId,
+) -> Result<(), String> {
+    let mail = mail_context(&scenario.inputs)?;
+    let pooled = scenario
+        .inputs
+        .get("pool")
+        .ok_or_else(|| "carries no pool object".to_owned())?;
+    let reply = str_field(pooled, "reply")?;
+    let confidence = confidence_from_word(&str_field(pooled, "confidence")?)?;
+    store
+        .insert_draft_pool(&NewDraftPoolRow {
+            correlation: correlation.clone(),
+            message_account: mail.account.as_str().to_owned(),
+            message_key: mail.key.as_str().to_owned(),
+            reply: Some(reply),
+            confidence: Some(confidence.score()),
+        })
+        .map_err(|err| format!("the pool row could not be stored: {err}"))?;
+    if scenario
+        .inputs
+        .get("dismissed")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+    {
+        store
+            .dismiss_chips(mail.account.as_str(), mail.key.as_str())
+            .map_err(|err| format!("the dismissal could not be stored: {err}"))?;
+    }
+    let chips = chips_for(&mail.account, &mail.key, store, judge, correlation).await;
+    let surfaced: Vec<&str> = chips.iter().map(|chip| chip.reply.as_str()).collect();
+    expect(
+        &scenario.expected,
+        &serde_json::json!({ "chips": surfaced }),
+    )
+}
+
+/// The scenario's thread history, newest first exactly as the engine's
+/// thread read returns it: the mail objects of the optional `history`
+/// array, in order.
+fn history_field(inputs: &serde_json::Value) -> Result<Vec<MailContext>, String> {
+    let Some(history) = inputs.get("history") else {
+        return Ok(Vec::new());
+    };
+    let array = history
+        .as_array()
+        .ok_or_else(|| "the history must be an array".to_owned())?;
+    let mut contexts = Vec::new();
+    for member in array {
+        contexts.push(mail_object(member)?);
+    }
+    Ok(contexts)
+}
+
+/// The confidence word one stored score reads back as, from the closed
+/// set's fixed mapping; a score outside the set is a malformed fixture.
+fn confidence_word(score: f64) -> Result<DraftConfidence, String> {
+    DraftConfidence::ALL
+        .iter()
+        .find(|word| (word.score() - score).abs() < 1e-9)
+        .copied()
+        .ok_or_else(|| format!("no closed-set confidence carries the score {score}"))
+}
+
+/// The closed set's member a fixture's confidence word names, rejected
+/// loudly when outside the set.
+fn confidence_from_word(word: &str) -> Result<DraftConfidence, String> {
+    DraftConfidence::ALL
+        .iter()
+        .find(|confidence| confidence.as_str() == word)
+        .copied()
+        .ok_or_else(|| format!("the confidence word {word:?} is outside the closed set"))
+}
+
+/// The failure word for a summarise outcome the scenario expects to fail:
+/// the seam's completion error or the unparseable output.
+fn summarise_error_word(error: &SummariseError) -> &'static str {
+    match error {
+        SummariseError::Completion(_) => "completion",
+        SummariseError::MalformedOutput(_) => "malformed",
+    }
+}
+
 /// One rule as the generation expectation compares it: identity aside
 /// (every parse mints a fresh one), the fields the scenario pins.
 fn rule_json(rule: &Rule) -> serde_json::Value {
@@ -148,6 +305,12 @@ fn mail_context(inputs: &serde_json::Value) -> Result<MailContext, String> {
     let mail = inputs
         .get("mail")
         .ok_or_else(|| "carries no mail object".to_owned())?;
+    mail_object(mail)
+}
+
+/// One mail object as a [`MailContext`], the shape the fixture's `mail`
+/// field and the history array's members share.
+fn mail_object(mail: &serde_json::Value) -> Result<MailContext, String> {
     let field = |name: &str| {
         mail.get(name)
             .and_then(serde_json::Value::as_str)

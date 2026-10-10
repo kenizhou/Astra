@@ -1,0 +1,29 @@
+{
+  "id": "gate-useful-reply-surfaces",
+  "feature": "gate",
+  "mode": "offline",
+  "prompt_version": "1",
+  "inputs": {
+    "mail": {
+      "account": "work",
+      "key": "m1",
+      "from_name": "Ada Lovelace",
+      "from_address": "ada@example.test",
+      "subject": "Prototype timing",
+      "body": "Can we still land the prototype next Friday?"
+    },
+    "pool": {
+      "reply": "Yes, the prototype still lands next Friday, and the review notes will follow the week after.",
+      "confidence": "high"
+    },
+    "outcome": {
+      "verdict": "yes",
+      "path": "first_try"
+    }
+  },
+  "expected": {
+    "chips": [
+      "Yes, the prototype still lands next Friday, and the review notes will follow the week after."
+    ]
+  }
+}

@@ -138,8 +138,8 @@
 
 | 功能 | 状态 | 备注 |
 |---|---|---|
-| 读动词与 --json 契约 | 🚧 | 已交付十一个动词：账户、文件夹、邮件、规则与存储的 AI 读取；随 SP2+ 切片增长；cli.md |
-| 带门控的变更动词与 --preview | 🚧 | drafts save 与 discard、rules create 与 delete；cli.md |
+| 读动词与 --json 契约 | 🚧 | 已交付十五个动词：账户、文件夹、邮件、规则与存储的 AI 读取（cold、results、drafts、summary、style）；随 SP2+ 切片增长；cli.md |
+| 带门控的变更动词与 --preview | 🚧 | drafts save 与 discard、rules create 与 delete；模型类 `ai style rebuild` 先解析后拒绝；cli.md |
 | 每次调用带相关性 id 审计 | 🚧 | ai.sqlite 账本；cli.md |
 | 发送类动词先解析后拒绝 | 🚧 | 退出码 3；cli.md |
 | 虚拟权限工具映射 | ⬜ | SPA0 |
@@ -164,8 +164,9 @@
 | A1 | AI 规则：提示词转规则、匹配、确定性执行 | 🚧 | ai-rules.md |
 | A1 | 发件人分类 | 🚧 | ai-rules.md |
 | A1 | 冷邮件拦截 | 🚧 | 仅记录判定；A1 不在其上执行任何动作；ai-rules.md |
-| A2 | 带写作风格的回信起草 | ⬜ |
-| A2 | 带缓存的摘要 | ⬜ |
+| A2 | 带写作风格的回信起草 | 🚧 | 草稿池、风格档案、阅读窗格武装；ai-replies.md |
+| A2 | 智能回复条：门控浮现、接受进入回复编写器、关闭 | 🚧 | 门与回复条已交付；分类尚无徽标界面；ai-replies.md |
+| A2 | 带缓存的摘要 | 🚧 | 阅读窗格的摘要块；ai-replies.md |
 | A2 | 带工具配额的助手对话 | ⬜ |
 | A3 | 知识、人设、片段、自动补全、翻译 | ⬜ |
 | A4 | 摘要报、会议简报、分析报告、分栏收件箱 | ⬜ |

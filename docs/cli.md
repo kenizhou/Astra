@@ -123,9 +123,13 @@ parser, so no send-class spelling can ever reach the engine.
 to infer the style note from Sent mail through a model completion; the
 CLI holds no model connection and never will, so the spelling parses
 into a refusal that names the rule and points where the rebuild runs:
-in the app. The verb ships no `--preview`, because there is no action to
-describe. Exit `3`, ledger outcome `refused`, the row naming the full
-`ai style rebuild` spelling.
+the app's demand-driven profile read, where the next drafting turn or
+style read after the daily cap passes infers a fresh note from Sent mail
+(no explicit rebuild command ships; the contract and the recorded
+deviation from the spec's mutating-verb sentence live in
+`docs/ai-replies.md`). The verb ships no `--preview`, because there is no
+action to describe. Exit `3`, ledger outcome `refused`, the row naming
+the full `ai style rebuild` spelling.
 
 ## The audit
 

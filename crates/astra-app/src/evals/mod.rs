@@ -27,6 +27,7 @@ use astra_ai::JUDGE_TEMPLATES_VERSION;
 use crate::ai_rules::{
     CATEGORISE_PROMPT_VERSION, COLD_JUDGE_VERSION, RULES_MATCH_VERSION, RULES_PROMPT_VERSION,
 };
+use crate::{DRAFT_REPLY_PROMPT_VERSION, GATE_JUDGE_VERSION, SUMMARISE_PROMPT_VERSION};
 
 pub use drive::drive;
 
@@ -83,6 +84,12 @@ pub enum Feature {
     /// The redactor's masked output, the pure function. No prompt text
     /// rides, so no version is pinned.
     Redaction,
+    /// Reply drafting through the completion seam into the draft pool.
+    Draft,
+    /// The cached summarise action through the completion seam.
+    Summarise,
+    /// The chips surfacing gate through the judge seam.
+    Gate,
 }
 
 impl Feature {
@@ -95,6 +102,9 @@ impl Feature {
             "match" => Ok(Self::Match),
             "judge_template" => Ok(Self::JudgeTemplate),
             "redaction" => Ok(Self::Redaction),
+            "draft" => Ok(Self::Draft),
+            "summarise" => Ok(Self::Summarise),
+            "gate" => Ok(Self::Gate),
             _ => Err(format!("unknown feature {word:?}")),
         }
     }
@@ -110,6 +120,9 @@ impl Feature {
             Self::Match => Some((RULES_MATCH_VERSION, "RULES_MATCH_VERSION")),
             Self::JudgeTemplate => Some((JUDGE_TEMPLATES_VERSION, "JUDGE_TEMPLATES_VERSION")),
             Self::Redaction => None,
+            Self::Draft => Some((DRAFT_REPLY_PROMPT_VERSION, "DRAFT_REPLY_PROMPT_VERSION")),
+            Self::Summarise => Some((SUMMARISE_PROMPT_VERSION, "SUMMARISE_PROMPT_VERSION")),
+            Self::Gate => Some((GATE_JUDGE_VERSION, "GATE_JUDGE_VERSION")),
         }
     }
 }
