@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The ai chips store: the open message's smart-reply chips, pulled on open
 // and re-pulled when the draft pool lands a row for that same message. The
-// pull is fire and forget with a stale-resolution guard, so a slow answer
+// pull is fire and forget under a stale-resolution guard, so a slow answer
 // for a message the pane has left behind never lands; a failure fails quiet,
 // the strip stays absent, and the next open tries again. A dismissal clears
-// the local chips beside its recorded write, so the strip hides at once.
+// the local chips beside its recorded write and bumps the pull epoch, so a
+// pull that was in flight across the click can never resurface what the
+// reader put away (the composer's send-epoch discipline, on a store).
 
 import { create } from 'zustand';
 
@@ -24,6 +26,9 @@ interface AiChipsStoreState {
   message: MessageRef | null;
   /** The open message's chips, capped by the host's gate; empty with none. */
   chips: ChipView[];
+  /** The pull epoch: bumped by every open and dismissal, so a pull issued
+   * before either cannot land its answer after. */
+  epoch: number;
   /** Opens the message: holds it and pulls its chips. */
   open: (message: MessageRef) => void;
   /** Re-pulls when the draft pool lands a row for the open message alone. */
@@ -36,14 +41,16 @@ interface AiChipsStoreState {
 
 /** Pulls the message's chips into the store, ignoring a stale resolution. */
 function pull(): void {
-  const { message } = useAiChipsStore.getState();
+  const { message, epoch } = useAiChipsStore.getState();
   if (message === null) {
     return;
   }
   const pulled = message;
+  const issued = epoch;
   void chipsFor(pulled).then(
     (chips) => {
-      if (sameMessage(useAiChipsStore.getState().message, pulled)) {
+      const state = useAiChipsStore.getState();
+      if (state.epoch === issued && sameMessage(state.message, pulled)) {
         useAiChipsStore.setState({ chips });
       }
     },
@@ -56,9 +63,10 @@ function pull(): void {
 export const useAiChipsStore = create<AiChipsStoreState>((set) => ({
   message: null,
   chips: [],
+  epoch: 0,
 
   open: (message) => {
-    set({ message, chips: [] });
+    set((state) => ({ message, chips: [], epoch: state.epoch + 1 }));
     pull();
   },
 
@@ -72,7 +80,7 @@ export const useAiChipsStore = create<AiChipsStoreState>((set) => ({
     if (!sameMessage(useAiChipsStore.getState().message, message)) {
       return;
     }
-    set({ chips: [] });
+    set((state) => ({ chips: [], epoch: state.epoch + 1 }));
     void dismissChips(message);
   },
 

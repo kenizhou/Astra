@@ -76,7 +76,7 @@ export function SmartReplies() {
 
   return (
     <section
-      aria-label="Smart replies"
+      aria-label="Suggested replies"
       className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-border px-4 py-2"
     >
       <span className="text-xs text-muted-foreground">Suggested replies</span>
@@ -98,7 +98,7 @@ export function SmartReplies() {
       ))}
       <button
         type="button"
-        aria-label="Dismiss smart replies"
+        aria-label="Dismiss suggested replies"
         onClick={() => useAiChipsStore.getState().dismiss(message)}
         className={`ml-auto ${GLYPH_BUTTON}`}
       >

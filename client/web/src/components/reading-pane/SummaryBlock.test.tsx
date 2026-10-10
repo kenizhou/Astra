@@ -115,6 +115,65 @@ describe('the summarise block', () => {
     expect(screen.getByRole('button', { name: 'Summarise' })).toBeTruthy();
   });
 
+  it('never settles a run under a message the reader switched away from', async () => {
+    useReadingStore.getState().applySnapshot(snapshot('imap:v1:u1'));
+    let resolveRun: (summary: string) => void = () => undefined;
+    ai.summariseMessage.mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveRun = resolve;
+        }),
+    );
+    render(<SummaryBlock />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Summarise' }));
+    act(() => {
+      useReadingStore.getState().applySnapshot(snapshot('imap:v1:u2'));
+    });
+    expect(screen.getByRole('button', { name: 'Summarise' })).toBeTruthy();
+
+    resolveRun('The launch is ready.');
+    await waitFor(() => {
+      expect(ai.summariseMessage).toHaveBeenCalledOnce();
+    });
+    expect(screen.queryByText('The launch is ready.')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Summarise' })).toBeTruthy();
+
+    // The switched-away message's next open summarises fresh, unpoisoned.
+    ai.summariseMessage.mockResolvedValue('A fresh summary.');
+    act(() => {
+      useReadingStore.getState().applySnapshot(snapshot('imap:v1:u1'));
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Summarise' }));
+    await waitFor(() => {
+      expect(screen.getByText('A fresh summary.')).toBeTruthy();
+    });
+  });
+
+  it('never surfaces a failure that settles under a newer message', async () => {
+    useReadingStore.getState().applySnapshot(snapshot('imap:v1:u1'));
+    let rejectRun: (err: Error) => void = () => undefined;
+    ai.summariseMessage.mockImplementation(
+      () =>
+        new Promise<string>((_resolve, reject) => {
+          rejectRun = reject;
+        }),
+    );
+    render(<SummaryBlock />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Summarise' }));
+    act(() => {
+      useReadingStore.getState().applySnapshot(snapshot('imap:v1:u2'));
+    });
+    rejectRun(new Error('the endpoint is down'));
+    await waitFor(() => {
+      expect(ai.summariseMessage).toHaveBeenCalledOnce();
+    });
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Summarise' })).toBeTruthy();
+  });
+
   it('stands absent with nothing open', () => {
     useReadingStore.getState().applySnapshot(null);
     const { container } = render(<SummaryBlock />);

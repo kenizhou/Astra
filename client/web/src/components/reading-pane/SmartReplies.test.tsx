@@ -87,7 +87,7 @@ describe('the smart replies strip', () => {
     await waitFor(() => {
       expect(screen.getByText('Shipped.')).toBeTruthy();
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Dismiss smart replies' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss suggested replies' }));
 
     expect(ai.dismissChips).toHaveBeenCalledWith({ account: 'work', key: 'imap:v1:u1' });
     expect(screen.queryByText('Shipped.')).toBeNull();

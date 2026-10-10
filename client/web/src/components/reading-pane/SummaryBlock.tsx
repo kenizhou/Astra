@@ -4,9 +4,11 @@
 // failure sentence a refused run surfaces beside its retry, and the summary
 // itself in a collapsible block that a cached instant return re-expands
 // without a second call. The block resets with each newly opened message and
-// stands absent with nothing open.
+// stands absent with nothing open. Each run settles only against the block
+// it started for (the composer's send-epoch shape): a run the reader
+// switched away from lands neither its summary nor its failure.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { summariseMessage } from '@/services/ai';
 import { useReadingStore } from '@/stores/readingStore';
@@ -47,8 +49,13 @@ export function SummaryBlock() {
   const [summary, setSummary] = useState('');
   const [error, setError] = useState('');
   const [expanded, setExpanded] = useState(true);
+  // The run epoch: bumped by every message switch and every click, so each
+  // run settles only while it is still the newest, never under a message the
+  // reader has moved on to.
+  const runEpoch = useRef(0);
 
   useEffect(() => {
+    runEpoch.current += 1;
     setPhase('idle');
     setSummary('');
     setError('');
@@ -60,13 +67,20 @@ export function SummaryBlock() {
   }
 
   const summarise = (): void => {
+    const run = ++runEpoch.current;
     setPhase('loading');
     summariseMessage(message).then(
       (text) => {
+        if (runEpoch.current !== run) {
+          return;
+        }
         setSummary(text);
         setPhase('done');
       },
       (err) => {
+        if (runEpoch.current !== run) {
+          return;
+        }
         setError(sentenceOf(err));
         setPhase('error');
       },

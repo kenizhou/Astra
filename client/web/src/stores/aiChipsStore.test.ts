@@ -96,6 +96,41 @@ describe('the ai chips store', () => {
     expect(useAiChipsStore.getState().chips).toEqual([chip]);
   });
 
+  it('never re-lands a pull that was in flight across a dismissal', async () => {
+    ai.chipsFor.mockResolvedValue([chip]);
+    useAiChipsStore.getState().open(work);
+    await settle();
+
+    // A draft-pool landing starts a re-pull that stays in flight across the
+    // reader's dismissal click.
+    let resolveLanded: (chips: ChipView[]) => void = () => undefined;
+    ai.chipsFor.mockImplementationOnce(
+      () =>
+        new Promise<ChipView[]>((resolve) => {
+          resolveLanded = resolve;
+        }),
+    );
+    useAiChipsStore.getState().poolLanded(work);
+
+    useAiChipsStore.getState().dismiss(work);
+    expect(useAiChipsStore.getState().chips).toEqual([]);
+
+    resolveLanded([chip]);
+    await settle();
+    expect(
+      useAiChipsStore.getState().chips,
+      'the pre-dismissal pull cannot resurface what the reader put away',
+    ).toEqual([]);
+    expect(useAiChipsStore.getState().message).toEqual(work);
+
+    // A later landing still re-pulls, and the durable marker keeps it empty.
+    ai.chipsFor.mockResolvedValueOnce([]);
+    useAiChipsStore.getState().poolLanded(work);
+    await settle();
+    expect(ai.chipsFor).toHaveBeenLastCalledWith(work);
+    expect(useAiChipsStore.getState().chips).toEqual([]);
+  });
+
   it('dismisses the open message by clearing locally and recording the write', async () => {
     ai.chipsFor.mockResolvedValue([chip]);
     useAiChipsStore.getState().open(work);
