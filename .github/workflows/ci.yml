@@ -79,6 +79,17 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+      # The sidecar ships as a Tauri resource and tauri-build checks
+      # sidecar/dist exists on every cargo invocation of the crate,
+      # clippy included, so the bundle is built before any compiling
+      # step; this node setup also serves the web client steps below.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Build the sidecar bundle for the Tauri resource
+        run: |
+          npm --prefix sidecar ci
+          npm --prefix sidecar run build
       - name: Build the CLI
         run: cargo build --release --bin astra-cli
       - name: Stage the CLI for the Tauri externalBin
@@ -87,9 +98,6 @@ jobs:
         run: cargo clippy -p astra-desktop --all-targets -- -D warnings
       - name: Build (desktop host)
         run: cargo build -p astra-desktop
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
       - name: Install web dependencies
         working-directory: client/web
         run: npm ci
