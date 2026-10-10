@@ -1,15 +1,27 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! The AI rules model: the closed action set, the rule record, the
 //! completion seam the host implements, and the bridge to the rules store
-//! (migration 0002). Generation lives in the `generate` child module; the
-//! matching and execution stages arrive with the incoming pass.
+//! (migration 0002). Generation lives in the `generate` child module,
+//! matching and execution in theirs, and the message-level stages
+//! (categorisation, the cold judge) in theirs; the incoming pass in the
+//! crate's `ai_results` module drives them all.
 
 // `match` is a keyword, so the module over match.rs is `matching` (the file
 // name stays the one the plan pins).
+mod categorise;
+mod cold;
 mod execute;
 mod generate;
 #[path = "match.rs"]
 mod matching;
+
+#[cfg(test)]
+#[path = "categorise_tests.rs"]
+mod categorise_tests;
+
+#[cfg(test)]
+#[path = "cold_tests.rs"]
+mod cold_tests;
 
 #[cfg(test)]
 #[path = "execute_tests.rs"]
@@ -26,6 +38,10 @@ mod matching_tests;
 use astra_ai::{CorrelationId, JudgeOutcome, JudgeUseCase, LlmUseCase, NewRule, RuleId, RuleRow};
 use async_trait::async_trait;
 
+pub use categorise::{
+    categorise, categorise_prompt, CategoriseError, Category, CATEGORISE_PROMPT_VERSION,
+};
+pub use cold::{cold_question, judge_cold, COLD_JUDGE_VERSION};
 pub use generate::{generation_prompt, prompt_to_rules, RULES_PROMPT_VERSION};
 pub use matching::{
     judge_context, match_question, match_rules, MailContext, MatchResult, MATCH_CONTEXT_BODY_CAP,

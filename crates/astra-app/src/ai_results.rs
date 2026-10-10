@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! The incoming AI pass: one bounded sweep over the newest newly seen
 //! unread mail after each refresh, one correlation id per pass. The sweep
-//! judges each candidate against the enabled rules through the match
-//! stage and runs a matched rule's actions through the deterministic
-//! write paths, everything recorded to the results store (migration
-//! 0003) and the audit ledger. The seen tracking is durable, not
-//! in-memory: a message with any results row is a message a pass already
-//! judged, so a restart rejudges nothing.
+//! gates each candidate through the DLP policy before any stage prompt is
+//! built, then runs the message's AI stages in order (the rule matches,
+//! categorisation, the cold judge) and runs a matched rule's actions
+//! through the deterministic write paths, everything recorded to the
+//! results store (migration 0003) and the audit ledger. The seen tracking
+//! is durable, not in-memory: a message with any results row is a message
+//! a pass already judged, so a restart rejudges nothing.
 //!
 //! The core owns no executor (the runtime is the host's, the crate's own
 //! rule), so a refresh only arms the pass: [`App::drive_incoming_pass`] is
@@ -16,10 +17,14 @@
 
 use std::sync::Arc;
 
-use astra_ai::{AiStore, CorrelationId, JudgeOutcome, JudgePath};
+use astra_ai::{
+    apply, AiStore, CorrelationId, DlpOutcome, DlpPolicy, JudgeOutcome, JudgePath, NewAiResult,
+};
 use engine_api::{AccountId, MailListRow, Provider, ProviderKey};
 
-use crate::ai_rules::{match_rules, AiJudge, MailContext, Rule};
+use crate::ai_rules::{
+    categorise, judge_cold, match_rules, AiComplete, AiJudge, MailContext, Rule,
+};
 use crate::reference::MessageRef;
 use crate::App;
 
@@ -33,13 +38,19 @@ pub(crate) const PASS_MESSAGE_LIMIT: usize = 10;
 /// before any model call is spent.
 pub(crate) const PASS_CANDIDATE_WINDOW: usize = 50;
 
-/// The AI stages a pass runs, as the results table's stage words. The A1
-/// set is the rule match; the cold and categorise stages arrive with their
-/// slice and grow this closed set.
+/// The AI stages a pass runs, as the results table's stage words: the
+/// rule-level match and the message-level categorise and cold, beside the
+/// gate's own row for a message the DLP policy refuses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum AiStage {
     /// Does this rule's condition match the message? Abstains to no match.
     RuleMatch,
+    /// Which of the five-way closed set is the message? Skips on failure.
+    Categorise,
+    /// Is the message unsolicited cold outreach? Abstains to not cold.
+    Cold,
+    /// The DLP gate's refusal row: the message's stages did not run.
+    Dlp,
 }
 
 impl AiStage {
@@ -47,6 +58,9 @@ impl AiStage {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::RuleMatch => "rule_match",
+            Self::Categorise => "categorise",
+            Self::Cold => "cold",
+            Self::Dlp => "dlp",
         }
     }
 }
@@ -62,29 +76,45 @@ pub(crate) fn outcome_word(outcome: JudgeOutcome) -> &'static str {
     }
 }
 
-/// The AI bundle the app runs its pass over: the judge seam (the host's
-/// client behind it) and the one store every AI path shares (the rules,
-/// the results, the ledgers). Assembled host-side and injected; the app
-/// without one simply never runs a pass.
+/// The AI bundle the app runs its pass over: the judge and completion
+/// seams (the host's client behind them), the DLP policy every
+/// mail-carrying prompt passes through, and the one store every AI path
+/// shares (the rules, the results, the ledgers). Assembled host-side and
+/// injected; the app without one simply never runs a pass.
 pub struct AiPass {
     /// The judge seam: one binary judge call.
     pub(crate) judge: Box<dyn AiJudge>,
+    /// The completion seam: one structured completion.
+    pub(crate) complete: Box<dyn AiComplete>,
+    /// The DLP policy the gate applies before any stage prompt.
+    pub(crate) dlp: DlpPolicy,
     /// The shared AI store: rules in, results and audits out.
     pub(crate) store: Arc<AiStore>,
 }
 
 impl core::fmt::Debug for AiPass {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        // The judge seam may hold provider credentials; show nothing of it.
+        // The seams may hold provider credentials; show nothing of them.
         f.debug_struct("AiPass").finish_non_exhaustive()
     }
 }
 
 impl AiPass {
-    /// Bundles `judge` and `store` into the pass the app is given.
+    /// Bundles `judge`, `complete`, `store`, and the gate's `dlp` policy
+    /// into the pass the app is given.
     #[must_use]
-    pub fn new(judge: Box<dyn AiJudge>, store: Arc<AiStore>) -> Self {
-        Self { judge, store }
+    pub fn new(
+        judge: Box<dyn AiJudge>,
+        complete: Box<dyn AiComplete>,
+        store: Arc<AiStore>,
+        dlp: DlpPolicy,
+    ) -> Self {
+        Self {
+            judge,
+            complete,
+            dlp,
+            store,
+        }
     }
 }
 
@@ -112,20 +142,17 @@ impl<P: Provider> App<P> {
 
     /// One bounded pass: one fresh correlation id, the enabled rules, and
     /// the head [`PASS_MESSAGE_LIMIT`] of the newest unread messages no
-    /// earlier pass judged, each matched and, on a match, executed through
-    /// the deterministic write paths. Every failure logs and the pass
-    /// moves on; nothing here may panic or propagate, the contract the
-    /// refresh that armed it rests on.
+    /// earlier pass judged, each gated through the DLP policy and then run
+    /// through its stages (the rule match, categorise, the cold judge),
+    /// and, on a match, executed through the deterministic write paths.
+    /// Every failure logs and the pass moves on; nothing here may panic or
+    /// propagate, the contract the refresh that armed it rests on.
     pub(crate) async fn run_incoming_pass(&self) {
         let Some(pass) = self.ai.as_ref() else {
             return;
         };
         let correlation = CorrelationId::generate();
         let rules = enabled_rules(&pass.store);
-        if rules.is_empty() {
-            log::info!("ai pass: no enabled rules; nothing to judge");
-            return;
-        }
         let accounts = self.account_handles().await;
         let ids: Vec<AccountId> = accounts.iter().map(|account| account.id.clone()).collect();
         let rows = match self.engine.mail_window(&ids, PASS_CANDIDATE_WINDOW).await {
@@ -146,18 +173,34 @@ impl<P: Provider> App<P> {
             if Self::already_judged(&pass.store, &row.account, &row.mail.key) {
                 continue;
             }
-            let Some(context) = self.match_context(row).await else {
+            let Some(raw) = self.match_context(row).await else {
+                continue;
+            };
+            judged += 1;
+            let Some(mail) = gate_mail(
+                pass.dlp,
+                raw,
+                &row.account,
+                &row.mail.key,
+                &correlation,
+                &pass.store,
+            ) else {
                 continue;
             };
             let matched = match_rules(
-                &context,
+                &mail,
                 &rules,
                 &correlation,
                 pass.judge.as_ref(),
                 &pass.store,
             )
             .await;
-            judged += 1;
+            if let Err(err) =
+                categorise(&mail, &correlation, pass.complete.as_ref(), &pass.store).await
+            {
+                log::warn!("ai pass: the categorise stage was skipped: {err}");
+            }
+            judge_cold(&mail, &correlation, pass.judge.as_ref(), &pass.store).await;
             let message = MessageRef {
                 account: row.account.clone(),
                 key: row.mail.key.clone(),
@@ -233,6 +276,52 @@ impl<P: Provider> App<P> {
     }
 }
 
+/// The DLP gate, in front of every stage prompt a message's text might
+/// ride: allow passes the context through, redact masks every field the
+/// stages build their prompts from (the sender, the subject, the body;
+/// a sensitive span never crosses a field boundary), and block refuses the
+/// message outright with one `dlp` row, the verdict `blocked`, and no seam
+/// call spent. `None` means blocked: the caller skips the message's stages.
+fn gate_mail(
+    policy: DlpPolicy,
+    mail: MailContext,
+    account: &AccountId,
+    key: &ProviderKey,
+    correlation: &CorrelationId,
+    store: &AiStore,
+) -> Option<MailContext> {
+    if policy == DlpPolicy::Allow {
+        return Some(mail);
+    }
+    let mut mail = mail;
+    for field in [
+        &mut mail.from_name,
+        &mut mail.from_address,
+        &mut mail.subject,
+        &mut mail.body,
+    ] {
+        if let DlpOutcome::Allowed { content } = apply(policy, field) {
+            *field = content;
+        } else {
+            let row = NewAiResult {
+                correlation: correlation.clone(),
+                message_account: account.as_str().to_owned(),
+                message_key: key.as_str().to_owned(),
+                stage: AiStage::Dlp.as_str().to_owned(),
+                rule_id: None,
+                verdict: "blocked".to_owned(),
+                category: None,
+            };
+            if let Err(err) = store.record_ai_result(&row) {
+                log::warn!("ai pass: the dlp refusal could not be recorded: {err}");
+            }
+            log::info!("ai pass: the dlp policy blocked the message's ai stages");
+            return None;
+        }
+    }
+    Some(mail)
+}
+
 /// The enabled rules as the pass judges them: the stored rows parsed
 /// loudly, a row outside the closed action set logged and skipped (the
 /// pass must survive a broken row; the load-time rejection stays the
@@ -241,7 +330,7 @@ fn enabled_rules(store: &AiStore) -> Vec<Rule> {
     let rows = match store.list_rules() {
         Ok(rows) => rows,
         Err(err) => {
-            log::warn!("ai pass: the rules read failed; the pass is skipped: {err}");
+            log::warn!("ai pass: the rules read failed; the match stage is empty: {err}");
             return Vec::new();
         }
     };

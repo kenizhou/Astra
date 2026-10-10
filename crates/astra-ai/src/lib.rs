@@ -10,8 +10,8 @@
 //! the sidecar, the CLI, and both ledgers, the product SQLite store
 //! ([`AiStore`], the product database's arrival, with the rules CRUD of
 //! migration 0002 beside the ledgers), the prompt-injection hardening
-//! types ([`tag_untrusted`] and [`DlpPolicy`], whose redact and block arms
-//! are resolved to allow until the A1 hardening slice), the structured
+//! wrapper ([`tag_untrusted`]), the active data loss prevention gate
+//! ([`DlpPolicy`] with its [`redact`] and [`apply`]), the structured
 //! output [`repair_json`] helper every structured caller recovers through,
 //! and the binary judge's vocabulary ([`JudgeVerdict`],
 //! [`parse_judgement`], the [`SAFE_DEFAULTS`] table, and the versioned
@@ -22,6 +22,7 @@
 
 mod ai_results;
 mod correlation;
+mod dlp;
 mod hardening;
 mod judge;
 mod repair;
@@ -32,6 +33,8 @@ mod use_case;
 
 #[cfg(test)]
 mod ai_results_tests;
+#[cfg(test)]
+mod dlp_tests;
 #[cfg(test)]
 mod hardening_tests;
 #[cfg(test)]
@@ -47,7 +50,8 @@ mod tier_tests;
 
 pub use ai_results::{AiResultRow, NewAiResult};
 pub use correlation::CorrelationId;
-pub use hardening::{tag_untrusted, DlpPolicy};
+pub use dlp::{apply, redact, DlpError, DlpOutcome, DlpPolicy};
+pub use hardening::tag_untrusted;
 pub use judge::{
     judge_prompt, parse_judgement, safe_default, JudgeDefault, JudgeOutcome, JudgePath,
     JudgeUseCase, JudgeVerdict, ABSTAIN_MARKER, JUDGE_TEMPLATES_VERSION, SAFE_DEFAULTS,

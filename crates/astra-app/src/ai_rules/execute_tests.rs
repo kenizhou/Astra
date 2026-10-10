@@ -45,7 +45,9 @@ async fn synced_app() -> (
         vec![fakes::account("work", provider)],
         &surfaces,
         fakes::ai::FixtureJudge::scripted(&[]),
+        fakes::ai::FixtureComplete::scripted(&[]),
         Arc::new(AiStore::open_in_memory().unwrap()),
+        astra_ai::DlpPolicy::Allow,
     );
     app.dispatch(Intent::RefreshMail).await.unwrap();
     app.dispatch(Intent::SelectFolder {

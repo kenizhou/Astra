@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Prompt-injection hardening: the untrusted-content wrapper and the data
-//! loss prevention policy vocabulary.
+//! Prompt-injection hardening: the untrusted-content wrapper. The data
+//! loss prevention policy and gate live in the crate's `dlp` module.
 
 /// The opening fence line: content between the fences is untrusted data.
 const FENCE_BEGIN: &str = "[[[untrusted:begin]]]";
@@ -43,29 +43,4 @@ pub fn tag_untrusted(heading: &str, content: &str) -> String {
 fn is_wrapped(content: &str) -> bool {
     let trimmed = content.trim();
     trimmed.starts_with("<untrusted heading=\"") && trimmed.ends_with("</untrusted>")
-}
-
-/// The data loss prevention posture for content leaving the machine.
-///
-/// SPA0 resolves every policy to [`DlpPolicy::Allow`]: redaction and
-/// blocking enforcement land with the A1 hardening slice. The deferral is
-/// this type's contract, not a silent gap; callers code against the
-/// resolve step now so A1 changes enforcement, never call sites.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DlpPolicy {
-    /// Content passes through untouched.
-    Allow,
-    /// Sensitive spans are masked before the call (enforced from A1).
-    Redact,
-    /// The call is refused outright (enforced from A1).
-    Block,
-}
-
-impl DlpPolicy {
-    /// The posture this build enforces for `policy`. SPA0 always answers
-    /// [`DlpPolicy::Allow`]; A1 makes [`DlpPolicy::Redact`] and
-    /// [`DlpPolicy::Block`] bite.
-    pub fn resolve(_policy: DlpPolicy) -> DlpPolicy {
-        DlpPolicy::Allow
-    }
 }
