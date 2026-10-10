@@ -7,10 +7,12 @@
 //! other. The [`App`] owns one [`engine_api::Engine`] shared across every configured
 //! [`Account`], and [`boot`] assembles the whole sequence over a host-provided runtime.
 //! The crate root holds the runtime's state; the command surface, the projection, the
-//! sync paths, the preferences, the AI rules model with its generation seam, and the
-//! AI replies model with its draft pool service each live in their own module.
+//! sync paths, the preferences, the AI rules model with its generation seam, the AI
+//! replies model with its draft pool service, and the AI assist services (knowledge,
+//! snippets, autocomplete, translate) each live in their own module.
 
 mod accounts;
+mod ai_assist;
 mod ai_replies;
 mod ai_results;
 mod ai_rules;
@@ -74,6 +76,13 @@ use crate::{
 };
 
 pub use accounts::{Account, MailboxConnector};
+pub use ai_assist::{
+    autocomplete, autocomplete_prompt, extract_knowledge, extraction_prompt, knowledge_context,
+    ranking_prompt, search_snippets, translate, translate_prompt, KnowledgeEntry, KnowledgeKind,
+    Snippet, TranslateLanguage, AUTOCOMPLETE_VERSION, KNOWLEDGE_BODY_CAP, KNOWLEDGE_CONTEXT_LIMIT,
+    KNOWLEDGE_EXTRACT_LIMIT, KNOWLEDGE_EXTRACT_VERSION, SNIPPET_SEARCH_VERSION,
+    TRANSLATE_CACHE_KIND, TRANSLATE_VERSION,
+};
 pub use ai_replies::{
     body_hash, chips_for, draft_prompt, generate_reply, style_profile, style_prompt, summarise,
     summarise_prompt, surface_question, Chip, DraftConfidence, DraftContext, DraftPoolEntry,
