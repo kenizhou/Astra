@@ -421,6 +421,7 @@ async fn boot_primes_the_cached_list_and_spawns_each_accounts_first_sync() {
                 spawned.fetch_add(1, Ordering::SeqCst);
             }
         },
+        None,
     )
     .await
     .unwrap();

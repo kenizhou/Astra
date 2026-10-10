@@ -138,8 +138,8 @@
 
 | 功能 | 状态 | 备注 |
 |---|---|---|
-| 读动词与 --json 契约 | 🚧 | 已交付六个动词；随 SP2+ 切片增长；cli.md |
-| 带门控的变更动词与 --preview | 🚧 | drafts save 与 discard；cli.md |
+| 读动词与 --json 契约 | 🚧 | 已交付十一个动词：账户、文件夹、邮件、规则与存储的 AI 读取；随 SP2+ 切片增长；cli.md |
+| 带门控的变更动词与 --preview | 🚧 | drafts save 与 discard、rules create 与 delete；cli.md |
 | 每次调用带相关性 id 审计 | 🚧 | ai.sqlite 账本；cli.md |
 | 发送类动词先解析后拒绝 | 🚧 | 退出码 3；cli.md |
 | 虚拟权限工具映射 | ⬜ | SPA0 |
@@ -150,19 +150,20 @@
 | 功能 | 状态 | 备注 |
 |---|---|---|
 | 来自 `ASTRA_LLM_*` 环境变量的层级与用例注册表（链、按层回退、按提供方前缀选协议） | 🚧 | SPA0 集合加裁决器族、五个层级；ai-foundation.md |
-| 后台 LLM 客户端：双协议、可重试链式回退、配额与鉴权终局 | 🚧 | 每次尝试一行账本；A2 前无特性消费；ai-foundation.md |
+| 后台 LLM 客户端：双协议、可重试链式回退、配额与鉴权终局 | 🚧 | 每次尝试一行账本；A1 收件扫描与其接缝已消费；ai-foundation.md |
 | 引擎存储之侧的产品 AI 账本（`llm_calls`、`audit_log`） | 🚧 | ai.sqlite，宿主与 CLI 共用；记录在案的 rusqlite 决定；ai-foundation.md |
-| 非受信内容包裹器与 DLP 策略类型 | 🚧 | A1 前仅允许；ai-foundation.md |
-| 二元判定器：严格单词裁决、弃权仅重试一次、安全默认表、nano 支出守卫 | 🚧 | 裁决记入账本行的 outcome；预算来自 `ASTRA_LLM_NANO_BUDGET_MICROS`；A1 各阶段前无特性消费；二元判定器规范 |
+| 非受信内容包裹器与 DLP 策略类型 | 🚧 | A1 已生效：`ASTRA_DLP` 的 allow、redact、block；ai-rules.md |
+| 二元判定器：严格单词裁决、弃权仅重试一次、安全默认表、nano 支出守卫 | 🚧 | 裁决记入账本行的 outcome；预算来自 `ASTRA_LLM_NANO_BUDGET_MICROS`；A1 各阶段已消费；二元判定器规范 |
+| 评测挂具：场景夹具、CI 离线全套、门下 live 判定场景 | 🚧 | 部分：离线全套与三个 live 场景已交付；live 集作为评测内容增长；ai-rules.md |
 | 离线 agent 循环端到端：提问、门控批准、工具执行、两本账一个相关性 id | 🚧 | 真实 sidecar bundle 加 stub CLI，在桌面测试套件中；ai-foundation.md |
 
 ## Astra：AI（inbox-zero 移植，阶段见规范 9.3）
 
-| 阶段 | 功能 | 状态 |
-|---|---|---|
-| A1 | AI 规则：提示词转规则、匹配、确定性执行 | ⬜ |
-| A1 | 发件人分类 | ⬜ |
-| A1 | 冷邮件拦截 | ⬜ |
+| 阶段 | 功能 | 状态 | 备注 |
+|---|---|---|---|
+| A1 | AI 规则：提示词转规则、匹配、确定性执行 | 🚧 | ai-rules.md |
+| A1 | 发件人分类 | 🚧 | ai-rules.md |
+| A1 | 冷邮件拦截 | 🚧 | 仅记录判定；A1 不在其上执行任何动作；ai-rules.md |
 | A2 | 带写作风格的回信起草 | ⬜ |
 | A2 | 带缓存的摘要 | ⬜ |
 | A2 | 带工具配额的助手对话 | ⬜ |

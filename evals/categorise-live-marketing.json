@@ -1,0 +1,20 @@
+{
+  "id": "categorise-live-marketing",
+  "feature": "categorise",
+  "mode": "live",
+  "prompt_version": "1",
+  "inputs": {
+    "mail": {
+      "account": "work",
+      "key": "m1",
+      "from_name": "The Weekly Launch",
+      "from_address": "digest@news.example.test",
+      "subject": "The Weekly Launch, issue 42",
+      "body": "You are receiving this because you subscribed at news.example.test. This week: our product roundup, three upcoming events, and a word from our sponsor. Unsubscribe any time at the bottom of this page."
+    }
+  },
+  "expected": {
+    "category": "newsletter",
+    "verdict": "ok"
+  }
+}

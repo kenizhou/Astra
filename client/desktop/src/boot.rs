@@ -51,6 +51,19 @@ pub(crate) fn assemble_state(
 
     let accounts = runtime.block_on(|| dial_stored(&connections));
     let engine_path = data_dir.join(ENGINE_STORE_FILE);
+    // The AI ledgers and the agent: one store the host, the sidecar's
+    // reported calls, and the CLI's audited verbs all append to, the
+    // background client over the engine's TLS policy, and the relay that
+    // hosts the sidecar with the chat tier's endpoint delivered in band.
+    // The store and client are built before the app core boots so the
+    // incoming AI pass rides the same client from the first refresh.
+    let ai_store = Arc::new(astra_ai::AiStore::open(&data_dir.join(AI_STORE_FILE))?);
+    let llm = build_llm_client(&ai_store);
+    let ai_pass = crate::ai::incoming_pass(
+        llm.clone(),
+        Arc::clone(&ai_store),
+        astra_ai::DlpPolicy::from_env(),
+    );
     let spawn = {
         let spawner = runtime.handle().clone();
         move |task: SpawnedTask| {
@@ -66,15 +79,9 @@ pub(crate) fn assemble_state(
             })),
             observer,
             spawn,
+            ai_pass,
         )
     })?;
-
-    // The AI ledgers and the agent: one store the host, the sidecar's
-    // reported calls, and the CLI's audited verbs all append to, the
-    // background client over the engine's TLS policy, and the relay that
-    // hosts the sidecar with the chat tier's endpoint delivered in band.
-    let ai_store = Arc::new(astra_ai::AiStore::open(&data_dir.join(AI_STORE_FILE))?);
-    let llm = build_llm_client(&ai_store);
     let model = llm.as_ref().and_then(|client| chat_model_config(client));
     let agent_relay = agent::build_relay(data_dir, model, agent_sink, Arc::clone(&ai_store));
 

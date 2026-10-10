@@ -1,0 +1,19 @@
+{
+  "id": "cold-live-personal-note",
+  "feature": "cold",
+  "mode": "live",
+  "prompt_version": "1",
+  "inputs": {
+    "mail": {
+      "account": "work",
+      "key": "m1",
+      "from_name": "Ada Lovelace",
+      "from_address": "ada@example.test",
+      "subject": "Notes from our planning call",
+      "body": "Thanks for making time today. I wrote up the three decisions we reached and attached the timeline we agreed: the prototype lands next Friday, review the week after. Shout if I misheard anything."
+    }
+  },
+  "expected": {
+    "verdict": "no"
+  }
+}

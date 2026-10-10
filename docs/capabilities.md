@@ -137,8 +137,8 @@ this row ports.
 
 | Feature | Status | Notes |
 |---|---|---|
-| Read verbs with --json contract | 🚧 | six verbs ship; grows with SP2+ slices; cli.md |
-| Gated mutating verbs with --preview | 🚧 | drafts save and discard; cli.md |
+| Read verbs with --json contract | 🚧 | eleven verbs ship: accounts, folders, messages, rules, and the stored AI reads; grows with SP2+ slices; cli.md |
+| Gated mutating verbs with --preview | 🚧 | drafts save and discard, rules create and delete; cli.md |
 | Every invocation audited with a correlation id | 🚧 | ai.sqlite ledger; cli.md |
 | Send-class verbs parsed but refused | 🚧 | exit 3; cli.md |
 | Virtual permission tools mapping | ⬜ | SPA0 |
@@ -149,19 +149,20 @@ this row ports.
 | Feature | Status | Notes |
 |---|---|---|
 | Tier and use-case registry from `ASTRA_LLM_*` env (chains, per-tier fallback, protocol per provider prefix) | 🚧 | the SPA0 set plus the judge family, five tiers; ai-foundation.md |
-| Background LLM client: dual protocol, retryable chain fallback, quota and auth terminal | 🚧 | one ledger row per attempt; no feature consumes it until A2; ai-foundation.md |
+| Background LLM client: dual protocol, retryable chain fallback, quota and auth terminal | 🚧 | one ledger row per attempt; consumed by the A1 incoming pass and its seams; ai-foundation.md |
 | Product AI ledger (`llm_calls`, `audit_log`) beside the engine store | 🚧 | ai.sqlite, shared by host and CLI; rusqlite per the recorded decision; ai-foundation.md |
-| Untrusted-content wrapper and DLP policy types | 🚧 | allow-only until A1; ai-foundation.md |
-| Binary judge: strict single-token verdicts, retry once on abstain, safe-default table, nano spend guard | 🚧 | verdicts in the ledger row outcome; budget from `ASTRA_LLM_NANO_BUDGET_MICROS`; no feature consumes it until the A1 stages; binary judge spec |
+| Untrusted-content wrapper and DLP policy types | 🚧 | active in A1: allow, redact, block from `ASTRA_DLP`; ai-rules.md |
+| Binary judge: strict single-token verdicts, retry once on abstain, safe-default table, nano spend guard | 🚧 | verdicts in the ledger row outcome; budget from `ASTRA_LLM_NANO_BUDGET_MICROS`; consumed by A1's stages; binary judge spec |
+| Eval harness: scenario fixtures, offline battery in CI, live judge scenarios under the gate | 🚧 | partial: offline battery and three live scenarios ship; the live set grows as eval content; ai-rules.md |
 | Offline agent loop e2e: prompt, gated approval, tool run, one correlation id across both ledgers | 🚧 | real sidecar bundle plus the stub CLI, in the desktop test suite; ai-foundation.md |
 
 ## Astra: AI (inbox-zero port, phases per spec 9.3)
 
-| Phase | Feature | Status |
-|---|---|---|
-| A1 | AI rules: prompt-to-rules, matching, deterministic execution | ⬜ |
-| A1 | Sender categorisation | ⬜ |
-| A1 | Cold email blocker | ⬜ |
+| Phase | Feature | Status | Notes |
+|---|---|---|---|
+| A1 | AI rules: prompt-to-rules, matching, deterministic execution | 🚧 | ai-rules.md |
+| A1 | Sender categorisation | 🚧 | ai-rules.md |
+| A1 | Cold email blocker | 🚧 | recorded verdicts only; nothing executes on them in A1; ai-rules.md |
 | A2 | Reply drafting with writing style | ⬜ |
 | A2 | Summarisation with cache | ⬜ |
 | A2 | Assistant chat with tool budget | ⬜ |

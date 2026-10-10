@@ -201,7 +201,7 @@ impl LlmClient {
         use_case: LlmUseCase,
         prompt: &str,
         correlation: &CorrelationId,
-        ok_outcome: &dyn Fn(&str) -> String,
+        ok_outcome: &(dyn Fn(&str) -> String + Sync),
     ) -> Result<String, LlmError> {
         let chain = self
             .registry
@@ -311,7 +311,7 @@ impl LlmClient {
         entry: &ModelEntry,
         use_case: LlmUseCase,
         correlation: &CorrelationId,
-        ok_outcome: &dyn Fn(&str) -> String,
+        ok_outcome: &(dyn Fn(&str) -> String + Sync),
     ) -> Attempt {
         let protocol = wire::protocol_for(&entry.provider)
             .expect("the entry was screened when its request was built");

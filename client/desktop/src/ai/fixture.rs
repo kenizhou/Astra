@@ -172,14 +172,14 @@ static STORE_COUNTER: AtomicU32 = AtomicU32::new(0);
 /// stay out: neither is deterministic.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct RecordedRow {
-    correlation: String,
-    use_case: String,
-    tier: String,
-    model: String,
-    prompt_tokens: i64,
-    completion_tokens: i64,
-    cost_micros: Option<i64>,
-    outcome: String,
+    pub(crate) correlation: String,
+    pub(crate) use_case: String,
+    pub(crate) tier: String,
+    pub(crate) model: String,
+    pub(crate) prompt_tokens: i64,
+    pub(crate) completion_tokens: i64,
+    pub(crate) cost_micros: Option<i64>,
+    pub(crate) outcome: String,
 }
 
 /// The expected row shape for a whole-ledger `assert_eq`.
@@ -214,10 +214,15 @@ pub(crate) struct Ledger {
 }
 
 impl Ledger {
-    /// Opens the file-backed store at its own temp file.
+    /// Opens the file-backed store at its own temp file. The name carries
+    /// the process id beside the counter, so a run whose cleanup could not
+    /// remove its file (a panicking live test whose spawned driver still
+    /// holds the store open on Windows) can never be opened by the next
+    /// run: the stale rows stay with the dead process's name.
     pub(crate) fn open(tag: &str) -> Self {
         let path = std::env::temp_dir().join(format!(
-            "astra-llm-client-tests-{}-{tag}.sqlite",
+            "astra-llm-client-tests-{}-{}-{tag}.sqlite",
+            std::process::id(),
             STORE_COUNTER.fetch_add(1, Ordering::SeqCst)
         ));
         let store = Arc::new(AiStore::open(&path).expect("the test ledger opens"));

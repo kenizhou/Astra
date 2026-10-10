@@ -49,11 +49,12 @@ mod tests_live_harness;
 mod dispatch_fakes;
 
 // The eval harness: the scenario fixtures under the repository's evals/
-// directory, driven through the same seams the unit tests exercise and the
-// seams the Task 6 live suite injects. Compiled only for tests, so the
-// library carries no harness of its own.
-#[cfg(test)]
-mod evals;
+// directory, driven through the same seams the unit tests exercise. The
+// scenario vocabulary and the seam-parameter drive are library surface
+// (the desktop host's live suite drives the live-mode fixtures over its
+// background client); the offline battery and its fixture injection stay
+// test-only, riding the dispatch-loop fakes.
+pub mod evals;
 
 use std::{
     path::PathBuf,

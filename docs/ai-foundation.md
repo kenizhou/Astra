@@ -143,7 +143,8 @@ chain entry, retryable failures (connect and transport errors, 5xx,
 honoured in delta-seconds capped at two seconds, and auth (401, 403) and
 quota (402, the providers' exhausted-balance bodies) terminal for the
 call. Error strings are status-level: response bodies never flow into
-them. No feature consumes the client until A2; the chat panel's model
+them. The A1 incoming pass consumes the client through its completion and
+judge seams (the `docs/ai-rules.md` contract); the chat panel's model
 rides the sidecar.
 
 The sidecar loop is the panel's engine: the host spawns

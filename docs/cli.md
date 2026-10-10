@@ -17,12 +17,14 @@ the ledger does not know happened.
 
 ## The verbs
 
-Six ship today, one per surface that exists. The grammar is two positional
+Eleven ship today, one per surface that exists. The grammar is two positional
 words (`verb subverb`) plus flags, and flag order is free: the sidecar
 should spell `astra-cli [--json] [--correlation-id <id>] <verb> <subverb>
 [--flag <value> ...]`, always passing `--json` and the turn's
 `--correlation-id`, and treating everything after the two positionals as
-named flags. A call is unambiguous in text and in an audit row.
+named flags. The five store-backed verbs (`rules` and `ai`) take their
+remaining operands as bare positionals instead, the grammar their
+surfaces pinned. A call is unambiguous in text and in an audit row.
 
 | Verb | Reads | Answer's `data` |
 |---|---|---|
@@ -32,6 +34,11 @@ named flags. A call is unambiguous in text and in an audit row.
 | `messages read --account <id> --key <k> [--key <k>...]` | the engine store's whole-message read and cached body | `messages`: the envelope plus `body.plain` and `body.html_present` |
 | `drafts save --account <id> --from <a> --to <a,...> [--cc <a,...>] --subject <s> (--plain <text> or --file <path> or stdin)` | writes through the engine's `put_draft` | `message_id`, `op`, `state` (`stored` or `queued`), and `key` when stored |
 | `drafts discard --account <id> --key <k>` | writes through the engine's `delete_draft` | `key`, `op`, `state` (`removed` or `queued`) |
+| `rules list` | the rules store beside the audit ledger | `rules`: id, name, condition, `actions` as wire words, enabled, `created_at`; a stored payload outside the closed set fails the verb loudly, naming the rule |
+| `rules create --name <n> --condition <c> --action <word> [--action <word>...]` | writes one rule to the rules store, enabled | `rule` (the whole stored rule) and `state: created`; `--preview` prints the exact rule the store would take |
+| `rules delete --id <id>` | deletes one stored rule | `id`, `state: deleted`; `--preview` names the exact deletion; an id no rule carries is a runtime error naming it |
+| `ai cold <account> <key> [<key>...]` | the stored cold verdicts in the results store | `messages`: per key, the newest `cold` row's `verdict` with the `correlation` that judged it and `recorded_at`, or `null` when no pass has judged the message |
+| `ai results <account> <key> [<key>...]` | the stored stage rows in the results store | `messages`: per key, every row newest first with `stage`, `rule_id`, `verdict`, `category`, `correlation`, `recorded_at` |
 
 Rules that bind every verb:
 
@@ -57,6 +64,25 @@ Rules that bind every verb:
   preview; the audit row's outcome says `preview`.
 - **The body comes from one source.** `--plain`, `--file`, or stdin; two at
   once is a usage error.
+- **The store verbs answer without the engine.** `rules` and `ai` read and
+  write the rules and results tables beside the audit ledger in
+  `ai.sqlite`, the one file every invocation already opens: no mail is
+  read and no provider is dialled, so the verbs work against a cold data
+  dir exactly as the mail verbs work against a synced one.
+- **The CLI never dials a model.** `ai cold` and `ai results` return what
+  a pass recorded, never a live call: a verdict exists here only because
+  the app's incoming pass judged the message, and an unjudged message
+  answers `null`, never a guess. The generation seam is the same
+  honesty: `rules create` takes an explicit condition sentence and
+  generates nothing, because the background client lives in the desktop
+  host and the CLI holds no model connection and never will. The agent
+  composes the condition itself, through its own model, and the verb
+  stores what it is given (the seam recorded in `docs/ai-rules.md`).
+- **The closed action set is spelled twice, by design.** The CLI's
+  `CLOSED_ACTIONS` and the app layer's `Action::ALL` carry the same wire
+  words in two crates that do not depend on each other; both are pinned
+  by their own tests, and a change to either lands in both places. The
+  duplication sentence and its cost live in `docs/ai-rules.md`.
 
 ## The envelope and the exit codes
 
@@ -123,14 +149,15 @@ known interaction, not a gap to close.
 
 | Rule | Status | Where |
 |---|---|---|
-| Six verbs with the pinned envelope | ✅ | `cli/src/verbs` |
-| `--preview` on both mutating verbs, one shared builder | ✅ | `cli/src/verbs/drafts.rs` |
+| Eleven verbs with the pinned envelope | ✅ | `cli/src/verbs` |
+| `--preview` on every mutating verb (drafts and rules), one shared builder each | ✅ | `cli/src/verbs/{drafts,rules}.rs` |
 | Every invocation audited with a correlation id | ✅ | `cli/src/audit.rs`, `cli/src/verbs/mod.rs` |
 | Send-class verbs parsed and refused, exit 3 | ✅ | `cli/src/verbs/mod.rs` |
 | Exit codes 0, 1, 2, 3 | ✅ | `cli/src/envelope.rs` |
 | Redacted argument previews (shapes, never text) | ✅ | `cli/src/audit.rs` |
 | Staged as the desktop bundle's `externalBin` | ✅ | `client/desktop/scripts/stage-cli.mjs` |
 | `--json` on every verb of a versioned schema | ✅ | schema pinned at 1 |
+| The CLI generates rules or dials a model | N/A | the generation seam: the agent composes, the CLI stores |
 | Send-class verbs beyond refusal (none ship) | N/A | the send class is the refusal |
 | Archive and label verbs | ⬜ | arrive with their slices |
 | Virtual permission tools over the verbs | ⬜ | the sidecar's bridge, SPA0 later tasks |

@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! The eval harness: the scenario fixtures under the repository's
-//! `evals/` directory, executed against the AI seams the unit tests
-//! already exercise. Deterministic scenarios (fixture completions and
-//! judgements injected through the crate's own fakes) run as ordinary
-//! offline tests in CI; judge-backed live scenarios run under the
-//! `ASTRA_LIVE_LLM` gate through the runner's seam parameters, the live
-//! client the Task 6 suite wires.
+//! `evals/` directory, the vocabulary that parses them, and the
+//! seam-parameter drive that runs one scenario over any seam pair.
+//! Deterministic scenarios (fixture completions and judgements injected
+//! through the crate's own fakes) run as ordinary offline tests in CI;
+//! judge-backed live scenarios dial a model endpoint, so they run under
+//! the `ASTRA_LIVE_LLM` gate through the drive's seam parameters, driven
+//! by the desktop host's live suite (the only crate that holds the
+//! background client).
 //!
 //! Every scenario carries the pipeline constant value its prompt text was
 //! written against, and the offline test pins each one against the
@@ -13,6 +15,9 @@
 //! rerunning and refreshing its scenarios fails the offline suite, the
 //! observable-bump net the rulebook's AI rule demands.
 
+mod drive;
+
+#[cfg(test)]
 mod runner;
 
 use std::path::PathBuf;
@@ -23,9 +28,12 @@ use crate::ai_rules::{
     CATEGORISE_PROMPT_VERSION, COLD_JUDGE_VERSION, RULES_MATCH_VERSION, RULES_PROMPT_VERSION,
 };
 
+pub use drive::drive;
+
 /// The environment variable that opens the live gate: judge-backed
 /// scenarios dial a model endpoint, so they never run in the offline CI
 /// battery.
+#[cfg(test)]
 const LIVE_VAR: &str = "ASTRA_LIVE_LLM";
 
 /// The repository's `evals/` directory, resolved from this crate's
@@ -40,28 +48,28 @@ fn fixtures_dir() -> PathBuf {
 /// runner checks (a corner fixture's explanation, say) are documentation
 /// the harness carries but does not assert.
 #[derive(Debug)]
-pub(crate) struct Scenario {
+pub struct Scenario {
     /// The fixture's identity, the failure messages' name.
-    pub(crate) id: String,
+    pub id: String,
     /// The pipeline feature the scenario drives.
-    pub(crate) feature: Feature,
+    pub feature: Feature,
     /// Whether the scenario runs offline on fixtures or live under the
     /// gate.
-    pub(crate) mode: Mode,
+    pub mode: Mode,
     /// The pipeline constant value the scenario was written against;
     /// `None` only for the features that pin no prompt text.
-    pub(crate) prompt_version: Option<String>,
+    pub prompt_version: Option<String>,
     /// The scenario's given world: the text, the mail, and the canned
     /// seam answers an offline run injects.
-    pub(crate) inputs: serde_json::Value,
+    pub inputs: serde_json::Value,
     /// The outcome the scenario expects, in the feature's own shape.
-    pub(crate) expected: serde_json::Value,
+    pub expected: serde_json::Value,
 }
 
 /// The pipeline features the harness drives, each naming the seam or the
 /// pure builder its scenarios exercise.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Feature {
+pub enum Feature {
     /// Rule generation through the completion seam.
     Generation,
     /// Sender categorisation through the completion seam.
@@ -108,7 +116,7 @@ impl Feature {
 
 /// The mode a scenario runs in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Mode {
+pub enum Mode {
     /// Fixture-driven, deterministic, part of the offline battery.
     Offline,
     /// Judge-backed against the live endpoint, under the live gate.
@@ -129,7 +137,7 @@ impl Mode {
 /// Every scenario fixture in the directory, file name order for
 /// deterministic runs. A fixture that fails to parse fails the load
 /// loudly: the harness never silently drops a scenario.
-pub(crate) fn scenarios() -> Vec<Scenario> {
+pub fn scenarios() -> Vec<Scenario> {
     let dir = fixtures_dir();
     let mut names: Vec<String> = std::fs::read_dir(&dir)
         .unwrap_or_else(|err| {
@@ -196,7 +204,10 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
 /// one the build carries. A mismatch names the constant, the fixture's
 /// value, and the build's, so a bump that skipped its eval rerun is
 /// readable straight off the failure.
-pub(crate) fn pin_version(scenario: &Scenario) -> Result<(), String> {
+///
+/// # Errors
+/// The pin failure, naming the constant and both values.
+pub fn pin_version(scenario: &Scenario) -> Result<(), String> {
     match (scenario.feature.version_pin(), &scenario.prompt_version) {
         (Some((current, spelling)), Some(written)) => {
             if written == current {
@@ -239,14 +250,14 @@ async fn offline_scenarios_run_green_and_every_scenario_pins_its_version() {
 
 #[test]
 #[ignore = "live evals dial the model endpoint: run under ASTRA_LIVE_LLM=1 with the live client"]
-fn live_scenarios_run_under_the_live_gate() {
+fn live_scenarios_pin_their_versions_under_the_live_gate() {
     if std::env::var(LIVE_VAR).ok().as_deref() != Some("1") {
         eprintln!("skipping live evals: {LIVE_VAR} is not 1");
         return;
     }
-    // The version pin holds offline even for live scenarios; the drives
-    // themselves run through the runner's seam parameters, the live client
-    // the Task 6 suite wires over its tier chain.
+    // The version pin holds for live scenarios too; the drives themselves
+    // run in the desktop host's live suite (client/desktop/src/ai), the
+    // crate that holds the background client the seam parameters take.
     let all = scenarios();
     let live: Vec<&Scenario> = all
         .iter()
@@ -257,7 +268,7 @@ fn live_scenarios_run_under_the_live_gate() {
             .unwrap_or_else(|err| panic!("{}: the version pin: {err}", scenario.id));
     }
     eprintln!(
-        "{} live scenario(s) await the Task 6 client wiring the seams",
+        "{} live scenario(s) pinned; the desktop live suite drives them under {LIVE_VAR}=1",
         live.len()
     );
 }
