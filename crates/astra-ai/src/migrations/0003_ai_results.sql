@@ -1,7 +1,8 @@
 -- The AI results table: one row per AI stage verdict on one message,
 -- keyed by the pass's correlation id (migration 0003). The stage set is
--- rule_match | cold | categorise (the A1 stages; cold and categorise land
--- with their slices). The verdict is the outcome word: yes, no, or
+-- rule_match | cold | categorise | dlp (the A1 stages; cold and categorise
+-- land with their slices, dlp the DLP gate's refusal row, verdict
+-- blocked). The verdict is the outcome word: yes, no, or
 -- abstain_default, the last naming the safe-default table's answer rather
 -- than the model's. A message's rows are its seen tracking: the incoming
 -- pass skips a message that already has any.

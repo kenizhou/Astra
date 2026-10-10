@@ -126,8 +126,10 @@ slice and its own contract.
 ## The safe defaults, referenced
 
 Every judge use case declares its abstain default up front in
-`SAFE_DEFAULTS` (`astra-ai`), pinned by tests that fail compilation when
-a use case lacks a row. The table, its rationale, and the boundary
+`SAFE_DEFAULTS` (`astra-ai`), held by two nets: the exhaustive match in
+`safe_default` fails compilation when a use case lacks a row, and the
+runtime pin tests hold the table's rows to the spec verbatim. The table,
+its rationale, and the boundary
 (judges gate user experience only, never authorisation; the permission
 bridge and send refusal stay deterministic) are the binary judge spec's
 contract: `docs/superpowers/specs/2026-10-10-binary-judge-design.md`.
@@ -242,6 +244,19 @@ classification, not the endpoint's name, is the contract.
   and sender into the prompts but no body text. The reading surface sees
   the html; the AI stages do not. A plain-text extraction at the pass is
   the fix when a stage needs it, landed with its own fixtures.
+- **No panic isolation around the pass driver.** The driver runs each
+  pass inline: a panic in one pass takes the driver down, and no later
+  pass runs until restart. The refresh that armed the pass stays
+  protected (the pass rides the driver's own future, off the refresh's
+  path), so the loss is the AI pass alone.
+- **Unresolvable head candidates spend pass attention with no row.** A
+  candidate the pass cannot build a context for (its account is gone,
+  its message no longer resolves, its body will not fetch) is skipped
+  with a log line only; no skipped-with-error results row records it,
+  so every later pass meets it again at the head of the window. The
+  bound itself is not starved today (such candidates do not count
+  against `PASS_MESSAGE_LIMIT`); the cost is the repeated attention,
+  not lost capacity.
 - **Single global correlation holder.** The pass's correlation spans its
   own rows cleanly, but the agent relay's single global holder and the
   `any_correlation` attribution of session-less asks remain

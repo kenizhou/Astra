@@ -52,7 +52,8 @@ Astra Mail 是一个桌面邮件客户端。产品名为 "Astra Mail"，用户�
 ## 安全
 
 凡 kylins 实现占优之处，安全机制以 kylins 为准；功能契约以
-mail-calendar 为准。sidecar 失败即关闭：每个受门控的工具初始为
+mail-calendar 为准。判定器只门控用户体验，绝不门控授权；权限桥、发送拒绝
+与 CLI 门控保持确定性。sidecar 失败即关闭：每个受门控的工具初始为
 needs-approval，发送类动词对代理一律拒绝，由人类决定并发送。每次
 LLM 调用、工具调用与权限决定都带关联 id 落入其台账。
 

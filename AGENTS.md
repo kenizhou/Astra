@@ -56,7 +56,9 @@ are English only and have no Chinese mirror.
 ## Security
 
 kylins implementations win on security mechanics where they have the
-advantage; mail-calendar wins on feature contracts. The sidecar is fail
+advantage; mail-calendar wins on feature contracts. Judges gate user
+experience only, never authorisation; the permission bridge, send
+refusal, and CLI gating stay deterministic. The sidecar is fail
 closed: every gated tool starts as needs-approval, send-class verbs are
 refused to the agent, and humans decide and send. Every LLM call, tool
 call, and permission decision lands in its ledger with a correlation id.
