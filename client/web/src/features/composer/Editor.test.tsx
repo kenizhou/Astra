@@ -58,4 +58,16 @@ describe('the editor surface', () => {
     expect(JSON.stringify(doc)).toContain('hello there');
     editor.destroy();
   });
+
+  it('hands the live editor to the ready callback and null again on unmount', () => {
+    const onReady = vi.fn();
+    const { unmount } = render(
+      <Editor initialContent={[{ type: 'paragraph' }]} onChange={() => undefined} onReady={onReady} />,
+    );
+
+    expect(onReady).toHaveBeenCalledTimes(1);
+    expect(onReady.mock.calls[0]?.[0]?.isEmpty).toBe(true);
+    unmount();
+    expect(onReady).toHaveBeenLastCalledWith(null);
+  });
 });

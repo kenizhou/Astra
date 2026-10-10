@@ -26,6 +26,7 @@ const ai = vi.hoisted(() => ({
   dismissChips: vi.fn(),
   composeFromDraft: vi.fn(),
   summariseMessage: vi.fn(),
+  translateMessage: vi.fn(),
 }));
 
 vi.mock('@/services/ai', () => ai);
@@ -71,6 +72,7 @@ beforeEach(() => {
   ai.dismissChips.mockReset();
   ai.composeFromDraft.mockReset();
   ai.summariseMessage.mockReset();
+  ai.translateMessage.mockReset();
   useReadingStore.setState({ snapshot: null, showRemoteImages: false });
   useAiChipsStore.setState({ message: null, chips: [] });
 });
@@ -197,5 +199,7 @@ describe('the reading pane', () => {
     });
     expect(screen.getByRole('button', { name: 'Summarise' })).toBeTruthy();
     expect(ai.chipsFor).toHaveBeenCalledWith({ account: 'work', key: 'imap:v1:u1' });
+    expect(screen.getByRole('button', { name: 'Translate' })).toBeTruthy();
+    expect(screen.getByRole('combobox', { name: 'Translate to' })).toBeTruthy();
   });
 });
