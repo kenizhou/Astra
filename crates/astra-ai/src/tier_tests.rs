@@ -185,3 +185,13 @@ fn spa0_use_cases_map_to_their_tiers_and_wire_words() {
         );
     }
 }
+
+#[test]
+fn prompt_to_rules_pins_the_default_tier_and_its_wire_word() {
+    assert_eq!(LlmUseCase::PromptToRules.tier(), ModelTier::Default);
+    assert_eq!(
+        serde_json::to_string(&LlmUseCase::PromptToRules).unwrap(),
+        "\"prompt_to_rules\"",
+    );
+    assert_eq!(LlmUseCase::PromptToRules.as_str(), "prompt_to_rules");
+}

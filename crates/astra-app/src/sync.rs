@@ -59,6 +59,10 @@ impl<P: Provider> App<P> {
             "refresh_mail: sync {sync_ms}ms + rebuild {}ms",
             rebuild_start.elapsed().as_millis(),
         );
+        // The AI rules pass runs off the refresh's own path: armed here,
+        // judged and executed by the driver future the host runs, so model
+        // latency never sits on the refresh the user asked for.
+        self.request_incoming_pass();
     }
 
     /// Syncs one account's mail (used when it is first added), without touching the

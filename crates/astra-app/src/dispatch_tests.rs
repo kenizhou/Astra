@@ -421,6 +421,7 @@ async fn boot_primes_the_cached_list_and_spawns_each_accounts_first_sync() {
                 spawned.fetch_add(1, Ordering::SeqCst);
             }
         },
+        None,
     )
     .await
     .unwrap();
@@ -436,7 +437,8 @@ async fn boot_primes_the_cached_list_and_spawns_each_accounts_first_sync() {
     );
     assert_eq!(
         spawned.load(Ordering::SeqCst),
-        3,
-        "each account's first sync and the autosave driver are spawned, not awaited"
+        4,
+        "each account's first sync, the autosave driver, and the AI pass driver are \
+         spawned, not awaited"
     );
 }

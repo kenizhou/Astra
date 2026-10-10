@@ -1,0 +1,12 @@
+{
+  "id": "redaction-corner-fullwidth-comma-unmasked",
+  "feature": "redaction",
+  "mode": "offline",
+  "inputs": {
+    "content": "Email sales@acme.example，thanks before Friday."
+  },
+  "expected": {
+    "redacted": "Email sales@acme.example，thanks before Friday.",
+    "corner": "an address directly followed by full-width punctuation glues the next word into the TLD, the TLD check fails, and the address stays unmasked; documented, not fixed"
+  }
+}

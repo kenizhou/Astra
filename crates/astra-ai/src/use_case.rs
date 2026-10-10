@@ -22,9 +22,33 @@ pub enum LlmUseCase {
     CategorizeSender,
     /// Inbox cleaning suggestions (inbox-zero `clean-inbox`, tier default).
     CleanInbox,
+    /// Generating rules from a prompt (inbox-zero `prompt-to-rules`; the
+    /// A1 design pins the default tier where inbox-zero rides chat).
+    PromptToRules,
     /// The agent tool loop. Inbox-zero maps its agent use cases (the
     /// `McpAgent` line) to the economy tier; `agent_tool` follows.
     AgentTool,
+    /// The cold-mail judge (the binary judge spec; nano tier). Abstains
+    /// resolve to not cold: the mail stays put.
+    JudgeColdEmail,
+    /// The rule-match judge (economy tier). Abstains resolve to no match:
+    /// the rule does not run.
+    JudgeRuleMatch,
+    /// The data loss prevention judge (nano tier). Abstains resolve to
+    /// block: privacy errs shut.
+    JudgeDlp,
+    /// The prompt-injection judge (nano tier). Abstains resolve to
+    /// hostile: security errs closed.
+    JudgeInjection,
+    /// The draft-surfacing judge (nano tier; A2). Abstains resolve to
+    /// unsurfaced: the draft still exists in the folder.
+    JudgeDraftSurface,
+    /// The summary faithfulness eval judge (economy tier). Abstains
+    /// resolve to a failed eval.
+    JudgeSummaryFaithful,
+    /// The scenario eval judge (economy tier). Abstains resolve to a
+    /// failed scenario.
+    JudgeScenario,
 }
 
 impl LlmUseCase {
@@ -36,18 +60,37 @@ impl LlmUseCase {
             Self::Summarise => "summarise",
             Self::CategorizeSender => "categorize_sender",
             Self::CleanInbox => "clean_inbox",
+            Self::PromptToRules => "prompt_to_rules",
             Self::AgentTool => "agent_tool",
+            Self::JudgeColdEmail => "judge_cold_email",
+            Self::JudgeRuleMatch => "judge_rule_match",
+            Self::JudgeDlp => "judge_dlp",
+            Self::JudgeInjection => "judge_injection",
+            Self::JudgeDraftSurface => "judge_draft_surface",
+            Self::JudgeSummaryFaithful => "judge_summary_faithful",
+            Self::JudgeScenario => "judge_scenario",
         }
     }
 
     /// The tier every call in this use case runs at. The tier names the
     /// `ASTRA_LLM_*` list the call's chain comes from, before fallback.
+    /// The judge family rides nano (classification-sized) and economy
+    /// (rule-match and the eval judges); none ride chat or draft.
     pub fn tier(&self) -> ModelTier {
         match self {
             Self::AssistantChat => ModelTier::Chat,
             Self::DraftReply => ModelTier::Draft,
-            Self::Summarise | Self::CategorizeSender | Self::CleanInbox => ModelTier::Default,
+            Self::Summarise | Self::CategorizeSender | Self::CleanInbox | Self::PromptToRules => {
+                ModelTier::Default
+            }
             Self::AgentTool => ModelTier::Economy,
+            Self::JudgeColdEmail
+            | Self::JudgeDlp
+            | Self::JudgeInjection
+            | Self::JudgeDraftSurface => ModelTier::Nano,
+            Self::JudgeRuleMatch | Self::JudgeSummaryFaithful | Self::JudgeScenario => {
+                ModelTier::Economy
+            }
         }
     }
 }

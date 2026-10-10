@@ -143,7 +143,8 @@ chain entry, retryable failures (connect and transport errors, 5xx,
 honoured in delta-seconds capped at two seconds, and auth (401, 403) and
 quota (402, the providers' exhausted-balance bodies) terminal for the
 call. Error strings are status-level: response bodies never flow into
-them. No feature consumes the client until A2; the chat panel's model
+them. The A1 incoming pass consumes the client through its completion and
+judge seams (the `docs/ai-rules.md` contract); the chat panel's model
 rides the sidecar.
 
 The sidecar loop is the panel's engine: the host spawns
@@ -238,15 +239,18 @@ enters any child the sidecar spawns (`safe_exec` scrubs to `PATH`, the
 never lands in a ledger row or log line, and error messages are
 status-level, so response bodies cannot echo it back.
 
-## The eval harness: deferred to A1
+## The eval harness
 
-The rulebook requires an eval run for every AI behaviour change. No
-eval harness ships with SPA0; it lands with A1 together with the first
-behaviour-shaped prompts (rules, categorisation). Until then the only
-AI behaviour in the product is the sidecar's skill guide and the
-registry semantics above, both pinned by the offline tests, and any
-change to them rides review without an eval net. This deferral is the
-recorded shortfall, not a silent one.
+The rulebook requires an eval run for every AI behaviour change. The
+harness ships with A1: scenario fixtures live under `evals/` (one JSON
+file per scenario: its feature, the pipeline constant value its prompt
+text was written against, its inputs, and its expected outcome) and the
+runner in `astra-app` drives them through the same seams the unit tests
+exercise. Deterministic scenarios run as ordinary offline tests in CI;
+judge-backed scenarios run only under the `ASTRA_LIVE_LLM=1` gate.
+Every scenario pins the pipeline constant it was written against, so
+bumping a prompt constant without rerunning and refreshing its
+scenarios fails the offline suite.
 
 ## Known gaps
 
@@ -255,9 +259,12 @@ recorded shortfall, not a silent one.
 - **No streaming client.** The background client is completion-only;
   streaming arrives with A2's chat surfaces (the sidecar's own text
   streams today).
-- **DLP allow-only.** `DlpPolicy::resolve` answers allow for every
-  policy; redact and block land with A1. The types exist so callers are
-  written against the final shape.
+- **DLP patterns are heuristic.** `ASTRA_DLP` selects the posture
+  (`allow`, the default, `redact`, or `block`) and the `apply` gate
+  checks every mail-carrying prompt; the masked shapes (addresses,
+  phone runs, long digit runs) are pinned by the offline tests beside
+  the eval fixtures under `evals/`, which also document the corners the
+  heuristics leave unmasked.
 - **The CLI second-writer seam.** `astra-cli` opens the same
   `astra.sqlite` as the running app (WAL, busy timeout, the engine's
   outbox lease keep the writers safe), but the app is not pushed: it

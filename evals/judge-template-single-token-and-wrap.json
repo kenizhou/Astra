@@ -1,0 +1,16 @@
+{
+  "id": "judge-template-single-token-and-wrap",
+  "feature": "judge_template",
+  "mode": "offline",
+  "prompt_version": "1",
+  "inputs": {
+    "question": "Does the message in the context look like unsolicited cold outreach?",
+    "context": "From: Sam Seller <sam@cold-outreach.test>\nSubject: Quick question\n\nI help teams like yours save on tooling."
+  },
+  "expected": {
+    "contains": [
+      "Answer with exactly one word: yes, no, or abstain."
+    ],
+    "context_wrapped": true
+  }
+}

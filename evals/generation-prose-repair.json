@@ -1,0 +1,20 @@
+{
+  "id": "generation-prose-repair",
+  "feature": "generation",
+  "mode": "offline",
+  "prompt_version": "1",
+  "inputs": {
+    "text": "Anything from the ticketing system can be marked read.",
+    "completion": "Sure, here are your rules: {\"rules\":[{\"name\":\"Tickets\",\"condition\":\"The message is a ticketing system notice.\",\"actions\":[\"mark_read\"]}]} hope that helps"
+  },
+  "expected": {
+    "rules": [
+      {
+        "name": "Tickets",
+        "condition": "The message is a ticketing system notice.",
+        "actions": ["mark_read"],
+        "enabled": true
+      }
+    ]
+  }
+}

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Hardening tests: the untrusted wrapper's shape (heading, fence, verbatim
-//! content), its idempotence, and the SPA0 DLP resolution.
+//! content), its idempotence, and the heading's quote escaping.
 
-use crate::{tag_untrusted, DlpPolicy};
+use crate::tag_untrusted;
 
 #[test]
 fn wraps_with_heading_and_fence() {
@@ -39,15 +39,4 @@ fn heading_quotes_are_escaped() {
         open_line.starts_with("<untrusted heading=\"subject &quot;urgent&quot;\">"),
         "{open_line}"
     );
-}
-
-#[test]
-fn spa0_dlp_resolves_every_policy_to_allow() {
-    for policy in [DlpPolicy::Allow, DlpPolicy::Redact, DlpPolicy::Block] {
-        assert_eq!(
-            DlpPolicy::resolve(policy),
-            DlpPolicy::Allow,
-            "{policy:?} resolves to Allow in SPA0"
-        );
-    }
 }

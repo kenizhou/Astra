@@ -48,7 +48,7 @@ pub(crate) fn record(
 /// said. Address counts and text lengths stand in for the values.
 pub(crate) fn arg_preview(verb: &Verb) -> String {
     match verb {
-        Verb::AccountsList => String::new(),
+        Verb::AccountsList | Verb::RulesList => String::new(),
         Verb::FoldersList { account } => format!("account={account}"),
         Verb::MessagesList {
             account,
@@ -58,9 +58,11 @@ pub(crate) fn arg_preview(verb: &Verb) -> String {
             Some(folder) => format!("account={account} folder={folder} limit={limit}"),
             None => format!("account={account} limit={limit}"),
         },
-        Verb::MessagesRead { account, keys } => {
-            format!("account={account} keys={}", keys.len())
-        }
+        // Every key-carrying read previews the same shape: the account and
+        // the count, never the caller's key words.
+        Verb::MessagesRead { account, keys }
+        | Verb::AiCold { account, keys }
+        | Verb::AiResults { account, keys } => format!("account={account} keys={}", keys.len()),
         Verb::DraftsSave { args } => format!(
             "account={} from=1 to={} cc={} subject_chars={} body_chars={} source={}",
             args.account,
@@ -71,5 +73,16 @@ pub(crate) fn arg_preview(verb: &Verb) -> String {
             args.source,
         ),
         Verb::DraftsDiscard { account, key } => format!("account={account} key={key}"),
+        Verb::RulesCreate {
+            name,
+            condition,
+            actions,
+        } => format!(
+            "name_chars={} condition_chars={} actions={}",
+            name.chars().count(),
+            condition.chars().count(),
+            actions.len(),
+        ),
+        Verb::RulesDelete { id } => format!("id={id}"),
     }
 }

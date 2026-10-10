@@ -1,0 +1,23 @@
+{
+  "id": "cold-decisive-no",
+  "feature": "cold",
+  "mode": "offline",
+  "prompt_version": "1",
+  "inputs": {
+    "mail": {
+      "account": "work",
+      "key": "m1",
+      "from_name": "Ada Lovelace",
+      "from_address": "ada@example.test",
+      "subject": "Launch notes",
+      "body": "Our weekly digest of launch notes, as every week."
+    },
+    "outcome": {
+      "verdict": "no",
+      "path": "first_try"
+    }
+  },
+  "expected": {
+    "verdict": "no"
+  }
+}

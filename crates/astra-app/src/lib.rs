@@ -7,9 +7,12 @@
 //! other. The [`App`] owns one [`engine_api::Engine`] shared across every configured
 //! [`Account`], and [`boot`] assembles the whole sequence over a host-provided runtime.
 //! The crate root holds the runtime's state; the command surface, the projection, the
-//! sync paths, and the preferences each live in their own module.
+//! sync paths, the preferences, and the AI rules model with its generation seam each
+//! live in their own module.
 
 mod accounts;
+mod ai_results;
+mod ai_rules;
 mod boot;
 mod compose_request;
 mod dispatch;
@@ -45,6 +48,14 @@ mod tests_live_harness;
 #[cfg(test)]
 mod dispatch_fakes;
 
+// The eval harness: the scenario fixtures under the repository's evals/
+// directory, driven through the same seams the unit tests exercise. The
+// scenario vocabulary and the seam-parameter drive are library surface
+// (the desktop host's live suite drives the live-mode fixtures over its
+// background client); the offline battery and its fixture injection stay
+// test-only, riding the dispatch-loop fakes.
+pub mod evals;
+
 use std::{
     path::PathBuf,
     sync::{atomic::AtomicU64, Arc, Mutex},
@@ -62,6 +73,13 @@ use crate::{
 };
 
 pub use accounts::{Account, MailboxConnector};
+pub use ai_results::AiPass;
+pub use ai_rules::{
+    categorise, categorise_prompt, cold_question, generation_prompt, judge_cold, judge_context,
+    match_question, match_rules, prompt_to_rules, Action, AiComplete, AiJudge, CategoriseError,
+    Category, MailContext, MatchResult, RulesError, CATEGORISE_PROMPT_VERSION, COLD_JUDGE_VERSION,
+    MATCH_CONTEXT_BODY_CAP, RULES_MATCH_VERSION, RULES_PROMPT_VERSION,
+};
 pub use boot::{boot, BootError, SpawnedTask};
 pub use dispatch::AppError;
 pub use drafts::{DraftResume, DRAFT_AUTOSAVE_IDLE};
@@ -178,6 +196,13 @@ pub struct App<P> {
     /// account lists that no provider of it is bound to (created since it connected).
     /// `None` disables the path (the tests, an unpersisted build).
     connector: Option<Box<dyn MailboxConnector<P>>>,
+    /// The AI bundle the incoming pass runs over: the judge and completion
+    /// seams, the DLP policy, and the shared AI store. `None` (the
+    /// default) and the app never runs a pass.
+    ai: Option<Arc<AiPass>>,
+    /// Woken by each refresh that arms the incoming AI pass, so the driver
+    /// future the host runs picks it up off the refresh's own path.
+    pass_armed: tokio::sync::Notify,
 }
 
 impl<P> core::fmt::Debug for App<P> {
@@ -228,6 +253,8 @@ impl<P: Provider> App<P> {
             mail_row_cache: Mutex::new(None),
             row_cache_generation: AtomicU64::new(0),
             connector,
+            ai: None,
+            pass_armed: tokio::sync::Notify::new(),
         }
     }
 
@@ -256,6 +283,17 @@ impl<P: Provider> App<P> {
     #[must_use]
     pub fn with_draft_autosave_idle(mut self, idle: Duration) -> Self {
         self.autosave_idle = idle;
+        self
+    }
+
+    /// Names the AI bundle the incoming pass runs over (the judge and
+    /// completion seams, the DLP policy, and the shared AI store), or
+    /// `None` to run no pass (the default). Call it before the first
+    /// dispatch: the host assembles the bundle over its client and the one
+    /// store, and a refresh arms the pass only when the bundle is in place.
+    #[must_use]
+    pub fn with_ai_pass(mut self, pass: Option<AiPass>) -> Self {
+        self.ai = pass.map(Arc::new);
         self
     }
 }

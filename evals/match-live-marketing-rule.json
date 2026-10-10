@@ -1,0 +1,25 @@
+{
+  "id": "match-live-marketing-rule",
+  "feature": "match",
+  "mode": "live",
+  "prompt_version": "1",
+  "inputs": {
+    "rule": {
+      "name": "Marketing",
+      "condition": "The message markets a product, a sale, or an event.",
+      "actions": ["mark_read"]
+    },
+    "mail": {
+      "account": "work",
+      "key": "m1",
+      "from_name": "Promo Desk",
+      "from_address": "promo@example.test",
+      "subject": "40 percent off everything this weekend only",
+      "body": "Our flash sale ends at midnight on Sunday. Shop now and save 40 percent on everything in the store."
+    }
+  },
+  "expected": {
+    "matched": ["Marketing"],
+    "verdict": "yes"
+  }
+}

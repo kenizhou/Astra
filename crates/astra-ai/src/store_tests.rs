@@ -213,12 +213,16 @@ fn the_bookkeeping_row_lands_once_and_survives_the_reopen() {
     let path = dir.join("ai.sqlite3");
     {
         let store = AiStore::open(&path).expect("the first open migrates");
-        assert_eq!(versions(&store), vec![1], "one row per applied migration");
+        assert_eq!(
+            versions(&store),
+            vec![1, 2, 3],
+            "one row per applied migration"
+        );
     }
     let reopened = AiStore::open(&path).expect("the reopen claims nothing new");
     assert_eq!(
         versions(&reopened),
-        vec![1],
+        vec![1, 2, 3],
         "the reopen records no second bookkeeping row"
     );
     std::fs::remove_dir_all(&dir).ok();
@@ -243,10 +247,78 @@ fn concurrent_first_opens_all_succeed_with_one_bookkeeping_row() {
     let store = AiStore::open(&path).expect("the store opens after the race");
     assert_eq!(
         versions(&store),
-        vec![1],
-        "the race applied the migration exactly once"
+        vec![1, 2, 3],
+        "the race applied each migration exactly once"
     );
     std::fs::remove_dir_all(&dir).ok();
+}
+
+/// A nano-tier ledger row with a reported cost, the shape the spend guard
+/// aggregates.
+fn nano_call(cost: Option<u64>, outcome: &str) -> LlmCallRow {
+    LlmCallRow {
+        correlation: CorrelationId::generate(),
+        use_case: LlmUseCase::JudgeColdEmail,
+        tier: ModelTier::Nano,
+        model: "gpt-nano-mini".to_string(),
+        prompt_tokens: 10,
+        completion_tokens: 1,
+        cost_micros: cost,
+        latency_ms: 90,
+        outcome: outcome.to_string(),
+    }
+}
+
+#[test]
+fn weekly_nano_spend_aggregates_nano_rows_of_the_trailing_week() {
+    let store = store();
+    for cost in [1200u64, 3400] {
+        store
+            .record_llm_call(&nano_call(Some(cost), "ok"))
+            .expect("nano call records");
+    }
+    store
+        .record_llm_call(&nano_call(None, "error:transport"))
+        .expect("costless nano call records");
+    store
+        .record_llm_call(&LlmCallRow {
+            use_case: LlmUseCase::JudgeRuleMatch,
+            tier: ModelTier::Economy,
+            model: "gpt-4o-mini".to_string(),
+            outcome: "ok".to_string(),
+            ..nano_call(Some(9900), "ok")
+        })
+        .expect("economy call records");
+    assert_eq!(
+        store
+            .weekly_nano_spend_micros()
+            .expect("the weekly aggregate runs"),
+        4600,
+        "nano costs of the trailing week, costless and non-nano rows aside",
+    );
+}
+
+#[test]
+fn rows_outside_the_trailing_week_do_not_count_against_the_budget() {
+    let store = store();
+    store
+        .record_llm_call(&nano_call(Some(5000), "ok"))
+        .expect("nano call records");
+    {
+        let conn = store.test_conn();
+        let conn = conn.lock().expect("test connection");
+        conn.execute(
+            "UPDATE llm_calls SET created_at = strftime('%s','now') - 691200",
+            [],
+        )
+        .expect("the row is backdated eight days, beyond the week");
+    }
+    assert_eq!(
+        store
+            .weekly_nano_spend_micros()
+            .expect("the weekly aggregate runs"),
+        0,
+    );
 }
 
 #[test]

@@ -72,11 +72,23 @@ struct Migration {
 }
 
 /// The embedded migrations, in order.
-const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    name: "init",
-    sql: include_str!("migrations/0001_init.sql"),
-}];
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "init",
+        sql: include_str!("migrations/0001_init.sql"),
+    },
+    Migration {
+        version: 2,
+        name: "rules",
+        sql: include_str!("migrations/0002_rules.sql"),
+    },
+    Migration {
+        version: 3,
+        name: "ai_results",
+        sql: include_str!("migrations/0003_ai_results.sql"),
+    },
+];
 
 impl AiStore {
     /// Opens (creating when absent) the store at `path` and brings it to
@@ -137,6 +149,28 @@ impl AiStore {
         )
         .map_err(AiStoreError::Sqlite)?;
         Ok(())
+    }
+
+    /// The nano tier's provider-reported spend over the trailing seven
+    /// days, in micros of currency: the aggregate the judge spend guard
+    /// compares against its `ASTRA_LLM_NANO_BUDGET_MICROS` budget. Only
+    /// nano-tier rows count (the guard watches the cheap high-volume tier
+    /// where the judges live); rows without a reported cost contribute
+    /// nothing.
+    ///
+    /// # Errors
+    /// Fails when the aggregate cannot run.
+    pub fn weekly_nano_spend_micros(&self) -> Result<u64, AiStoreError> {
+        let conn = self.lock();
+        let spent: i64 = conn
+            .query_row(
+                "SELECT COALESCE(SUM(cost_micros), 0) FROM llm_calls
+                 WHERE tier = 'nano' AND created_at >= strftime('%s','now') - 604800",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(AiStoreError::Sqlite)?;
+        Ok(u64::try_from(spent).unwrap_or(0))
     }
 
     /// Appends one audit row. As [`AiStore::record_llm_call`], the store
@@ -220,8 +254,9 @@ impl AiStore {
     }
 
     /// The store's connection. An unreachable lock is a poisoned invariant,
-    /// not a caller-recoverable state.
-    fn lock(&self) -> std::sync::MutexGuard<'_, rusqlite::Connection> {
+    /// not a caller-recoverable state. Shared with this crate's rules CRUD,
+    /// which rides the same connection under the same contract.
+    pub(crate) fn lock(&self) -> std::sync::MutexGuard<'_, rusqlite::Connection> {
         self.conn.lock().expect("ai store connection poisoned")
     }
 }

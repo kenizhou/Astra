@@ -14,7 +14,7 @@ use std::{future::Future, path::Path, pin::Pin, sync::Arc};
 use engine_api::{Engine, Provider};
 use thiserror::Error;
 
-use crate::{preferences_path, Account, App, AppObserver, MailboxConnector};
+use crate::{preferences_path, Account, AiPass, App, AppObserver, MailboxConnector};
 
 /// A boxed task the host runs on its own runtime: the first sync of one account.
 pub type SpawnedTask = Pin<Box<dyn Future<Output = ()> + Send>>;
@@ -38,7 +38,9 @@ pub enum BootError {
 /// TLS trust policy and credentials live there), the observer is the notification path
 /// every [`Surfaced`](crate::Surfaced) publish signals, and `spawn` runs each account's
 /// first sync on the host's runtime: priming paints the cached list first, and the
-/// first sync is the longest wait the app asks for.
+/// first sync is the longest wait the app asks for. `ai` is the AI bundle the incoming
+/// pass runs over, assembled host-side over its background client; `None` runs no
+/// pass.
 ///
 /// The preferences file sits beside the engine store, in the same directory.
 ///
@@ -52,6 +54,7 @@ pub async fn boot<P, S>(
     connector: Option<Box<dyn MailboxConnector<P>>>,
     observer: Arc<dyn AppObserver>,
     spawn: S,
+    ai: Option<AiPass>,
 ) -> Result<Arc<App<P>>, BootError>
 where
     P: Provider + 'static,
@@ -69,7 +72,9 @@ where
     let prefs_path = engine_path
         .parent()
         .map_or_else(|| preferences_path(Path::new(".")), preferences_path);
-    let app = App::new(engine, accounts, connector, observer).with_prefs_path(Some(prefs_path));
+    let app = App::new(engine, accounts, connector, observer)
+        .with_prefs_path(Some(prefs_path))
+        .with_ai_pass(ai);
     let app = Arc::new(app);
     // Before anything can drain: a write the last run left mid-attempt is put back the
     // way the point it reached allows, so the first drain sends what never left and
@@ -91,6 +96,15 @@ where
         let app = Arc::clone(&app);
         spawn(Box::pin(async move {
             app.drive_draft_autosave().await;
+        }));
+    }
+    // The incoming AI pass driver rides the same seam: it sleeps until a refresh
+    // arms it, so a pass with no AI bundle costs nothing and one with a bundle
+    // never sits on the refresh path that armed it.
+    {
+        let app = Arc::clone(&app);
+        spawn(Box::pin(async move {
+            app.drive_incoming_pass().await;
         }));
     }
     Ok(app)

@@ -188,6 +188,7 @@ version = "0.1.0"
 dependencies = [
  "ammonia",
  "astra-account",
+ "astra-ai",
  "astra-autodetect",
  "astra-composer",
  "astra-viewmodel",

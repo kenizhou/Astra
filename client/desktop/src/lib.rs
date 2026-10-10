@@ -33,7 +33,9 @@ mod commands_fakes;
 use tauri::{Emitter, Manager};
 
 pub(crate) use agent::SidecarRelay;
-pub use ai::{repair_json, LlmClient, LlmEndpoint, LlmError};
+pub use ai::{
+    incoming_pass, repair_json, LlmAiComplete, LlmAiJudge, LlmClient, LlmEndpoint, LlmError,
+};
 pub(crate) use app_state::{AppPort, AppState, HostAccount, HostProvider};
 pub(crate) use boot::AccountDials;
 pub use credential_store::CredentialStoreError;

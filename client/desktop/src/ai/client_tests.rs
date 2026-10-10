@@ -5,15 +5,17 @@
 //! read at startup, and the pure classification helpers (rejection classes,
 //! Retry-After). The terminal and exhausted-chain failure classes live in
 //! `client_failure_tests`; the fixture, client builders, and ledger reader in
-//! the sibling `fixture` module; the repair_json cases in `wire_tests`.
+//! the sibling `fixture` module; the repair_json cases in the AI foundation
+//! crate they moved to.
 
 use std::time::Duration;
 
 use astra_ai::{CorrelationId, LlmUseCase};
 use reqwest::header::{HeaderMap, HeaderValue, RETRY_AFTER};
 
-use super::{classify_rejection, retry_after, LlmClient, Rejection};
+use super::LlmClient;
 use crate::ai::fixture::{self, env_at, llm_client, row, runtime, Ledger};
+use crate::ai::wire::{classify_rejection, retry_after, Rejection};
 
 #[test]
 fn openai_success_pins_the_wire_shape_and_lands_one_ok_row() {

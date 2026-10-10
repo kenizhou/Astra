@@ -37,6 +37,8 @@ use crate::{Account, App, AppObserver, MailboxConnector, Surface};
 // module so this file stays under the 500-line limit beside the SMTP leg. The
 // re-export keeps every test module's `fakes::…` paths unchanged.
 mod mail;
+// The AI pass fixtures, its own child for the same limit, pathed `fakes::ai::…`.
+pub(crate) mod ai;
 pub(super) use mail::{
     delivered_at, folder_keys, mail, pane_rows, read, row, row_keys, sending_signals, sent_copy,
     threaded,
