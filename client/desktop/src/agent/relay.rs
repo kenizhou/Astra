@@ -297,10 +297,10 @@ impl SidecarRelay {
             cli_path: config.cli_path,
             data_dir: config.data_dir.to_string_lossy().into_owned(),
             mock_fixture: config.mock_fixture,
-            model_configs: config
-                .model_configs
-                .is_empty()
-                .then_some(config.model_configs),
+            // A configured tier is delivered; an empty table is omitted
+            // entirely (the protocol's skip rule), never sent as an empty
+            // object the pi harness would read as no model.
+            model_configs: (!config.model_configs.is_empty()).then_some(config.model_configs),
             policy: Some(config.policy),
         };
         if let Err(e) = self.write_command(&init).await {

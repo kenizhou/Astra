@@ -12,8 +12,21 @@ use crate::agent::protocol::{
 };
 
 impl SidecarRelay {
-    /// Parses and routes one stdout line.
-    pub(super) async fn handle_line(&self, line: &str, generation: u64) {
+    /// Parses and routes one stdout line. The read pump enters here with
+    /// its generation, and the stale-generation tests replay lines through
+    /// the same door.
+    ///
+    /// Every envelope is gated on that generation, not just the ready
+    /// handshake: a line from a pump whose connection was already declared
+    /// dead or replaced (a late permission ask, a trailing llm_call)
+    /// belongs to a sidecar the host has moved on from, and routing it
+    /// would register an ask against the next sidecar or land a ledger row
+    /// on the live turn.
+    pub(crate) async fn handle_line(&self, line: &str, generation: u64) {
+        if self.inner.lock().await.generation != generation {
+            log::warn!("agent: dropping a stale sidecar line (generation {generation}): {line}");
+            return;
+        }
         let envelope: OutEnvelope = match serde_json::from_str(line) {
             Ok(envelope) => envelope,
             Err(e) => {
@@ -23,11 +36,8 @@ impl SidecarRelay {
         };
         match envelope {
             OutEnvelope::Ready { models, harnesses } => {
-                // A stale pump (a previous generation) must not flip the state.
-                if self.inner.lock().await.generation == generation {
-                    self.state_tx.send_replace(RelayState::Ready);
-                    self.sink.emit_sidecar_ready(models, harnesses);
-                }
+                self.state_tx.send_replace(RelayState::Ready);
+                self.sink.emit_sidecar_ready(models, harnesses);
             }
             OutEnvelope::Event { session_id, event } => {
                 let correlation = self.correlation_of(&session_id).await;

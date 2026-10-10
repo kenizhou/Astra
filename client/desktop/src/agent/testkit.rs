@@ -7,8 +7,8 @@
 use std::sync::{Arc, Mutex};
 
 use super::{
-    default_policy, relay::SidecarConfig, spawn_sidecar, AgentEventSink, AgentStreamEvent,
-    PendingApproval, PermissionResolved, SidecarRelay,
+    default_policy, protocol::ModelConfig, relay::SidecarConfig, spawn_sidecar, AgentEventSink,
+    AgentStreamEvent, PendingApproval, PermissionResolved, SidecarRelay,
 };
 use crate::agent::node::find_node;
 use astra_ai::AiStore;
@@ -92,15 +92,26 @@ pub(crate) fn stub_relay(
     restart_max: u32,
     backoff_base_ms: u64,
 ) -> (Arc<SidecarRelay>, Arc<CollectingSink>, std::path::PathBuf) {
-    stub_relay_with(name, &[mode], restart_max, backoff_base_ms)
+    stub_relay_with(name, &[mode], &[], restart_max, backoff_base_ms)
+}
+
+/// A relay whose init envelope carries `model_configs`, running the stub's
+/// `echo-init` mode so the test can read the delivery back.
+pub(crate) fn configured_stub_relay(
+    name: &str,
+    model_configs: &[(String, ModelConfig)],
+) -> (Arc<SidecarRelay>, Arc<CollectingSink>, std::path::PathBuf) {
+    stub_relay_with(name, &["echo-init"], model_configs, 3, 50)
 }
 
 /// The rotating-spawn form: each spawn call runs the next mode in the
 /// list, wrapping to the last one, so a test can exhaust a budget with
-/// dying sidecars and then recover with a live one.
+/// dying sidecars and then recover with a live one. The model configs
+/// ride every init envelope the relay writes.
 pub(crate) fn stub_relay_with(
     name: &str,
     modes: &[&str],
+    model_configs: &[(String, ModelConfig)],
     restart_max: u32,
     backoff_base_ms: u64,
 ) -> (Arc<SidecarRelay>, Arc<CollectingSink>, std::path::PathBuf) {
@@ -134,7 +145,7 @@ pub(crate) fn stub_relay_with(
             cli_path: String::new(),
             harness: "stub".to_string(),
             mock_fixture: None,
-            model_configs: std::collections::BTreeMap::new(),
+            model_configs: model_configs.iter().cloned().collect(),
             policy: default_policy(),
             restart_max,
             backoff_base_ms,

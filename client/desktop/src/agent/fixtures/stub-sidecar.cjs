@@ -111,6 +111,19 @@ function handleCommand(cmd) {
         answerReady();
         process.exit(0);
       }
+      if (mode === 'echo-init') {
+        // Report exactly what the init line carried: the model_configs
+        // field as received (null when the host omitted it), so the tests
+        // can pin the init envelope's delivery.
+        writeLine({
+          type: 'event',
+          session_id: 'agent:main',
+          event: {
+            kind: 'text_delta',
+            text: JSON.stringify(cmd.model_configs ?? null),
+          },
+        });
+      }
       answerReady();
       break;
     case 'prompt':

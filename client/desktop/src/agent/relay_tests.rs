@@ -10,10 +10,22 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::{
-    testkit::{audit_rows, llm_rows, stub_relay, CollectingSink},
+    protocol::{ModelApi, ModelConfig},
+    supervisor,
+    testkit::{audit_rows, configured_stub_relay, llm_rows, stub_relay, CollectingSink},
     StreamPayload,
 };
 use astra_ai::CorrelationId;
+
+/// The pinned fixture lines the stale-generation test replays, from the
+/// same shared files the protocol suite round-trips (four hops up from
+/// this file to the repo root).
+const LATE_PERMISSION_REQUEST: &str =
+    include_str!("../../../../sidecar/src/fixtures/protocol/out-permission-request.json");
+const LATE_LLM_CALL: &str =
+    include_str!("../../../../sidecar/src/fixtures/protocol/out-llm-call.json");
+const LIVE_EVENT: &str =
+    include_str!("../../../../sidecar/src/fixtures/protocol/out-event-text-delta.json");
 
 /// One test's runtime, built the way the host builds its own.
 fn runtime() -> crate::runtime::AppRuntime {
@@ -333,5 +345,120 @@ fn a_restart_returns_to_ready_and_answers_prompts_again() {
             |event| matches!(&event.event, StreamPayload::TextDelta { text } if text == "echo: again")
         ),
         "the new process answers: {events:?}"
+    );
+}
+
+#[test]
+fn a_configured_relay_delivers_its_model_configs_on_init() {
+    let runtime = runtime();
+    // The chat tier's endpoint, key included, rides the init line in band.
+    let (relay, sink, _data) = configured_stub_relay(
+        "init-configured",
+        &[(
+            "chat".to_string(),
+            ModelConfig {
+                api: ModelApi::AnthropicMessages,
+                base_url: "https://api.anthropic.com".to_owned(),
+                model: "claude-sonnet-4".to_owned(),
+                api_key: Some("sk-ant-test".to_owned()),
+            },
+        )],
+    );
+    runtime
+        .block_on(|| async { relay.ensure_started().await })
+        .expect("the handshake completes");
+
+    let events = runtime.block_on(|| async { sink.await_events(1).await });
+    let echoed: serde_json::Value = serde_json::from_str(match &events[0].event {
+        StreamPayload::TextDelta { text } => text,
+        other => panic!("the echo-init report is a text delta: {other:?}"),
+    })
+    .expect("the report is JSON");
+    assert_eq!(
+        echoed["chat"]["api"], "anthropic-messages",
+        "the configured tier is delivered: {echoed}"
+    );
+    assert_eq!(echoed["chat"]["base_url"], "https://api.anthropic.com");
+    assert_eq!(echoed["chat"]["model"], "claude-sonnet-4");
+    assert_eq!(echoed["chat"]["api_key"], "sk-ant-test");
+}
+
+#[test]
+fn an_unconfigured_relay_omits_the_model_configs_field() {
+    let runtime = runtime();
+    let (relay, sink, _data) = configured_stub_relay("init-empty", &[]);
+    runtime
+        .block_on(|| async { relay.ensure_started().await })
+        .expect("the handshake completes");
+
+    // The field is omitted entirely (the protocol's skip rule), not
+    // delivered as an empty object: the stub reports null for an absent
+    // field and "{}" for a present empty one.
+    let events = runtime.block_on(|| async { sink.await_events(1).await });
+    assert!(
+        matches!(&events[0].event, StreamPayload::TextDelta { text } if text == "null"),
+        "the unconfigured relay omits the field: {:?}",
+        events[0].event
+    );
+}
+
+#[test]
+fn stale_generation_lines_are_dropped_everywhere() {
+    let runtime = runtime();
+    // A long backoff keeps the supervisor's scheduled restart out of the
+    // test's way; the generation moves once, by hand, the way every death
+    // and restart path moves it.
+    let (relay, sink, data) = stub_relay("stale-lines", "echo", 5, 10_000);
+    runtime
+        .block_on(|| async { relay.ensure_started().await })
+        .expect("the handshake completes");
+    let dead_generation = runtime.block_on(|| async { relay.generation().await });
+    runtime
+        .block_on(|| async { supervisor::handle_connection_dead(&relay, dead_generation).await });
+
+    // The dead connection's pump delivers its late lines anyway: a
+    // permission ask and an llm_call from before the bump. Neither may
+    // register, emit, or land a row against the next generation.
+    runtime.block_on(|| async {
+        relay
+            .handle_line(LATE_PERMISSION_REQUEST, dead_generation)
+            .await;
+    });
+    runtime.block_on(|| async { relay.handle_line(LATE_LLM_CALL, dead_generation).await });
+    assert!(
+        sink.requests.lock().unwrap().is_empty(),
+        "a stale permission ask never registers"
+    );
+    assert!(
+        llm_rows(&data).is_empty(),
+        "a stale llm_call never lands a ledger row"
+    );
+    assert!(
+        sink.agent_events.lock().unwrap().is_empty(),
+        "a stale line never reaches the stream"
+    );
+
+    // The current generation still routes: the same envelope shapes
+    // deliver normally once the generation matches.
+    let live_generation = runtime.block_on(|| async { relay.generation().await });
+    runtime.block_on(|| async { relay.handle_line(LIVE_EVENT, live_generation).await });
+    let events = runtime.block_on(|| async { sink.await_events(1).await });
+    assert!(
+        matches!(&events[0].event, StreamPayload::TextDelta { text } if text == "Hello"),
+        "the current generation's line streams: {events:?}"
+    );
+}
+
+#[test]
+fn an_unknown_permission_answer_fails_without_starting_a_sidecar() {
+    let runtime = runtime();
+    let (relay, _sink, _data) = stub_relay("respond-order", "echo", 3, 50);
+    let outcome =
+        runtime.block_on(|| async { relay.respond_permission("no-such-ask", true, false).await });
+    assert!(outcome.is_err(), "the unknown id is the typed refusal");
+    assert_eq!(
+        relay.status().as_str(),
+        "down",
+        "no sidecar is spawned just to refuse an answer"
     );
 }

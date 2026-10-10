@@ -10,6 +10,7 @@ import { create } from 'zustand';
 import {
   agentAbort,
   agentPrompt,
+  agentStatus,
   permissionResponse,
   type AgentStreamEvent,
   type PendingApproval,
@@ -42,6 +43,9 @@ interface AgentStoreState {
   approvals: PendingApproval[];
   /** Applies the relay lifecycle word. */
   setStatus: (status: string) => void;
+  /** Pulls the relay lifecycle word from the host, so the panel shows the
+   *  state the events have not announced (restarting, most often). */
+  refreshStatus: () => Promise<void>;
   /** Sends a prompt and records the user's side of the turn. */
   sendPrompt: (text: string) => Promise<void>;
   /** Aborts the live turn. */
@@ -65,6 +69,16 @@ export const useAgentStore = create<AgentStoreState>((set, get) => ({
   approvals: [],
 
   setStatus: (status) => set({ status }),
+
+  refreshStatus: async () => {
+    try {
+      const status = await agentStatus();
+      set({ status: status.state });
+    } catch {
+      // Outside the desktop host (jsdom, a plain browser tab) there is no
+      // relay to ask; the last announced word stands.
+    }
+  },
 
   sendPrompt: async (text) => {
     const trimmed = text.trim();

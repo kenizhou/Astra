@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const ipc = vi.hoisted(() => ({
   agentPrompt: vi.fn(),
   agentAbort: vi.fn(),
+  agentStatus: vi.fn(),
   permissionResponse: vi.fn(),
 }));
 
@@ -17,6 +18,7 @@ vi.mock('@/services/agent', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   agentPrompt: ipc.agentPrompt,
   agentAbort: ipc.agentAbort,
+  agentStatus: ipc.agentStatus,
   permissionResponse: ipc.permissionResponse,
 }));
 
@@ -29,9 +31,11 @@ import { AgentPanel, AgentStatus } from './AgentPanel';
 function reset(): void {
   ipc.agentPrompt.mockReset();
   ipc.agentAbort.mockReset();
+  ipc.agentStatus.mockReset();
   ipc.permissionResponse.mockReset();
   ipc.agentPrompt.mockResolvedValue('p-1');
   ipc.agentAbort.mockResolvedValue(undefined);
+  ipc.agentStatus.mockResolvedValue({ state: 'down', model: null });
   ipc.permissionResponse.mockResolvedValue(undefined);
   useAgentStore.getState().reset();
   useUiStore.getState().setAgentOpen(false);
@@ -195,12 +199,13 @@ describe('the approval card', () => {
     ipc.permissionResponse.mockClear();
   }
 
-  it('renders the tool and its arguments', () => {
+  it('renders the tool, its arguments, and the request id', () => {
     openWithAsk();
 
     const card = screen.getByRole('article', { name: 'Approval save_draft' });
     expect(within(card).getByText('save_draft')).toBeTruthy();
     expect(within(card).getByText(/"account":"work"/)).toBeTruthy();
+    expect(within(card).getByText('perm-1')).toBeTruthy();
   });
 
   it('dispatches the approval with the exact IPC payload', async () => {
@@ -240,5 +245,17 @@ describe('the relay status', () => {
     render(<AgentPanel />);
 
     expect(screen.getByText('lost')).toBeTruthy();
+  });
+
+  it('pulls the status from the host when the panel opens, so the unannounced words show', async () => {
+    ipc.agentStatus.mockResolvedValue({ state: 'restarting', model: 'claude-sonnet-4' });
+    useUiStore.getState().setAgentOpen(true);
+    render(<AgentPanel />);
+
+    expect(ipc.agentStatus).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByText('restarting')).toBeTruthy();
   });
 });

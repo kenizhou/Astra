@@ -99,8 +99,11 @@ impl SidecarRelay {
     }
 
     /// The UI's answer to one pending approval. The bridge consumes the
-    /// ask before the response envelope is written; a write failure
-    /// restores it so the decision is not lost.
+    /// ask first, before anything is started: an answer for an unknown or
+    /// already-consumed id is the typed refusal, and refusing it must not
+    /// spawn a fresh sidecar just to fail. The response envelope is
+    /// written once a live sidecar stands; a start or write failure
+    /// restores the consumed ask so the decision is not lost.
     ///
     /// # Errors
     /// The typed unknown-or-consumed error, or the start and write
@@ -111,12 +114,15 @@ impl SidecarRelay {
         approved: bool,
         always_allow: bool,
     ) -> Result<(), String> {
-        let arc = self
-            .me
-            .upgrade()
-            .ok_or_else(|| "the agent relay was dropped".to_string())?;
-        arc.ensure_started().await?;
         let consumed = self.bridge.respond(id, approved, always_allow)?;
+        let Some(arc) = self.me.upgrade() else {
+            self.bridge.restore(consumed);
+            return Err("the agent relay was dropped".to_string());
+        };
+        if let Err(e) = arc.ensure_started().await {
+            self.bridge.restore(consumed);
+            return Err(e);
+        }
         let command = InCommand::PermissionResponse {
             id: id.to_owned(),
             approved,
@@ -148,6 +154,13 @@ impl SidecarRelay {
     /// Cancels one prompt: best effort on the wire, and fail-closes every
     /// pending approval so a suspended tool call cannot outlive the turn
     /// the user cancelled.
+    ///
+    /// The fail-close is deliberately cross-session today (one abort
+    /// settles every session's asks): SPA0 chat is the single
+    /// `agent:main` session, so the blast radius is the whole bridge by
+    /// construction. When sessions multiply, this narrows to the aborted
+    /// turn's session, matching the sidecar's own abort-side
+    /// `rejectAll` scope.
     pub(crate) async fn abort(&self, prompt_id: &str) {
         let command = InCommand::Abort {
             id: prompt_id.to_owned(),

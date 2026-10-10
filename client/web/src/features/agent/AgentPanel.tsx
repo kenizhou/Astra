@@ -51,6 +51,11 @@ function ApprovalCard({ approval }: { approval: PendingApproval }) {
         <span className="text-xs font-medium text-foreground">{approval.tool}</span>
         <span className="text-[11px] text-muted-foreground">{approval.level}</span>
       </div>
+      {/* The request id, so a support conversation can name the exact ask
+       *  the ledger's audit rows carry. */}
+      <p className="mt-0.5 truncate text-[10px] text-muted-foreground" title={approval.id}>
+        {approval.id}
+      </p>
       <p className="mt-0.5 truncate text-[11px] text-muted-foreground" title={argsPreview(approval.args)}>
         {argsPreview(approval.args)}
       </p>
@@ -87,6 +92,15 @@ export function AgentPanel() {
     // jsdom implements no scrolling; the optional call keeps tests honest.
     logEnd.current?.scrollIntoView?.({ block: 'end' });
   }, [messages]);
+
+  useEffect(() => {
+    // Opening the panel asks the host where the relay stands: the events
+    // announce ready and lost, but the words between them (restarting,
+    // starting) only the status pull knows.
+    if (open) {
+      void useAgentStore.getState().refreshStatus();
+    }
+  }, [open]);
 
   if (!open) {
     return null;

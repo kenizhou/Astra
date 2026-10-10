@@ -137,7 +137,8 @@ fn a_lost_relay_recovers_through_a_fresh_start() {
     // The rotating spawner: the first three spawns die instantly (a
     // budget of two exhausts on the third death), the fourth runs the
     // well-behaved echo stub the fresh start recovers onto.
-    let (relay, sink, _data) = stub_relay_with("recover", &["die", "die", "die", "echo"], 2, 20);
+    let (relay, sink, _data) =
+        stub_relay_with("recover", &["die", "die", "die", "echo"], &[], 2, 20);
     runtime
         .block_on(|| async { relay.start_once().await })
         .expect("the first spawn");
