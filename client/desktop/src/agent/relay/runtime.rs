@@ -36,8 +36,10 @@ impl SidecarRelay {
         };
         match envelope {
             OutEnvelope::Ready { models, harnesses } => {
-                self.state_tx.send_replace(RelayState::Ready);
+                // Emit before the flip: a waiter woken by the Ready state
+                // must already observe the ready emission in its sink.
                 self.sink.emit_sidecar_ready(models, harnesses);
+                self.state_tx.send_replace(RelayState::Ready);
             }
             OutEnvelope::Event { session_id, event } => {
                 let correlation = self.correlation_of(&session_id).await;
