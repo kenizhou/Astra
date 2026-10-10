@@ -11,6 +11,7 @@
 //! live in their own module.
 
 mod accounts;
+mod ai_results;
 mod ai_rules;
 mod boot;
 mod compose_request;
@@ -64,8 +65,11 @@ use crate::{
 };
 
 pub use accounts::{Account, MailboxConnector};
+pub use ai_results::AiPass;
 pub use ai_rules::{
-    generation_prompt, prompt_to_rules, Action, AiComplete, Rule, RulesError, RULES_PROMPT_VERSION,
+    generation_prompt, judge_context, match_question, match_rules, prompt_to_rules, Action,
+    AiComplete, AiJudge, MailContext, MatchResult, RulesError, MATCH_CONTEXT_BODY_CAP,
+    RULES_MATCH_VERSION, RULES_PROMPT_VERSION,
 };
 pub use boot::{boot, BootError, SpawnedTask};
 pub use dispatch::AppError;
@@ -183,6 +187,12 @@ pub struct App<P> {
     /// account lists that no provider of it is bound to (created since it connected).
     /// `None` disables the path (the tests, an unpersisted build).
     connector: Option<Box<dyn MailboxConnector<P>>>,
+    /// The AI bundle the incoming pass runs over: the judge seam and the
+    /// shared AI store. `None` (the default) and the app never runs a pass.
+    ai: Option<Arc<AiPass>>,
+    /// Woken by each refresh that arms the incoming AI pass, so the driver
+    /// future the host runs picks it up off the refresh's own path.
+    pass_armed: tokio::sync::Notify,
 }
 
 impl<P> core::fmt::Debug for App<P> {
@@ -233,6 +243,8 @@ impl<P: Provider> App<P> {
             mail_row_cache: Mutex::new(None),
             row_cache_generation: AtomicU64::new(0),
             connector,
+            ai: None,
+            pass_armed: tokio::sync::Notify::new(),
         }
     }
 
@@ -261,6 +273,17 @@ impl<P: Provider> App<P> {
     #[must_use]
     pub fn with_draft_autosave_idle(mut self, idle: Duration) -> Self {
         self.autosave_idle = idle;
+        self
+    }
+
+    /// Names the AI bundle the incoming pass runs over (the judge seam and
+    /// the shared AI store), or `None` to run no pass (the default). Call
+    /// it before the first dispatch: the host assembles the bundle over its
+    /// client and the one store, and a refresh arms the pass only when the
+    /// bundle is in place.
+    #[must_use]
+    pub fn with_ai_pass(mut self, pass: Option<AiPass>) -> Self {
+        self.ai = pass.map(Arc::new);
         self
     }
 }

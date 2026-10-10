@@ -120,8 +120,6 @@ pub fn generation_prompt(text: &str) -> String {
 /// furthest is the failure's detail.
 fn parse_generated(completion: &str) -> Result<GeneratedRules, RulesError> {
     serde_json::from_str(completion)
-        .or_else(|direct| {
-            repair_json(completion).map_or(Err(direct), serde_json::from_str)
-        })
+        .or_else(|direct| repair_json(completion).map_or(Err(direct), serde_json::from_str))
         .map_err(|source| RulesError::MalformedOutput(source.to_string()))
 }

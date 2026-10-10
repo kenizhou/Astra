@@ -4,16 +4,33 @@
 //! (migration 0002). Generation lives in the `generate` child module; the
 //! matching and execution stages arrive with the incoming pass.
 
+// `match` is a keyword, so the module over match.rs is `matching` (the file
+// name stays the one the plan pins).
+mod execute;
 mod generate;
+#[path = "match.rs"]
+mod matching;
+
+#[cfg(test)]
+#[path = "execute_tests.rs"]
+mod execute_tests;
 
 #[cfg(test)]
 #[path = "generate_tests.rs"]
 mod generate_tests;
 
-use astra_ai::{CorrelationId, LlmUseCase, NewRule, RuleId, RuleRow};
+#[cfg(test)]
+#[path = "match_tests.rs"]
+mod matching_tests;
+
+use astra_ai::{CorrelationId, JudgeOutcome, JudgeUseCase, LlmUseCase, NewRule, RuleId, RuleRow};
 use async_trait::async_trait;
 
 pub use generate::{generation_prompt, prompt_to_rules, RULES_PROMPT_VERSION};
+pub use matching::{
+    judge_context, match_question, match_rules, MailContext, MatchResult, MATCH_CONTEXT_BODY_CAP,
+    RULES_MATCH_VERSION,
+};
 
 /// One action a matched rule takes on a message. The set is closed:
 /// `mark_read` and `set_flagged` (the deterministic, reversible pair A1
@@ -128,6 +145,32 @@ pub trait AiComplete: Send + Sync {
         prompt: &str,
         correlation: &CorrelationId,
     ) -> Result<String, String>;
+}
+
+/// The judge seam: one binary judge call behind the AI matching paths,
+/// the judge family's mirror of [`AiComplete`]. The desktop host implements
+/// it over its `LlmClient::judge` (the versioned single-token prompt with
+/// the hardening wrap, the retry, the safe default, and the ledger row per
+/// attempt); tests inject fixture verdicts through the same trait.
+///
+/// Errors never cross the seam: the host folds every failure into the
+/// judge's safe default before it answers, so the caller always receives a
+/// decided [`JudgeOutcome`] and never a failure to propagate. The question
+/// and context arrive as the two halves the host's prompt template keeps
+/// apart: the question is trusted instruction text (a rule's condition
+/// sentence rides here, as data), the context is untrusted mail content
+/// the host wraps before the model sees it.
+#[async_trait]
+pub trait AiJudge: Send + Sync {
+    /// One judged one-bit answer for `use_case`, ledgered by the
+    /// implementing host under `correlation`.
+    async fn judge(
+        &self,
+        use_case: JudgeUseCase,
+        question: &str,
+        context: &str,
+        correlation: &CorrelationId,
+    ) -> JudgeOutcome;
 }
 
 /// Failures of the rules model: the seam's completion error, a generation

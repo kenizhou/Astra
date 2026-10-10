@@ -20,6 +20,7 @@
 //! Nothing here calls a model: the background client lives in the desktop
 //! host and consumes this crate.
 
+mod ai_results;
 mod correlation;
 mod hardening;
 mod judge;
@@ -29,6 +30,8 @@ mod store;
 mod tier;
 mod use_case;
 
+#[cfg(test)]
+mod ai_results_tests;
 #[cfg(test)]
 mod hardening_tests;
 #[cfg(test)]
@@ -42,6 +45,7 @@ mod store_tests;
 #[cfg(test)]
 mod tier_tests;
 
+pub use ai_results::{AiResultRow, NewAiResult};
 pub use correlation::CorrelationId;
 pub use hardening::{tag_untrusted, DlpPolicy};
 pub use judge::{

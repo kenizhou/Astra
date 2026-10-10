@@ -93,5 +93,14 @@ where
             app.drive_draft_autosave().await;
         }));
     }
+    // The incoming AI pass driver rides the same seam: it sleeps until a refresh
+    // arms it, so a pass with no AI bundle costs nothing and one with a bundle
+    // never sits on the refresh path that armed it.
+    {
+        let app = Arc::clone(&app);
+        spawn(Box::pin(async move {
+            app.drive_incoming_pass().await;
+        }));
+    }
     Ok(app)
 }

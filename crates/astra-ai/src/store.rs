@@ -83,6 +83,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "rules",
         sql: include_str!("migrations/0002_rules.sql"),
     },
+    Migration {
+        version: 3,
+        name: "ai_results",
+        sql: include_str!("migrations/0003_ai_results.sql"),
+    },
 ];
 
 impl AiStore {
