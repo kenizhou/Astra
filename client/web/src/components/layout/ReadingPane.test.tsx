@@ -3,8 +3,9 @@
 // standing disabled beside it), the full pane from a snapshot (header, gated
 // body, attachment rows, the compose actions dispatching for the open
 // message), the remote toggle through the reading store, the plain fallback,
-// the no-body note, and the close intent crossing back.
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+// the no-body note, and the close intent crossing back. The AI replies
+// surfaces (the chips strip and the summarise block) mount below the header.
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const ipc = vi.hoisted(() => ({
@@ -20,7 +21,17 @@ vi.mock('@/services/ipc', async (importOriginal) => ({
   ...ipc,
 }));
 
+const ai = vi.hoisted(() => ({
+  chipsFor: vi.fn(),
+  dismissChips: vi.fn(),
+  composeFromDraft: vi.fn(),
+  summariseMessage: vi.fn(),
+}));
+
+vi.mock('@/services/ai', () => ai);
+
 import { ReadingPane } from './ReadingPane';
+import { useAiChipsStore } from '@/stores/aiChipsStore';
 import { useReadingStore } from '@/stores/readingStore';
 import type { ReadingSnapshot } from '@/services/ipc';
 
@@ -55,7 +66,13 @@ function frameDoc(): string {
 beforeEach(() => {
   ipc.dispatch.mockReset();
   ipc.dispatch.mockResolvedValue(undefined);
+  ai.chipsFor.mockReset();
+  ai.chipsFor.mockResolvedValue([]);
+  ai.dismissChips.mockReset();
+  ai.composeFromDraft.mockReset();
+  ai.summariseMessage.mockReset();
   useReadingStore.setState({ snapshot: null, showRemoteImages: false });
+  useAiChipsStore.setState({ message: null, chips: [] });
 });
 
 afterEach(cleanup);
@@ -168,5 +185,17 @@ describe('the reading pane', () => {
 
     expect(ipc.dispatch).toHaveBeenCalledTimes(1);
     expect(ipc.dispatch).toHaveBeenCalledWith('close_reading');
+  });
+
+  it('mounts the smart replies strip and the summarise block below the header', async () => {
+    ai.chipsFor.mockResolvedValue([{ reply: 'Shipped.', preview: 'Shipped.' }]);
+    useReadingStore.getState().applySnapshot(snapshot());
+    render(<ReadingPane />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Shipped.')).toBeTruthy();
+    });
+    expect(screen.getByRole('button', { name: 'Summarise' })).toBeTruthy();
+    expect(ai.chipsFor).toHaveBeenCalledWith({ account: 'work', key: 'imap:v1:u1' });
   });
 });

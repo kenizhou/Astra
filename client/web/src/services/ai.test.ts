@@ -28,6 +28,7 @@ vi.mock('@tauri-apps/api/event', () => ({
 import {
   accountStyleProfile,
   chipsFor,
+  composeFromDraft,
   dismissChips,
   onDraftPoolLanded,
   summariseMessage,
@@ -74,6 +75,16 @@ describe('the ai replies service', () => {
     expect(wire.invoke).toHaveBeenCalledWith('chips_dismiss', {
       account: 'work',
       key: 'imap:v1:u42',
+    });
+  });
+
+  it('opens the reply composer on one accepted chip, draft and all', async () => {
+    wire.invoke.mockResolvedValue(undefined);
+    await composeFromDraft({ account: 'work', key: 'imap:v1:u42' }, 'Shipped.');
+    expect(wire.invoke).toHaveBeenCalledWith('compose_from_draft', {
+      account: 'work',
+      key: 'imap:v1:u42',
+      replyText: 'Shipped.',
     });
   });
 

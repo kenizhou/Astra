@@ -98,6 +98,9 @@ pub(crate) struct FakeApp {
     pub(crate) style_into: Mutex<Vec<String>>,
     /// The (account, key) pairs whose chips a dismissal hid.
     pub(crate) dismissed: Mutex<Vec<(String, String)>>,
+    /// The (account, key, draft) triples the accept command handed the core,
+    /// so a test can assert the drafted reply crosses untouched.
+    pub(crate) drafted_into: Mutex<Vec<(String, String, String)>>,
 }
 
 impl FakeApp {
@@ -132,6 +135,7 @@ impl FakeApp {
             style_note: Mutex::new(None),
             style_into: Mutex::new(Vec::new()),
             dismissed: Mutex::new(Vec::new()),
+            drafted_into: Mutex::new(Vec::new()),
         })
     }
 
@@ -375,6 +379,19 @@ impl AppPort for FakeApp {
             .lock()
             .unwrap()
             .retain(|(held, _)| *held != asked);
+    }
+
+    async fn compose_from_draft(&self, account: &AccountId, key: &ProviderKey, draft: &str) {
+        self.drafted_into.lock().unwrap().push((
+            account.as_str().to_owned(),
+            key.as_str().to_owned(),
+            draft.to_owned(),
+        ));
+        // The publish the core's own accept makes: the reply's prefill into
+        // the single slot, the draft's paragraphs riding the real snapshot the
+        // app core's own tests pin.
+        *self.compose_request.lock().unwrap() =
+            Some(compose_prefill(ComposeKind::Reply, account.as_str()));
     }
 }
 

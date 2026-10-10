@@ -108,6 +108,11 @@ pub(crate) trait AppPort: Send + Sync {
 
     /// Records the reader's dismissal of the message's chips.
     fn dismiss_chips(&self, account: &AccountId, key: &ProviderKey);
+
+    /// Publishes the reply composition one accepted chip opens: the reply's
+    /// own prefill with the drafted reply already the document's opening
+    /// paragraphs, signalled through the compose-request surface.
+    async fn compose_from_draft(&self, account: &AccountId, key: &ProviderKey, draft: &str);
 }
 
 #[async_trait]
@@ -174,6 +179,10 @@ impl AppPort for App<HostProvider> {
 
     fn dismiss_chips(&self, account: &AccountId, key: &ProviderKey) {
         App::dismiss_chips(self, account, key);
+    }
+
+    async fn compose_from_draft(&self, account: &AccountId, key: &ProviderKey, draft: &str) {
+        App::compose_from_draft(self, account, key, draft).await;
     }
 }
 

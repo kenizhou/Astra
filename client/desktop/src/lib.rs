@@ -79,6 +79,7 @@ pub fn run() {
             commands::ai::summarise,
             commands::ai::style_profile,
             commands::ai::chips_dismiss,
+            commands::ai::compose_from_draft,
             commands::add_account,
             commands::imap_test_connection,
             commands::detect_account_settings,

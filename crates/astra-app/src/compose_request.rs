@@ -3,7 +3,9 @@
 //! arm, which reads the original's headers through the engine, computes the
 //! prefill per mail-calendar's reply rules, and publishes it on the
 //! [`Surface::ComposeRequest`](crate::Surface::ComposeRequest) snapshot the
-//! composer hydrates from.
+//! composer hydrates from. The accepted smart-reply chip rides the same arm:
+//! `App::compose_from_draft` publishes the reply's prefill with the drafted
+//! reply already the document's opening paragraphs.
 //!
 //! The port source is mail-calendar's reply paths, reshaped one way: MC's
 //! clients derive the prefill from what their reading views already hold, while
@@ -23,10 +25,14 @@
 
 use std::collections::HashSet;
 
-use astra_composer::{Block, ComposerDocument, Quote, QuoteAttribution, QuoteHeader, QuoteStyle};
+use astra_composer::{
+    Block, ComposerDocument, InlineContent, Paragraph, Quote, QuoteAttribution, QuoteHeader,
+    QuoteStyle, TextRun,
+};
 use astra_viewmodel::{ComposeKind, ComposeRequestSnapshot};
 use engine_api::{
-    AccountId, EmailAddress, Message, MessageBody, MessageIdHeader, Provider, UtcDateTime,
+    AccountId, EmailAddress, Message, MessageBody, MessageIdHeader, Provider, ProviderKey,
+    UtcDateTime,
 };
 
 use crate::{reading::resolve, reference::MessageRef, sanitise, App, ComposeIntent};
@@ -63,7 +69,21 @@ impl<P: Provider> App<P> {
             ComposeIntent::ReplyAll { message } => (message, ComposeKind::ReplyAll),
             ComposeIntent::Forward { message } => (message, ComposeKind::Forward),
         };
-        self.publish_compose_request(&message, kind).await;
+        self.publish_compose_request(&message, kind, None).await;
+    }
+
+    /// Publishes the reply composition one accepted smart-reply chip opens:
+    /// the prefill a `Compose::Reply` builds with the drafted reply already
+    /// in the document as its opening paragraphs, above the quoted original.
+    /// The host's `compose_from_draft` command; the composer hydrates from
+    /// the published snapshot exactly as it does from a reply's own dispatch.
+    pub async fn compose_from_draft(&self, account: &AccountId, key: &ProviderKey, draft: &str) {
+        let message = MessageRef {
+            account: account.clone(),
+            key: key.clone(),
+        };
+        self.publish_compose_request(&message, ComposeKind::Reply, Some(draft))
+            .await;
     }
 
     /// Reads the original in its account, computes the prefill, and publishes
@@ -72,7 +92,12 @@ impl<P: Provider> App<P> {
     /// open, and an empty one would be a composer the user cannot trust. A
     /// body that cannot be fetched still publishes; the prefill needs only the
     /// headers, and the document opens on no quote rather than none at all.
-    async fn publish_compose_request(&self, message: &MessageRef, kind: ComposeKind) {
+    async fn publish_compose_request(
+        &self,
+        message: &MessageRef,
+        kind: ComposeKind,
+        draft: Option<&str>,
+    ) {
         let Some(handle) = self.account_handle(&message.account).await else {
             return;
         };
@@ -106,6 +131,7 @@ impl<P: Provider> App<P> {
             &original,
             &handle.identity,
             body.as_ref(),
+            draft,
         );
         // The submit arms re-resolve this message to thread the outgoing
         // reply or forward under the original's chain; the snapshot carries
@@ -121,6 +147,8 @@ impl<P: Provider> App<P> {
 /// Builds the snapshot one compose request publishes: the prefill for `kind`
 /// computed from `original`'s headers, quoted body and all, composing from
 /// `from` under the identity `identity` (whose address a reply-all leaves out).
+/// `draft`, when a chip's acceptance carried one, opens the document on the
+/// drafted reply's own paragraphs above the quote.
 ///
 /// Pure, so the prefill rules are testable against a bare message the way the
 /// reading pipeline's rendering is.
@@ -130,6 +158,7 @@ pub(crate) fn compose_request(
     original: &Message,
     identity: &EmailAddress,
     body: Option<&MessageBody>,
+    draft: Option<&str>,
 ) -> ComposeRequestSnapshot {
     let (to, cc) = recipients(kind, original, identity);
     ComposeRequestSnapshot {
@@ -139,7 +168,7 @@ pub(crate) fn compose_request(
         cc,
         subject: subject(kind, original.envelope.subject.as_deref()),
         in_reply_to: threading_header(kind, original),
-        document: document(kind, original, body),
+        document: document(kind, original, body, draft),
     }
 }
 
@@ -252,20 +281,53 @@ fn threading_header(kind: ComposeKind, original: &Message) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// The composer document `kind` opens on: the quoted original alone when there
-/// is one to quote (the editor puts the user's paragraph above it), and no
-/// blocks when there is not, so a composer never opens on an empty quote.
-fn document(kind: ComposeKind, original: &Message, body: Option<&MessageBody>) -> ComposerDocument {
+/// The composer document `kind` opens on: an accepted draft's paragraphs
+/// first, then the quoted original below them when there is one to quote.
+/// With no draft the quote stands alone and the editor puts the user's own
+/// paragraph above it; with neither there are no blocks, so a composer never
+/// opens on an empty quote.
+fn document(
+    kind: ComposeKind,
+    original: &Message,
+    body: Option<&MessageBody>,
+    draft: Option<&str>,
+) -> ComposerDocument {
+    let mut blocks = draft.map_or_else(Vec::new, draft_paragraphs);
     let quoted = quote_text(body);
-    let blocks = if quoted.trim().is_empty() {
-        Vec::new()
-    } else {
-        vec![Block::Quote(quote(kind, original, quoted))]
-    };
+    if !quoted.trim().is_empty() {
+        blocks.push(Block::Quote(quote(kind, original, quoted)));
+    }
     ComposerDocument {
         blocks,
         attachments: Vec::new(),
     }
+}
+
+/// The drafted reply as document blocks: one paragraph per line, each a
+/// single unmarked run, a blank line an empty paragraph. The plain-text
+/// resume path's own convention, so a multi-line draft opens as it would
+/// from a stored copy.
+fn draft_paragraphs(draft: &str) -> Vec<Block> {
+    draft
+        .lines()
+        .map(|line| {
+            let content = if line.is_empty() {
+                Vec::new()
+            } else {
+                vec![InlineContent::Text(TextRun {
+                    text: line.to_owned(),
+                    bold: false,
+                    italic: false,
+                    underline: false,
+                    font_size: None,
+                    color: None,
+                    highlight: None,
+                    link: None,
+                })]
+            };
+            Block::Paragraph(Paragraph { content })
+        })
+        .collect()
 }
 
 /// The quoted original: the default style (the account-preference setting is a

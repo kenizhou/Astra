@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! The AI replies half of the command surface: the chips pull the reading
 //! pane drives on open and on the draft-pool event, the cached summarise
-//! action, the account's style note, and the chips dismissal write. A
-//! child of [`super`], whose command registration this module continues.
+//! action, the account's style note, the chips dismissal write, and the
+//! accepted chip's compose-from-draft publish. A child of [`super`], whose
+//! command registration this module continues.
 //!
 //! Split from the command module itself to keep each file under the
 //! 500-line limit, the same split the app core's ai_replies made for its
@@ -61,12 +62,26 @@ pub(crate) async fn style_profile_of(state: &AppState, account: &AccountId) -> O
 }
 
 /// Records the reader's dismissal of the message's chips: the marker the
-/// surfacing gate consults before it spends a judge call, idempotent by
-/// the message identity pair. The write cannot fail the caller: a store
+/// surfacing gate consults before it spends a judge call, idempotent by the
+/// message identity pair. The write cannot fail the caller: a store
 /// the core cannot record into is logged there and the pane hides its
 /// chips again on the next pull.
 pub(crate) fn chips_dismiss_of(state: &AppState, account: &AccountId, key: &ProviderKey) {
     state.app.dismiss_chips(account, key);
+}
+
+/// Publishes the reply composition one accepted chip opens: the reply's own
+/// prefill (recipients, subject, threading header, quoted original) with the
+/// drafted reply already the document's opening paragraphs, published through
+/// the compose-request surface so the composer opens on it exactly as it does
+/// on a reply's own dispatch.
+pub(crate) async fn compose_from_draft_of(
+    state: &AppState,
+    account: &AccountId,
+    key: &ProviderKey,
+    draft: &str,
+) {
+    state.app.compose_from_draft(account, key, draft).await;
 }
 
 /// Pulls the message's smart-reply chips for the reading pane.
@@ -120,6 +135,24 @@ pub(crate) fn style_profile(state: State<'_, AppState>, account: AccountId) -> O
 #[tauri::command]
 pub(crate) fn chips_dismiss(state: State<'_, AppState>, account: AccountId, key: ProviderKey) {
     chips_dismiss_of(&state, &account, &key);
+}
+
+/// Opens the reply composer on one accepted chip, the drafted reply already
+/// the document's opening paragraphs; the composer opens on the published
+/// request's own signal. An original the store no longer resolves publishes
+/// nothing and the composer stays shut.
+// Tauri's command macro hands `State` by value; the wrapper only reads through it.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) fn compose_from_draft(
+    state: State<'_, AppState>,
+    account: AccountId,
+    key: ProviderKey,
+    reply_text: String,
+) {
+    state
+        .runtime
+        .block_on(|| compose_from_draft_of(&state, &account, &key, &reply_text));
 }
 
 #[cfg(test)]

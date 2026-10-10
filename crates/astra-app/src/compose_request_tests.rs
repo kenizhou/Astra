@@ -5,7 +5,8 @@
 //! threading header a reply carries and a forward does not), the quoted original
 //! with its attribution line, and the one publish per dispatch the composer
 //! hydrates from. The fixtures live in `dispatch_fakes`, the crate-root test
-//! module every dispatch-shaped test shares.
+//! module every dispatch-shaped test shares; the accepted-chip arm's tests
+//! live in their own child, sharing these fixtures.
 
 use std::sync::{Arc, Mutex};
 
@@ -86,6 +87,30 @@ fn quote_of(snapshot: &astra_viewmodel::ComposeRequestSnapshot) -> &Quote {
         [Block::Quote(quote)] => quote,
         blocks => panic!("one quote block, not {blocks:?}"),
     }
+}
+
+/// The joined text of the document's leading paragraph blocks, in order: the
+/// assertion's own witness of the paragraphs a draft prefilled above whatever
+/// follows them. Shared with the accepted-chip arm's own tests.
+fn paragraph_texts(snapshot: &astra_viewmodel::ComposeRequestSnapshot) -> Vec<String> {
+    snapshot
+        .document
+        .blocks
+        .iter()
+        .map_while(|block| match block {
+            Block::Paragraph(paragraph) => Some(
+                paragraph
+                    .content
+                    .iter()
+                    .map(|inline| match inline {
+                        astra_composer::InlineContent::Text(run) => run.text.clone(),
+                        astra_composer::InlineContent::Image(_) => String::new(),
+                    })
+                    .collect(),
+            ),
+            _ => None,
+        })
+        .collect()
 }
 
 #[tokio::test]
@@ -284,6 +309,7 @@ fn an_html_only_original_quotes_through_sanitised_text() {
         &original("m1", "Quarterly report"),
         &identity,
         Some(&body),
+        None,
     );
     let quote = quote_of(&snapshot);
     assert_eq!(quote.body_plain, "Hi there");
@@ -307,6 +333,7 @@ fn an_undated_original_attributes_the_sender_without_a_date() {
         &undated,
         &identity,
         Some(&body),
+        None,
     );
     let quote = quote_of(&snapshot);
     assert_eq!(
@@ -351,8 +378,8 @@ async fn a_message_the_store_no_longer_holds_publishes_nothing() {
 #[tokio::test]
 async fn a_bodyless_original_publishes_the_prefill_without_a_quote_block() {
     let surfaces = Arc::new(Mutex::new(Vec::new()));
-    // No source, so the body fetch fails: the prefill still publishes, and the
-    // document opens on nothing rather than an empty quote.
+    // No source, so the body fetch fails: the prefill still publishes, and
+    // the document opens on nothing rather than an empty quote.
     let app = app_over(original("m1", "Quarterly report"), None, &surfaces).await;
 
     app.dispatch(compose(ComposeKind::Reply)).await.unwrap();
@@ -368,3 +395,9 @@ async fn a_bodyless_original_publishes_the_prefill_without_a_quote_block() {
         "there is nothing to quote, so the document holds no quote block"
     );
 }
+
+// The accepted-chip arm's tests (the compose-from-draft publish and the
+// draft document's own shape), a child module so they share this module's
+// fixtures while each file stays under the line cap.
+#[path = "compose_request_draft_tests.rs"]
+mod drafts;

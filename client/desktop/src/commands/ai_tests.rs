@@ -9,8 +9,12 @@
 use std::sync::Arc;
 
 use astra_app::Chip;
+use astra_viewmodel::ComposeKind;
 
-use super::{chips_dismiss_of, draft_chips_of, style_profile_of, summarise_of};
+use super::{
+    chips_dismiss_of, compose_from_draft_of, draft_chips_of, style_profile_of, summarise_of,
+};
+use crate::commands::compose::compose_request_of;
 use crate::commands::CommandError;
 use crate::commands_fakes::{state, FakeApp, FakeStore};
 
@@ -142,5 +146,33 @@ fn the_chip_crosses_as_its_two_wire_fields() {
             "reply": "Sounds good, shipped it.",
             "preview": "Sounds good..."
         }),
+    );
+}
+
+#[test]
+fn the_accept_hands_the_draft_through_and_the_core_publishes_the_reply() {
+    let app = FakeApp::new();
+    let state = state("ai-accept", Arc::clone(&app), FakeStore::accepting());
+    let (account, key) = key_parts();
+
+    state
+        .runtime
+        .block_on(|| compose_from_draft_of(&state, &account, &key, "Sounds good, shipped it."));
+
+    assert_eq!(
+        app.drafted_into.lock().unwrap().as_slice(),
+        [(
+            "work".to_owned(),
+            "imap:v1:u42".to_owned(),
+            "Sounds good, shipped it.".to_owned()
+        )]
+        .as_slice(),
+        "the command hands the webview's account, key, and drafted reply to the core",
+    );
+    let request = compose_request_of(&state).expect("the accept published the reply's request");
+    assert_eq!(
+        request.kind,
+        ComposeKind::Reply,
+        "the composition a chip opens is the reply the reader accepted"
     );
 }
