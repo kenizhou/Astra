@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! The dual-protocol wire: request construction, response parsing, and the
-//! balanced-brace JSON repair. The endpoints, header sets, and body shapes
-//! mirror kylins' shared LLM core (`kylins.client.backend/src/agent/
+//! The dual-protocol wire: request construction, response parsing,
+//! non-2xx rejection classification, and the balanced-brace JSON repair.
+//! The endpoints, header sets, and body shapes mirror kylins' shared LLM
+//! core (`kylins.client.backend/src/agent/
 //! llm_client.rs` with its `build_chat_request` and `build_body`): openai
 //! entries post to `{base}/chat/completions` with a bearer token, anthropic
 //! entries post to `{base}/v1/messages` with the `x-api-key` and
 //! `anthropic-version` headers and the mandatory `max_tokens`.
 
+use std::time::Duration;
+
+use reqwest::header::{HeaderMap, RETRY_AFTER};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -50,6 +54,54 @@ impl Protocol {
 /// protocol makes `max_tokens` mandatory, and kylins' callers pass their own
 /// cap on the same field.
 pub(crate) const ANTHROPIC_MAX_TOKENS: u32 = 1024;
+
+/// The ceiling on a provider's `Retry-After` word. The wait before the next
+/// chain entry is honoured but bounded, so a hostile or mistaken header
+/// cannot stall a background call.
+pub(crate) const RETRY_AFTER_CAP: Duration = Duration::from_secs(2);
+
+/// How a non-2xx response rejects the request: the inbox-zero error classes
+/// (`shouldFallbackToNextModel` and the insufficient-credit classifiers)
+/// ported onto raw HTTP statuses and bodies.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Rejection {
+    /// Out of credit or quota (HTTP 402, OpenAI's `insufficient_quota` 429,
+    /// or Anthropic's `insufficient_balance` message). Terminal for the
+    /// call.
+    Quota,
+    /// A rate limit: advance the chain, honouring `Retry-After`.
+    RateLimited,
+    /// Any other non-2xx: advance the chain without a wait. A model-specific
+    /// 400 or 404 can pass on the next entry, the inbox-zero invalid-model
+    /// fallback.
+    Http,
+}
+
+/// Classifies one non-2xx response. Auth (401 or 403) is classified earlier,
+/// before the body is consulted.
+pub(crate) fn classify_rejection(status: u16, body: &str) -> Rejection {
+    // Exhausted balances arrive as retryable-looking statuses, so the body is
+    // looked at beneath the status (the inbox-zero exhausted-balance rule).
+    if status == 402
+        || body.contains("insufficient_quota")
+        || body.contains("insufficient_balance")
+        || body.contains("credit balance is too low")
+    {
+        return Rejection::Quota;
+    }
+    if status == 429 {
+        return Rejection::RateLimited;
+    }
+    Rejection::Http
+}
+
+/// The `Retry-After` word as the wait before the next chain entry, capped.
+/// Only delta-seconds parse; an HTTP-date or garbage reads as absent.
+pub(crate) fn retry_after(headers: &HeaderMap) -> Option<Duration> {
+    let value = headers.get(RETRY_AFTER)?.to_str().ok()?;
+    let seconds: u64 = value.trim().parse().ok()?;
+    Some(Duration::from_secs(seconds.min(RETRY_AFTER_CAP.as_secs())))
+}
 
 /// One chat message: the user-message shape both protocols share.
 #[derive(Debug, Serialize)]

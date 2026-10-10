@@ -153,6 +153,7 @@
 | 后台 LLM 客户端：双协议、可重试链式回退、配额与鉴权终局 | 🚧 | 每次尝试一行账本；A2 前无特性消费；ai-foundation.md |
 | 引擎存储之侧的产品 AI 账本（`llm_calls`、`audit_log`） | 🚧 | ai.sqlite，宿主与 CLI 共用；记录在案的 rusqlite 决定；ai-foundation.md |
 | 非受信内容包裹器与 DLP 策略类型 | 🚧 | A1 前仅允许；ai-foundation.md |
+| 二元判定器：严格单词裁决、弃权仅重试一次、安全默认表、nano 支出守卫 | 🚧 | 裁决记入账本行的 outcome；预算来自 `ASTRA_LLM_NANO_BUDGET_MICROS`；A1 各阶段前无特性消费；二元判定器规范 |
 | 离线 agent 循环端到端：提问、门控批准、工具执行、两本账一个相关性 id | 🚧 | 真实 sidecar bundle 加 stub CLI，在桌面测试套件中；ai-foundation.md |
 
 ## Astra：AI（inbox-zero 移植，阶段见规范 9.3）

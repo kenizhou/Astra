@@ -249,6 +249,74 @@ fn concurrent_first_opens_all_succeed_with_one_bookkeeping_row() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
+/// A nano-tier ledger row with a reported cost, the shape the spend guard
+/// aggregates.
+fn nano_call(cost: Option<u64>, outcome: &str) -> LlmCallRow {
+    LlmCallRow {
+        correlation: CorrelationId::generate(),
+        use_case: LlmUseCase::JudgeColdEmail,
+        tier: ModelTier::Nano,
+        model: "gpt-nano-mini".to_string(),
+        prompt_tokens: 10,
+        completion_tokens: 1,
+        cost_micros: cost,
+        latency_ms: 90,
+        outcome: outcome.to_string(),
+    }
+}
+
+#[test]
+fn weekly_nano_spend_aggregates_nano_rows_of_the_trailing_week() {
+    let store = store();
+    for cost in [1200u64, 3400] {
+        store
+            .record_llm_call(&nano_call(Some(cost), "ok"))
+            .expect("nano call records");
+    }
+    store
+        .record_llm_call(&nano_call(None, "error:transport"))
+        .expect("costless nano call records");
+    store
+        .record_llm_call(&LlmCallRow {
+            use_case: LlmUseCase::JudgeRuleMatch,
+            tier: ModelTier::Economy,
+            model: "gpt-4o-mini".to_string(),
+            outcome: "ok".to_string(),
+            ..nano_call(Some(9900), "ok")
+        })
+        .expect("economy call records");
+    assert_eq!(
+        store
+            .weekly_nano_spend_micros()
+            .expect("the weekly aggregate runs"),
+        4600,
+        "nano costs of the trailing week, costless and non-nano rows aside",
+    );
+}
+
+#[test]
+fn rows_outside_the_trailing_week_do_not_count_against_the_budget() {
+    let store = store();
+    store
+        .record_llm_call(&nano_call(Some(5000), "ok"))
+        .expect("nano call records");
+    {
+        let conn = store.test_conn();
+        let conn = conn.lock().expect("test connection");
+        conn.execute(
+            "UPDATE llm_calls SET created_at = strftime('%s','now') - 691200",
+            [],
+        )
+        .expect("the row is backdated eight days, beyond the week");
+    }
+    assert_eq!(
+        store
+            .weekly_nano_spend_micros()
+            .expect("the weekly aggregate runs"),
+        0,
+    );
+}
+
 #[test]
 fn generated_correlation_ids_are_distinct_and_nonempty() {
     let first = CorrelationId::generate();

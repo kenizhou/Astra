@@ -12,8 +12,9 @@ use std::time::Duration;
 use astra_ai::{CorrelationId, LlmUseCase};
 use reqwest::header::{HeaderMap, HeaderValue, RETRY_AFTER};
 
-use super::{classify_rejection, retry_after, LlmClient, Rejection};
+use super::LlmClient;
 use crate::ai::fixture::{self, env_at, llm_client, row, runtime, Ledger};
+use crate::ai::wire::{classify_rejection, retry_after, Rejection};
 
 #[test]
 fn openai_success_pins_the_wire_shape_and_lands_one_ok_row() {

@@ -139,6 +139,28 @@ impl AiStore {
         Ok(())
     }
 
+    /// The nano tier's provider-reported spend over the trailing seven
+    /// days, in micros of currency: the aggregate the judge spend guard
+    /// compares against its `ASTRA_LLM_NANO_BUDGET_MICROS` budget. Only
+    /// nano-tier rows count (the guard watches the cheap high-volume tier
+    /// where the judges live); rows without a reported cost contribute
+    /// nothing.
+    ///
+    /// # Errors
+    /// Fails when the aggregate cannot run.
+    pub fn weekly_nano_spend_micros(&self) -> Result<u64, AiStoreError> {
+        let conn = self.lock();
+        let spent: i64 = conn
+            .query_row(
+                "SELECT COALESCE(SUM(cost_micros), 0) FROM llm_calls
+                 WHERE tier = 'nano' AND created_at >= strftime('%s','now') - 604800",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(AiStoreError::Sqlite)?;
+        Ok(u64::try_from(spent).unwrap_or(0))
+    }
+
     /// Appends one audit row. As [`AiStore::record_llm_call`], the store
     /// sets `created_at` itself.
     ///

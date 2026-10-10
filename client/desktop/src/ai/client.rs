@@ -4,6 +4,11 @@
 //! ledger row per HTTP attempt. Retryable failures advance the fallback
 //! chain; auth and quota rejections are terminal for the call (the
 //! inbox-zero fallback-on classes over raw HTTP, the kylins row contract).
+//! The binary judge rides the same machinery from the `judge_call` child
+//! module: the spend guard, the strict single-token parse, and the
+//! safe-default fold.
+
+mod judge_call;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -11,21 +16,13 @@ use std::time::{Duration, Instant};
 
 use astra_ai::{AiStore, CorrelationId, LlmCallRow, LlmUseCase, ModelEntry, TierTable};
 use log::warn;
-use reqwest::{
-    header::{HeaderMap, RETRY_AFTER},
-    Client, StatusCode,
-};
+use reqwest::{Client, StatusCode};
 
-use crate::ai::wire::{self, Completion, WireRequest};
+use crate::ai::wire::{self, classify_rejection, retry_after, Completion, Rejection, WireRequest};
 
 /// The per-attempt timeout: real completions are slower than a one-token
 /// probe, so the client waits as long as kylins' shared core does.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
-
-/// The ceiling on a provider's `Retry-After` word. The wait before the next
-/// chain entry is honoured but bounded, so a hostile or mistaken header
-/// cannot stall a background call.
-const RETRY_AFTER_CAP: Duration = Duration::from_secs(2);
 
 /// The typed failure of one completion call.
 #[derive(Debug, thiserror::Error)]
@@ -76,49 +73,6 @@ impl std::fmt::Debug for LlmEndpoint {
     }
 }
 
-/// How a non-2xx response rejects the request: the inbox-zero error classes
-/// (`shouldFallbackToNextModel` and the insufficient-credit classifiers)
-/// ported onto raw HTTP statuses and bodies.
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum Rejection {
-    /// Out of credit or quota (HTTP 402, OpenAI's `insufficient_quota` 429,
-    /// or Anthropic's `insufficient_balance` message). Terminal for the
-    /// call.
-    Quota,
-    /// A rate limit: advance the chain, honouring `Retry-After`.
-    RateLimited,
-    /// Any other non-2xx: advance the chain without a wait. A model-specific
-    /// 400 or 404 can pass on the next entry, the inbox-zero invalid-model
-    /// fallback.
-    Http,
-}
-
-/// Classifies one non-2xx response. Auth (401 or 403) is classified earlier,
-/// before the body is consulted.
-pub(crate) fn classify_rejection(status: u16, body: &str) -> Rejection {
-    // Exhausted balances arrive as retryable-looking statuses, so the body is
-    // looked at beneath the status (the inbox-zero exhausted-balance rule).
-    if status == 402
-        || body.contains("insufficient_quota")
-        || body.contains("insufficient_balance")
-        || body.contains("credit balance is too low")
-    {
-        return Rejection::Quota;
-    }
-    if status == 429 {
-        return Rejection::RateLimited;
-    }
-    Rejection::Http
-}
-
-/// The `Retry-After` word as the wait before the next chain entry, capped.
-/// Only delta-seconds parse; an HTTP-date or garbage reads as absent.
-pub(crate) fn retry_after(headers: &HeaderMap) -> Option<Duration> {
-    let value = headers.get(RETRY_AFTER)?.to_str().ok()?;
-    let seconds: u64 = value.trim().parse().ok()?;
-    Some(Duration::from_secs(seconds.min(RETRY_AFTER_CAP.as_secs())))
-}
-
 /// One attempt's classified outcome.
 enum Attempt {
     /// 2xx with text content; the ledger row is written.
@@ -148,6 +102,10 @@ pub struct LlmClient {
     keys: HashMap<String, String>,
     /// Endpoint base overrides by provider name, read once at startup.
     base_urls: HashMap<String, String>,
+    /// The weekly nano spend budget in micros, read once at startup; the
+    /// judge's spend guard compares the ledger's weekly aggregate against
+    /// it before every judge call.
+    nano_budget_micros: u64,
 }
 
 impl std::fmt::Debug for LlmClient {
@@ -204,6 +162,7 @@ impl LlmClient {
             store,
             keys,
             base_urls,
+            nano_budget_micros: judge_call::nano_budget_from(&lookup),
         }
     }
 
@@ -228,6 +187,22 @@ impl LlmClient {
         prompt: &str,
         correlation: &CorrelationId,
     ) -> Result<String, LlmError> {
+        self.complete_with_outcome(use_case, prompt, correlation, &|_| "ok".to_string())
+            .await
+    }
+
+    /// The seam behind [`LlmClient::complete`] that the judge rides: the
+    /// ledger outcome of a successful attempt comes from the completion
+    /// text through `ok_outcome`, so a judge's rows carry their verdicts
+    /// (`judge:yes` and kin) while a plain completion's rows keep `ok`.
+    /// Everything else, the chain walk included, is the shared contract.
+    async fn complete_with_outcome(
+        &self,
+        use_case: LlmUseCase,
+        prompt: &str,
+        correlation: &CorrelationId,
+        ok_outcome: &dyn Fn(&str) -> String,
+    ) -> Result<String, LlmError> {
         let chain = self
             .registry
             .resolve(use_case)
@@ -239,7 +214,10 @@ impl LlmClient {
                 continue;
             };
             attempted += 1;
-            match self.attempt(&request, entry, use_case, correlation).await {
+            match self
+                .attempt(&request, entry, use_case, correlation, ok_outcome)
+                .await
+            {
                 Attempt::Done(text) => return Ok(text),
                 Attempt::Terminal(error) => return Err(error),
                 Attempt::Retry { message, wait } => {
@@ -323,15 +301,17 @@ impl LlmClient {
 
     /// Sends one wire request, classifies the outcome, and lands exactly one
     /// ledger row: outcome and error class truthful, tokens and cost carried
-    /// when the response parsed them. Non-2xx bodies are classified but
-    /// never reported: an endpoint can echo the request's credentials back,
-    /// and error strings are logged.
+    /// when the response parsed them. The row's outcome for a 2xx comes
+    /// from `ok_outcome` over the completion text. Non-2xx bodies are
+    /// classified but never reported: an endpoint can echo the request's
+    /// credentials back, and error strings are logged.
     async fn attempt(
         &self,
         request: &WireRequest,
         entry: &ModelEntry,
         use_case: LlmUseCase,
         correlation: &CorrelationId,
+        ok_outcome: &dyn Fn(&str) -> String,
     ) -> Attempt {
         let protocol = wire::protocol_for(&entry.provider)
             .expect("the entry was screened when its request was built");
@@ -426,7 +406,15 @@ impl LlmClient {
         }
         match wire::parse_response(protocol, &body) {
             Ok(Completion { content, usage }) => {
-                self.record(entry, use_case, correlation, started, Some(&usage), "ok");
+                let outcome = ok_outcome(&content);
+                self.record(
+                    entry,
+                    use_case,
+                    correlation,
+                    started,
+                    Some(&usage),
+                    &outcome,
+                );
                 Attempt::Done(content)
             }
             Err(message) => {

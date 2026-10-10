@@ -152,6 +152,7 @@ this row ports.
 | Background LLM client: dual protocol, retryable chain fallback, quota and auth terminal | 🚧 | one ledger row per attempt; no feature consumes it until A2; ai-foundation.md |
 | Product AI ledger (`llm_calls`, `audit_log`) beside the engine store | 🚧 | ai.sqlite, shared by host and CLI; rusqlite per the recorded decision; ai-foundation.md |
 | Untrusted-content wrapper and DLP policy types | 🚧 | allow-only until A1; ai-foundation.md |
+| Binary judge: strict single-token verdicts, retry once on abstain, safe-default table, nano spend guard | 🚧 | verdicts in the ledger row outcome; budget from `ASTRA_LLM_NANO_BUDGET_MICROS`; no feature consumes it until the A1 stages; binary judge spec |
 | Offline agent loop e2e: prompt, gated approval, tool run, one correlation id across both ledgers | 🚧 | real sidecar bundle plus the stub CLI, in the desktop test suite; ai-foundation.md |
 
 ## Astra: AI (inbox-zero port, phases per spec 9.3)
