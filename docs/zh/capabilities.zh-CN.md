@@ -138,8 +138,10 @@
 
 | 功能 | 状态 | 备注 |
 |---|---|---|
-| 读动词与 --json 契约 | ⬜ | 随 SP2+ 切片增长 |
-| 带门控的变更动词与 --preview | ⬜ | 随 SP2+ 切片增长 |
+| 读动词与 --json 契约 | 🚧 | 已交付六个动词；随 SP2+ 切片增长；cli.md |
+| 带门控的变更动词与 --preview | 🚧 | drafts save 与 discard；cli.md |
+| 每次调用带相关性 id 审计 | 🚧 | ai.sqlite 账本；cli.md |
+| 发送类动词先解析后拒绝 | 🚧 | 退出码 3；cli.md |
 | 虚拟权限工具映射 | ⬜ | SPA0 |
 | Shell 补全 | ⬜ | SP-CLI |
 

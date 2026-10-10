@@ -40,6 +40,10 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Build the CLI
+        run: cargo build --release --bin astra-cli
+      - name: Stage the CLI for the Tauri externalBin
+        run: node client/desktop/scripts/stage-cli.mjs
       - name: Clippy (desktop host)
         run: cargo clippy -p astra-desktop --all-targets -- -D warnings
       - name: Build (desktop host)

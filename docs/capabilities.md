@@ -137,8 +137,10 @@ this row ports.
 
 | Feature | Status | Notes |
 |---|---|---|
-| Read verbs with --json contract | ⬜ | grows with SP2+ slices |
-| Gated mutating verbs with --preview | ⬜ | grows with SP2+ slices |
+| Read verbs with --json contract | 🚧 | six verbs ship; grows with SP2+ slices; cli.md |
+| Gated mutating verbs with --preview | 🚧 | drafts save and discard; cli.md |
+| Every invocation audited with a correlation id | 🚧 | ai.sqlite ledger; cli.md |
+| Send-class verbs parsed but refused | 🚧 | exit 3; cli.md |
 | Virtual permission tools mapping | ⬜ | SPA0 |
 | Shell completions | ⬜ | SP-CLI |
 

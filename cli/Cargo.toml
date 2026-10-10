@@ -1,0 +1,38 @@
+[package]
+name = "astra-cli"
+description = "The agent-first command line: read and draft verbs over the engine store, every invocation audited."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# Every mail read and write goes through the engine facade; the provider and
+# core crates appear beside it only because the offline provider implements
+# the engine's `Provider` trait, whose own signatures name `EmailStream`,
+# `SyncState`, `RawMime`, and `ProviderError` (the same seam astra-account
+# and the app's test fakes already hold).
+engine-api.workspace = true
+engine-core.workspace = true
+engine-provider.workspace = true
+# The audit ledger (`AiStore`, `AuditRow`, `CorrelationId`).
+astra-ai = { path = "../crates/astra-ai" }
+# The envelope's serialisation.
+serde.workspace = true
+serde_json.workspace = true
+# Awaits the engine's async reads; no timer, no IO of its own.
+tokio = { workspace = true, features = ["rt"] }
+# Implementing the engine's async `Provider` trait for the offline provider.
+async-trait.workspace = true
+# The offline provider's one erroring email stream.
+futures.workspace = true
+# The default data dir beside the product store, when ASTRA_DATA_DIR is unset.
+dirs.workspace = true
+
+[dev-dependencies]
+# The audit-row assertions open the ledger's sqlite file directly: the store
+# itself only appends.
+rusqlite.workspace = true
