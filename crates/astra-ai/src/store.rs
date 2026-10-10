@@ -163,10 +163,14 @@ impl AiStore {
         Ok(())
     }
 
-    /// Brings a fresh connection to the latest embedded migration. Each
-    /// migration runs inside one transaction together with its bookkeeping
-    /// row in `ai_migrations`, so an interrupted migration leaves no
-    /// half-applied schema.
+    /// Brings a fresh connection to the latest embedded migration. The
+    /// connection claims each migration's bookkeeping row first
+    /// (`INSERT OR IGNORE`, asserted by change count): the claim that
+    /// changes zero rows was won by a concurrent opener, the migration
+    /// runs only inside the winner's transaction together with that row,
+    /// and an interrupted migration leaves no half-applied schema. There
+    /// is no check-then-act: the host and a CLI invocation opening the
+    /// same fresh file interleave freely.
     fn migrate(conn: &mut rusqlite::Connection) -> Result<(), AiStoreError> {
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS ai_migrations (
@@ -180,39 +184,33 @@ impl AiStore {
             source,
         })?;
         for migration in MIGRATIONS {
-            let applied: bool = conn
-                .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM ai_migrations WHERE version = ?1)",
-                    [migration.version],
-                    |row| row.get(0),
-                )
-                .map_err(|source| AiStoreError::Migration {
-                    migration: migration.name,
-                    source,
-                })?;
-            if applied {
-                continue;
-            }
             let tx = conn
                 .transaction()
                 .map_err(|source| AiStoreError::Migration {
                     migration: migration.name,
                     source,
                 })?;
+            let claimed = tx
+                .execute(
+                    "INSERT OR IGNORE INTO ai_migrations (version, name, installed_at)
+                     VALUES (?1, ?2, strftime('%s','now'))",
+                    rusqlite::params![migration.version, migration.name],
+                )
+                .map_err(|source| AiStoreError::Migration {
+                    migration: migration.name,
+                    source,
+                })?;
+            if claimed == 0 {
+                // A concurrent opener applied this migration first; the
+                // claim wrote nothing, so dropping the transaction is a
+                // no-op rollback.
+                continue;
+            }
             tx.execute_batch(migration.sql)
                 .map_err(|source| AiStoreError::Migration {
                     migration: migration.name,
                     source,
                 })?;
-            tx.execute(
-                "INSERT INTO ai_migrations (version, name, installed_at)
-                 VALUES (?1, ?2, strftime('%s','now'))",
-                rusqlite::params![migration.version, migration.name],
-            )
-            .map_err(|source| AiStoreError::Migration {
-                migration: migration.name,
-                source,
-            })?;
             tx.commit().map_err(|source| AiStoreError::Migration {
                 migration: migration.name,
                 source,

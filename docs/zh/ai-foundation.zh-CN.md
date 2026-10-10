@@ -175,11 +175,13 @@ sidecar 循环是面板的引擎：宿主生成 `node <sidecar>/index.cjs`（Nod
    ```
 
 4. **单独运行 sidecar（无应用）。** 通过真实 pi harness 手工驱动 bundle（每个
-   信封一行；`sleep` 在轮次流式输出期间保持 stdin 打开）：
+   信封一行；`sleep` 在轮次流式输出期间保持 stdin 打开）。密钥从文件读入，
+   shell 历史里留下的那行因此绝不含密钥本身：
 
    ```
+   key=$(cat /path/to/keyfile)
    ( printf '%s\n' \
-     '{"type":"init","harness":"pi","cli_path":"<绝对路径>/target/release/astra-cli","data_dir":"<绝对数据目录>","model_configs":{"chat":{"api":"openai-completions","base_url":"https://api.openai.com/v1","model":"gpt-4o-mini","api_key":"sk-<your key>"}},"policy":{"list_folders":{"level":"auto"},"list_messages":{"level":"auto"},"read_message":{"level":"auto"},"save_draft":{"level":"confirm"},"discard_draft":{"level":"confirm"}}}' \
+     '{"type":"init","harness":"pi","cli_path":"<绝对路径>/target/release/astra-cli","data_dir":"<绝对数据目录>","model_configs":{"chat":{"api":"openai-completions","base_url":"https://api.openai.com/v1","model":"gpt-4o-mini","api_key":"'"$key"'"}},"policy":{"list_folders":{"level":"auto"},"list_messages":{"level":"auto"},"read_message":{"level":"auto"},"save_draft":{"level":"confirm"},"discard_draft":{"level":"confirm"}}}' \
      '{"type":"prompt","id":"p-1","session_id":"agent:main","text":"Say hello in one sentence.","correlation_id":"corr-smoke"}' \
      ; sleep 20 ) | node sidecar/dist/index.cjs
    ```
@@ -188,7 +190,7 @@ sidecar 循环是面板的引擎：宿主生成 `node <sidecar>/index.cjs`（Nod
    `llm_call` 信封、以及 `done`。
 
 5. **清理。** `unset ASTRA_LLM_CHAT ASTRA_LLM_API_KEY_OPENAI
-   ASTRA_LLM_BASE_URL_OPENAI`（用过 anthropic 拼法则一并 unset）。
+   ASTRA_LLM_BASE_URL_OPENAI key`（用过 anthropic 拼法则一并 unset）。
 
 **密钥的去向。** 从导出的环境变量进入宿主进程，只在启动时读一次；然后经
 stdio 上的 init 信封带内进入 sidecar 内存中的模型注册；再无别处。它绝不进入
@@ -223,3 +225,6 @@ id），绝不落入任何账本行或日志行，错误消息只到状态级，
   宿主观察到的是就绪超时，而非类型化错误。
 - **`discard_draft` 门控在 confirm。** 删除草稿在 confirm 级询问一次；因
   Astra 除草稿外不交付删除类动词，kylins 的更硬确认被裁掉。
+- **单会话相关性归属。** 中继唯一的全局相关性持有者，以及 `any_correlation`
+  对无会话请求与工具结果的归属，都是单会话约束；当 A2 带来并发聊天界面时，
+  它们将换成按提示词的盖章。

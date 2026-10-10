@@ -211,11 +211,13 @@ design; this checklist is the live proof.
 
 4. **Sidecar alone (no app).** Drive the bundle by hand through the
    real pi harness (one shell line per envelope; the `sleep` holds
-   stdin open while the turn streams):
+   stdin open while the turn streams). The key is read from a file, so
+   the line the shell history keeps never contains it:
 
    ```
+   key=$(cat /path/to/keyfile)
    ( printf '%s\n' \
-     '{"type":"init","harness":"pi","cli_path":"<absolute path>/target/release/astra-cli","data_dir":"<absolute data dir>","model_configs":{"chat":{"api":"openai-completions","base_url":"https://api.openai.com/v1","model":"gpt-4o-mini","api_key":"sk-<your key>"}},"policy":{"list_folders":{"level":"auto"},"list_messages":{"level":"auto"},"read_message":{"level":"auto"},"save_draft":{"level":"confirm"},"discard_draft":{"level":"confirm"}}}' \
+     '{"type":"init","harness":"pi","cli_path":"<absolute path>/target/release/astra-cli","data_dir":"<absolute data dir>","model_configs":{"chat":{"api":"openai-completions","base_url":"https://api.openai.com/v1","model":"gpt-4o-mini","api_key":"'"$key"'"}},"policy":{"list_folders":{"level":"auto"},"list_messages":{"level":"auto"},"read_message":{"level":"auto"},"save_draft":{"level":"confirm"},"discard_draft":{"level":"confirm"}}}' \
      '{"type":"prompt","id":"p-1","session_id":"agent:main","text":"Say hello in one sentence.","correlation_id":"corr-smoke"}' \
      ; sleep 20 ) | node sidecar/dist/index.cjs
    ```
@@ -224,7 +226,8 @@ design; this checklist is the live proof.
    carrying `corr-smoke`, and `done`.
 
 5. **Clean up.** `unset ASTRA_LLM_CHAT ASTRA_LLM_API_KEY_OPENAI
-   ASTRA_LLM_BASE_URL_OPENAI` (and the anthropic spellings when used).
+   ASTRA_LLM_BASE_URL_OPENAI key` (and the anthropic spellings when
+   used).
 
 **Where the key travels.** From the exported environment into the host
 process at boot, once; then in band on the init envelope over stdio into
@@ -272,3 +275,8 @@ recorded shortfall, not a silent one.
 - **`discard_draft` gates at confirm.** Deleting a draft asks once at
   the confirm level; kylins' harder confirm was dropped because Astra
   ships no delete-class verb beyond drafts.
+- **Single-session correlation attribution.** The relay's single global
+  correlation holder and the `any_correlation` attribution of
+  session-less asks and tool results are single-session constraints;
+  they gain per-prompt stamping when A2 brings concurrent chat
+  surfaces.

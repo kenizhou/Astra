@@ -191,6 +191,64 @@ fn open_creates_the_file_and_reopens_with_the_rows_intact() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
+/// The bookkeeping rows of one store, in order: `ai_migrations` must hold
+/// each embedded version exactly once.
+fn versions(store: &AiStore) -> Vec<i64> {
+    let conn = store.test_conn();
+    let conn = conn.lock().expect("test connection");
+    let mut statement = conn
+        .prepare("SELECT version FROM ai_migrations ORDER BY version")
+        .expect("the bookkeeping query prepares");
+    statement
+        .query_map([], |row| row.get(0))
+        .expect("the bookkeeping query runs")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("the bookkeeping rows read")
+}
+
+#[test]
+fn the_bookkeeping_row_lands_once_and_survives_the_reopen() {
+    let dir = std::env::temp_dir().join(format!("astra-ai-store-{}", CorrelationId::generate()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let path = dir.join("ai.sqlite3");
+    {
+        let store = AiStore::open(&path).expect("the first open migrates");
+        assert_eq!(versions(&store), vec![1], "one row per applied migration");
+    }
+    let reopened = AiStore::open(&path).expect("the reopen claims nothing new");
+    assert_eq!(
+        versions(&reopened),
+        vec![1],
+        "the reopen records no second bookkeeping row"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn concurrent_first_opens_all_succeed_with_one_bookkeeping_row() {
+    let dir = std::env::temp_dir().join(format!("astra-ai-store-{}", CorrelationId::generate()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let path = dir.join("ai.sqlite3");
+    std::thread::scope(|scope| {
+        let openers: Vec<_> = (0..4)
+            .map(|_| scope.spawn(|| AiStore::open(&path)))
+            .collect();
+        for opener in openers {
+            opener
+                .join()
+                .expect("the opener thread ends")
+                .expect("a concurrent first open never fails on the bookkeeping row");
+        }
+    });
+    let store = AiStore::open(&path).expect("the store opens after the race");
+    assert_eq!(
+        versions(&store),
+        vec![1],
+        "the race applied the migration exactly once"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 #[test]
 fn generated_correlation_ids_are_distinct_and_nonempty() {
     let first = CorrelationId::generate();
