@@ -195,3 +195,13 @@ fn prompt_to_rules_pins_the_default_tier_and_its_wire_word() {
     );
     assert_eq!(LlmUseCase::PromptToRules.as_str(), "prompt_to_rules");
 }
+
+#[test]
+fn style_infer_pins_the_economy_tier_and_its_wire_word() {
+    assert_eq!(LlmUseCase::StyleInfer.tier(), ModelTier::Economy);
+    assert_eq!(
+        serde_json::to_string(&LlmUseCase::StyleInfer).unwrap(),
+        "\"style_infer\"",
+    );
+    assert_eq!(LlmUseCase::StyleInfer.as_str(), "style_infer");
+}
