@@ -143,6 +143,39 @@ async fn the_dedup_guard_skips_repeats_quietly() {
 }
 
 #[tokio::test]
+async fn the_counted_run_names_the_entries_the_guard_skipped() {
+    let store = AiStore::open_in_memory().unwrap();
+    store
+        .insert_knowledge(&NewKnowledgeEntry {
+            id: KnowledgeId::new("pre-stored".to_owned()),
+            account: "work".to_owned(),
+            kind: "fact".to_owned(),
+            text: "The launch lands on Friday.".to_owned(),
+            source_message_account: "work".to_owned(),
+            source_message_key: "m9".to_owned(),
+            correlation: CorrelationId::new("c-old".to_owned()),
+        })
+        .unwrap();
+    let complete = FixtureComplete::scripted(&[r#"{"entries":[
+        {"kind":"fact","text":"The launch lands on Friday.","message":1},
+        {"kind":"preference","text":"The user prefers short replies.","message":1}
+    ]}"#]);
+    let landing = super::knowledge::extract_knowledge_counted(
+        &[message(0)],
+        &account(),
+        &CorrelationId::generate(),
+        &complete,
+        &store,
+    )
+    .await;
+    assert_eq!(landing.landed.len(), 1, "the fresh text alone lands");
+    assert_eq!(
+        landing.skipped_duplicates, 1,
+        "the held text is named as the one skip",
+    );
+}
+
+#[tokio::test]
 async fn an_unknown_kind_word_empties_the_batch() {
     let complete = FixtureComplete::scripted(&[r#"{"entries":[
         {"kind":"rumour","text":"The user hears things.","message":1}

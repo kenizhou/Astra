@@ -78,10 +78,10 @@ use crate::{
 pub use accounts::{Account, MailboxConnector};
 pub use ai_assist::{
     autocomplete, autocomplete_prompt, extract_knowledge, extraction_prompt, knowledge_context,
-    ranking_prompt, search_snippets, translate, translate_prompt, KnowledgeEntry, KnowledgeKind,
-    Snippet, TranslateLanguage, AUTOCOMPLETE_VERSION, KNOWLEDGE_BODY_CAP, KNOWLEDGE_CONTEXT_LIMIT,
-    KNOWLEDGE_EXTRACT_LIMIT, KNOWLEDGE_EXTRACT_VERSION, SNIPPET_SEARCH_VERSION,
-    TRANSLATE_CACHE_KIND, TRANSLATE_VERSION,
+    ranking_prompt, search_snippets, translate, translate_prompt, ExtractionSummary,
+    KnowledgeEntry, KnowledgeKind, KnowledgeView, Snippet, TranslateLanguage, AUTOCOMPLETE_VERSION,
+    KNOWLEDGE_BODY_CAP, KNOWLEDGE_CONTEXT_LIMIT, KNOWLEDGE_EXTRACT_LIMIT,
+    KNOWLEDGE_EXTRACT_VERSION, SNIPPET_SEARCH_VERSION, TRANSLATE_CACHE_KIND, TRANSLATE_VERSION,
 };
 pub use ai_replies::{
     body_hash, chips_for, draft_prompt, generate_reply, style_profile, style_prompt, summarise,

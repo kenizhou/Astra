@@ -159,6 +159,18 @@ struct ExtractedEntry {
     message: usize,
 }
 
+/// The counted outcome of one extraction run: the entries that landed
+/// beside how many the exact-text dedup guard skipped, the pair the
+/// host's extraction pull summarises.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct KnowledgeLanding {
+    /// The entries that landed, in the model's order.
+    pub landed: Vec<KnowledgeEntry>,
+    /// How many entries the dedup guard skipped: a text the account
+    /// already held, a within-batch repeat included.
+    pub skipped_duplicates: usize,
+}
+
 /// Extracts knowledge for `account` from `messages`: builds the
 /// versioned batch prompt, sends it through the seam under the turn's
 /// `correlation` (the knowledge extract use case, economy tier), parses
@@ -182,8 +194,27 @@ pub async fn extract_knowledge(
     complete: &dyn AiComplete,
     store: &AiStore,
 ) -> Vec<KnowledgeEntry> {
+    extract_knowledge_counted(messages, account, correlation, complete, store)
+        .await
+        .landed
+}
+
+/// [`extract_knowledge`] with the dedup skips counted: the same run, the
+/// same quiet skips, the landing answered beside how many entries the
+/// guard refused so a caller can report the run without re-reading the
+/// store.
+pub(super) async fn extract_knowledge_counted(
+    messages: &[MailContext],
+    account: &AccountId,
+    correlation: &CorrelationId,
+    complete: &dyn AiComplete,
+    store: &AiStore,
+) -> KnowledgeLanding {
     if messages.is_empty() {
-        return Vec::new();
+        return KnowledgeLanding {
+            landed: Vec::new(),
+            skipped_duplicates: 0,
+        };
     }
     let prompt = extraction_prompt(messages);
     let completion = match complete
@@ -193,14 +224,21 @@ pub async fn extract_knowledge(
         Ok(completion) => completion,
         Err(err) => {
             log::warn!("ai assist: the knowledge extraction call failed; nothing lands: {err}");
-            return Vec::new();
+            return KnowledgeLanding {
+                landed: Vec::new(),
+                skipped_duplicates: 0,
+            };
         }
     };
     let Some(extracted) = parse_extracted(&completion) else {
-        return Vec::new();
+        return KnowledgeLanding {
+            landed: Vec::new(),
+            skipped_duplicates: 0,
+        };
     };
     let kept: Vec<&MailContext> = kept_messages(messages).collect();
     let mut landed = Vec::new();
+    let mut skipped_duplicates = 0usize;
     for entry in extracted.entries {
         let Some(message) = entry.message.checked_sub(1).and_then(|at| kept.get(at)) else {
             log::warn!(
@@ -221,6 +259,7 @@ pub async fn extract_knowledge(
         match store.insert_knowledge(&row) {
             Ok(landed_row) => landed.push(entry_from_row(landed_row, entry.kind, message)),
             Err(err) if is_duplicate(&err) => {
+                skipped_duplicates += 1;
                 log::debug!(
                     "ai assist: the knowledge entry is already stored; the dedup guard skips it"
                 );
@@ -230,7 +269,10 @@ pub async fn extract_knowledge(
             }
         }
     }
-    landed
+    KnowledgeLanding {
+        landed,
+        skipped_duplicates,
+    }
 }
 
 /// Reads the account's knowledge context for the draft prompt: the

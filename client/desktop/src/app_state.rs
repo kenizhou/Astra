@@ -5,7 +5,11 @@
 
 use std::sync::Arc;
 
-use astra_app::{Account, App, Chip, CompositionId, DraftResume, Intent, SummariseMessageError};
+use astra_ai::KnowledgeId;
+use astra_app::{
+    Account, App, Chip, CompositionId, DraftResume, ExtractionSummary, Intent, KnowledgeView,
+    Snippet, SummariseMessageError, TranslateLanguage,
+};
 use astra_viewmodel::{
     ComposeRequestSnapshot, DraftStatusSnapshot, MailboxListSnapshot, ReadingSnapshot,
     SendingSnapshot, SyncProgressSnapshot,
@@ -113,6 +117,41 @@ pub(crate) trait AppPort: Send + Sync {
     /// own prefill with the drafted reply already the document's opening
     /// paragraphs, signalled through the compose-request surface.
     async fn compose_from_draft(&self, account: &AccountId, key: &ProviderKey, draft: &str);
+
+    /// Every knowledge entry the account holds, newest first, as the
+    /// knowledge surface lists it. An app with no AI bundle answers
+    /// empty.
+    fn knowledge_list(&self, account: &AccountId) -> Vec<KnowledgeView>;
+
+    /// Runs one knowledge extraction over the account's most recent
+    /// mail, `limit` messages at most, answering the run's summary. An
+    /// app with no AI bundle answers the empty run.
+    async fn knowledge_extract(&self, account: &AccountId, limit: usize) -> ExtractionSummary;
+
+    /// Forgets one knowledge entry, answering whether any row went.
+    fn knowledge_forget(&self, id: &KnowledgeId) -> bool;
+
+    /// Every snippet, the most recently touched first: the picker's
+    /// plain listing read.
+    fn snippet_list(&self) -> Vec<Snippet>;
+
+    /// Searches the snippet library, the ranked answer with its
+    /// substring fallback.
+    async fn snippet_search(&self, query: &str) -> Vec<Snippet>;
+
+    /// The compose autocomplete suggestion for the editor's text around
+    /// the cursor; an empty answer never shows a chip.
+    async fn compose_autocomplete(&self, before: &str, after: &str) -> String;
+
+    /// Translates the message's body into `lang`, the answer served
+    /// through the text cache; an empty answer names a message that
+    /// cannot be resolved or a call that failed.
+    async fn translate_message(
+        &self,
+        account: &AccountId,
+        key: &ProviderKey,
+        lang: TranslateLanguage,
+    ) -> String;
 }
 
 #[async_trait]
@@ -183,6 +222,39 @@ impl AppPort for App<HostProvider> {
 
     async fn compose_from_draft(&self, account: &AccountId, key: &ProviderKey, draft: &str) {
         App::compose_from_draft(self, account, key, draft).await;
+    }
+
+    fn knowledge_list(&self, account: &AccountId) -> Vec<KnowledgeView> {
+        App::knowledge_list(self, account)
+    }
+
+    async fn knowledge_extract(&self, account: &AccountId, limit: usize) -> ExtractionSummary {
+        App::knowledge_extract(self, account, limit).await
+    }
+
+    fn knowledge_forget(&self, id: &KnowledgeId) -> bool {
+        App::knowledge_forget(self, id)
+    }
+
+    fn snippet_list(&self) -> Vec<Snippet> {
+        App::snippet_list(self)
+    }
+
+    async fn snippet_search(&self, query: &str) -> Vec<Snippet> {
+        App::snippet_search(self, query).await
+    }
+
+    async fn compose_autocomplete(&self, before: &str, after: &str) -> String {
+        App::compose_autocomplete(self, before, after).await
+    }
+
+    async fn translate_message(
+        &self,
+        account: &AccountId,
+        key: &ProviderKey,
+        lang: TranslateLanguage,
+    ) -> String {
+        App::translate_message(self, account, key, lang).await
     }
 }
 

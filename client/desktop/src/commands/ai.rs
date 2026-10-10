@@ -2,8 +2,11 @@
 //! The AI replies half of the command surface: the chips pull the reading
 //! pane drives on open and on the draft-pool event, the cached summarise
 //! action, the account's style note, the chips dismissal write, and the
-//! accepted chip's compose-from-draft publish. A child of [`super`], whose
-//! command registration this module continues.
+//! accepted chip's compose-from-draft publish. Beside them ride the A3
+//! assist pulls: the knowledge listing, extraction, and forget, the
+//! snippet listing and ranked search, the compose autocomplete, and the
+//! cached translate. A child of [`super`], whose command registration
+//! this module continues.
 //!
 //! Split from the command module itself to keep each file under the
 //! 500-line limit, the same split the app core's ai_replies made for its
@@ -13,7 +16,10 @@
 //! resume read and the add flow's dial do, so the webview learns what its
 //! pane opens with.
 
-use astra_app::Chip;
+use astra_ai::KnowledgeId;
+use astra_app::{
+    Chip, ExtractionSummary, KnowledgeView, Snippet, TranslateLanguage, KNOWLEDGE_EXTRACT_LIMIT,
+};
 use engine_api::{AccountId, ProviderKey};
 use tauri::State;
 
@@ -82,6 +88,73 @@ pub(crate) async fn compose_from_draft_of(
     draft: &str,
 ) {
     state.app.compose_from_draft(account, key, draft).await;
+}
+
+/// Every knowledge entry the account holds, newest first: the knowledge
+/// surface's listing read over the AI bundle's one store. An app with no
+/// bundle answers empty.
+pub(crate) fn knowledge_list_of(state: &AppState, account: &AccountId) -> Vec<KnowledgeView> {
+    state.app.knowledge_list(account)
+}
+
+/// Runs one knowledge extraction over the account's most recent mail:
+/// `limit` messages at most, the thirty cap when none was named. The
+/// command returns when the run is done, so the surface's spinner is the
+/// only progress there is.
+pub(crate) async fn knowledge_extract_of(
+    state: &AppState,
+    account: &AccountId,
+    limit: Option<usize>,
+) -> ExtractionSummary {
+    state
+        .app
+        .knowledge_extract(account, limit.unwrap_or(KNOWLEDGE_EXTRACT_LIMIT))
+        .await
+}
+
+/// Forgets one knowledge entry by its identity, answering whether any
+/// row went: false names an id no entry carried or a store that refused.
+pub(crate) fn knowledge_forget_of(state: &AppState, id: &str) -> bool {
+    state.app.knowledge_forget(&KnowledgeId::new(id.to_owned()))
+}
+
+/// Every snippet, the most recently touched first: the composer picker's
+/// plain listing read.
+pub(crate) fn snippet_list_of(state: &AppState) -> Vec<Snippet> {
+    state.app.snippet_list()
+}
+
+/// Searches the snippet library: the ranked answer with its substring
+/// fallback, over the whole store listing.
+pub(crate) async fn snippet_search_of(state: &AppState, query: &str) -> Vec<Snippet> {
+    state.app.snippet_search(query).await
+}
+
+/// The compose autocomplete suggestion for the editor's text around the
+/// cursor; an absent trailing half crosses as the empty string. An empty
+/// answer never shows a chip, and nothing inserts without the user's
+/// gesture, which is the editor's own discipline.
+pub(crate) async fn compose_autocomplete_of(
+    state: &AppState,
+    before: &str,
+    after: Option<&str>,
+) -> String {
+    state
+        .app
+        .compose_autocomplete(before, after.unwrap_or(""))
+        .await
+}
+
+/// Translates the message's body into `lang`, the cached answer served
+/// without a call; an empty answer names a message that cannot be
+/// resolved or a call that failed.
+pub(crate) async fn translate_of(
+    state: &AppState,
+    account: &AccountId,
+    key: &ProviderKey,
+    lang: TranslateLanguage,
+) -> String {
+    state.app.translate_message(account, key, lang).await
 }
 
 /// Pulls the message's smart-reply chips for the reading pane.
@@ -153,6 +226,87 @@ pub(crate) fn compose_from_draft(
     state
         .runtime
         .block_on(|| compose_from_draft_of(&state, &account, &key, &reply_text));
+}
+
+/// Lists every knowledge entry the account holds, newest first; an app
+/// with no AI bundle answers empty.
+// Tauri's command macro hands `State` by value; the wrapper only reads through it.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) fn knowledge_list(state: State<'_, AppState>, account: AccountId) -> Vec<KnowledgeView> {
+    knowledge_list_of(&state, &account)
+}
+
+/// Runs one knowledge extraction over the account's most recent mail,
+/// `limit` messages at most and the thirty cap when none was named, and
+/// answers the run's summary once the run is done.
+// Tauri's command macro hands `State` by value; the wrapper only reads through it.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) fn knowledge_extract(
+    state: State<'_, AppState>,
+    account: AccountId,
+    limit: Option<usize>,
+) -> ExtractionSummary {
+    state
+        .runtime
+        .block_on(|| knowledge_extract_of(&state, &account, limit))
+}
+
+/// Forgets one knowledge entry, answering whether any row went.
+// Tauri's command macro hands `State` by value; the wrapper only reads through it.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) fn knowledge_forget(state: State<'_, AppState>, id: String) -> bool {
+    knowledge_forget_of(&state, &id)
+}
+
+/// Lists every snippet, the most recently touched first.
+// Tauri's command macro hands `State` by value; the wrapper only reads through it.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) fn snippet_list(state: State<'_, AppState>) -> Vec<Snippet> {
+    snippet_list_of(&state)
+}
+
+/// Searches the snippet library, the ranked answer with its substring
+/// fallback.
+// Tauri's command macro hands `State` by value; the wrapper only reads through it.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) fn snippet_search(state: State<'_, AppState>, query: String) -> Vec<Snippet> {
+    state.runtime.block_on(|| snippet_search_of(&state, &query))
+}
+
+/// Answers the compose autocomplete suggestion for the editor's text
+/// around the cursor; an empty answer never shows a chip.
+// Tauri's command macro hands `State` by value; the wrapper only reads through it.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) fn compose_autocomplete(
+    state: State<'_, AppState>,
+    before: String,
+    after: Option<String>,
+) -> String {
+    state
+        .runtime
+        .block_on(|| compose_autocomplete_of(&state, &before, after.as_deref()))
+}
+
+/// Translates the message's body into the chosen language, the cached
+/// answer served without a call.
+// Tauri's command macro hands `State` by value; the wrapper only reads through it.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) fn translate(
+    state: State<'_, AppState>,
+    account: AccountId,
+    key: ProviderKey,
+    lang: TranslateLanguage,
+) -> String {
+    state
+        .runtime
+        .block_on(|| translate_of(&state, &account, &key, lang))
 }
 
 #[cfg(test)]

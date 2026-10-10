@@ -10,6 +10,7 @@
 //! and replies models ride.
 
 mod autocomplete;
+mod drive;
 mod knowledge;
 mod snippets;
 mod translate;
@@ -17,6 +18,10 @@ mod translate;
 #[cfg(test)]
 #[path = "autocomplete_tests.rs"]
 mod autocomplete_tests;
+
+#[cfg(test)]
+#[path = "drive_tests.rs"]
+mod drive_tests;
 
 #[cfg(test)]
 #[path = "knowledge_tests.rs"]
@@ -31,6 +36,7 @@ mod snippets_tests;
 mod translate_tests;
 
 pub use autocomplete::{autocomplete, autocomplete_prompt, AUTOCOMPLETE_VERSION};
+pub use drive::{ExtractionSummary, KnowledgeView};
 pub use knowledge::{
     extract_knowledge, extraction_prompt, knowledge_context, KnowledgeEntry, KnowledgeKind,
     KNOWLEDGE_BODY_CAP, KNOWLEDGE_CONTEXT_LIMIT, KNOWLEDGE_EXTRACT_LIMIT,
