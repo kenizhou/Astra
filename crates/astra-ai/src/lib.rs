@@ -71,5 +71,6 @@ pub use judge::{
 pub use repair::repair_json;
 pub use rules::{NewRule, RuleId, RuleRow};
 pub use store::{AiStore, AiStoreError, AuditRow, LlmCallRow};
+pub use summarise_cache::SummariseCacheRow;
 pub use tier::{ModelEntry, ModelTier, TierError, TierTable};
 pub use use_case::LlmUseCase;

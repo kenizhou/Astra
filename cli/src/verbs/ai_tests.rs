@@ -3,7 +3,8 @@
 //! results store the incoming pass fills (migration 0003), never a live
 //! call. The unjudged answer is null, not a guess; every row the pass
 //! recorded lists back; and the account index check the CLI's contract
-//! carries holds for the positional grammar too.
+//! carries holds for the positional grammar too. The reply-drafting
+//! verbs' tests live in the `ai_replies_tests` child.
 
 use astra_ai::{AiStore, CorrelationId, NewAiResult};
 

@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Summarise cache store tests: the 005 migration lands the table, a put
 //! hits while the stored body hash matches the asked one, a changed hash
-//! misses, a re-put under the new hash invalidates the old entry, and
-//! each message keeps its own row.
+//! misses, a re-put under the new hash invalidates the old entry, each
+//! message keeps its own row, and the hash-free row read answers the
+//! whole stored row the CLI's summary verb reads.
 
 use crate::AiStore;
 
@@ -79,6 +80,39 @@ fn a_re_put_under_a_new_hash_replaces_the_entry() {
         Some("The second summary.".to_owned()),
         "one row per message, the newest hash's summary",
     );
+}
+
+#[test]
+fn the_row_read_answers_the_whole_stored_row_whatever_hash() {
+    let store = store();
+    assert!(
+        store
+            .summarise_cache_for_message("work", "m1")
+            .expect("the row read runs")
+            .is_none(),
+        "a message never summarised answers no row"
+    );
+    store
+        .cache_summary("work", "m1", "hash-a", "Ada asks for the launch date.")
+        .expect("the summary caches");
+    let row = store
+        .summarise_cache_for_message("work", "m1")
+        .expect("the row read runs")
+        .expect("the cached row answers");
+    assert_eq!(row.message_account, "work");
+    assert_eq!(row.message_key, "m1");
+    assert_eq!(row.body_hash, "hash-a");
+    assert_eq!(row.summary, "Ada asks for the launch date.");
+    assert!(row.created_at > 0, "the store stamps created_at itself");
+    store
+        .cache_summary("work", "m1", "hash-b", "The second summary.")
+        .expect("the re-put stores");
+    let row = store
+        .summarise_cache_for_message("work", "m1")
+        .expect("the row read runs")
+        .expect("one row per message still");
+    assert_eq!(row.body_hash, "hash-b");
+    assert_eq!(row.summary, "The second summary.");
 }
 
 #[test]
