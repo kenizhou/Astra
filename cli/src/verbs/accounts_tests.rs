@@ -90,6 +90,31 @@ fn an_unparsable_line_audits_as_usage_and_exits_two() {
 }
 
 #[test]
+fn a_known_subverb_joins_the_ledgers_verb_word() {
+    let dir = temp_dir();
+    write_index(&dir, &["alpha"]);
+    // `messages read` is the CLI's own vocabulary; the missing --key makes
+    // it a usage failure, and the verb word keeps its subverb.
+    run(
+        &["messages".to_owned(), "read".to_owned()],
+        &dir,
+        &mut std::io::empty(),
+    );
+    assert_eq!(audit_rows(&dir)[0].1, "messages read");
+}
+
+#[test]
+fn a_caller_typed_positional_never_reaches_the_ledger() {
+    let dir = temp_dir();
+    run(
+        &["delete-me".to_owned(), "now".to_owned()],
+        &dir,
+        &mut std::io::empty(),
+    );
+    assert_eq!(audit_rows(&dir)[0].1, "delete-me");
+}
+
+#[test]
 fn send_class_verbs_are_parsed_then_refused_with_exit_three() {
     let dir = temp_dir();
     for word in ["send", "queue"] {

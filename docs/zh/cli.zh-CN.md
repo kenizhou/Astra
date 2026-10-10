@@ -15,13 +15,16 @@
 
 ## 动词
 
-今天交付六个，每个对应一个已存在的界面。每个动词在两个位置词（`verb
-subverb`）之后接受标志，因此一次调用在文本中、在审计行里都不含糊。
+今天交付六个，每个对应一个已存在的界面。语法是两个位置词（`verb
+subverb`）加标志，且标志顺序自由：sidecar 应拼写为
+`astra-cli [--json] [--correlation-id <id>] <verb> <subverb> [--flag <value> ...]`，
+始终传 `--json` 与轮次的 `--correlation-id`，并把两个位置词之后的一切都当作
+具名标志。一次调用在文本中、在审计行里都不含糊。
 
 | 动词 | 读取 | 应答的 `data` |
 |---|---|---|
 | `accounts list` | 数据目录中的账户索引（`accounts.json`） | `accounts`：按索引顺序的 id |
-| `folders list --account <id>` | 引擎存储的 mailbox 对象 | `folders`：id、名称、角色、父级、`unread_count`，按侧栏的规范顺序 |
+| `folders list --account <id>` | 引擎存储的 mailbox 对象 | `folders`：id、名称、角色、父级、`unread_count`，按侧栏的规范顺序，树被展平，每行携带父级因此嵌套可推导 |
 | `messages list --account <id> [--folder <key>] [--limit <n>]` | 引擎存储的窗口化列表读取 | `messages`：key、发件人、主题、日期、未读、草稿、有无附件、预览 |
 | `messages read --account <id> --key <k> [--key <k>...]` | 引擎存储的整封邮件读取与缓存正文 | `messages`：信封加 `body.plain` 与 `body.html_present` |
 | `drafts save --account <id> --from <a> --to <a,...> [--cc <a,...>] --subject <s> (--plain <text> 或 --file <path> 或 stdin)` | 经引擎的 `put_draft` 写入 | `message_id`、`op`、`state`（`stored` 或 `queued`），已存储时附 `key` |
@@ -70,8 +73,10 @@ subverb`）之后接受标志，因此一次调用在文本中、在审计行里
 每次调用，无论做了什么，都向数据目录旁的 AI 账本（`ai.sqlite`）追加一行：动词、
 脱敏的参数预览、结果（`ok`、`error`、`usage`、`refused`、`preview`），以及轮次的
 相关性 id，取自 `--correlation-id`，缺席时生成。参数预览只携带形状：账户与文件夹
-id、数量、长度。地址、主题与正文文本绝不进入账本。账本无法打开或写入时调用
-不被应答：CLI 打印运行时错误并以 `1` 退出。
+id、数量、长度。地址、主题与正文文本绝不进入账本。解析失败的行只记录动词词，
+当子动词属于 CLI 自身的词汇时与之相连：调用方键入的位置词绝不进入账本，而
+相关性 id 已经把整行绑定到其轮次。账本无法打开或写入时调用不被应答：CLI 打印
+运行时错误并以 `1` 退出。
 
 ## 存储在哪里
 
@@ -84,8 +89,11 @@ id、数量、长度。地址、主题与正文文本绝不进入账本。账本
 `put_draft` 与 `delete_draft`，处于发件队列的租约与资源串行化之下，因此两个
 写入方不会互相破坏。但应用不会被推送：它通过自己的发件箱界面与下一次同步或
 刷新得知 CLI 写入的草稿，正如得知自己排队中的保存一样。CLI 的读取看到的是
-最后一次同步的状态，绝不向服务器索取更多。这是被记录的已知交互，不是待关闭
-的缺口。
+最后一次同步的状态，绝不向服务器索取更多。与纯读者相比有一处偏离：引擎的
+`open` 即便在读取路径上也会创建并迁移存储，因此 CLI 首次运行在一个应用从未
+创建过的数据目录上时会创建 `astra.sqlite` 并带到本引擎的 schema。在应用旁这是
+无害的，因为两侧运行同一引擎版本、因此同一套迁移，这也是读动词不需要预置
+存储即可应答空结果的原因。这是被记录的已知交互，不是待关闭的缺口。
 
 ## 矩阵
 

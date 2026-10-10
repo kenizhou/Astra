@@ -36,8 +36,13 @@ pub(crate) fn build_draft(args: &DraftArgs) -> Result<Draft, (Code, String)> {
 }
 
 /// A fresh `Message-ID`, the same form the app mints (`drafts/build.rs`):
-/// clock plus process counter, so every mint is unique and stable across the
-/// saves of one composition.
+/// clock plus process counter, unique per mint. Each invocation mints its
+/// own id: one CLI process is one save, never one composition's save
+/// history, so the outbox's supersede-withdrawal (which keys on the
+/// resource `draft:<Message-ID>`) never fires across CLI saves and
+/// consecutive saves store beside one another rather than over. That is
+/// the duplicate-draft gap recorded in docs/cli.md, and it stands until a
+/// `--replacing` flag names the copy to supersede.
 fn mint_message_id() -> Option<MessageIdHeader> {
     static SEQ: AtomicU64 = AtomicU64::new(0);
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);

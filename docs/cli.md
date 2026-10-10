@@ -17,14 +17,17 @@ the ledger does not know happened.
 
 ## The verbs
 
-Six ship today, one per surface that exists. Each takes flags after two
-positional words (`verb subverb`), so a call is unambiguous in text and in
-an audit row.
+Six ship today, one per surface that exists. The grammar is two positional
+words (`verb subverb`) plus flags, and flag order is free: the sidecar
+should spell `astra-cli [--json] [--correlation-id <id>] <verb> <subverb>
+[--flag <value> ...]`, always passing `--json` and the turn's
+`--correlation-id`, and treating everything after the two positionals as
+named flags. A call is unambiguous in text and in an audit row.
 
 | Verb | Reads | Answer's `data` |
 |---|---|---|
 | `accounts list` | the account index (`accounts.json`) in the data dir | `accounts`: the ids, in index order |
-| `folders list --account <id>` | the engine store's mailbox objects | `folders`: id, name, role, parent, `unread_count`, in the sidebar's canonical order |
+| `folders list --account <id>` | the engine store's mailbox objects | `folders`: id, name, role, parent, `unread_count`, in the sidebar's canonical order, the tree flattened with each row carrying its parent so nesting is derivable |
 | `messages list --account <id> [--folder <key>] [--limit <n>]` | the engine store's windowed list read | `messages`: key, from, subject, date, unread, draft, has attachment, preview |
 | `messages read --account <id> --key <k> [--key <k>...]` | the engine store's whole-message read and cached body | `messages`: the envelope plus `body.plain` and `body.html_present` |
 | `drafts save --account <id> --from <a> --to <a,...> [--cc <a,...>] --subject <s> (--plain <text> or --file <path> or stdin)` | writes through the engine's `put_draft` | `message_id`, `op`, `state` (`stored` or `queued`), and `key` when stored |
@@ -85,9 +88,12 @@ the data dir (`ai.sqlite`): the verb, a redacted argument preview, the
 outcome (`ok`, `error`, `usage`, `refused`, `preview`), and the turn's
 correlation id, taken from `--correlation-id` or generated when absent. The
 argument preview carries shapes only: account and folder ids, counts,
-lengths. Addresses, subjects, and body text never enter the ledger. When
-the ledger cannot be opened or written the invocation is not answered: the
-CLI prints a runtime error and exits `1`.
+lengths. Addresses, subjects, and body text never enter the ledger. A line
+that fails to parse records only the verb word, joined with a subverb when
+the subverb is the CLI's own vocabulary: caller-typed positionals never
+reach the ledger, and the correlation id already ties the whole line to its
+turn. When the ledger cannot be opened or written the invocation is not
+answered: the CLI prints a runtime error and exits `1`.
 
 ## Where the stores live
 
@@ -105,7 +111,13 @@ serialisation, so two writers cannot corrupt one another. But the app is
 not pushed: it learns a CLI-written draft through its outbox surface and
 its next sync or refresh, exactly as it learns a parked save of its own.
 The CLI's reads see the last synced state and never ask a server for more.
-This is the recorded known interaction, not a gap to close.
+One deviation from a pure reader stands: the engine's `open` creates and
+migrates the store even on a read path, so a first CLI run against a data
+dir the app never made creates `astra.sqlite` and brings it to this
+engine's schema. That is benign beside the app because both sides run the
+same engine version and therefore the same migrations, and it is why the
+read verbs never need a staged store to answer empty. This is the recorded
+known interaction, not a gap to close.
 
 ## Matrix
 

@@ -247,15 +247,26 @@ fn audit_outcome(run: &Run) -> &'static str {
     }
 }
 
-/// The verb words of an unparsable line, best effort: two positionals, one,
-/// or a dash for none. A refused send-class line records its single verb
-/// word alone; its own arguments are not the verb.
+/// The subverbs the six verbs spell: the CLI's own vocabulary, the only
+/// second positional the ledger may capture beside a verb word.
+const SUBVERBS: &[&str] = &["list", "read", "save", "discard"];
+
+/// The verb word of an unparsable line, best effort: the first positional,
+/// joined with the subverb only when the subverb is the CLI's own
+/// vocabulary. A caller-typed positional never reaches the ledger (the
+/// correlation id already ties the whole line to its turn), and a refused
+/// send-class line records its single verb word alone.
 fn raw_verb(args: &[String], code: Code) -> String {
     let positionals = parse::positional_words(args);
-    match (positionals.len(), code) {
-        (0, _) => "-".to_owned(),
-        (1, _) | (_, Code::Refused) => positionals[0].to_owned(),
-        _ => format!("{} {}", positionals[0], positionals[1]),
+    let Some(word) = positionals.first().copied() else {
+        return "-".to_owned();
+    };
+    if code == Code::Refused {
+        return word.to_owned();
+    }
+    match positionals.get(1) {
+        Some(&sub) if SUBVERBS.contains(&sub) => format!("{word} {sub}"),
+        _ => word.to_owned(),
     }
 }
 
