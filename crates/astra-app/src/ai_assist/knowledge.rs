@@ -165,6 +165,9 @@ struct ExtractedEntry {
 /// the completion strictly with one repair through the shared recovery
 /// path, then lands every citable entry in the knowledge store with its
 /// source tracked, skipping a text the account already holds quietly.
+/// `messages` arrive newest first from the caller, exactly as the
+/// engine's reads return them, so the batch cap keeps the newest
+/// [`KNOWLEDGE_EXTRACT_LIMIT`] of them.
 ///
 /// The answer is the entries that landed. An empty `messages` list never
 /// calls; a failed call, an unparseable completion, or a batch that

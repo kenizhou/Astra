@@ -1,0 +1,27 @@
+{
+  "id": "snippet-search-ranked-order",
+  "feature": "snippet_search",
+  "mode": "offline",
+  "prompt_version": "1",
+  "inputs": {
+    "query": "scheduling",
+    "snippets": [
+      {
+        "title": "Shipping update",
+        "body": "The release is on track for next Friday."
+      },
+      {
+        "title": "Thanks",
+        "body": "Thanks so much for your help with this."
+      },
+      {
+        "title": "Meeting invite",
+        "body": "Happy to meet Tuesday afternoon if that works."
+      }
+    ],
+    "completion": "{\"matches\":[3,1]}"
+  },
+  "expected": {
+    "matches": ["Meeting invite", "Shipping update"]
+  }
+}

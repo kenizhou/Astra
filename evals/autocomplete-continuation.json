@@ -1,0 +1,14 @@
+{
+  "id": "autocomplete-continuation",
+  "feature": "autocomplete",
+  "mode": "offline",
+  "prompt_version": "1",
+  "inputs": {
+    "before": "Thanks for the quick turnaround on the review notes. I will",
+    "after": "them into the prototype branch.",
+    "completion": "  fold  "
+  },
+  "expected": {
+    "suggestion": "fold"
+  }
+}

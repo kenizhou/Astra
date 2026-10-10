@@ -43,14 +43,16 @@ a closed set (`low`, `medium`, `high`) stored as its fixed score (0.3,
 skipped row, never a guess.
 
 The context collector keeps the halves apart the way every Astra prompt
-does: the instruction, the output policy, and the style note ride the
-trusted half, the note explicitly labelled data (model-derived text over
+does: the instruction, the output policy, the style note, and the
+account's knowledge context lines ride the trusted half, the note and
+the knowledge lines explicitly labelled data (model-derived text over
 untrusted mail must never speak as an instruction); every thread message
 rides its own untrusted wrap. The thread arrives newest first from the
 engine's thread read and renders oldest first with the original last, so
 the model answers the message the reader has open. The caps:
 `THREAD_HISTORY_LIMIT` (8) earlier members, `THREAD_BODY_CAP` (2000)
-characters per message with a truncation marker, the original included.
+characters per message with a truncation marker, the original included,
+and the knowledge context's own ten-entry cap (the assist model's read).
 
 ## The gate
 

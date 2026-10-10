@@ -2,7 +2,7 @@
   "id": "draft-unknown-confidence-skips",
   "feature": "draft",
   "mode": "offline",
-  "prompt_version": "1",
+  "prompt_version": "2",
   "inputs": {
     "mail": {
       "account": "work",

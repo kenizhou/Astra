@@ -1,0 +1,41 @@
+{
+  "id": "knowledge-extract-two-sourced-entries",
+  "feature": "knowledge_extract",
+  "mode": "offline",
+  "prompt_version": "1",
+  "inputs": {
+    "messages": [
+      {
+        "account": "work",
+        "key": "m1",
+        "from_name": "Astra One",
+        "from_address": "astra1@example.test",
+        "subject": "Re: Prototype timing",
+        "body": "The build is on track; I will confirm the review dates once QA signs off."
+      },
+      {
+        "account": "work",
+        "key": "m0",
+        "from_name": "Ada Lovelace",
+        "from_address": "ada@example.test",
+        "subject": "Prototype timing",
+        "body": "Thanks for the update. Can we still land the prototype next Friday?"
+      }
+    ],
+    "completion": "{\"entries\":[{\"kind\":\"fact\",\"text\":\"The prototype lands next Friday.\",\"message\":1},{\"kind\":\"preference\",\"text\":\"The user confirms review dates once QA signs off.\",\"message\":2}]}"
+  },
+  "expected": {
+    "entries": [
+      {
+        "kind": "fact",
+        "text": "The prototype lands next Friday.",
+        "source": "m0"
+      },
+      {
+        "kind": "preference",
+        "text": "The user confirms review dates once QA signs off.",
+        "source": "m1"
+      }
+    ]
+  }
+}

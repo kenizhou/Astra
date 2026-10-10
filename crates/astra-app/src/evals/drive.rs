@@ -16,6 +16,7 @@ use crate::ai_rules::{
 };
 use crate::{chips_for, generate_reply, summarise, DraftConfidence, DraftContext, SummariseError};
 
+use super::drive_assist;
 use super::{Feature, Scenario};
 
 /// Drives one scenario over the given seams, whatever backs them: the
@@ -80,6 +81,18 @@ pub async fn drive(
         Feature::Draft => draft(scenario, complete, &store, &correlation).await,
         Feature::Summarise => summarise_scenario(scenario, complete, &store, &correlation).await,
         Feature::Gate => gate(scenario, judge, &store, &correlation).await,
+        Feature::KnowledgeExtract => {
+            drive_assist::knowledge_extract_scenario(scenario, complete, &store, &correlation).await
+        }
+        Feature::SnippetSearch => {
+            drive_assist::snippet_search_scenario(scenario, complete, &correlation).await
+        }
+        Feature::Autocomplete => {
+            drive_assist::autocomplete_scenario(scenario, complete, &correlation).await
+        }
+        Feature::Translate => {
+            drive_assist::translate_scenario(scenario, complete, &store, &correlation).await
+        }
     }
 }
 
@@ -142,10 +155,15 @@ async fn draft(
         .get("style_note")
         .and_then(serde_json::Value::as_str)
         .map(str::to_owned);
+    let knowledge: Vec<String> = match scenario.inputs.get("knowledge") {
+        Some(_) => strings_field(&scenario.inputs, "knowledge")?,
+        None => Vec::new(),
+    };
     let context = DraftContext {
         original: &original,
         history: &history,
         style_note: style_note.as_deref(),
+        knowledge: &knowledge,
     };
     let entry = generate_reply(&context, correlation, complete, store).await;
     let actual = match entry.and_then(|entry| {
@@ -301,7 +319,7 @@ fn error_word(message: &str) -> String {
 
 /// The scenario's mail context, built from the `mail` object the fixture
 /// carries.
-fn mail_context(inputs: &serde_json::Value) -> Result<MailContext, String> {
+pub(super) fn mail_context(inputs: &serde_json::Value) -> Result<MailContext, String> {
     let mail = inputs
         .get("mail")
         .ok_or_else(|| "carries no mail object".to_owned())?;
@@ -310,7 +328,7 @@ fn mail_context(inputs: &serde_json::Value) -> Result<MailContext, String> {
 
 /// One mail object as a [`MailContext`], the shape the fixture's `mail`
 /// field and the history array's members share.
-fn mail_object(mail: &serde_json::Value) -> Result<MailContext, String> {
+pub(super) fn mail_object(mail: &serde_json::Value) -> Result<MailContext, String> {
     let field = |name: &str| {
         mail.get(name)
             .and_then(serde_json::Value::as_str)
@@ -412,7 +430,7 @@ fn newest_row(store: &AiStore, mail: &MailContext, stage: &str) -> Result<String
 }
 
 /// A required string field.
-fn str_field(value: &serde_json::Value, name: &str) -> Result<String, String> {
+pub(super) fn str_field(value: &serde_json::Value, name: &str) -> Result<String, String> {
     value
         .get(name)
         .and_then(serde_json::Value::as_str)
@@ -445,7 +463,10 @@ fn bool_field(value: &serde_json::Value, name: &str) -> Result<bool, String> {
 
 /// Structural equality against the expectation, both sides printed on a
 /// mismatch.
-fn expect(expected: &serde_json::Value, actual: &serde_json::Value) -> Result<(), String> {
+pub(super) fn expect(
+    expected: &serde_json::Value,
+    actual: &serde_json::Value,
+) -> Result<(), String> {
     if expected == actual {
         Ok(())
     } else {

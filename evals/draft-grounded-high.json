@@ -2,7 +2,7 @@
   "id": "draft-grounded-high",
   "feature": "draft",
   "mode": "offline",
-  "prompt_version": "1",
+  "prompt_version": "2",
   "inputs": {
     "mail": {
       "account": "work",
@@ -21,6 +21,10 @@
         "subject": "Re: Prototype timing",
         "body": "The build is on track; I will confirm the review dates once QA signs off."
       }
+    ],
+    "knowledge": [
+      "preference: The user confirms dates in writing.",
+      "fact: The user's prototype work lands on Fridays when QA has signed off."
     ],
     "completion": "{\"reply\":\"Yes, the prototype still lands next Friday, and the review notes will follow the week after.\",\"confidence\":\"high\"}"
   },

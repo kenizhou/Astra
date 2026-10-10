@@ -2,13 +2,17 @@
 //! Reply-drafting driver tests: an open arms the generation off its own
 //! path, the driver drafts once per message (pool presence, skipped rows
 //! included, the arming's correlation riding or a fresh one minted), the
-//! thread history and the style note ride the prompt, and a landed row
-//! signals the host's sink. The host-pull tests live in the `pulls` child
-//! module (their own file, so this one stays under the line cap).
+//! thread history, the style note, and the knowledge context ride the
+//! prompt, and a landed row signals the host's sink. The host-pull tests
+//! live in the `pulls` child module (their own file, so this one stays
+//! under the line cap).
 
 use std::sync::{Arc, Mutex};
 
-use astra_ai::{AiStore, CorrelationId, DlpPolicy, JudgeOutcome, JudgePath, JudgeVerdict};
+use astra_ai::{
+    AiStore, CorrelationId, DlpPolicy, JudgeOutcome, JudgePath, JudgeVerdict, KnowledgeId,
+    NewKnowledgeEntry,
+};
 use astra_viewmodel::MessageKey;
 
 use crate::ai_replies::DraftPoolSink;
@@ -400,6 +404,53 @@ async fn the_style_note_is_inferred_once_and_rides_every_draft_prompt() {
             .prompt
             .contains("Crisp and warm, signs with thanks."),
         "the stored note rides just the same",
+    );
+}
+
+#[tokio::test]
+async fn the_account_knowledge_rides_every_draft_prompt() {
+    // Two stored entries beside the thread, so the collector's read has
+    // lines to shape with; the completion answers the draft alone (no
+    // Sent messages, so the style never infers).
+    let store = Arc::new(AiStore::open_in_memory().unwrap());
+    for (kind, text) in [
+        (
+            "persona",
+            "The user writes plainly and signs off with Cheers.",
+        ),
+        ("fact", "The launch lands on Friday."),
+    ] {
+        store
+            .insert_knowledge(&NewKnowledgeEntry {
+                id: KnowledgeId::new(format!("k-{kind}")),
+                account: "work".to_owned(),
+                kind: kind.to_owned(),
+                text: text.to_owned(),
+                source_message_account: "work".to_owned(),
+                source_message_key: "m0".to_owned(),
+                correlation: CorrelationId::new("c-old".to_owned()),
+            })
+            .unwrap();
+    }
+    let complete = fakes::ai::FixtureComplete::scripted(&[DRAFT]);
+    let probe = complete.clone();
+    let app = drafted_app(thread(), complete, Arc::clone(&store), None).await;
+
+    app.request_reply_draft(message("m3"), Some(CorrelationId::generate()));
+    app.run_reply_drafting().await;
+    let calls = probe.calls();
+    assert_eq!(calls[0].use_case, astra_ai::LlmUseCase::DraftReply);
+    assert!(
+        calls[0].prompt.contains("Known facts about the user"),
+        "the knowledge section rides the draft prompt:\n{}",
+        calls[0].prompt,
+    );
+    assert!(
+        calls[0]
+            .prompt
+            .contains("fact: The launch lands on Friday."),
+        "the stored entries ride as labelled lines:\n{}",
+        calls[0].prompt,
     );
 }
 
