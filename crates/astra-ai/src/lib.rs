@@ -10,7 +10,8 @@
 //! the sidecar, the CLI, and both ledgers, the product SQLite store
 //! ([`AiStore`], the product database's arrival, with the rules CRUD of
 //! migration 0002 beside the ledgers, the draft pool and style profiles
-//! of 0004, and the summarise cache of 0005), the prompt-injection
+//! of 0004, the summarise cache of 0005, and the chips-dismissed markers
+//! of 0006), the prompt-injection
 //! hardening wrapper ([`tag_untrusted`]), the active data loss
 //! prevention gate ([`DlpPolicy`] with its [`redact`] and [`apply`]),
 //! the structured output [`repair_json`] helper every structured caller
@@ -22,6 +23,7 @@
 //! host and consumes this crate.
 
 mod ai_results;
+mod chip_dismissals;
 mod correlation;
 mod dlp;
 mod draft_pool;
@@ -36,6 +38,8 @@ mod use_case;
 
 #[cfg(test)]
 mod ai_results_tests;
+#[cfg(test)]
+mod chip_dismissals_tests;
 #[cfg(test)]
 mod dlp_tests;
 #[cfg(test)]

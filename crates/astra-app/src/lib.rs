@@ -75,8 +75,12 @@ use crate::{
 
 pub use accounts::{Account, MailboxConnector};
 pub use ai_replies::{
-    draft_prompt, generate_reply, DraftConfidence, DraftContext, DraftPoolEntry,
-    DRAFT_REPLY_PROMPT_VERSION, THREAD_BODY_CAP, THREAD_HISTORY_LIMIT,
+    body_hash, chips_for, draft_prompt, generate_reply, style_profile, style_prompt, summarise,
+    summarise_prompt, surface_question, Chip, DraftConfidence, DraftContext, DraftPoolEntry,
+    SummariseError, CHIP_CONFIDENCE_FLOOR, CHIP_LIMIT, CHIP_PREVIEW_CAP,
+    DRAFT_REPLY_PROMPT_VERSION, GATE_JUDGE_VERSION, STYLE_PROFILE_MAX_AGE_SECS,
+    STYLE_PROMPT_VERSION, STYLE_SAMPLE_BODY_CAP, STYLE_SAMPLE_LIMIT, SUMMARISE_PROMPT_VERSION,
+    THREAD_BODY_CAP, THREAD_HISTORY_LIMIT,
 };
 pub use ai_results::AiPass;
 pub use ai_rules::{
