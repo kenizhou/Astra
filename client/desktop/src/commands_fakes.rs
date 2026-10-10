@@ -2,8 +2,13 @@
 //! The command-surface test fixtures: one compiled copy of the fake app the
 //! command tests drive, the in-memory credential store, and the state builder
 //! over them, at the crate root so every command test module (the command
-//! tests, the reading tests they split off, and the drafts, sending, and
-//! compose tests) includes the same module rather than its own.
+//! tests, the reading tests they split off, and the drafts, sending, compose,
+//! and ai tests) includes the same module rather than its own.
+
+// The fake's preset snapshots (the reading and compose answers), a child
+// module so this file stays under the 500-line limit; the re-export keeps
+// every test module's `commands_fakes::…` paths unchanged.
+mod snapshots;
 
 use std::{
     path::PathBuf,
@@ -11,7 +16,8 @@ use std::{
 };
 
 use astra_app::{
-    AppError, ComposeIntent, CompositionId, DraftResume, DraftsIntent, Intent, OutboxIntent,
+    AppError, Chip, ComposeIntent, CompositionId, DraftResume, DraftsIntent, Intent, OutboxIntent,
+    SummariseMessageError,
 };
 use astra_viewmodel::{
     ComposeKind, ComposeRequestSnapshot, DraftSaveState, DraftStatusSnapshot, MailboxListSnapshot,
@@ -25,6 +31,8 @@ use crate::{
     AccountDials,
 };
 
+pub(crate) use snapshots::{compose_prefill, open_snapshot};
+
 /// A scratch directory for one test's account index.
 fn scratch(name: &str) -> PathBuf {
     let dir = std::env::temp_dir()
@@ -34,72 +42,9 @@ fn scratch(name: &str) -> PathBuf {
     dir
 }
 
-/// The snapshot the fake app publishes for the message an open names: the same
-/// shape astra-viewmodel's wire tests pin, carrying one attachment.
-pub(crate) fn open_snapshot() -> ReadingSnapshot {
-    ReadingSnapshot {
-        message: astra_viewmodel::MessageKey {
-            account: AccountId::try_from("work").expect("an account id"),
-            key: ProviderKey::new("imap:v1:u42").expect("a provider key"),
-        },
-        subject: "Quarterly report".to_owned(),
-        from_name: "Ada Lovelace".to_owned(),
-        from_address: "ada@example.test".to_owned(),
-        sent_at: "2026-10-09T08:30:00Z".to_owned(),
-        html: Some("<p>See the report.</p>".to_owned()),
-        plain: Some("See the report.".to_owned()),
-        attachments: vec![astra_viewmodel::AttachmentRow {
-            id: 1,
-            file_name: "report.pdf".to_owned(),
-            media_type: "application/pdf".to_owned(),
-            size: 2048,
-        }],
-        remote_image_count: 2,
-    }
-}
-
 /// The instant the fake stamps every queued send with, the same whole-second
 /// UTC instant the drafts fake fixes its landed save at.
 pub(crate) const ARRIVED_AT: &str = "2026-10-09T08:30:00Z";
-
-/// The prefill the fake computes for one compose dispatch, the core's rules
-/// at their simplest: the message's own account composes, a reply answers the
-/// original alone, a reply all keeps the original's `Cc`, and a forward names
-/// no one and threads under nothing. Shared with the command tests, which
-/// assert the pull against exactly what the fake publishes.
-pub(crate) fn compose_prefill(kind: ComposeKind, account: &str) -> ComposeRequestSnapshot {
-    ComposeRequestSnapshot {
-        kind,
-        from: AccountId::try_from(account).expect("an account id"),
-        to: if kind == ComposeKind::Forward {
-            String::new()
-        } else {
-            "ada@example.test".to_owned()
-        },
-        cc: if kind == ComposeKind::ReplyAll {
-            "carol@example.test".to_owned()
-        } else {
-            String::new()
-        },
-        subject: format!(
-            "{} Quarterly report",
-            if kind == ComposeKind::Forward {
-                "Fwd:"
-            } else {
-                "Re:"
-            }
-        ),
-        in_reply_to: if kind == ComposeKind::Forward {
-            None
-        } else {
-            Some("orig-1@server.test".to_owned())
-        },
-        document: astra_composer::ComposerDocument {
-            blocks: Vec::new(),
-            attachments: Vec::new(),
-        },
-    }
-}
 
 /// The fake's outbox: the next op id it assigns and the snapshot the pull
 /// answers with, under one lock so a dispatch and its publish cannot tear.
@@ -108,6 +53,10 @@ pub(crate) struct SendingQueue {
     next_op: u64,
     snapshot: SendingSnapshot,
 }
+
+/// The chips the fake's AI pull answers, keyed by the (account, key) pair
+/// of the message they belong to.
+type SeededChips = Vec<((String, String), Vec<Chip>)>;
 
 /// A fake app core behind the same seam the commands hold: records what it was
 /// asked and answers with preset snapshots.
@@ -132,6 +81,23 @@ pub(crate) struct FakeApp {
     /// The sending snapshot the pull answers with: what the fake's submit and
     /// outbox dispatches last published over its own op counter.
     pub(crate) sending: Mutex<SendingQueue>,
+    /// The chips the AI pull answers with, keyed by the message pair; a
+    /// dismissal removes the entry.
+    pub(crate) chips: Mutex<SeededChips>,
+    /// The (account, key) pairs the chips pull was asked about, so a test
+    /// can assert the command hands the webview's ids through to the core.
+    pub(crate) chips_into: Mutex<Vec<(String, String)>>,
+    /// The summary the AI pull answers with; `None` refuses with the
+    /// unresolvable-message failure.
+    pub(crate) summary: Mutex<Option<String>>,
+    /// The (account, key) pairs the summarise pull was asked about.
+    pub(crate) summarise_into: Mutex<Vec<(String, String)>>,
+    /// The style note the AI pull answers with.
+    pub(crate) style_note: Mutex<Option<String>>,
+    /// The accounts the style pull was asked about.
+    pub(crate) style_into: Mutex<Vec<String>>,
+    /// The (account, key) pairs whose chips a dismissal hid.
+    pub(crate) dismissed: Mutex<Vec<(String, String)>>,
 }
 
 impl FakeApp {
@@ -159,6 +125,13 @@ impl FakeApp {
             stored_draft: Mutex::new(None),
             resumed_into: Mutex::new(Vec::new()),
             sending: Mutex::new(SendingQueue::default()),
+            chips: Mutex::new(Vec::new()),
+            chips_into: Mutex::new(Vec::new()),
+            summary: Mutex::new(None),
+            summarise_into: Mutex::new(Vec::new()),
+            style_note: Mutex::new(None),
+            style_into: Mutex::new(Vec::new()),
+            dismissed: Mutex::new(Vec::new()),
         })
     }
 
@@ -354,6 +327,54 @@ impl AppPort for FakeApp {
 
     async fn sync_added_account(&self, id: &AccountId) {
         self.synced.lock().unwrap().push(id.as_str().to_owned());
+    }
+
+    async fn draft_chips(&self, account: &AccountId, key: &ProviderKey) -> Vec<Chip> {
+        self.chips_into
+            .lock()
+            .unwrap()
+            .push((account.as_str().to_owned(), key.as_str().to_owned()));
+        self.chips
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|((held, held_key), _)| {
+                held.as_str() == account.as_str() && held_key.as_str() == key.as_str()
+            })
+            .map_or_else(Vec::new, |(_, chips)| chips.clone())
+    }
+
+    async fn summarise_message(
+        &self,
+        account: &AccountId,
+        key: &ProviderKey,
+    ) -> Result<String, SummariseMessageError> {
+        self.summarise_into
+            .lock()
+            .unwrap()
+            .push((account.as_str().to_owned(), key.as_str().to_owned()));
+        self.summary
+            .lock()
+            .unwrap()
+            .clone()
+            .ok_or(SummariseMessageError::Unresolved)
+    }
+
+    async fn account_style_note(&self, account: &AccountId) -> Option<String> {
+        self.style_into
+            .lock()
+            .unwrap()
+            .push(account.as_str().to_owned());
+        self.style_note.lock().unwrap().clone()
+    }
+
+    fn dismiss_chips(&self, account: &AccountId, key: &ProviderKey) {
+        let asked = (account.as_str().to_owned(), key.as_str().to_owned());
+        self.dismissed.lock().unwrap().push(asked.clone());
+        self.chips
+            .lock()
+            .unwrap()
+            .retain(|(held, _)| *held != asked);
     }
 }
 

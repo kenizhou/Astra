@@ -107,5 +107,14 @@ where
             app.drive_incoming_pass().await;
         }));
     }
+    // The reply-drafting driver rides the same seam: it sleeps until an open
+    // arms it, so a message the reader never opens costs nothing and a draft
+    // never sits on the open's own path.
+    {
+        let app = Arc::clone(&app);
+        spawn(Box::pin(async move {
+            app.drive_reply_drafting().await;
+        }));
+    }
     Ok(app)
 }

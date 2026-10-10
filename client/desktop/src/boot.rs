@@ -31,8 +31,9 @@ use crate::{
 };
 
 /// Assembles the host's state over `data_dir`: the same pieces in the same order for
-/// every host shape, windowed or headless. The caller owns the two things a shape can
-/// differ in: where the data lives, and where surface changes are signalled.
+/// every host shape, windowed or headless. The caller owns the three things a shape can
+/// differ in: where the data lives, where surface changes are signalled, and where the
+/// draft-pool landing is signalled.
 ///
 /// # Errors
 ///
@@ -43,6 +44,7 @@ pub(crate) fn assemble_state(
     data_dir: &Path,
     observer: Arc<dyn astra_app::AppObserver>,
     agent_sink: Arc<dyn AgentEventSink>,
+    draft_sink: Arc<dyn astra_app::DraftPoolSink>,
 ) -> Result<AppState, Box<dyn std::error::Error>> {
     std::fs::create_dir_all(data_dir)?;
     let runtime = build_runtime()?;
@@ -63,6 +65,7 @@ pub(crate) fn assemble_state(
         llm.clone(),
         Arc::clone(&ai_store),
         astra_ai::DlpPolicy::from_env(),
+        Some(draft_sink),
     );
     let spawn = {
         let spawner = runtime.handle().clone();
@@ -368,7 +371,9 @@ pub(crate) fn setup_host(app: &mut tauri::App) -> Result<(), Box<dyn std::error:
         ObserverBridge::new(Box::new(TauriEventSink::new(handle.clone()))),
     ));
     let agent_sink: Arc<dyn AgentEventSink> = Arc::new(crate::agent::TauriAgentSink::new(handle));
-    let state = assemble_state(&data_dir, observer, agent_sink)?;
+    let draft_sink: Arc<dyn astra_app::DraftPoolSink> =
+        Arc::new(crate::ai::DraftPoolEventSink::new(app.handle().clone()));
+    let state = assemble_state(&data_dir, observer, agent_sink, draft_sink)?;
 
     log::info!(
         "boot: the app core is up over {} account(s)",

@@ -123,6 +123,14 @@ pub(crate) fn sending_signals(surfaces: &Arc<Mutex<Vec<crate::Surface>>>) -> usi
         .count()
 }
 
+/// The role-bearing Sent folder, so a drafting fixture's account holds sent
+/// mail a style profile can be inferred from.
+pub(crate) fn sent() -> engine_api::Mailbox {
+    let mut mailbox = engine_api::Mailbox::new(MailboxId::try_from("sent").unwrap(), "Sent");
+    mailbox.role = Some(engine_api::MailboxRole::Sent);
+    mailbox
+}
+
 /// A message `key` filed in the Sent mailbox, from the account's own identity,
 /// so a delivered send's copy appears to a later sync pass the way a real Sent
 /// folder would present it.

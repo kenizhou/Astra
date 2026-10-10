@@ -7,9 +7,12 @@
 //! sibling, 0005's summarise cache, 0006's chips-dismissed markers); this
 //! module owns the context collector, the versioned prompts, the
 //! structured parses, and the failure paths that record skipped rows or
-//! fall back to stored state.
+//! fall back to stored state. Its `drive` child owns the runtime half:
+//! the arming an open leaves, the driver the host runs, and the host's
+//! AI pulls over the one bundle.
 
 mod draft;
+mod drive;
 mod gate;
 mod style;
 mod summarise;
@@ -34,6 +37,8 @@ pub use draft::{
     draft_prompt, generate_reply, DraftConfidence, DraftContext, DraftPoolEntry,
     DRAFT_REPLY_PROMPT_VERSION, THREAD_BODY_CAP, THREAD_HISTORY_LIMIT,
 };
+pub(crate) use drive::DraftArm;
+pub use drive::{DraftPoolSink, SummariseMessageError, STYLE_SENT_WINDOW};
 pub use gate::{
     chips_for, surface_question, Chip, CHIP_CONFIDENCE_FLOOR, CHIP_LIMIT, CHIP_PREVIEW_CAP,
     GATE_JUDGE_VERSION,

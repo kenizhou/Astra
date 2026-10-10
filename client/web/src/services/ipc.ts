@@ -258,12 +258,33 @@ export interface ResumeView {
   to: string;
   /** The `Cc` field, comma-joined. */
   cc: string;
-  /** The `Bcc` field, comma-joined. */
+  /** The `Bcc` field, comma-joined; only what the stored copy carried. */
   bcc: string;
   /** The subject. */
   subject: string;
-  /** The body as plain text: what the composer opens without a markup parser. */
+  /** The body as plain text: what a composer opens without a markup parser. */
   body_text: string;
+}
+
+/** One smart-reply chip: the whole drafted reply beside its one-line preview. */
+export interface ChipView {
+  /** The drafted reply, trimmed: the text the accept path prefills. */
+  reply: string;
+  /** The reply's head as one line, capped at eighty characters with `...` when
+   * it was trimmed. */
+  preview: string;
+}
+
+/**
+ * The draft-pool event's payload: which message gained a pool row, named by
+ * the same account and key pair the reading snapshot's identity carries, so
+ * the pane matches it against its open row before pulling chips.
+ */
+export interface DraftPoolLanded {
+  /** The account owning the answered message. */
+  account: string;
+  /** The answered message's provider key, unique only within `account`. */
+  key: string;
 }
 
 /** How a mail connection is secured, crossing as a snake_case word. */

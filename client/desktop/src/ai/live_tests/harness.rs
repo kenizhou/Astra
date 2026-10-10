@@ -333,6 +333,7 @@ fn the_incoming_pass_runs_over_a_real_refresh_live() {
         Some(Arc::clone(&client)),
         Arc::clone(&store),
         Ok(DlpPolicy::Allow),
+        None,
     )
     .expect("the pass arms over the live client");
 

@@ -12,8 +12,10 @@ use std::sync::Arc;
 use astra_ai::{
     AiStore, CorrelationId, DlpError, DlpPolicy, JudgeOutcome, JudgeUseCase, LlmUseCase,
 };
-use astra_app::{AiComplete, AiJudge, AiPass};
+use astra_app::{AiComplete, AiJudge, AiPass, DraftPoolSink};
+use astra_viewmodel::MessageKey;
 use async_trait::async_trait;
+use tauri::{AppHandle, Emitter};
 
 use super::LlmClient;
 
@@ -94,16 +96,45 @@ impl AiJudge for LlmAiJudge {
     }
 }
 
+/// The running app's draft-pool sink: the reply-drafting driver's
+/// row-landing signal, emitted as the `draft_pool` event every webview
+/// the shell holds receives. The payload is the landed message's key, the
+/// same `{account, key}` shape the reading snapshot's identity carries,
+/// so the pane matches it against its open row before pulling chips.
+#[derive(Debug)]
+pub(crate) struct DraftPoolEventSink {
+    /// The handle the event is emitted on.
+    handle: AppHandle,
+}
+
+impl DraftPoolEventSink {
+    /// A sink emitting on `handle`.
+    #[must_use]
+    pub(crate) fn new(handle: AppHandle) -> Self {
+        Self { handle }
+    }
+}
+
+impl DraftPoolSink for DraftPoolEventSink {
+    fn draft_pool_landed(&self, message: MessageKey) {
+        if let Err(err) = self.handle.emit("draft_pool", &message) {
+            log::warn!("observer: a draft-pool landing could not be emitted: {err}");
+        }
+    }
+}
+
 /// Assembles the incoming pass the app core runs: both seams over the one
-/// background client, the one AI store every path shares, and the DLP
-/// policy the gate applies. No client (the tier table or the transport
-/// never built) means no pass, and so does a malformed policy value: a
+/// background client, the one AI store every path shares, the DLP policy
+/// the gate applies, and the draft-pool sink the reply-drafting driver
+/// signals through. No client (the tier table or the transport never
+/// built) means no pass, and so does a malformed policy value: a
 /// misconfigured `ASTRA_DLP` fails the pass's arming loudly rather than
 /// silently allowing, the recorded decision.
 pub fn incoming_pass(
     client: Option<Arc<LlmClient>>,
     store: Arc<AiStore>,
     dlp: Result<DlpPolicy, DlpError>,
+    draft_sink: Option<Arc<dyn DraftPoolSink>>,
 ) -> Option<AiPass> {
     let policy = match dlp {
         Ok(policy) => policy,
@@ -115,12 +146,15 @@ pub fn incoming_pass(
         }
     };
     let client = client?;
-    Some(AiPass::new(
-        Box::new(LlmAiJudge::new(Arc::clone(&client))),
-        Box::new(LlmAiComplete::new(Arc::clone(&client))),
-        store,
-        policy,
-    ))
+    Some(
+        AiPass::new(
+            Box::new(LlmAiJudge::new(Arc::clone(&client))),
+            Box::new(LlmAiComplete::new(Arc::clone(&client))),
+            store,
+            policy,
+        )
+        .with_draft_sink(draft_sink),
+    )
 }
 
 #[cfg(test)]
