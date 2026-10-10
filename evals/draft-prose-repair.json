@@ -1,0 +1,22 @@
+{
+  "id": "draft-prose-repair",
+  "feature": "draft",
+  "mode": "offline",
+  "prompt_version": "1",
+  "inputs": {
+    "mail": {
+      "account": "work",
+      "key": "m1",
+      "from_name": "Ada Lovelace",
+      "from_address": "ada@example.test",
+      "subject": "Lunch Thursday",
+      "body": "Shall we do lunch Thursday at the usual place? One o'clock works for me."
+    },
+    "completion": "Here is the reply you asked for: {\"reply\":\"Thursday at one works well; see you at the usual place.\",\"confidence\":\"medium\"} Hope that helps!"
+  },
+  "expected": {
+    "drafted": true,
+    "confidence": "medium",
+    "reply": "Thursday at one works well; see you at the usual place."
+  }
+}

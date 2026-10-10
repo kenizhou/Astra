@@ -5,13 +5,13 @@
 
 use std::sync::Arc;
 
-use astra_app::{Account, App, CompositionId, DraftResume, Intent};
+use astra_app::{Account, App, Chip, CompositionId, DraftResume, Intent, SummariseMessageError};
 use astra_viewmodel::{
     ComposeRequestSnapshot, DraftStatusSnapshot, MailboxListSnapshot, ReadingSnapshot,
     SendingSnapshot, SyncProgressSnapshot,
 };
 use async_trait::async_trait;
-use engine_api::{AccountId, Provider};
+use engine_api::{AccountId, Provider, ProviderKey};
 
 use crate::{AccountCredentialStore, AccountDials, AppRuntime, LlmClient, SidecarRelay};
 
@@ -86,6 +86,33 @@ pub(crate) trait AppPort: Send + Sync {
     /// Syncs one account's mail in the background; the host spawns this after the
     /// install.
     async fn sync_added_account(&self, id: &AccountId);
+
+    /// The message's smart-reply chips: the reading pane's pull on open and
+    /// on the draft-pool event, answered through the surfacing gate.
+    async fn draft_chips(&self, account: &AccountId, key: &ProviderKey) -> Vec<Chip>;
+
+    /// Summarises the message, cached: a hit answers without a model call.
+    ///
+    /// # Errors
+    ///
+    /// Returns the core's own failure when no AI bundle runs, the message
+    /// cannot be resolved, or the action itself fails.
+    async fn summarise_message(
+        &self,
+        account: &AccountId,
+        key: &ProviderKey,
+    ) -> Result<String, SummariseMessageError>;
+
+    /// The account's writing-style note, or `None` when none was built.
+    async fn account_style_note(&self, account: &AccountId) -> Option<String>;
+
+    /// Records the reader's dismissal of the message's chips.
+    fn dismiss_chips(&self, account: &AccountId, key: &ProviderKey);
+
+    /// Publishes the reply composition one accepted chip opens: the reply's
+    /// own prefill with the drafted reply already the document's opening
+    /// paragraphs, signalled through the compose-request surface.
+    async fn compose_from_draft(&self, account: &AccountId, key: &ProviderKey, draft: &str);
 }
 
 #[async_trait]
@@ -132,6 +159,30 @@ impl AppPort for App<HostProvider> {
 
     async fn sync_added_account(&self, id: &AccountId) {
         App::sync_added_account(self, id).await;
+    }
+
+    async fn draft_chips(&self, account: &AccountId, key: &ProviderKey) -> Vec<Chip> {
+        App::draft_chips(self, account, key).await
+    }
+
+    async fn summarise_message(
+        &self,
+        account: &AccountId,
+        key: &ProviderKey,
+    ) -> Result<String, SummariseMessageError> {
+        App::summarise_message(self, account, key).await
+    }
+
+    async fn account_style_note(&self, account: &AccountId) -> Option<String> {
+        App::account_style_note(self, account).await
+    }
+
+    fn dismiss_chips(&self, account: &AccountId, key: &ProviderKey) {
+        App::dismiss_chips(self, account, key);
+    }
+
+    async fn compose_from_draft(&self, account: &AccountId, key: &ProviderKey, draft: &str) {
+        App::compose_from_draft(self, account, key, draft).await;
     }
 }
 

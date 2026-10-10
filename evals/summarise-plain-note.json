@@ -1,0 +1,20 @@
+{
+  "id": "summarise-plain-note",
+  "feature": "summarise",
+  "mode": "offline",
+  "prompt_version": "1",
+  "inputs": {
+    "mail": {
+      "account": "work",
+      "key": "m1",
+      "from_name": "Ada Lovelace",
+      "from_address": "ada@example.test",
+      "subject": "Notes from our planning call",
+      "body": "Thanks for making time today. We reached three decisions: the prototype lands next Friday, the review follows the week after, and the budget question waits for finance. I attached the timeline we agreed."
+    },
+    "completion": "{\"summary\":\"The prototype lands next Friday, the review follows the week after, and the budget question waits for finance.\"}"
+  },
+  "expected": {
+    "summary": "The prototype lands next Friday, the review follows the week after, and the budget question waits for finance."
+  }
+}

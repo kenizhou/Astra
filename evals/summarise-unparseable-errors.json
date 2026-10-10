@@ -1,0 +1,20 @@
+{
+  "id": "summarise-unparseable-errors",
+  "feature": "summarise",
+  "mode": "offline",
+  "prompt_version": "1",
+  "inputs": {
+    "mail": {
+      "account": "work",
+      "key": "m1",
+      "from_name": "Ada Lovelace",
+      "from_address": "ada@example.test",
+      "subject": "Notes",
+      "body": "A short note whose summary will not parse."
+    },
+    "completion": "The note is about a meeting."
+  },
+  "expected": {
+    "error": "malformed"
+  }
+}

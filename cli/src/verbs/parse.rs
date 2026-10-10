@@ -85,6 +85,21 @@ pub(super) fn parse(args: &[String], stdin: &mut dyn Read) -> Result<Invocation,
                 keys: positional_keys(&ai_words)?,
             }
         }
+        (Some("ai"), Some("drafts")) => {
+            let ai_words = ai_positionals(args);
+            Verb::AiDrafts {
+                account: positional_account(&ai_words, "ai drafts")?,
+                keys: positional_keys(&ai_words)?,
+            }
+        }
+        (Some("ai"), Some("summary")) => {
+            let ai_words = ai_positionals(args);
+            Verb::AiSummary {
+                account: positional_account(&ai_words, "ai summary")?,
+                keys: positional_keys(&ai_words)?,
+            }
+        }
+        (Some("ai"), Some("style")) => style_verb(&ai_positionals(args))?,
         (Some(_), Some(_)) => return Err(usage("unknown verb")),
         _ => {
             return Err(usage(
@@ -206,6 +221,23 @@ fn rule_actions(args: &[String]) -> Result<Vec<String>, ParseFailure> {
         ));
     }
     Ok(actions)
+}
+
+/// `ai style`'s grammar: one account, or the refused `rebuild` spelling
+/// alone. Any further word is a usage error, so the tight grammar every
+/// ai verb carries holds for the style pair too.
+fn style_verb(positionals: &[&str]) -> Result<Verb, ParseFailure> {
+    match (positionals.get(2).copied(), positionals.len()) {
+        (None, _) => Err(usage("ai style wants an account (or `rebuild`)")),
+        (Some("rebuild"), 3) => Ok(Verb::AiStyleRebuild),
+        (Some("rebuild"), _) => Err(usage(
+            "ai style rebuild wants no further words: the verb refuses whatever follows",
+        )),
+        (Some(account), 3) => Ok(Verb::AiStyle {
+            account: (*account).to_owned(),
+        }),
+        (Some(_), _) => Err(usage("ai style takes one account and no keys")),
+    }
 }
 
 /// The account positional the `ai` verbs take: the third word, after the

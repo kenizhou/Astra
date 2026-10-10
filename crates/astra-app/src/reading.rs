@@ -14,6 +14,7 @@
 //! stays empty, which is the honest answer over a snapshot that would claim the
 //! message carries no body at all.
 
+use astra_ai::CorrelationId;
 use astra_viewmodel::{AttachmentRow, MessageKey, ReadingSnapshot};
 use engine_api::{Engine, Message, MessageAttachment, Provider, SystemKeyword};
 
@@ -33,8 +34,9 @@ impl<P: Provider> App<P> {
     }
 
     /// Opens one message in the reading pane: renders its body through the
-    /// pipeline, publishes the snapshot, and marks the message read through the
-    /// same write path [`Intent::MarkRead`](crate::Intent::MarkRead) drives.
+    /// pipeline, publishes the snapshot, arms the message's reply draft,
+    /// and marks the message read through the same write path
+    /// [`Intent::MarkRead`](crate::Intent::MarkRead) drives.
     ///
     /// The read state is re-resolved at the moment of that decision, the way
     /// mail-calendar's open does, so a read that landed while the body was in
@@ -44,6 +46,12 @@ impl<P: Provider> App<P> {
     /// claimed before the first `await`, so a close or a newer open that lands
     /// while the body is in flight drops the render that arrives after it: an
     /// older open must not win by finishing last.
+    ///
+    /// The arming mints the open's reading correlation and leaves it with the
+    /// message for the drafting driver
+    /// ([`App::drive_reply_drafting`](crate::App::drive_reply_drafting)) to
+    /// take, so the generation never sits on the open's own path and its
+    /// ledger rows ride the turn the open began.
     pub(crate) async fn open_message(&self, message: MessageRef) {
         *self
             .open_reading
@@ -53,6 +61,7 @@ impl<P: Provider> App<P> {
             Some(snapshot) => {
                 if self.still_open(&message) {
                     self.reading.publish(Some(snapshot));
+                    self.request_reply_draft(message.clone(), Some(CorrelationId::generate()));
                     if self.message_unread(&message).await {
                         self.mark_read(RowRef::Message(message), true).await;
                     }

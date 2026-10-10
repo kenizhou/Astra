@@ -71,6 +71,20 @@ impl SurfaceEventSink for LoggingEventSink {
     }
 }
 
+/// The headless run's draft-pool sink: one line per landed row, in place
+/// of the windowed host's webview event.
+#[derive(Debug)]
+struct LoggingDraftSink;
+
+impl astra_app::DraftPoolSink for LoggingDraftSink {
+    fn draft_pool_landed(&self, message: astra_viewmodel::MessageKey) {
+        log::debug!(
+            "headless: a draft-pool row landed for account {}",
+            message.account.as_str(),
+        );
+    }
+}
+
 /// The headless run's logger: one line per record on stderr, which already
 /// carries the run's narration. Hand-rolled because the headless slice is a
 /// diagnostic tool that pulls no logging framework behind it.
@@ -225,7 +239,8 @@ fn assemble_for(env: &SliceEnv) -> Result<AppState, String> {
         ObserverBridge::new(Box::new(LoggingEventSink)),
     ));
     let agent_sink: Arc<dyn crate::agent::AgentEventSink> = Arc::new(crate::agent::LogAgentSink);
-    assemble_state(&env.data_dir, observer, agent_sink)
+    let draft_sink: Arc<dyn astra_app::DraftPoolSink> = Arc::new(LoggingDraftSink);
+    assemble_state(&env.data_dir, observer, agent_sink, draft_sink)
         .map_err(|err| format!("the headless host could not boot: {err}"))
 }
 

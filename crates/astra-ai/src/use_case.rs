@@ -49,6 +49,10 @@ pub enum LlmUseCase {
     /// The scenario eval judge (economy tier). Abstains resolve to a
     /// failed scenario.
     JudgeScenario,
+    /// The per-account writing style inference (economy tier; A2): the
+    /// StyleInfer completion that turns recent Sent mail into the style
+    /// note the reply drafting prompt carries as data.
+    StyleInfer,
 }
 
 impl LlmUseCase {
@@ -69,13 +73,15 @@ impl LlmUseCase {
             Self::JudgeDraftSurface => "judge_draft_surface",
             Self::JudgeSummaryFaithful => "judge_summary_faithful",
             Self::JudgeScenario => "judge_scenario",
+            Self::StyleInfer => "style_infer",
         }
     }
 
     /// The tier every call in this use case runs at. The tier names the
     /// `ASTRA_LLM_*` list the call's chain comes from, before fallback.
     /// The judge family rides nano (classification-sized) and economy
-    /// (rule-match and the eval judges); none ride chat or draft.
+    /// (rule-match and the eval judges); the agent tool loop and the
+    /// style inference ride economy with them; none ride chat or draft.
     pub fn tier(&self) -> ModelTier {
         match self {
             Self::AssistantChat => ModelTier::Chat,
@@ -83,14 +89,15 @@ impl LlmUseCase {
             Self::Summarise | Self::CategorizeSender | Self::CleanInbox | Self::PromptToRules => {
                 ModelTier::Default
             }
-            Self::AgentTool => ModelTier::Economy,
             Self::JudgeColdEmail
             | Self::JudgeDlp
             | Self::JudgeInjection
             | Self::JudgeDraftSurface => ModelTier::Nano,
-            Self::JudgeRuleMatch | Self::JudgeSummaryFaithful | Self::JudgeScenario => {
-                ModelTier::Economy
-            }
+            Self::AgentTool
+            | Self::JudgeRuleMatch
+            | Self::JudgeSummaryFaithful
+            | Self::JudgeScenario
+            | Self::StyleInfer => ModelTier::Economy,
         }
     }
 }

@@ -266,10 +266,22 @@ pub(crate) fn app_with_ai(
     store: Arc<AiStore>,
     dlp: DlpPolicy,
 ) -> App<FakeProvider> {
-    base_app(accounts, surfaces).with_ai_pass(Some(crate::AiPass::new(
-        Box::new(judge),
-        Box::new(complete),
-        store,
-        dlp,
-    )))
+    app_with_drafting(accounts, surfaces, judge, complete, store, dlp, None)
+}
+
+/// [`app_with_ai`] with the draft-pool `sink` installed beside the seams:
+/// the shape the reply-drafting tests drive, mirroring the desktop host's
+/// event emitter over the same trait.
+pub(crate) fn app_with_drafting(
+    accounts: Vec<Account<FakeProvider>>,
+    surfaces: &Arc<Mutex<Vec<Surface>>>,
+    judge: FixtureJudge,
+    complete: FixtureComplete,
+    store: Arc<AiStore>,
+    dlp: DlpPolicy,
+    sink: Option<Arc<dyn crate::ai_replies::DraftPoolSink>>,
+) -> App<FakeProvider> {
+    base_app(accounts, surfaces).with_ai_pass(Some(
+        crate::AiPass::new(Box::new(judge), Box::new(complete), store, dlp).with_draft_sink(sink),
+    ))
 }

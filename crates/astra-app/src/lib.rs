@@ -7,10 +7,11 @@
 //! other. The [`App`] owns one [`engine_api::Engine`] shared across every configured
 //! [`Account`], and [`boot`] assembles the whole sequence over a host-provided runtime.
 //! The crate root holds the runtime's state; the command surface, the projection, the
-//! sync paths, the preferences, and the AI rules model with its generation seam each
-//! live in their own module.
+//! sync paths, the preferences, the AI rules model with its generation seam, and the
+//! AI replies model with its draft pool service each live in their own module.
 
 mod accounts;
+mod ai_replies;
 mod ai_results;
 mod ai_rules;
 mod boot;
@@ -73,6 +74,14 @@ use crate::{
 };
 
 pub use accounts::{Account, MailboxConnector};
+pub use ai_replies::{
+    body_hash, chips_for, draft_prompt, generate_reply, style_profile, style_prompt, summarise,
+    summarise_prompt, surface_question, Chip, DraftConfidence, DraftContext, DraftPoolEntry,
+    DraftPoolSink, SummariseError, SummariseMessageError, CHIP_CONFIDENCE_FLOOR, CHIP_LIMIT,
+    CHIP_PREVIEW_CAP, DRAFT_REPLY_PROMPT_VERSION, GATE_JUDGE_VERSION, STYLE_PROFILE_MAX_AGE_SECS,
+    STYLE_PROMPT_VERSION, STYLE_SAMPLE_BODY_CAP, STYLE_SAMPLE_LIMIT, STYLE_SENT_WINDOW,
+    SUMMARISE_PROMPT_VERSION, THREAD_BODY_CAP, THREAD_HISTORY_LIMIT,
+};
 pub use ai_results::AiPass;
 pub use ai_rules::{
     categorise, categorise_prompt, cold_question, generation_prompt, judge_cold, judge_context,
@@ -203,6 +212,13 @@ pub struct App<P> {
     /// Woken by each refresh that arms the incoming AI pass, so the driver
     /// future the host runs picks it up off the refresh's own path.
     pass_armed: tokio::sync::Notify,
+    /// The reply drafts an open has armed and the driver has not taken
+    /// yet: one entry per message, the open's reading correlation riding
+    /// each. See `ai_replies::drive`.
+    reply_arms: Mutex<Vec<crate::ai_replies::DraftArm>>,
+    /// Woken by each open that arms a reply draft, so the driver future
+    /// the host runs picks the arming up off the open's own path.
+    reply_armed: tokio::sync::Notify,
 }
 
 impl<P> core::fmt::Debug for App<P> {
@@ -255,6 +271,8 @@ impl<P: Provider> App<P> {
             connector,
             ai: None,
             pass_armed: tokio::sync::Notify::new(),
+            reply_arms: Mutex::new(Vec::new()),
+            reply_armed: tokio::sync::Notify::new(),
         }
     }
 

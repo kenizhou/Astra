@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! The agent tests' shared kit: the collecting sink every suite asserts
-//! against, the scratch directories the file-backed stores live in, and the
-//! stub-relay builders that run the fixture sidecar script under a real
+//! against, the scratch directories the file-backed stores live in, and
+//! the stub-relay builders that run the fixture sidecar script under a real
 //! Node process in a chosen mode.
 
 use std::sync::{Arc, Mutex};
@@ -70,11 +70,26 @@ impl AgentEventSink for CollectingSink {
     }
 }
 
-/// A scratch directory for one test's data dir and ledger store.
+/// A scratch directory for one test's data dir and ledger store. The
+/// name plus the process id names one directory for the whole test, so
+/// every call inside one process reuses it; the first call for a name
+/// removes any directory a recycled process id left behind, because the
+/// operating system never cleans the parent.
 pub(crate) fn scratch(name: &str) -> std::path::PathBuf {
+    static HANDED_OUT: std::sync::OnceLock<Mutex<std::collections::HashSet<String>>> =
+        std::sync::OnceLock::new();
+    let handed_out = HANDED_OUT.get_or_init(|| Mutex::new(std::collections::HashSet::new()));
+    let key = format!("{name}-{}", std::process::id());
+    let first_for_this_process = {
+        let mut held = handed_out.lock().unwrap();
+        held.insert(key.clone())
+    };
     let dir = std::env::temp_dir()
         .join("astra-desktop-agent-tests")
-        .join(format!("{name}-{}", std::process::id()));
+        .join(&key);
+    if first_for_this_process && dir.exists() {
+        std::fs::remove_dir_all(&dir).expect("the stale scratch directory removes");
+    }
     std::fs::create_dir_all(&dir).expect("the scratch directory creates");
     dir
 }
@@ -209,4 +224,36 @@ pub(crate) fn llm_rows(
         .collect::<Result<Vec<_>, _>>()
         .expect("the ledger rows read");
     rows
+}
+
+#[cfg(test)]
+mod tests {
+    use super::scratch;
+
+    #[test]
+    fn scratch_wipes_a_directory_a_recycled_pid_left_behind() {
+        let stale_dir = std::env::temp_dir()
+            .join("astra-desktop-agent-tests")
+            .join(format!("scratch-recycled-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&stale_dir);
+        std::fs::create_dir_all(&stale_dir).expect("the stale directory creates");
+        let stale = stale_dir.join("stub-captures.jsonl");
+        std::fs::write(&stale, "stale\n").expect("the stale file writes");
+        let dir = scratch("scratch-recycled");
+        assert_eq!(dir, stale_dir, "the same pid names the same directory");
+        assert!(
+            !stale.exists(),
+            "a directory an earlier run left behind starts empty"
+        );
+    }
+
+    #[test]
+    fn scratch_hands_one_process_the_same_directory_every_time() {
+        let dir = scratch("scratch-reuse");
+        let kept = dir.join("kept");
+        std::fs::write(&kept, "here").expect("the kept file writes");
+        let again = scratch("scratch-reuse");
+        assert_eq!(again, dir, "one process reuses its own directory");
+        assert!(kept.exists(), "a later call never wipes the live directory");
+    }
 }

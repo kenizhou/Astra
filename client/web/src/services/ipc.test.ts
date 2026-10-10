@@ -9,7 +9,9 @@ const invoke = vi.hoisted(() => vi.fn());
 vi.mock('@tauri-apps/api/core', () => ({ invoke }));
 
 import type {
+  ChipView,
   ComposerDocument,
+  DraftPoolLanded,
   DraftStatusSnapshot,
   ReadingSnapshot,
   RecommendationView,
@@ -444,5 +446,22 @@ describe('the resume wire', () => {
       account: 'work',
       composition: 'compose-9',
     });
+  });
+});
+
+// The literal is byte-for-byte the JSON astra-app's gate and astra-desktop's
+// ai_tests.rs assert for the chip and the draft-pool event payload, so the
+// reading pane renders the fields the host sends.
+describe('the ai replies wire', () => {
+  it('crosses one chip as its reply beside its preview', () => {
+    const chip: ChipView = { reply: 'Sounds good, shipped it.', preview: 'Sounds good...' };
+    expect(JSON.stringify(chip)).toBe(
+      '{"reply":"Sounds good, shipped it.","preview":"Sounds good..."}',
+    );
+  });
+
+  it('names the landed message by its account and key', () => {
+    const landed: DraftPoolLanded = { account: 'work', key: 'imap:v1:u42' };
+    expect(JSON.stringify(landed)).toBe('{"account":"work","key":"imap:v1:u42"}');
   });
 });

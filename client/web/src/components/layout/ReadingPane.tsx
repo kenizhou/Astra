@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The reading pane: the right-hand column of the shell. Nothing open draws
 // the empty state with the compose actions standing disabled; a pulled
-// snapshot draws its header, its body (the sandboxed HTML, the plain
+// snapshot draws its header, its AI replies surfaces (the smart replies
+// strip and the summarise block, both keyed to the open message and standing
+// absent with nothing to show), its body (the sandboxed HTML, the plain
 // fallback, or a no-body note), and its attachment rows, with the compose
 // actions dispatching the family for the open message and the close button
 // crossing back as close_reading.
@@ -10,6 +12,8 @@ import { AttachmentList } from '@/components/reading-pane/AttachmentList';
 import { MessageHtml } from '@/components/reading-pane/MessageHtml';
 import { ReadingActions } from '@/components/reading-pane/ReadingActions';
 import { ReadingHeader } from '@/components/reading-pane/ReadingHeader';
+import { SmartReplies } from '@/components/reading-pane/SmartReplies';
+import { SummaryBlock } from '@/components/reading-pane/SummaryBlock';
 import { dispatch, intents } from '@/services/ipc';
 import { useReadingStore } from '@/stores/readingStore';
 
@@ -74,6 +78,8 @@ export function ReadingPane() {
         fromAddress={snapshot.from_address}
         sentAt={snapshot.sent_at}
       />
+      <SmartReplies />
+      <SummaryBlock />
       {snapshot.html !== undefined ? (
         <MessageHtml
           html={snapshot.html}

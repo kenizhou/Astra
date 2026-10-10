@@ -48,8 +48,14 @@ pub(crate) fn record(
 /// said. Address counts and text lengths stand in for the values.
 pub(crate) fn arg_preview(verb: &Verb) -> String {
     match verb {
-        Verb::AccountsList | Verb::RulesList => String::new(),
-        Verb::FoldersList { account } => format!("account={account}"),
+        // The account-only previews and the empty ones: a folder list and
+        // the style read carry the account alone, the no-argument lists
+        // and the refused rebuild (no account resolves, no action runs)
+        // carry nothing.
+        Verb::FoldersList { account } | Verb::AiStyle { account } => {
+            format!("account={account}")
+        }
+        Verb::AccountsList | Verb::RulesList | Verb::AiStyleRebuild => String::new(),
         Verb::MessagesList {
             account,
             folder,
@@ -62,7 +68,9 @@ pub(crate) fn arg_preview(verb: &Verb) -> String {
         // the count, never the caller's key words.
         Verb::MessagesRead { account, keys }
         | Verb::AiCold { account, keys }
-        | Verb::AiResults { account, keys } => format!("account={account} keys={}", keys.len()),
+        | Verb::AiResults { account, keys }
+        | Verb::AiDrafts { account, keys }
+        | Verb::AiSummary { account, keys } => format!("account={account} keys={}", keys.len()),
         Verb::DraftsSave { args } => format!(
             "account={} from=1 to={} cc={} subject_chars={} body_chars={} source={}",
             args.account,

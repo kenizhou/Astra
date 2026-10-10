@@ -133,7 +133,8 @@ fn the_judge_adapter_is_infallible_through_a_failing_client() {
 /// The pass assembly arms over a client and a parseable policy, and stays
 /// unarmed when either half is missing: no client (the background client
 /// never built) or a malformed DLP value, the loud refusal rather than a
-/// silent allow.
+/// silent allow. The draft-pool sink is an optional rider: the pass arms
+/// the same with one as without.
 #[test]
 fn the_pass_assembly_arms_only_over_a_client_and_a_parseable_policy() {
     let fixture = fixture::serve(Vec::new());
@@ -144,20 +145,27 @@ fn the_pass_assembly_arms_only_over_a_client_and_a_parseable_policy() {
         incoming_pass(
             Some(Arc::clone(&built)),
             ledger.store(),
-            Ok(DlpPolicy::Redact)
+            Ok(DlpPolicy::Redact),
+            None
         )
         .is_some(),
         "a client and a parseable policy arm the pass"
     );
     assert!(
-        incoming_pass(None, ledger.store(), Ok(DlpPolicy::Allow)).is_none(),
+        incoming_pass(None, ledger.store(), Ok(DlpPolicy::Allow), None).is_none(),
         "no client means no pass"
     );
     let malformed = DlpError::Malformed {
         value: "sometimes".to_owned(),
     };
     assert!(
-        incoming_pass(Some(Arc::clone(&built)), ledger.store(), Err(malformed)).is_none(),
+        incoming_pass(
+            Some(Arc::clone(&built)),
+            ledger.store(),
+            Err(malformed),
+            None
+        )
+        .is_none(),
         "a malformed policy leaves the pass unarmed, whatever the client"
     );
 }

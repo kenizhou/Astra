@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Dispatch and the offline provider: the plumbing every verb shares. The
-//! parser lives in [`parse`], the verbs in their own modules, and this module
-//! ties one invocation to the engine store, the audit ledger, and the
-//! envelope `main` prints.
+//! Dispatch: the plumbing every verb shares. The parser lives in
+//! [`parse`], the verbs in their own modules (the dial-nothing provider
+//! in [`offline`]), and this module ties one invocation to the engine
+//! store, the audit ledger, and the envelope `main` prints.
 
 pub(crate) mod accounts;
 #[cfg(test)]
 mod accounts_tests;
 pub(crate) mod ai;
+#[cfg(test)]
+mod ai_replies_tests;
 #[cfg(test)]
 mod ai_tests;
 pub(crate) mod drafts;
@@ -21,19 +23,19 @@ mod folders_tests;
 pub(crate) mod messages;
 #[cfg(test)]
 mod messages_tests;
+pub(crate) mod offline;
 mod parse;
 pub(crate) mod rules;
 #[cfg(test)]
 mod rules_tests;
 
+pub(crate) use offline::Offline;
+
 use std::io::Read;
 use std::path::Path;
 
 use astra_ai::AiStore;
-use async_trait::async_trait;
-use engine_api::{AccountId, CalendarWrites, Capabilities, Engine, MailboxWrites, Provider};
-use engine_core::sync::{SyncState, SyncWindow};
-use engine_provider::{ConnectionInfo, EmailStream, ProviderError};
+use engine_api::{AccountId, Engine};
 use serde_json::Value;
 
 use crate::audit;
@@ -52,11 +54,6 @@ pub(crate) const SEND_CLASS: &[&str] = &["send", "queue"];
 
 /// The default `messages list` limit, so the verb is usable unadorned.
 pub(crate) const DEFAULT_LIMIT: usize = 25;
-
-/// The words every offline provider failure carries. Classified retryable so
-/// the outbox parks the write for the app's drain rather than settling it as
-/// a permanent failure.
-const OFFLINE: &str = "the astra-cli dials no server; the app's outbox executes this write";
 
 /// What one finished invocation hands `main`.
 pub(crate) struct Run {
@@ -77,7 +74,8 @@ pub(crate) struct Invocation {
 }
 
 /// The verbs, with their arguments: the mail reads and writes, the rules
-/// verbs over the rules store, and the AI reads over the results store.
+/// verbs over the rules store, and the AI reads over the results,
+/// draft-pool, cache, and profile tables.
 pub(crate) enum Verb {
     /// List the account index's ids.
     AccountsList,
@@ -144,6 +142,27 @@ pub(crate) enum Verb {
         /// The provider keys to list rows for.
         keys: Vec<String>,
     },
+    /// List the stored draft pool rows for messages.
+    AiDrafts {
+        /// The account id from the index.
+        account: String,
+        /// The provider keys to list pool rows for.
+        keys: Vec<String>,
+    },
+    /// Answer each key's cached summary row, when one is stored.
+    AiSummary {
+        /// The account id from the index.
+        account: String,
+        /// The provider keys to read cached summaries for.
+        keys: Vec<String>,
+    },
+    /// Read the account's stored style profile.
+    AiStyle {
+        /// The account id from the index.
+        account: String,
+    },
+    /// The refused style rebuild: the model seam lives in the app.
+    AiStyleRebuild,
 }
 
 impl Verb {
@@ -161,6 +180,10 @@ impl Verb {
             Self::RulesDelete { .. } => "rules delete",
             Self::AiCold { .. } => "ai cold",
             Self::AiResults { .. } => "ai results",
+            Self::AiDrafts { .. } => "ai drafts",
+            Self::AiSummary { .. } => "ai summary",
+            Self::AiStyle { .. } => "ai style",
+            Self::AiStyleRebuild => "ai style rebuild",
         }
     }
 
@@ -298,7 +321,8 @@ fn audit_outcome(run: &Run) -> &'static str {
 /// The subverbs the verbs spell: the CLI's own vocabulary, the only
 /// second positional the ledger may capture beside a verb word.
 const SUBVERBS: &[&str] = &[
-    "list", "read", "save", "discard", "create", "delete", "cold", "results",
+    "list", "read", "save", "discard", "create", "delete", "cold", "results", "drafts", "summary",
+    "style",
 ];
 
 /// The verb word of an unparsable line, best effort: the first positional,
@@ -342,6 +366,19 @@ async fn execute(invocation: &Invocation, data_dir: &Path, store: &AiStore) -> A
             let account = account_id(data_dir, account)?;
             return ai::results(store, &account, keys);
         }
+        Verb::AiDrafts { account, keys } => {
+            let account = account_id(data_dir, account)?;
+            return ai::drafts(store, &account, keys);
+        }
+        Verb::AiSummary { account, keys } => {
+            let account = account_id(data_dir, account)?;
+            return ai::summary(store, &account, keys);
+        }
+        Verb::AiStyle { account } => {
+            let account = account_id(data_dir, account)?;
+            return ai::style(store, &account);
+        }
+        Verb::AiStyleRebuild => return ai::style_rebuild(),
         _ => {}
     }
     let engine = match Engine::open(data_dir.join(ENGINE_STORE_FILE)) {
@@ -359,7 +396,11 @@ async fn execute(invocation: &Invocation, data_dir: &Path, store: &AiStore) -> A
         | Verb::RulesCreate { .. }
         | Verb::RulesDelete { .. }
         | Verb::AiCold { .. }
-        | Verb::AiResults { .. } => unreachable!("answered before the engine opened"),
+        | Verb::AiResults { .. }
+        | Verb::AiDrafts { .. }
+        | Verb::AiSummary { .. }
+        | Verb::AiStyle { .. }
+        | Verb::AiStyleRebuild => unreachable!("answered before the engine opened"),
         Verb::FoldersList { account } => {
             let account = account_id(data_dir, account)?;
             folders::list(&engine, &account).await
@@ -400,57 +441,3 @@ fn account_id(data_dir: &Path, account: &str) -> Result<AccountId, (Code, String
         Err(err) => Err((Code::Runtime, err)),
     }
 }
-
-/// The provider every CLI write and body fetch goes through: it dials
-/// nothing. Draft writes park in the engine's outbox for the app's drain, and
-/// an uncached body is an error rather than a network fetch.
-pub(crate) struct Offline;
-
-#[async_trait]
-impl Provider for Offline {
-    fn connection_info(&self) -> ConnectionInfo {
-        ConnectionInfo::new(Capabilities::none())
-    }
-
-    fn stream_email<'a>(
-        &'a self,
-        account: &'a AccountId,
-        cursor: Option<&'a SyncState>,
-        _window: SyncWindow,
-        _fetch_batch: usize,
-        _chunk_size: usize,
-    ) -> EmailStream<'a> {
-        let _ = (account, cursor);
-        Box::pin(futures::stream::once(async {
-            Err(ProviderError::retryable(OFFLINE))
-        }))
-    }
-
-    async fn fetch_message_source(
-        &self,
-        _account: &AccountId,
-        _message: &engine_api::Message,
-    ) -> Result<engine_core::raw::RawMime, engine_provider::ProviderError> {
-        Err(ProviderError::retryable(OFFLINE))
-    }
-
-    async fn put_draft(
-        &self,
-        _account: &AccountId,
-        _draft: &engine_api::Draft,
-        _replacing: Option<&engine_api::ProviderKey>,
-    ) -> Result<engine_api::ProviderKey, engine_provider::ProviderError> {
-        Err(ProviderError::retryable(OFFLINE))
-    }
-
-    async fn delete_draft(
-        &self,
-        _account: &AccountId,
-        _draft: &engine_api::ProviderKey,
-    ) -> Result<(), engine_provider::ProviderError> {
-        Err(ProviderError::retryable(OFFLINE))
-    }
-}
-
-impl MailboxWrites for Offline {}
-impl CalendarWrites for Offline {}

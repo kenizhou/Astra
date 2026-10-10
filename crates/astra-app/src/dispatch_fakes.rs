@@ -40,8 +40,8 @@ mod mail;
 // The AI pass fixtures, its own child for the same limit, pathed `fakes::ai::…`.
 pub(crate) mod ai;
 pub(super) use mail::{
-    delivered_at, folder_keys, mail, pane_rows, read, row, row_keys, sending_signals, sent_copy,
-    threaded,
+    delivered_at, folder_keys, mail, pane_rows, read, row, row_keys, sending_signals, sent,
+    sent_copy, threaded,
 };
 
 /// Records the surfaces the app signals, so a test can assert the loop fired.

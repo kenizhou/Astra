@@ -22,6 +22,7 @@ use astra_ai::{
 };
 use engine_api::{AccountId, MailListRow, Provider, ProviderKey};
 
+use crate::ai_replies::DraftPoolSink;
 use crate::ai_rules::{
     categorise, judge_cold, match_rules, AiComplete, AiJudge, MailContext, Rule,
 };
@@ -90,6 +91,11 @@ pub struct AiPass {
     pub(crate) dlp: DlpPolicy,
     /// The shared AI store: rules in, results and audits out.
     pub(crate) store: Arc<AiStore>,
+    /// The host's draft-pool sink, when one was installed: the
+    /// row-landing signal the reply-drafting driver emits, so the reading
+    /// pane knows to pull the message's chips again. `None` lands rows
+    /// with no signal, the store-only shape.
+    pub(crate) draft_sink: Option<Arc<dyn DraftPoolSink>>,
 }
 
 impl core::fmt::Debug for AiPass {
@@ -101,7 +107,7 @@ impl core::fmt::Debug for AiPass {
 
 impl AiPass {
     /// Bundles `judge`, `complete`, `store`, and the gate's `dlp` policy
-    /// into the pass the app is given.
+    /// into the pass the app is given, with no draft-pool sink.
     #[must_use]
     pub fn new(
         judge: Box<dyn AiJudge>,
@@ -114,7 +120,16 @@ impl AiPass {
             complete,
             dlp,
             store,
+            draft_sink: None,
         }
+    }
+
+    /// Installs the draft-pool `sink` the reply-drafting driver signals
+    /// through, in place of the default none.
+    #[must_use]
+    pub fn with_draft_sink(mut self, sink: Option<Arc<dyn DraftPoolSink>>) -> Self {
+        self.draft_sink = sink;
+        self
     }
 }
 

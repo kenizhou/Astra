@@ -15,11 +15,11 @@
 
 ## 动词
 
-今天交付十一个，每个对应一个已存在的界面。语法是两个位置词（`verb
+今天交付十五个：九个邮件、草稿与规则动词，加六个 `ai` 动词。语法是两个位置词（`verb
 subverb`）加标志，且标志顺序自由：sidecar 应拼写为
 `astra-cli [--json] [--correlation-id <id>] <verb> <subverb> [--flag <value> ...]`，
 始终传 `--json` 与轮次的 `--correlation-id`，并把两个位置词之后的一切都当作
-具名标志。五个走存储的动词（`rules` 与 `ai`）改为以裸位置词接受其余操作数，
+具名标志。九个走存储的动词（`rules` 与 `ai`）改为以裸位置词接受其余操作数，
 即其界面钉住的语法。一次调用在文本中、在审计行里都不含糊。
 
 | 动词 | 读取 | 应答的 `data` |
@@ -35,6 +35,10 @@ subverb`）加标志，且标志顺序自由：sidecar 应拼写为
 | `rules delete --id <id>` | 删除一条存储规则 | `id`、`state: deleted`；`--preview` 点名确切的删除；无规则携带的 id 是点名它的运行时错误 |
 | `ai cold <account> <key> [<key>...]` | 结果存储中已存的冷判定 | `messages`：每 key，最新 `cold` 行的 `verdict`，附判定它的 `correlation` 与 `recorded_at`；无扫描审判过该邮件时为 `null` |
 | `ai results <account> <key> [<key>...]` | 结果存储中已存的阶段行 | `messages`：每 key，全部行最新优先，含 `stage`、`rule_id`、`verdict`、`category`、`correlation`、`recorded_at` |
+| `ai drafts <account> <key> [<key>...]` | 审计账本旁的草稿池行（迁移 0004） | `messages`：每 key，全部池行最新优先，含 `correlation`、完整的 `reply`（模型生成的文本，即该动词存在的目的，与 `messages read` 的整正文纪律相同）、`confidence`、`skipped`、`created_at`；未被生成触碰过的邮件应答空列表 |
+| `ai summary <account> <key> [<key>...]` | 审计账本旁的摘要缓存行（迁移 0005） | `messages`：每 key，缓存的 `summary`，附缓存它的 `body_hash` 与 `created_at`；无缓存时为 `null`。该行是否仍然命中是应用在服务时的正文哈希检查，本读取对此不做断言 |
+| `ai style <account>` | 已存的风格画像（0004 的姊妹表） | `style`：画像的 `note` 与 `built_at`；从未构建过时为 `null` |
+| `ai style rebuild` | 无：该拼写被解析后拒绝 | 以 `3` 退出并附模型规则的拒绝消息（见下）；`--preview` 走非变更动词共有的用法错误，因为没有可描述的动作 |
 
 约束每个动词的规则：
 
@@ -55,14 +59,18 @@ subverb`）加标志，且标志顺序自由：sidecar 应拼写为
   outcome 为 `preview`。
 - **正文只来自一个来源。** `--plain`、`--file` 或 stdin；同时给两个是用法错误。
 - **走存储的动词不经引擎应答。** `rules` 与 `ai` 读写 `ai.sqlite` 中审计账本旁
-  的规则表与结果表，即每次调用都已打开的那一个文件：不读邮件、不拨提供商，
-  因此这些动词对冷数据目录的可用性与邮件动词对已同步目录的可用性相同。
+  的规则表、结果表与回复起草表（草稿池与风格画像、摘要缓存），即每次调用都已
+  打开的那一个文件：不读邮件、不拨提供商，因此这些动词对冷数据目录的可用性与
+  邮件动词对已同步目录的可用性相同。
 - **CLI 绝不拨模型。** `ai cold` 与 `ai results` 返回扫描记录下的内容，绝不是
   实时调用：判定在此存在仅因应用的收件扫描审判过该邮件，未审判的邮件应答
-  `null`，绝不猜测。生成接缝是同样的诚实：`rules create` 接受显式的条件句子、
-  不做任何生成，因为后台客户端在桌面宿主里，CLI 不持有模型连接且永远不会有。
-  agent 用自己的模型自行撰写条件，动词照单存储（接缝记录于
-  `docs/ai-rules.md`）。
+  `null`，绝不猜测。`ai drafts`、`ai summary` 与 `ai style` 把同样的诚实延伸到
+  回复起草表：池行、缓存行或画像行的存在仅因应用的起草驱动器或拉取记录过它。
+  生成接缝是同样的诚实：`rules create` 接受显式的条件句子、不做任何生成，因为
+  后台客户端在桌面宿主里，CLI 不持有模型连接且永远不会有。agent 用自己的模型
+  自行撰写条件，动词照单存储（接缝记录于 `docs/ai-rules.md`）。
+  `ai style rebuild` 把该规则带到它的拒绝边缘：重建是一次模型推断，因此该拼写
+  被解析为下文的拒绝，而不是假装推断。
 - **封闭动作集刻意拼写两遍。** CLI 的 `CLOSED_ACTIONS` 与应用层的
   `Action::ALL` 在两个互不依赖的 crate 里携带同样的线词；两者各有自己的测试
   钉住，任一处变更都要落进两处。重复的句子与其代价见 `docs/ai-rules.md`。
@@ -85,6 +93,14 @@ subverb`）加标志，且标志顺序自由：sidecar 应拼写为
 **发送类动词先解析后被拒绝。** `send` 与 `queue`（以及之后被划入发送类的任何
 词）解析到足以知道被请求了什么，然后以 `3` 退出，消息点明人发规则：由人决定并
 发送，应用来发送。拒绝位于参数解析器中，因此任何发送类拼写都永远到不了引擎。
+
+**模型类动词以同样的方式拒绝。** `ai style rebuild` 需要通过一次模型补全从已发
+邮件推断风格笔记；CLI 不持有模型连接且永远不会有，因此该拼写被解析为一条拒
+绝，点明规则并指向重建运行之处：应用的需求驱动档案读取，每日上限过去后的
+下一个起草回合或风格读取会从已发邮件推断新笔记（没有显式的重建命令交付；
+契约与对规格可变动词句子的记录偏差见 `docs/ai-replies.md`）。该动词不带
+`--preview`，因为没有可描述的动作。退出码 `3`、账本结果 `refused`，行点明
+完整的 `ai style rebuild` 拼写。
 
 ## 审计
 
@@ -117,10 +133,11 @@ id、数量、长度。地址、主题与正文文本绝不进入账本。解析
 
 | 规则 | 状态 | 位置 |
 |---|---|---|
-| 十一个动词与固定信封 | ✅ | `cli/src/verbs` |
+| 十五个动词与固定信封 | ✅ | `cli/src/verbs` |
 | 每个变更动词（drafts 与 rules）上的 `--preview`，各共享一个构建器 | ✅ | `cli/src/verbs/{drafts,rules}.rs` |
 | 每次调用带相关性 id 审计 | ✅ | `cli/src/audit.rs`、`cli/src/verbs/mod.rs` |
 | 发送类动词先解析后拒绝，退出码 3 | ✅ | `cli/src/verbs/mod.rs` |
+| 模型类动词（`ai style rebuild`）先解析后拒绝，退出码 3 | ✅ | `cli/src/verbs/ai.rs` |
 | 退出码 0、1、2、3 | ✅ | `cli/src/envelope.rs` |
 | 脱敏的参数预览（形状，绝非文本） | ✅ | `cli/src/audit.rs` |
 | 作为桌面安装包的 `externalBin` 分发 | ✅ | `client/desktop/scripts/stage-cli.mjs` |

@@ -32,6 +32,10 @@ pub(crate) mod drafts;
 // The sending command surface (the queue pull), under the same split.
 pub(crate) mod sending;
 
+// The AI replies command surface (the chips, summarise, style, and dismiss
+// pulls), under the same split.
+pub(crate) mod ai;
+
 /// A command failure, serialised to the webview as its display string: a sentence a
 /// surface can show, with the reason the host saw.
 #[derive(Debug, thiserror::Error)]
@@ -57,6 +61,9 @@ pub(crate) enum CommandError {
     /// The agent sidecar is unavailable or refused the request.
     #[error("the agent is unavailable: {0}")]
     Agent(String),
+    /// The AI replies surface is unconfigured or refused the request.
+    #[error("the ai surface refused: {0}")]
+    Ai(String),
 }
 
 impl Serialize for CommandError {

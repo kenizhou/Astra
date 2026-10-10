@@ -9,11 +9,16 @@ mod wire;
 
 pub use astra_ai::repair_json;
 pub use client::{LlmClient, LlmEndpoint, LlmError};
+pub(crate) use seams::DraftPoolEventSink;
 pub use seams::{incoming_pass, LlmAiComplete, LlmAiJudge};
 
 #[cfg(test)]
 #[path = "live_tests.rs"]
 mod live_tests;
+
+#[cfg(test)]
+#[path = "live_replies_tests.rs"]
+mod live_replies_tests;
 
 #[cfg(test)]
 #[path = "fixture.rs"]

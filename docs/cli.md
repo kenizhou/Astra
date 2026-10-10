@@ -17,12 +17,13 @@ the ledger does not know happened.
 
 ## The verbs
 
-Eleven ship today, one per surface that exists. The grammar is two positional
+Fifteen ship today: nine mail, drafts, and rules verbs plus the six `ai`
+verbs. The grammar is two positional
 words (`verb subverb`) plus flags, and flag order is free: the sidecar
 should spell `astra-cli [--json] [--correlation-id <id>] <verb> <subverb>
 [--flag <value> ...]`, always passing `--json` and the turn's
 `--correlation-id`, and treating everything after the two positionals as
-named flags. The five store-backed verbs (`rules` and `ai`) take their
+named flags. The nine store-backed verbs (`rules` and `ai`) take their
 remaining operands as bare positionals instead, the grammar their
 surfaces pinned. A call is unambiguous in text and in an audit row.
 
@@ -39,6 +40,10 @@ surfaces pinned. A call is unambiguous in text and in an audit row.
 | `rules delete --id <id>` | deletes one stored rule | `id`, `state: deleted`; `--preview` names the exact deletion; an id no rule carries is a runtime error naming it |
 | `ai cold <account> <key> [<key>...]` | the stored cold verdicts in the results store | `messages`: per key, the newest `cold` row's `verdict` with the `correlation` that judged it and `recorded_at`, or `null` when no pass has judged the message |
 | `ai results <account> <key> [<key>...]` | the stored stage rows in the results store | `messages`: per key, every row newest first with `stage`, `rule_id`, `verdict`, `category`, `correlation`, `recorded_at` |
+| `ai drafts <account> <key> [<key>...]` | the stored draft pool rows (migration 0004) beside the audit ledger | `messages`: per key, every pool row newest first with `correlation`, the whole `reply` (model-generated text the verb exists to read, the same whole-body discipline `messages read` carries), `confidence`, `skipped`, `created_at`; a message no generation touched answers an empty list |
+| `ai summary <account> <key> [<key>...]` | the stored summarise cache row (migration 0005) beside the audit ledger | `messages`: per key, the cached `summary` with the `body_hash` it was cached under and `created_at`, or `null` when nothing is cached; whether the row still hits is the app's serving-time body-hash check, which this read makes no claim about |
+| `ai style <account>` | the stored style profile (0004's sibling table) | `style`: the profile's `note` and `built_at`, or `null` when none was ever built |
+| `ai style rebuild` | nothing: the spelling parses and refuses | exit `3` with the model rule's refusal (below); `--preview` is the shared non-mutating usage error, there being no action to describe |
 
 Rules that bind every verb:
 
@@ -65,19 +70,26 @@ Rules that bind every verb:
 - **The body comes from one source.** `--plain`, `--file`, or stdin; two at
   once is a usage error.
 - **The store verbs answer without the engine.** `rules` and `ai` read and
-  write the rules and results tables beside the audit ledger in
+  write the rules, results, and reply-drafting tables (the draft pool and
+  style profiles, the summarise cache) beside the audit ledger in
   `ai.sqlite`, the one file every invocation already opens: no mail is
   read and no provider is dialled, so the verbs work against a cold data
   dir exactly as the mail verbs work against a synced one.
 - **The CLI never dials a model.** `ai cold` and `ai results` return what
   a pass recorded, never a live call: a verdict exists here only because
   the app's incoming pass judged the message, and an unjudged message
-  answers `null`, never a guess. The generation seam is the same
+  answers `null`, never a guess. `ai drafts`, `ai summary`, and
+  `ai style` extend the same honesty to the reply-drafting tables: a
+  pool, cache, or profile row exists only because the app's drafting
+  driver or pulls recorded it. The generation seam is the same
   honesty: `rules create` takes an explicit condition sentence and
   generates nothing, because the background client lives in the desktop
   host and the CLI holds no model connection and never will. The agent
   composes the condition itself, through its own model, and the verb
   stores what it is given (the seam recorded in `docs/ai-rules.md`).
+  `ai style rebuild` carries the rule to its refused edge: the rebuild
+  is a model inference, so the spelling parses into the refusal below
+  rather than pretend to infer.
 - **The closed action set is spelled twice, by design.** The CLI's
   `CLOSED_ACTIONS` and the app layer's `Action::ALL` carry the same wire
   words in two crates that do not depend on each other; both are pinned
@@ -106,6 +118,18 @@ anything else later assigned to the send class) parse far enough to know
 what was asked, then exit `3` with a message naming the human-send rule:
 humans decide and send, the app sends. The refusal lives in the argument
 parser, so no send-class spelling can ever reach the engine.
+
+**Model-class verbs refuse the same way.** `ai style rebuild` would have
+to infer the style note from Sent mail through a model completion; the
+CLI holds no model connection and never will, so the spelling parses
+into a refusal that names the rule and points where the rebuild runs:
+the app's demand-driven profile read, where the next drafting turn or
+style read after the daily cap passes infers a fresh note from Sent mail
+(no explicit rebuild command ships; the contract and the recorded
+deviation from the spec's mutating-verb sentence live in
+`docs/ai-replies.md`). The verb ships no `--preview`, because there is no
+action to describe. Exit `3`, ledger outcome `refused`, the row naming
+the full `ai style rebuild` spelling.
 
 ## The audit
 
@@ -149,10 +173,11 @@ known interaction, not a gap to close.
 
 | Rule | Status | Where |
 |---|---|---|
-| Eleven verbs with the pinned envelope | ✅ | `cli/src/verbs` |
+| Fifteen verbs with the pinned envelope | ✅ | `cli/src/verbs` |
 | `--preview` on every mutating verb (drafts and rules), one shared builder each | ✅ | `cli/src/verbs/{drafts,rules}.rs` |
 | Every invocation audited with a correlation id | ✅ | `cli/src/audit.rs`, `cli/src/verbs/mod.rs` |
 | Send-class verbs parsed and refused, exit 3 | ✅ | `cli/src/verbs/mod.rs` |
+| Model-class verb (`ai style rebuild`) parsed and refused, exit 3 | ✅ | `cli/src/verbs/ai.rs` |
 | Exit codes 0, 1, 2, 3 | ✅ | `cli/src/envelope.rs` |
 | Redacted argument previews (shapes, never text) | ✅ | `cli/src/audit.rs` |
 | Staged as the desktop bundle's `externalBin` | ✅ | `client/desktop/scripts/stage-cli.mjs` |
