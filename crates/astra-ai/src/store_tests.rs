@@ -213,12 +213,16 @@ fn the_bookkeeping_row_lands_once_and_survives_the_reopen() {
     let path = dir.join("ai.sqlite3");
     {
         let store = AiStore::open(&path).expect("the first open migrates");
-        assert_eq!(versions(&store), vec![1], "one row per applied migration");
+        assert_eq!(
+            versions(&store),
+            vec![1, 2],
+            "one row per applied migration"
+        );
     }
     let reopened = AiStore::open(&path).expect("the reopen claims nothing new");
     assert_eq!(
         versions(&reopened),
-        vec![1],
+        vec![1, 2],
         "the reopen records no second bookkeeping row"
     );
     std::fs::remove_dir_all(&dir).ok();
@@ -243,8 +247,8 @@ fn concurrent_first_opens_all_succeed_with_one_bookkeeping_row() {
     let store = AiStore::open(&path).expect("the store opens after the race");
     assert_eq!(
         versions(&store),
-        vec![1],
-        "the race applied the migration exactly once"
+        vec![1, 2],
+        "the race applied each migration exactly once"
     );
     std::fs::remove_dir_all(&dir).ok();
 }

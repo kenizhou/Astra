@@ -72,11 +72,18 @@ struct Migration {
 }
 
 /// The embedded migrations, in order.
-const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    name: "init",
-    sql: include_str!("migrations/0001_init.sql"),
-}];
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "init",
+        sql: include_str!("migrations/0001_init.sql"),
+    },
+    Migration {
+        version: 2,
+        name: "rules",
+        sql: include_str!("migrations/0002_rules.sql"),
+    },
+];
 
 impl AiStore {
     /// Opens (creating when absent) the store at `path` and brings it to
@@ -242,8 +249,9 @@ impl AiStore {
     }
 
     /// The store's connection. An unreachable lock is a poisoned invariant,
-    /// not a caller-recoverable state.
-    fn lock(&self) -> std::sync::MutexGuard<'_, rusqlite::Connection> {
+    /// not a caller-recoverable state. Shared with this crate's rules CRUD,
+    /// which rides the same connection under the same contract.
+    pub(crate) fn lock(&self) -> std::sync::MutexGuard<'_, rusqlite::Connection> {
         self.conn.lock().expect("ai store connection poisoned")
     }
 }

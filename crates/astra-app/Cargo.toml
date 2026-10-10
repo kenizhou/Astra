@@ -13,6 +13,10 @@ workspace = true
 # The account layer's folder-shaping rule (which listed folders a pass syncs) and the
 # connection seams the host drives; the protocol itself names only ids.
 astra-account = { path = "../astra-account" }
+# The AI foundation the rules model rides: the correlation id, the use-case
+# registry the generation seam names, the rules store, and the shared
+# structured-output repair helper.
+astra-ai = { path = "../astra-ai" }
 # The shared composer document a drafts save renders and stores.
 astra-composer = { path = "../astra-composer" }
 # The immutable snapshots the surfaces render, and the folder-row projection.

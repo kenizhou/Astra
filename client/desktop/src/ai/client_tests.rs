@@ -5,7 +5,8 @@
 //! read at startup, and the pure classification helpers (rejection classes,
 //! Retry-After). The terminal and exhausted-chain failure classes live in
 //! `client_failure_tests`; the fixture, client builders, and ledger reader in
-//! the sibling `fixture` module; the repair_json cases in `wire_tests`.
+//! the sibling `fixture` module; the repair_json cases in the AI foundation
+//! crate they moved to.
 
 use std::time::Duration;
 

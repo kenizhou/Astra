@@ -22,6 +22,9 @@ pub enum LlmUseCase {
     CategorizeSender,
     /// Inbox cleaning suggestions (inbox-zero `clean-inbox`, tier default).
     CleanInbox,
+    /// Generating rules from a prompt (inbox-zero `prompt-to-rules`; the
+    /// A1 design pins the default tier where inbox-zero rides chat).
+    PromptToRules,
     /// The agent tool loop. Inbox-zero maps its agent use cases (the
     /// `McpAgent` line) to the economy tier; `agent_tool` follows.
     AgentTool,
@@ -57,6 +60,7 @@ impl LlmUseCase {
             Self::Summarise => "summarise",
             Self::CategorizeSender => "categorize_sender",
             Self::CleanInbox => "clean_inbox",
+            Self::PromptToRules => "prompt_to_rules",
             Self::AgentTool => "agent_tool",
             Self::JudgeColdEmail => "judge_cold_email",
             Self::JudgeRuleMatch => "judge_rule_match",
@@ -76,7 +80,9 @@ impl LlmUseCase {
         match self {
             Self::AssistantChat => ModelTier::Chat,
             Self::DraftReply => ModelTier::Draft,
-            Self::Summarise | Self::CategorizeSender | Self::CleanInbox => ModelTier::Default,
+            Self::Summarise | Self::CategorizeSender | Self::CleanInbox | Self::PromptToRules => {
+                ModelTier::Default
+            }
             Self::AgentTool => ModelTier::Economy,
             Self::JudgeColdEmail
             | Self::JudgeDlp
