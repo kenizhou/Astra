@@ -59,8 +59,10 @@ nano spend guard.
 - **D7 (nano spend guard)**: the weekly nano budget
   (`ASTRA_LLM_NANO_BUDGET_MICROS`, generous default) is checked from the
   ledger's weekly aggregate before each judge call; on exceed the pass
-  skips with a warn (fail open for UX stages; recorded honestly, DLP
-  judge skip means allow under the default policy).
+  skips with a warn and the skip applies the use case's safe default per
+  the binary judge table (fail closed for DLP and injection; fail open
+  only for pure UX stages such as cold and draft surface; recorded
+  honestly).
 
 ## 3. Testing
 

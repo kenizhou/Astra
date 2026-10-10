@@ -103,3 +103,4 @@ LLM 调用、工具调用与权限决定都带关联 id 落入其台账。
 - Windows 上的 Node 在 spawn 略去 SYSTEMROOT 时会在 ncrypto::CSPRNG 处断言退出，且该变量通常以大写到达：agent spawn 的平台放行名单必须大小写不敏感地匹配名字，否则所有 sidecar 一起暴毙。
 - AppState 的字段顺序就是其析构顺序，且是承重的：agent relay 必须先于 runtime 析构，否则 runtime 的关闭会等一个读泵，读泵在等子进程，子进程在等 relay 的 stdin 关闭。
 - Pull request 一律用 squash and merge 合并，主题为「PR 标题 (#编号)」，合并后删除分支；不使用 merge commit。
+- xtask doc_sync 自测夹具使用按 pid 命名的临时目录且从不清理；Windows 的 pid 复用可能污染陈旧目录、使并发运行偶发失败；串行重跑是干净的；最终的修法是夹具助手的清理。

@@ -61,6 +61,11 @@ impl LlmClient {
     /// spec. The verdict of each attempt lands in its ledger row's outcome
     /// field, so the judge population stays auditable.
     ///
+    /// The question must be phrased so `Yes` affirms the positive pole the
+    /// safe-default table relies on (proceed, match, safe, pass): every
+    /// safe default resolves to the `No` verdict, so a negatively-phrased
+    /// question silently inverts the default.
+    ///
     /// The spend guard runs first: a weekly nano aggregate already at the
     /// `ASTRA_LLM_NANO_BUDGET_MICROS` budget answers the safe default with
     /// no network call and one `budget-skipped` row. An abstaining first

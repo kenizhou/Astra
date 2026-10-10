@@ -48,8 +48,9 @@ nano 花费护栏。
   <message-key>` 随 `--json`、审计、变更动词 `--preview` 落地，遵 CLI
   契约。
 - **D7（nano 花费护栏）**：周度 nano 预算（`ASTRA_LLM_NANO_BUDGET_MICROS`，
-  宽松默认）在每次裁决调用前经台账周聚合检查；超限则该通道跳过并告警
-  （UX 阶段 fail open；诚实记录——DLP 裁决跳过在默认策略下即 allow）。
+  宽松默认）在每次裁决调用前经台账周聚合检查；超限则该通道跳过并告警，
+  跳过适用二元裁决器表中该 use case 的安全默认（DLP 与 injection 从严
+  关闭；仅冷邮件与草稿浮现这类纯 UX 阶段才 fail open；诚实记录）。
 
 ## 3. 测试
 

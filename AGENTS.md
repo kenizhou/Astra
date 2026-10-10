@@ -114,3 +114,4 @@ reference decision is forbidden: disagreements are escalated in the PR.
 - AppState's field order is its drop order and it is load bearing: the agent relay must drop before the runtime, or the runtime's shutdown waits on a read pump that waits on the child that waits on the relay's stdin closing.
 - Pull requests merge with squash and merge, subject "PR title (#number)",
   branch deleted after; merge commits are not used.
+- xtask doc_sync self-test fixtures use pid-keyed temp dirs that are never cleaned; Windows pid reuse can pollute the stale dirs and flake concurrent runs; serial reruns are clean; a fixture-helper cleanup is the eventual fix.

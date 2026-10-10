@@ -148,7 +148,7 @@ this row ports.
 
 | Feature | Status | Notes |
 |---|---|---|
-| Tier and use-case registry from `ASTRA_LLM_*` env (chains, per-tier fallback, protocol per provider prefix) | 🚧 | six use cases, five tiers; ai-foundation.md |
+| Tier and use-case registry from `ASTRA_LLM_*` env (chains, per-tier fallback, protocol per provider prefix) | 🚧 | the SPA0 set plus the judge family, five tiers; ai-foundation.md |
 | Background LLM client: dual protocol, retryable chain fallback, quota and auth terminal | 🚧 | one ledger row per attempt; no feature consumes it until A2; ai-foundation.md |
 | Product AI ledger (`llm_calls`, `audit_log`) beside the engine store | 🚧 | ai.sqlite, shared by host and CLI; rusqlite per the recorded decision; ai-foundation.md |
 | Untrusted-content wrapper and DLP policy types | 🚧 | allow-only until A1; ai-foundation.md |

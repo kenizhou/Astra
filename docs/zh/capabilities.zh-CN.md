@@ -149,7 +149,7 @@
 
 | 功能 | 状态 | 备注 |
 |---|---|---|
-| 来自 `ASTRA_LLM_*` 环境变量的层级与用例注册表（链、按层回退、按提供方前缀选协议） | 🚧 | 六个用例、五个层级；ai-foundation.md |
+| 来自 `ASTRA_LLM_*` 环境变量的层级与用例注册表（链、按层回退、按提供方前缀选协议） | 🚧 | SPA0 集合加裁决器族、五个层级；ai-foundation.md |
 | 后台 LLM 客户端：双协议、可重试链式回退、配额与鉴权终局 | 🚧 | 每次尝试一行账本；A2 前无特性消费；ai-foundation.md |
 | 引擎存储之侧的产品 AI 账本（`llm_calls`、`audit_log`） | 🚧 | ai.sqlite，宿主与 CLI 共用；记录在案的 rusqlite 决定；ai-foundation.md |
 | 非受信内容包裹器与 DLP 策略类型 | 🚧 | A1 前仅允许；ai-foundation.md |
