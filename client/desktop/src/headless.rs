@@ -218,13 +218,14 @@ fn add_dial(
     }
 }
 
-/// Boots the host state over the slice's data directory, with the logging sink in
-/// place of the Tauri emitter.
+/// Boots the host state over the slice's data directory, with the logging sinks in
+/// place of the Tauri emitters.
 fn assemble_for(env: &SliceEnv) -> Result<AppState, String> {
     let observer: Arc<dyn astra_app::AppObserver> = Arc::new(DebouncedObserver::new(
         ObserverBridge::new(Box::new(LoggingEventSink)),
     ));
-    assemble_state(&env.data_dir, observer)
+    let agent_sink: Arc<dyn crate::agent::AgentEventSink> = Arc::new(crate::agent::LogAgentSink);
+    assemble_state(&env.data_dir, observer, agent_sink)
         .map_err(|err| format!("the headless host could not boot: {err}"))
 }
 

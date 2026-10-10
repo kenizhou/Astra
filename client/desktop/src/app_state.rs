@@ -13,7 +13,7 @@ use astra_viewmodel::{
 use async_trait::async_trait;
 use engine_api::{AccountId, Provider};
 
-use crate::{AccountCredentialStore, AccountDials, AppRuntime};
+use crate::{AccountCredentialStore, AccountDials, AppRuntime, LlmClient, SidecarRelay};
 
 /// The concrete provider parameter the desktop host runs the app over:
 /// `App<HostProvider>`.
@@ -136,16 +136,28 @@ impl AppPort for App<HostProvider> {
 }
 
 /// The state the shell manages: everything a command needs, in one registered value.
+///
+/// The field order is the drop order, and it is load bearing: the agent
+/// relay must drop before the runtime, because the runtime's shutdown
+/// waits for the relay's read pump and the pump waits on the sidecar
+/// child, which waits on the relay's stdin closing.
 pub(crate) struct AppState {
     /// The app core behind the command surface.
     pub(crate) app: Arc<dyn AppPort>,
-    /// The app's async runtime: dispatches, first syncs and blocking dials run on it.
-    pub(crate) runtime: AppRuntime,
+    /// The agent sidecar relay: prompts, approvals, and the ledger the
+    /// sidecar's calls land in.
+    pub(crate) agent: Arc<SidecarRelay>,
+    /// The background LLM client, when a tier table resolved at boot: the
+    /// use-case chains, the provider keys, and the ledger its attempts
+    /// land in.
+    pub(crate) llm: Option<Arc<LlmClient>>,
     /// Every registered account's config and connection pool: what a re-dial, a
     /// folder bind, and the boot's restore read.
     pub(crate) connections: Arc<AccountDials>,
     /// The OS secure store the account-add flow persists through.
     pub(crate) credential_store: Arc<dyn AccountCredentialStore>,
+    /// The app's async runtime: dispatches, first syncs and blocking dials run on it.
+    pub(crate) runtime: AppRuntime,
 }
 
 impl core::fmt::Debug for AppState {
@@ -153,6 +165,8 @@ impl core::fmt::Debug for AppState {
         // The app core and the pools may hold sensitive handles; count, do not show.
         f.debug_struct("AppState")
             .field("accounts", &self.connections.ids().len())
+            .field("agent", &self.agent.status().as_str())
+            .field("llm", &self.llm.is_some())
             .finish_non_exhaustive()
     }
 }

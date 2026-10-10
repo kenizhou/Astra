@@ -95,4 +95,11 @@ LLM 调用、工具调用与权限决定都带关联 id 落入其台账。
 - npm 11 会拦截 esbuild 的 postinstall 直至批准：全新安装后在 client/web 运行 `npm install-scripts approve esbuild`，否则开发服务器无法构建。
 - client/web/package.json 中提交的 allowScripts 记录就是该批准写入的内容；npm 11.19 缺少它时只会警告，提交的记录让全新安装与 CI 保持安静。
 - rustdoc 拒绝公开文档链接私有条目（private_intra-doc_links）：私有常量在正文中用纯文本命名、绝不做文档链接，否则 `cargo doc --workspace --no-deps` 失败。
+- astra-desktop 把 astra-cli 作为 externalBin 打包，而 tauri-build 在该 crate 的每次 cargo 调用上都检查暂存文件存在：全新检出后先运行一次 node client/desktop/scripts/stage-cli.mjs --placeholder-ok，否则连 cargo check -p astra-desktop 都会失败。
+- Windows 上的 Node 会在 spawn 的子进程环境里强行注入 SYSTEMROOT、HOMEDRIVE、TEMP 等固定系统变量，即使 spawn 的 env 略去了它们；环境擦除断言必须放行这份固定的平台集合。
+- 本机的 Git Bash printf 会折叠单引号参数中的反斜杠转义；包含 Windows 路径的 JSON 夹具一律用 node 写入，绝不用 printf。
+- sidecar 的 npm test 会针对 dist/index.cjs 运行其 e2e 文件；先在 sidecar 运行 npm run build，否则全新检出上这些测试失败。
+- astra-desktop 把 sidecar 作为 Tauri 资源打包，tauri-build 在该 crate 的每次 cargo 调用（含 clippy）上都检查 sidecar/dist 存在：全新检出先构建捆绑包（npm --prefix sidecar run build）再编译，否则构建脚本失败。
+- Windows 上的 Node 在 spawn 略去 SYSTEMROOT 时会在 ncrypto::CSPRNG 处断言退出，且该变量通常以大写到达：agent spawn 的平台放行名单必须大小写不敏感地匹配名字，否则所有 sidecar 一起暴毙。
+- AppState 的字段顺序就是其析构顺序，且是承重的：agent relay 必须先于 runtime 析构，否则 runtime 的关闭会等一个读泵，读泵在等子进程，子进程在等 relay 的 stdin 关闭。
 - Pull request 一律用 squash and merge 合并，主题为「PR 标题 (#编号)」，合并后删除分支；不使用 merge commit。

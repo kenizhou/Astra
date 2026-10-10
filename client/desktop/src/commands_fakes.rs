@@ -412,11 +412,17 @@ impl AccountCredentialStore for FakeStore {
 }
 
 /// A state over a fake app and store, with a real runtime and a scratch index.
+/// The agent relay runs the stub sidecar in echo mode (no process starts
+/// until an agent command asks for one), and the background client stays
+/// off: no tier list or provider key is read out of the test environment.
 pub(crate) fn state(name: &str, app: Arc<FakeApp>, store: Arc<FakeStore>) -> AppState {
+    let (relay, _sink, _data) = crate::agent::testkit::stub_relay(name, "echo", 3, 50);
     AppState {
         app,
-        runtime: crate::runtime::build_runtime().expect("the test runtime builds"),
+        agent: relay,
+        llm: None,
         connections: Arc::new(AccountDials::empty(&scratch(name))),
         credential_store: store,
+        runtime: crate::runtime::build_runtime().expect("the test runtime builds"),
     }
 }

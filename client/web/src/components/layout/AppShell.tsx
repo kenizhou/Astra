@@ -10,6 +10,7 @@
 // flow rides above everything when it is open.
 
 import { AccountSetupFlow } from '@/features/account-setup/AccountSetupFlow';
+import { AgentPanel } from '@/features/agent/AgentPanel';
 import { ComposerPane, NewMessageAction, useDraftResumeAtStart } from '@/features/composer/Composer';
 import { useComposeRequestHydration } from '@/features/composer/useComposeRequest';
 import { OutboxPanel } from '@/features/outbox/OutboxPanel';
@@ -38,6 +39,7 @@ export function AppShell() {
       <StatusBar />
       <NewMessageAction disabled={accountCount === 0} />
       <OutboxPanel />
+      <AgentPanel />
       <SendResultToast />
       <AccountSetupFlow />
     </div>

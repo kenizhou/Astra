@@ -1,0 +1,1 @@
+{"type":"llm_call","call":{"session_id":"agent:main","prompt_id":"turn-7","correlation_id":"corr-9f1c","model":"claude-sonnet-4","tier":"chat","caller":"agent-chat","prompt_tokens":120,"completion_tokens":35,"cache_read_tokens":0,"cache_write_tokens":0,"duration_ms":812,"status":"ok"}}

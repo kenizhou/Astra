@@ -1,12 +1,14 @@
 [workspace]
 resolver = "2"
-members = ["crates/*", "xtask", "client/desktop"]
+members = ["crates/*", "xtask", "cli", "client/desktop"]
 # Bare `cargo build`/`test`/`run` stay on the engine-side crates; the desktop
 # host builds explicitly (`cargo build -p astra-desktop`) because its Tauri
 # dependency tree is heavy and needs the platform webview libraries.
 # `--workspace` commands still compile it, which is why CI installs the Tauri
-# system dependencies (Ruling R8).
-default-members = ["crates/*", "xtask"]
+# system dependencies (Ruling R8). The CLI is engine-side only (no Tauri
+# tree), so bare commands build it too; every documented run of a bin names
+# it with `-p`, so the second bin adds no ambiguity in practice.
+default-members = ["crates/*", "xtask", "cli"]
 
 [workspace.package]
 version = "0.1.0"
@@ -124,6 +126,10 @@ reqwest = { version = "0.13.4", default-features = false, features = ["json", "f
 # URL construction for the autodetect lookup endpoints; the email address never
 # appears in one, and the trust decision reads each hop's scheme.
 url = "2"
+# The CLI's default data dir beside the product store, when ASTRA_DATA_DIR is
+# unset: the platform's per-user data location (the same directory family the
+# desktop host resolves through Tauri's app_data_dir).
+dirs = "6"
 # Streaming pull-parser for the Mozilla autoconfig XML autodetect reads; no custom
 # entity expansion, so a hostile document cannot balloon in memory.
 quick-xml = "0.42"
@@ -135,3 +141,11 @@ psl = "2"
 # cannot reach, and std's getaddrinfo answers no MX or SRV questions; the desktop
 # host resolves through this resolver over the system's configured DNS servers.
 hickory-resolver = "0.26"
+# The AI ledgers' product SQLite store (astra-ai only; the product database's
+# arrival). rusqlite, not sqlx: sqlx's sqlite binding pins libsqlite3-sys
+# below 0.38 and the engine's rusqlite needs 0.38.x, and Cargo allows only
+# one linked sqlite3 per dependency graph. The same version line as the
+# engine so one libsqlite3-sys serves both stores.
+rusqlite = { version = "0.40", features = ["bundled"] }
+# CorrelationId generation: the v4 UUID spelling, as the kylins ledgers use.
+uuid = { version = "1", features = ["v4"] }

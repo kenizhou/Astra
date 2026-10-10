@@ -5,3 +5,5 @@ dist/
 *.local
 # Tauri-generated capability schemas (client/desktop/gen/schemas).
 /client/desktop/gen/
+# The staged externalBin copy of astra-cli (client/desktop/scripts/stage-cli.mjs).
+/client/desktop/bin/

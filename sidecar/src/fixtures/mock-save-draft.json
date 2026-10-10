@@ -1,0 +1,1 @@
+{"chunks": ["I will draft that reply for you.", " Saving the draft now."], "chunk_delay_ms": 1, "tool_call": {"name": "save_draft", "args": {"account": "acct-1", "from": "ada@example.com", "to": ["bob@example.com"], "subject": "Re: Friday", "body": "See you then."}}}

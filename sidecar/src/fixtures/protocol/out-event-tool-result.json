@@ -1,0 +1,1 @@
+{"type":"event","session_id":"agent:main","event":{"kind":"tool_result","tool_call_id":"call-3","name":"save_draft","status":"ok","output":"{\"schema\":1,\"ok\":true,\"data\":{\"key\":\"draft-9\"}}"}}

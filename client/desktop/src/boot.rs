@@ -24,6 +24,7 @@ use tauri::Manager;
 use astra_app::{MailboxConnector, SpawnedTask};
 
 use crate::{
+    agent::{self, chat_model_config, AgentEventSink},
     build_runtime,
     observer::{DebouncedObserver, ObserverBridge},
     AppPort, AppState, HostAccount, HostProvider, KeyringCredentialStore, TauriEventSink,
@@ -41,6 +42,7 @@ use crate::{
 pub(crate) fn assemble_state(
     data_dir: &Path,
     observer: Arc<dyn astra_app::AppObserver>,
+    agent_sink: Arc<dyn AgentEventSink>,
 ) -> Result<AppState, Box<dyn std::error::Error>> {
     std::fs::create_dir_all(data_dir)?;
     let runtime = build_runtime()?;
@@ -67,12 +69,67 @@ pub(crate) fn assemble_state(
         )
     })?;
 
+    // The AI ledgers and the agent: one store the host, the sidecar's
+    // reported calls, and the CLI's audited verbs all append to, the
+    // background client over the engine's TLS policy, and the relay that
+    // hosts the sidecar with the chat tier's endpoint delivered in band.
+    let ai_store = Arc::new(astra_ai::AiStore::open(&data_dir.join(AI_STORE_FILE))?);
+    let llm = build_llm_client(&ai_store);
+    let model = llm.as_ref().and_then(|client| chat_model_config(client));
+    let agent_relay = agent::build_relay(data_dir, model, agent_sink, Arc::clone(&ai_store));
+
     Ok(AppState {
         app: core as Arc<dyn AppPort>,
-        runtime,
+        agent: agent_relay,
+        llm,
         connections,
         credential_store: Arc::new(keyring),
+        runtime,
     })
+}
+
+/// The AI ledgers' file name, under the data directory: the same store the
+/// CLI opens, so both writers land in one ledger.
+const AI_STORE_FILE: &str = "ai.sqlite";
+
+/// Builds the background LLM client when the tier table and the TLS
+/// transport resolve: the registry from the `ASTRA_LLM_*` tier lists, the
+/// provider keys read once out of the environment, and the ledger store.
+/// A malformed tier list or an unbuilt TLS stack leaves the client off
+/// with a warning, never a failed boot.
+fn build_llm_client(store: &Arc<astra_ai::AiStore>) -> Option<Arc<crate::LlmClient>> {
+    let registry = match astra_ai::TierTable::from_env() {
+        Ok(registry) => registry,
+        Err(e) => {
+            log::warn!(
+                "boot: the llm tier table is unusable; the background client stays off: {e}"
+            );
+            return None;
+        }
+    };
+    let tls = match engine_tls::client_config(&engine_tls::TlsPolicy::bundled_and_system()) {
+        Ok(tls) => tls,
+        Err(e) => {
+            log::warn!(
+                "boot: the llm TLS policy is unusable; the background client stays off: {e}"
+            );
+            return None;
+        }
+    };
+    let http = match tls.reqwest_builder().build() {
+        Ok(http) => http,
+        Err(e) => {
+            log::warn!(
+                "boot: the llm HTTP client is unusable; the background client stays off: {e}"
+            );
+            return None;
+        }
+    };
+    Some(Arc::new(crate::LlmClient::new(
+        http,
+        registry,
+        Arc::clone(store),
+    )))
 }
 
 /// The engine store's file name, under the data directory.
@@ -301,9 +358,10 @@ pub(crate) fn setup_host(app: &mut tauri::App) -> Result<(), Box<dyn std::error:
         .app_data_dir()
         .map_err(|err| format!("the app data directory could not be resolved: {err}"))?;
     let observer: Arc<dyn astra_app::AppObserver> = Arc::new(DebouncedObserver::new(
-        ObserverBridge::new(Box::new(TauriEventSink::new(handle))),
+        ObserverBridge::new(Box::new(TauriEventSink::new(handle.clone()))),
     ));
-    let state = assemble_state(&data_dir, observer)?;
+    let agent_sink: Arc<dyn AgentEventSink> = Arc::new(crate::agent::TauriAgentSink::new(handle));
+    let state = assemble_state(&data_dir, observer, agent_sink)?;
 
     log::info!(
         "boot: the app core is up over {} account(s)",

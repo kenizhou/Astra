@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! The exit hook: reached exactly once on every exit path, after the windows are
-//! gone but while the managed state is still alive, it stops background sync with a
-//! bound.
+//! gone but while the managed state is still alive, it shuts the agent sidecar
+//! down fail-closed and stops background sync with a bound.
 
 use std::time::Duration;
 
@@ -26,11 +26,15 @@ pub(crate) fn on_run_event(app: &AppHandle, event: RunEvent) {
 }
 
 impl AppState {
-    /// Stops background sync: shuts the app's runtime down, bounding in-flight work
-    /// by [`EXIT_SYNC_BOUND`]. Everything the runtime still owes (a commit mid-write,
-    /// a first sync) is either finished inside the bound or picked up by the next
-    /// launch's lease recovery; the process does not outlive the window closing.
+    /// Stops the host's background work: the agent sidecar first (killed,
+    /// its in-flight prompts settled, its unanswered approvals fail-closed
+    /// rather than approved by disappearance), then background sync, with
+    /// in-flight work bounded by [`EXIT_SYNC_BOUND`]. Everything the
+    /// runtime still owes (a commit mid-write, a first sync) is either
+    /// finished inside the bound or picked up by the next launch's lease
+    /// recovery; the process does not outlive the window closing.
     pub(crate) fn stop_sync(&self) {
+        self.runtime.block_on(|| self.agent.shutdown());
         self.runtime.shutdown_timeout(EXIT_SYNC_BOUND);
     }
 }

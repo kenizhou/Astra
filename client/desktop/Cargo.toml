@@ -40,6 +40,9 @@ astra-app = { path = "../../crates/astra-app" }
 astra-account = { path = "../../crates/astra-account" }
 # The immutable snapshots the pull commands hand the webview.
 astra-viewmodel = { path = "../../crates/astra-viewmodel" }
+# The AI foundation the background LLM client rides: the tier registry, the
+# correlation id, and the ledger store its per-attempt rows land in.
+astra-ai = { path = "../../crates/astra-ai" }
 # The engine facade: the `Provider` trait the host's boxed provider type names.
 engine-api.workspace = true
 # The OS secure store the account credentials live in (Credential Manager,
@@ -58,14 +61,31 @@ thiserror.workspace = true
 log.workspace = true
 # The app's async runtime: every engine call the host drives runs on it, and
 # blocking host calls are polled on a thread of our own (src/runtime.rs). The
-# time feature drives the five second bound around one detection run.
-tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
+# time feature drives the five second bound around one detection run; the
+# process, io-util, and sync features drive the agent sidecar's stdio
+# connection and the relay's state channel.
+tokio = { workspace = true, features = ["rt-multi-thread", "time", "process", "io-util", "sync"] }
 # Account autodetection, whose DNS seam the host resolves for (src/detection.rs).
 astra-autodetect = { path = "../../crates/astra-autodetect" }
 # The MX and SRV lookups behind that seam, over the system's configured DNS.
 hickory-resolver.workspace = true
+# The background LLM client's transport. The host builds the client (the
+# engine's TLS policy, as autodetection does); the AI module only sends over
+# it, so no TLS feature is needed here.
+reqwest.workspace = true
+# The TLS policy the host builds that client over at boot: the same
+# engine-tls build autodetection's fetcher and the client tests use, now on
+# the runtime path (the llm store and client are assembled in the boot).
+engine-tls.workspace = true
 
 [dev-dependencies]
 # The composer document the drafts intents carry; the command-surface fakes
 # render the saved document to the plain text a stored draft resumes as.
 astra-composer = { path = "../../crates/astra-composer" }
+# Reading the LLM ledger rows back in the client tests, through the test's
+# own connection into the file-backed store the client records into.
+rusqlite = { workspace = true, features = ["fallible_uint"] }
+# Building the tests' HTTP client over the engine's TLS policy, the same way
+# autodetection builds its fetcher; the plain-HTTP fixture never exercises
+# the TLS path, but the client build needs the installed provider.
+engine-tls.workspace = true

@@ -172,6 +172,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "astra-ai"
+version = "0.1.0"
+dependencies = [
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "uuid",
+]
+
+[[package]]
 name = "astra-app"
 version = "0.1.0"
 dependencies = [
@@ -213,6 +224,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "astra-cli"
+version = "0.1.0"
+dependencies = [
+ "astra-ai",
+ "async-trait",
+ "dirs 6.0.0",
+ "engine-api",
+ "engine-core",
+ "engine-provider",
+ "futures",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "astra-composer"
 version = "0.1.0"
 dependencies = [
@@ -225,15 +253,19 @@ name = "astra-desktop"
 version = "0.1.0"
 dependencies = [
  "astra-account",
+ "astra-ai",
  "astra-app",
  "astra-autodetect",
  "astra-composer",
  "astra-viewmodel",
  "async-trait",
  "engine-api",
+ "engine-tls",
  "hickory-resolver",
  "keyring",
  "log",
+ "reqwest",
+ "rusqlite",
  "serde",
  "serde_json",
  "tauri",
@@ -1246,6 +1278,15 @@ checksum = "f1dd6dbb5841937940781866fa1281a1ff7bd3bf827091440879f9994983d5c2"
 dependencies = [
  "block-buffer 0.12.1",
  "crypto-common 0.2.2",
+]
+
+[[package]]
+name = "dirs"
+version = "6.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3e8aa94d75141228480295a7d0e7feb620b1a5ad9f12bc40be62411e38cce4e"
+dependencies = [
+ "dirs-sys",
 ]
 
 [[package]]
@@ -5458,7 +5499,7 @@ dependencies = [
  "anyhow",
  "bytes",
  "cookie",
- "dirs",
+ "dirs 7.0.0",
  "dunce",
  "embed_plist",
  "getrandom 0.3.4",
@@ -5508,7 +5549,7 @@ checksum = "59563ca5b331fd97f27ee9672ec8d36d33bb3c9e2c9f6710a1a5687256052e45"
 dependencies = [
  "anyhow",
  "cargo_toml",
- "dirs",
+ "dirs 7.0.0",
  "glob",
  "heck 0.5.0",
  "json-patch",
@@ -5971,6 +6012,7 @@ dependencies = [
  "libc",
  "mio",
  "pin-project-lite",
+ "signal-hook-registry",
  "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",
@@ -6190,7 +6232,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b2b9c52859a94554803ccd4a24b98f74148ebc73b90676d783f3490b1bff9d72"
 dependencies = [
  "crossbeam-channel",
- "dirs",
+ "dirs 7.0.0",
  "libappindicator",
  "muda",
  "objc2",
@@ -7048,7 +7090,7 @@ dependencies = [
  "block2",
  "cookie",
  "crossbeam-channel",
- "dirs",
+ "dirs 7.0.0",
  "dom_query",
  "dpi",
  "dunce",
