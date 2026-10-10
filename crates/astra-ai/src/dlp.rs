@@ -11,7 +11,10 @@ const MASK: char = '*';
 
 /// The fewest digits a bare run needs to be sensitive on its own: the
 /// shape of card and account numbers, longer than any number prose quotes
-/// for meaning.
+/// for meaning. Bare ten and eleven digit runs stay unmasked: the phone
+/// shape is separator-based by pin, so a bare run that long is neither a
+/// phone this build recognises nor a card-shaped number. The asymmetry is
+/// deliberate and revisits with the eval fixtures (Task 5).
 const LONG_RUN_DIGITS: usize = 12;
 
 /// The digit band a separated run may carry and count as phone-shaped:
@@ -41,7 +44,10 @@ pub fn redact(content: &str) -> String {
         if start > at {
             masked.push_str(&content[at..start]);
         }
-        for _ in start..end {
+        // Spans sit on char boundaries, so the slice is text: one mask per
+        // character keeps character lengths preserved over multibyte
+        // domains.
+        for _ in content[start..end].chars() {
             masked.push(MASK);
         }
         at = end;
@@ -143,9 +149,9 @@ pub enum DlpError {
 }
 
 /// The spans of every email address: an `@` with a local part before it
-/// and a dotted domain with an alphabetic tail after it. All the character
-/// classes are ASCII, so the scan walks bytes and the spans land on char
-/// boundaries.
+/// and a dotted domain with an alphabetic tail after it. The delimiter and
+/// local classes are ASCII and the span's edges stop at ASCII bytes, so
+/// the scan walks bytes and the spans land on char boundaries.
 fn email_spans(bytes: &[u8]) -> Vec<(usize, usize)> {
     let mut spans = Vec::new();
     for (i, &byte) in bytes.iter().enumerate() {
@@ -162,6 +168,14 @@ fn email_spans(bytes: &[u8]) -> Vec<(usize, usize)> {
         let mut end = i + 1;
         while end < bytes.len() && is_domain_byte(bytes[end]) {
             end += 1;
+        }
+        // The domain class admits the sentence's closing marks (an ASCII
+        // dot, a CJK full stop's non-ASCII bytes) and a passing TLD never
+        // ends in one: the address ends before any trailing dot or
+        // non-ASCII byte, so the TLD is the real one and the sentence
+        // keeps its punctuation.
+        while end > i + 1 && (bytes[end - 1] == b'.' || bytes[end - 1] >= 0x80) {
+            end -= 1;
         }
         let domain = &bytes[i + 1..end];
         let Some(dot) = domain.iter().rposition(|&b| b == b'.') else {
@@ -181,9 +195,11 @@ fn is_local_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'%' | b'+' | b'-')
 }
 
-/// The bytes an address's domain may carry.
+/// The bytes an address's domain may carry: the ASCII letters, digits,
+/// dots, and dashes, beside every non-ASCII byte, so a raw UTF-8
+/// internationalised domain rides the class and masks whole.
 fn is_domain_byte(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-')
+    byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-') || byte >= 0x80
 }
 
 /// The spans of every number token: digit groups joined by separator gaps,

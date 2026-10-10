@@ -37,6 +37,40 @@ fn address_shaped_words_without_a_domain_stay() {
 }
 
 #[test]
+fn sentence_final_addresses_are_masked_and_the_period_stays() {
+    // The sentence's closing period is not the address's: the mask ends at
+    // the TLD and the sentence keeps its punctuation.
+    assert_eq!(
+        redact("Contact ada@example.test."),
+        format!("Contact {}.", "*".repeat(16)),
+        "a sentence-final address masks while the period stays",
+    );
+    assert_eq!(
+        redact("Write ada@example.co.uk. Thanks."),
+        format!("Write {}. Thanks.", "*".repeat(17)),
+        "a multi-dot domain at sentence end masks the same way",
+    );
+}
+
+#[test]
+fn idn_domains_are_masked() {
+    // A raw UTF-8 domain rides the domain class: the address masks whole,
+    // one mask character per address character.
+    let address = "ada@münchen-umlaut.de";
+    let masked = redact("Mail ada@münchen-umlaut.de now");
+    assert_eq!(
+        masked,
+        format!("Mail {} now", "*".repeat(address.chars().count())),
+        "the whole address masks, umlaut included",
+    );
+    assert_eq!(
+        masked.chars().count(),
+        "Mail ada@münchen-umlaut.de now".chars().count(),
+        "redaction preserves character lengths over multibyte spans",
+    );
+}
+
+#[test]
 fn phone_shaped_runs_are_masked_with_their_separators() {
     assert_eq!(
         redact("Call +1 (555) 123-4567 now."),

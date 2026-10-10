@@ -255,9 +255,11 @@ recorded shortfall, not a silent one.
 - **No streaming client.** The background client is completion-only;
   streaming arrives with A2's chat surfaces (the sidecar's own text
   streams today).
-- **DLP allow-only.** `DlpPolicy::resolve` answers allow for every
-  policy; redact and block land with A1. The types exist so callers are
-  written against the final shape.
+- **DLP patterns are heuristic.** `ASTRA_DLP` selects the posture
+  (`allow`, the default, `redact`, or `block`) and `DlpPolicy::apply`
+  gates every mail-carrying prompt; the masked shapes (addresses, phone
+  runs, long digit runs) are hand-pinned and revisit with the eval
+  fixtures.
 - **The CLI second-writer seam.** `astra-cli` opens the same
   `astra.sqlite` as the running app (WAL, busy timeout, the engine's
   outbox lease keep the writers safe), but the app is not pushed: it
