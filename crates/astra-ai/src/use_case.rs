@@ -53,6 +53,20 @@ pub enum LlmUseCase {
     /// StyleInfer completion that turns recent Sent mail into the style
     /// note the reply drafting prompt carries as data.
     StyleInfer,
+    /// The batch knowledge extraction (economy tier; A3): the structured
+    /// pass over an account's recent mail that lands stored knowledge
+    /// entries with their sources tracked.
+    KnowledgeExtract,
+    /// The snippet library's search (economy tier; A3): the one ranking
+    /// call over titles and bodies the composer's picker rides, with a
+    /// substring fallback when it cannot run.
+    SnippetSearch,
+    /// The compose autocomplete (chat tier for latency; A3): the short
+    /// continuation the editor offers for the text around the cursor.
+    Autocomplete,
+    /// The reading pane's translate action (default tier; A3): the open
+    /// message rendered into the chosen target language.
+    Translate,
 }
 
 impl LlmUseCase {
@@ -74,21 +88,29 @@ impl LlmUseCase {
             Self::JudgeSummaryFaithful => "judge_summary_faithful",
             Self::JudgeScenario => "judge_scenario",
             Self::StyleInfer => "style_infer",
+            Self::KnowledgeExtract => "knowledge_extract",
+            Self::SnippetSearch => "snippet_search",
+            Self::Autocomplete => "autocomplete",
+            Self::Translate => "translate",
         }
     }
 
     /// The tier every call in this use case runs at. The tier names the
     /// `ASTRA_LLM_*` list the call's chain comes from, before fallback.
     /// The judge family rides nano (classification-sized) and economy
-    /// (rule-match and the eval judges); the agent tool loop and the
-    /// style inference ride economy with them; none ride chat or draft.
+    /// (rule-match and the eval judges); the agent tool loop, the style
+    /// inference, the knowledge extraction, and the snippet search ride
+    /// economy with them; autocomplete rides chat beside the assistant
+    /// loop; none of those ride draft.
     pub fn tier(&self) -> ModelTier {
         match self {
-            Self::AssistantChat => ModelTier::Chat,
+            Self::AssistantChat | Self::Autocomplete => ModelTier::Chat,
             Self::DraftReply => ModelTier::Draft,
-            Self::Summarise | Self::CategorizeSender | Self::CleanInbox | Self::PromptToRules => {
-                ModelTier::Default
-            }
+            Self::Summarise
+            | Self::CategorizeSender
+            | Self::CleanInbox
+            | Self::PromptToRules
+            | Self::Translate => ModelTier::Default,
             Self::JudgeColdEmail
             | Self::JudgeDlp
             | Self::JudgeInjection
@@ -97,7 +119,9 @@ impl LlmUseCase {
             | Self::JudgeRuleMatch
             | Self::JudgeSummaryFaithful
             | Self::JudgeScenario
-            | Self::StyleInfer => ModelTier::Economy,
+            | Self::StyleInfer
+            | Self::KnowledgeExtract
+            | Self::SnippetSearch => ModelTier::Economy,
         }
     }
 }

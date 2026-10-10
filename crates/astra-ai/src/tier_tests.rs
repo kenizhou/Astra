@@ -205,3 +205,29 @@ fn style_infer_pins_the_economy_tier_and_its_wire_word() {
     );
     assert_eq!(LlmUseCase::StyleInfer.as_str(), "style_infer");
 }
+
+#[test]
+fn a3_use_cases_pin_their_tiers_and_wire_words() {
+    let cases = [
+        (
+            LlmUseCase::KnowledgeExtract,
+            ModelTier::Economy,
+            "knowledge_extract",
+        ),
+        (
+            LlmUseCase::SnippetSearch,
+            ModelTier::Economy,
+            "snippet_search",
+        ),
+        (LlmUseCase::Autocomplete, ModelTier::Chat, "autocomplete"),
+        (LlmUseCase::Translate, ModelTier::Default, "translate"),
+    ];
+    for (use_case, tier, wire) in cases {
+        assert_eq!(use_case.tier(), tier);
+        assert_eq!(
+            serde_json::to_string(&use_case).unwrap(),
+            format!("\"{wire}\"")
+        );
+        assert_eq!(use_case.as_str(), wire);
+    }
+}

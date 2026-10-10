@@ -103,6 +103,21 @@ const MIGRATIONS: &[Migration] = &[
         name: "chip_dismissals",
         sql: include_str!("migrations/0006_chip_dismissals.sql"),
     },
+    Migration {
+        version: 7,
+        name: "knowledge",
+        sql: include_str!("migrations/0007_knowledge.sql"),
+    },
+    Migration {
+        version: 8,
+        name: "snippets",
+        sql: include_str!("migrations/0008_snippets.sql"),
+    },
+    Migration {
+        version: 9,
+        name: "text_cache",
+        sql: include_str!("migrations/0009_text_cache.sql"),
+    },
 ];
 
 impl AiStore {
