@@ -14,7 +14,7 @@ const MASK: char = '*';
 /// for meaning. Bare ten and eleven digit runs stay unmasked: the phone
 /// shape is separator-based by pin, so a bare run that long is neither a
 /// phone this build recognises nor a card-shaped number. The asymmetry is
-/// deliberate and revisits with the eval fixtures (Task 5).
+/// deliberate; the eval fixtures under `evals/` pin the boundary.
 const LONG_RUN_DIGITS: usize = 12;
 
 /// The digit band a separated run may carry and count as phone-shaped:

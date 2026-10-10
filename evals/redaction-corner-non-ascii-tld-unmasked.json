@@ -1,0 +1,12 @@
+{
+  "id": "redaction-corner-non-ascii-tld-unmasked",
+  "feature": "redaction",
+  "mode": "offline",
+  "inputs": {
+    "content": "Write to ada@example.テスト today."
+  },
+  "expected": {
+    "redacted": "Write to ada@example.テスト today.",
+    "corner": "an address whose top level domain carries non-ASCII bytes fails the alphabetic TLD check and stays unmasked; documented, not fixed"
+  }
+}

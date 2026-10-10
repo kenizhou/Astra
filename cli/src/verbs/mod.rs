@@ -7,6 +7,9 @@
 pub(crate) mod accounts;
 #[cfg(test)]
 mod accounts_tests;
+pub(crate) mod ai;
+#[cfg(test)]
+mod ai_tests;
 pub(crate) mod drafts;
 #[cfg(test)]
 mod drafts_tests;
@@ -19,6 +22,9 @@ pub(crate) mod messages;
 #[cfg(test)]
 mod messages_tests;
 mod parse;
+pub(crate) mod rules;
+#[cfg(test)]
+mod rules_tests;
 
 use std::io::Read;
 use std::path::Path;
@@ -70,7 +76,8 @@ pub(crate) struct Invocation {
     pub(crate) preview: bool,
 }
 
-/// The six verbs, with their arguments.
+/// The verbs, with their arguments: the mail reads and writes, the rules
+/// verbs over the rules store, and the AI reads over the results store.
 pub(crate) enum Verb {
     /// List the account index's ids.
     AccountsList,
@@ -107,6 +114,36 @@ pub(crate) enum Verb {
         /// The stored draft's provider key.
         key: String,
     },
+    /// List the stored rules.
+    RulesList,
+    /// Store one rule, explicit condition and actions, no generation.
+    RulesCreate {
+        /// The rule's short name.
+        name: String,
+        /// The natural language condition sentence.
+        condition: String,
+        /// The actions as their closed-set wire words.
+        actions: Vec<String>,
+    },
+    /// Delete one stored rule by id.
+    RulesDelete {
+        /// The stored rule's id.
+        id: String,
+    },
+    /// Read the stored cold verdicts for messages, never a live call.
+    AiCold {
+        /// The account id from the index.
+        account: String,
+        /// The provider keys to read verdicts for.
+        keys: Vec<String>,
+    },
+    /// List the stored stage rows for messages.
+    AiResults {
+        /// The account id from the index.
+        account: String,
+        /// The provider keys to list rows for.
+        keys: Vec<String>,
+    },
 }
 
 impl Verb {
@@ -119,12 +156,23 @@ impl Verb {
             Self::MessagesRead { .. } => "messages read",
             Self::DraftsSave { .. } => "drafts save",
             Self::DraftsDiscard { .. } => "drafts discard",
+            Self::RulesList => "rules list",
+            Self::RulesCreate { .. } => "rules create",
+            Self::RulesDelete { .. } => "rules delete",
+            Self::AiCold { .. } => "ai cold",
+            Self::AiResults { .. } => "ai results",
         }
     }
 
     /// Whether this verb changes anything, and so ships `--preview`.
     pub(crate) fn mutating(&self) -> bool {
-        matches!(self, Self::DraftsSave { .. } | Self::DraftsDiscard { .. })
+        matches!(
+            self,
+            Self::DraftsSave { .. }
+                | Self::DraftsDiscard { .. }
+                | Self::RulesCreate { .. }
+                | Self::RulesDelete { .. }
+        )
     }
 }
 
@@ -191,7 +239,7 @@ async fn dispatch(args: &[String], data_dir: &Path, stdin: &mut dyn Read) -> Run
     };
     let run = match parsed {
         Ok(ref invocation) => {
-            let outcome = execute(invocation, data_dir).await;
+            let outcome = execute(invocation, data_dir, &store).await;
             to_run(outcome, json)
         }
         Err(ref failure) => to_run(Err((failure.code, failure.message.clone())), json),
@@ -247,9 +295,11 @@ fn audit_outcome(run: &Run) -> &'static str {
     }
 }
 
-/// The subverbs the six verbs spell: the CLI's own vocabulary, the only
+/// The subverbs the verbs spell: the CLI's own vocabulary, the only
 /// second positional the ledger may capture beside a verb word.
-const SUBVERBS: &[&str] = &["list", "read", "save", "discard"];
+const SUBVERBS: &[&str] = &[
+    "list", "read", "save", "discard", "create", "delete", "cold", "results",
+];
 
 /// The verb word of an unparsable line, best effort: the first positional,
 /// joined with the subverb only when the subverb is the CLI's own
@@ -270,10 +320,29 @@ fn raw_verb(args: &[String], code: Code) -> String {
     }
 }
 
-/// Executes one parsed invocation against the data dir.
-async fn execute(invocation: &Invocation, data_dir: &Path) -> Answer {
-    if let Verb::AccountsList = invocation.verb {
-        return accounts::list(data_dir);
+/// Executes one parsed invocation against the data dir. The mail verbs
+/// open the engine store; the rules and AI verbs answer straight from the
+/// audit ledger's own store, the one file every invocation already
+/// opened (the rules and results tables live beside the ledgers).
+async fn execute(invocation: &Invocation, data_dir: &Path, store: &AiStore) -> Answer {
+    match &invocation.verb {
+        Verb::AccountsList => return accounts::list(data_dir),
+        Verb::RulesList => return rules::list(store),
+        Verb::RulesCreate {
+            name,
+            condition,
+            actions,
+        } => return rules::create(store, name, condition, actions, invocation.preview),
+        Verb::RulesDelete { id } => return rules::delete(store, id, invocation.preview),
+        Verb::AiCold { account, keys } => {
+            let account = account_id(data_dir, account)?;
+            return ai::cold(store, &account, keys);
+        }
+        Verb::AiResults { account, keys } => {
+            let account = account_id(data_dir, account)?;
+            return ai::results(store, &account, keys);
+        }
+        _ => {}
     }
     let engine = match Engine::open(data_dir.join(ENGINE_STORE_FILE)) {
         Ok(engine) => engine,
@@ -285,7 +354,12 @@ async fn execute(invocation: &Invocation, data_dir: &Path) -> Answer {
         }
     };
     match &invocation.verb {
-        Verb::AccountsList => unreachable!("answered before the engine opened"),
+        Verb::AccountsList
+        | Verb::RulesList
+        | Verb::RulesCreate { .. }
+        | Verb::RulesDelete { .. }
+        | Verb::AiCold { .. }
+        | Verb::AiResults { .. } => unreachable!("answered before the engine opened"),
         Verb::FoldersList { account } => {
             let account = account_id(data_dir, account)?;
             folders::list(&engine, &account).await

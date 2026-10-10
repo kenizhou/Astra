@@ -1,0 +1,29 @@
+{
+  "id": "match-yes-runs-the-rule",
+  "feature": "match",
+  "mode": "offline",
+  "prompt_version": "1",
+  "inputs": {
+    "rule": {
+      "name": "Marketing",
+      "condition": "The message markets a product, a sale, or an event.",
+      "actions": ["mark_read"]
+    },
+    "mail": {
+      "account": "work",
+      "key": "m1",
+      "from_name": "Promo Desk",
+      "from_address": "promo@example.test",
+      "subject": "40 percent off everything",
+      "body": "Our flash sale ends at midnight. Shop now."
+    },
+    "outcome": {
+      "verdict": "yes",
+      "path": "first_try"
+    }
+  },
+  "expected": {
+    "matched": ["Marketing"],
+    "verdict": "yes"
+  }
+}

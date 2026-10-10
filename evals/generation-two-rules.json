@@ -1,0 +1,26 @@
+{
+  "id": "generation-two-rules",
+  "feature": "generation",
+  "mode": "offline",
+  "prompt_version": "1",
+  "inputs": {
+    "text": "Mark messages from the marketing team as read, and flag receipts so I can follow up.",
+    "completion": "{\"rules\":[{\"name\":\"Marketing\",\"condition\":\"The message is from the marketing team.\",\"actions\":[\"mark_read\"]},{\"name\":\"Receipts\",\"condition\":\"The message is a receipt or an invoice.\",\"actions\":[\"set_flagged\"]}]}"
+  },
+  "expected": {
+    "rules": [
+      {
+        "name": "Marketing",
+        "condition": "The message is from the marketing team.",
+        "actions": ["mark_read"],
+        "enabled": true
+      },
+      {
+        "name": "Receipts",
+        "condition": "The message is a receipt or an invoice.",
+        "actions": ["set_flagged"],
+        "enabled": true
+      }
+    ]
+  }
+}

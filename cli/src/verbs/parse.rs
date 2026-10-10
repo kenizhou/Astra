@@ -62,6 +62,29 @@ pub(super) fn parse(args: &[String], stdin: &mut dyn Read) -> Result<Invocation,
             account: required(args, "--account")?,
             key: required(args, "--key")?,
         },
+        (Some("rules"), Some("list")) => Verb::RulesList,
+        (Some("rules"), Some("create")) => Verb::RulesCreate {
+            name: non_empty(required(args, "--name")?, "--name")?,
+            condition: non_empty(required(args, "--condition")?, "--condition")?,
+            actions: rule_actions(args)?,
+        },
+        (Some("rules"), Some("delete")) => Verb::RulesDelete {
+            id: required(args, "--id")?,
+        },
+        (Some("ai"), Some("cold")) => {
+            let ai_words = ai_positionals(args);
+            Verb::AiCold {
+                account: positional_account(&ai_words, "ai cold")?,
+                keys: positional_keys(&ai_words)?,
+            }
+        }
+        (Some("ai"), Some("results")) => {
+            let ai_words = ai_positionals(args);
+            Verb::AiResults {
+                account: positional_account(&ai_words, "ai results")?,
+                keys: positional_keys(&ai_words)?,
+            }
+        }
         (Some(_), Some(_)) => return Err(usage("unknown verb")),
         _ => {
             return Err(usage(
@@ -139,6 +162,94 @@ fn usage(message: &str) -> ParseFailure {
         code: Code::Usage,
         message: message.to_owned(),
     }
+}
+
+/// A flag's value that must carry content, not just characters: a rule's
+/// name and condition are data the pass judges by, so a blank one never
+/// reaches the store.
+fn non_empty(value: String, flag: &str) -> Result<String, ParseFailure> {
+    if value.trim().is_empty() {
+        return Err(usage(&format!(
+            "the {flag} flag wants content, not just whitespace"
+        )));
+    }
+    Ok(value)
+}
+
+/// `rules create`'s actions: at least one `--action`, every word from the
+/// closed set, no word twice. The closed set is the rules verb's own
+/// vocabulary, spelled there beside the verbs that carry it.
+fn rule_actions(args: &[String]) -> Result<Vec<String>, ParseFailure> {
+    let actions = many_values(args, "--action");
+    if actions.is_empty() {
+        return Err(usage(
+            "rules create wants at least one --action from the closed set",
+        ));
+    }
+    let closed = super::rules::CLOSED_ACTIONS;
+    for action in &actions {
+        if !closed.contains(&action.as_str()) {
+            return Err(usage(&format!(
+                "unknown --action {action}; the closed set is {}",
+                closed.join(" and ")
+            )));
+        }
+    }
+    if actions
+        .iter()
+        .collect::<std::collections::HashSet<_>>()
+        .len()
+        != actions.len()
+    {
+        return Err(usage(
+            "each --action may appear once; a rule's actions are a set",
+        ));
+    }
+    Ok(actions)
+}
+
+/// The account positional the `ai` verbs take: the third word, after the
+/// verb and its subverb.
+fn positional_account(positionals: &[&str], verb: &str) -> Result<String, ParseFailure> {
+    positionals
+        .get(2)
+        .map(|word| (*word).to_owned())
+        .ok_or_else(|| usage(&format!("{verb} wants an account and at least one key")))
+}
+
+/// The key positionals the `ai` verbs take: every word after the account,
+/// at least one.
+fn positional_keys(positionals: &[&str]) -> Result<Vec<String>, ParseFailure> {
+    let keys = positionals
+        .iter()
+        .skip(3)
+        .map(|word| (*word).to_owned())
+        .collect::<Vec<_>>();
+    if keys.is_empty() {
+        return Err(usage("at least one key is required"));
+    }
+    Ok(keys)
+}
+
+/// The positional words of an `ai` line, flag values excluded. Unlike the
+/// mail verbs, whose arguments all ride named flags, the ai verbs take
+/// their account and keys as bare positionals, so the value of a
+/// value-taking flag (`--correlation-id` is the one the CLI defines)
+/// must not leak into them.
+fn ai_positionals(args: &[String]) -> Vec<&str> {
+    let mut words = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        if args[index] == "--correlation-id" {
+            index += 2;
+            continue;
+        }
+        if !args[index].starts_with('-') {
+            words.push(args[index].as_str());
+        }
+        index += 1;
+    }
+    words
 }
 
 /// The missing-flag message.

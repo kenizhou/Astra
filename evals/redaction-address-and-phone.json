@@ -1,0 +1,11 @@
+{
+  "id": "redaction-address-and-phone",
+  "feature": "redaction",
+  "mode": "offline",
+  "inputs": {
+    "content": "Contact ada@example.test or call +44 20 7946 0958 today."
+  },
+  "expected": {
+    "redacted": "Contact **************** or call **************** today."
+  }
+}

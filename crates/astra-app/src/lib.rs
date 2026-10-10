@@ -48,6 +48,13 @@ mod tests_live_harness;
 #[cfg(test)]
 mod dispatch_fakes;
 
+// The eval harness: the scenario fixtures under the repository's evals/
+// directory, driven through the same seams the unit tests exercise and the
+// seams the Task 6 live suite injects. Compiled only for tests, so the
+// library carries no harness of its own.
+#[cfg(test)]
+mod evals;
+
 use std::{
     path::PathBuf,
     sync::{atomic::AtomicU64, Arc, Mutex},
