@@ -19,7 +19,7 @@ pub mod view;
 
 pub use calendar::{
     CalendarRow, CalendarSnapshot, CalendarWriteRow, CalendarWriteState, NowLineData,
-    OccurrenceAccuracy, OccurrenceRow,
+    OccurrenceAccuracy, OccurrenceRow, Participation, ReplyPromptRow,
 };
 pub use compose_request::{ComposeKind, ComposeRequestSnapshot};
 pub use drafts::{DraftSaveState, DraftStatusSnapshot};

@@ -104,8 +104,13 @@ impl<P: Provider> App<P> {
     /// background sync runs. The store survives across launches, so on a returning
     /// user this paints the last-synced tree immediately. A first run (empty store)
     /// simply renders an empty pane.
+    ///
+    /// The calendar snapshot primes the same way, over the same persisted store:
+    /// a returning user's last-synced occurrences paint before any calendar
+    /// sync runs.
     pub async fn prime_snapshot(&self) {
         self.rebuild_snapshot().await;
+        self.rebuild_calendar().await;
     }
 
     /// Every account's id, in the order the host stored them.

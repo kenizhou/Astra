@@ -35,6 +35,12 @@ pub struct CalendarSnapshot {
     /// written and nothing needs confirming.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub write_states: Vec<CalendarWriteRow>,
+    /// The answers whose reply the calendar server reported it could not
+    /// deliver: the reply-delivery-failure prompts, one per failed answer,
+    /// offering to email the organiser instead. Empty, crossing no key at all,
+    /// while every answer reached its organiser or nothing reported a failure.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reply_prompts: Vec<ReplyPromptRow>,
     /// What the now line draws from, once the app has a clock reading for the
     /// view. `None` on the default snapshot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -73,6 +79,10 @@ pub struct CalendarRow {
 /// row is the join: the occurrence's resolved instants beside the master's
 /// title, calendar, and markers, plus the occurrence token a drag or a
 /// one-occurrence write hands back.
+// The four booleans are independent facts of the row (an all-day event can
+// repeat, a repeat can carry an override, and none of that says whether the
+// block may be dragged), not states of one machine, so they stay booleans.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OccurrenceRow {
     /// The account whose store holds the master event: an action on the row
@@ -112,6 +122,51 @@ pub struct OccurrenceRow {
     /// How the instants were resolved: what a grid may promise about the times
     /// it draws.
     pub accuracy: OccurrenceAccuracy,
+    /// How this account answered the meeting this occurrence is of:
+    /// [`Accepted`](Participation::Accepted) when the event is its own
+    /// appointment or a meeting it called, [`NeedsAction`](Participation::NeedsAction)
+    /// the unanswered hold a grid draws dotted.
+    ///
+    /// The commitment default is deliberate: a row from before this field
+    /// existed (the additive-wire case) is a commitment, never a hold, so an
+    /// older snapshot still draws every block it ever drew.
+    #[serde(default)]
+    pub participation: Participation,
+    /// Whether the user may **drag** this block: a writable calendar *and* an
+    /// event that is theirs to reshape (their own appointment, or a meeting
+    /// they organise). Strictly narrower than the calendar's `can_write`: a
+    /// meeting somebody else called can sit on a writable calendar and still
+    /// must not be silently re-timed; the right affordance there is a proposal,
+    /// which does not exist yet.
+    #[serde(default)]
+    pub can_move: bool,
+}
+
+/// How this account stands in a meeting: the word a grid picks its hold
+/// marking from. Crosses as a snake_case word.
+///
+/// The engine's participation statuses in substance, restated like
+/// [`OccurrenceAccuracy`](super::OccurrenceAccuracy) restates the time forms,
+/// because the snapshot's every word crosses snake_case.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Participation {
+    /// Not answered yet: the hold a grid draws dotted.
+    NeedsAction,
+    /// A commitment: answered yes, or not an invitation at all (the account's
+    /// own appointment, a meeting it called, an event on a shared calendar it
+    /// is not an attendee of). The default, so a row from before this field
+    /// existed (the additive-wire case) is a commitment and never a hold.
+    #[default]
+    Accepted,
+    /// Answered no. Never reaches an occurrence row (the rebuild filters
+    /// declined meetings out of the diary); the word exists so the answer a
+    /// prompt carries can say it.
+    Declined,
+    /// Answered maybe.
+    Tentative,
+    /// Delegated to somebody else.
+    Delegated,
 }
 
 /// How an occurrence row's instants were resolved, per the master event's time
@@ -154,6 +209,42 @@ pub enum CalendarWriteState {
     /// the row stays until a refresh or the next write resolves it. A failed
     /// confirmation is not a rejected change.
     FailedWithRetry,
+}
+
+/// One invitation whose calendar server reported it could **not** deliver the
+/// answer to the organiser: the reply-delivery-failure prompt.
+///
+/// The answer itself already landed (the stored `PARTSTAT` says so); what
+/// failed is the telling. A surface offers to email the organiser the iTIP
+/// `REPLY` instead, which is mail sent as the user and therefore a decision the
+/// user makes, never a repair the app makes silently. The prompt stays until
+/// the invitation is answered again (a re-answer replaces the question it
+/// supersedes); a refresh does not clear it, because the organiser still has
+/// not heard.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReplyPromptRow {
+    /// The account whose server failed to deliver.
+    pub account: AccountId,
+    /// The invitation message, by its provider key: the message a re-answer or
+    /// an emailed reply is re-derived from, so a prompt that outlives a restart
+    /// cannot act on stale state.
+    pub message: ProviderKey,
+    /// The meeting's title, for the sentence naming what is being confirmed.
+    pub summary: String,
+    /// The organiser's address: who the email would go to. A user consenting
+    /// to send mail on their own behalf is entitled to see the recipient.
+    pub organizer: String,
+    /// The answer that was given, so a reply sent from the prompt says the
+    /// same thing the calendar does.
+    pub response: Participation,
+    /// The note the user wrote for the organiser, if any; it becomes the
+    /// reply's `COMMENT`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub comment: Option<String>,
+    /// The transport's own status token (an RFC 5546 §3.6 code such as `5.2`),
+    /// verbatim, for the diagnostics screen. Not shown in the plain-language
+    /// prompt.
+    pub status_code: String,
 }
 
 /// What the now line draws from.

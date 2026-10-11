@@ -54,6 +54,15 @@ pub enum RepeatEnd {
     /// It never stops.
     Never,
     /// On a calendar date in the event's own terms, inclusive.
+    ///
+    /// The recorded rule for the date's conversion to the engine's `UNTIL`
+    /// bound: the wall clock is the **final second of the named date**,
+    /// rendered in the form of the event's own start, so an occurrence any
+    /// time that day recurs in either a timed or an all-day series. A zoned
+    /// event's bound resolves through its own zone to the instant RFC 5545
+    /// §3.3.10 demands; a floating or all-day one stays a wall clock, which
+    /// has no instant to resolve to. The core does the conversion, never
+    /// the host.
     OnDate(CalendarDate),
     /// After a fixed number of instances, counting the first.
     AfterCount(u32),

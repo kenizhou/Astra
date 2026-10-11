@@ -293,6 +293,24 @@ fn a_move_carries_the_drag_in_the_grid_s_own_currency() {
             r#""drag":{"edge":"end","days":0,"minutes":45}}}}"#
         ),
     );
+    // The start edge: pinned because a host writing literals by hand has no
+    // way to spell it except this word, and the family's tags are snake_case.
+    round_trips(
+        &Intent::Calendar(CalendarIntent::MoveEvent {
+            event: event(),
+            drag: EventDrag {
+                edge: EventEdge::Start,
+                days: 0,
+                minutes: 15,
+                occurrence: None,
+            },
+        }),
+        concat!(
+            r#"{"calendar":{"move_event":{"event":{"account":"work","#,
+            r#""key":"/dav/cal/work/default/evt-1.ics"},"#,
+            r#""drag":{"edge":"start","days":0,"minutes":15}}}}"#
+        ),
+    );
 }
 
 #[test]

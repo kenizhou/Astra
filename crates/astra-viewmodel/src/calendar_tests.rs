@@ -7,7 +7,7 @@ use engine_api::{AccountId, CalendarId, LocalDateTime, ProviderKey, UtcDateTime}
 
 use crate::{
     CalendarRow, CalendarSnapshot, CalendarWriteRow, CalendarWriteState, OccurrenceAccuracy,
-    OccurrenceRow,
+    OccurrenceRow, Participation, ReplyPromptRow,
 };
 
 /// A well-formed account id, the way every calendar test names one.
@@ -44,10 +44,21 @@ fn the_wire_shape_is_snake_case_and_carries_every_row_kind() {
             overridden: true,
             occurrence_start: Some(LocalDateTime::new(2026, 10, 19, 9, 0, 0).unwrap()),
             accuracy: OccurrenceAccuracy::Zoned,
+            participation: Participation::Tentative,
+            can_move: false,
         }],
         write_states: vec![CalendarWriteRow {
             account: account("work"),
             state: CalendarWriteState::Writing,
+        }],
+        reply_prompts: vec![ReplyPromptRow {
+            account: account("work"),
+            message: ProviderKey::new("imap:v1:u7@INBOX").unwrap(),
+            summary: "Sprint planning".to_owned(),
+            organizer: "boss@example.test".to_owned(),
+            response: Participation::Accepted,
+            comment: None,
+            status_code: "5.2".to_owned(),
         }],
         now_data: Some(crate::NowLineData {
             now: utc("2026-10-19T08:12:00Z"),
@@ -82,13 +93,25 @@ fn the_wire_shape_is_snake_case_and_carries_every_row_kind() {
                     "recurring": true,
                     "overridden": true,
                     "occurrence_start": "2026-10-19T09:00:00",
-                    "accuracy": "zoned"
+                    "accuracy": "zoned",
+                    "participation": "tentative",
+                    "can_move": false
                 }
             ],
             "write_states": [
                 {
                     "account": "work",
                     "state": "writing"
+                }
+            ],
+            "reply_prompts": [
+                {
+                    "account": "work",
+                    "message": "imap:v1:u7@INBOX",
+                    "summary": "Sprint planning",
+                    "organizer": "boss@example.test",
+                    "response": "accepted",
+                    "status_code": "5.2"
                 }
             ],
             "now_data": {
@@ -133,6 +156,43 @@ fn the_accuracy_words_and_write_states_cross_as_snake_case() {
 }
 
 #[test]
+fn the_participation_words_cross_as_snake_case_and_default_to_a_commitment() {
+    // Each participation word is pinned both ways, and the additive-wire rule
+    // with it: a row from before the field existed parses as a commitment
+    // (never an unanswered hold), so an older snapshot draws every block it
+    // ever drew.
+    for (participation, word) in [
+        (Participation::NeedsAction, r#""needs_action""#),
+        (Participation::Accepted, r#""accepted""#),
+        (Participation::Declined, r#""declined""#),
+        (Participation::Tentative, r#""tentative""#),
+        (Participation::Delegated, r#""delegated""#),
+    ] {
+        assert_eq!(serde_json::to_string(&participation).unwrap(), word);
+        assert_eq!(
+            serde_json::from_str::<Participation>(word).unwrap(),
+            participation
+        );
+    }
+    assert_eq!(Participation::default(), Participation::Accepted);
+    let old_wire = serde_json::json!({
+        "account": "work",
+        "event": "evt-1",
+        "calendar": "cal-1",
+        "title": "Standup",
+        "start": "2026-10-19T07:00:00Z",
+        "end": "2026-10-19T07:30:00Z",
+        "all_day": false,
+        "recurring": false,
+        "overridden": false,
+        "accuracy": "zoned"
+    });
+    let row: OccurrenceRow = serde_json::from_value(old_wire).expect("the old wire parses");
+    assert_eq!(row.participation, Participation::Accepted);
+    assert!(!row.can_move);
+}
+
+#[test]
 fn the_default_snapshot_crosses_as_an_empty_object() {
     // Before any calendar state exists, the snapshot is empty and carries no now line:
     // nothing skips on the wire except by being absent, so a cold host renders an empty
@@ -141,6 +201,7 @@ fn the_default_snapshot_crosses_as_an_empty_object() {
     assert!(snapshot.calendars.is_empty());
     assert!(snapshot.occurrences.is_empty());
     assert!(snapshot.write_states.is_empty());
+    assert!(snapshot.reply_prompts.is_empty());
     assert!(snapshot.now_data.is_none());
 
     let wire = serde_json::to_value(&snapshot).expect("the default serialises");
@@ -178,8 +239,11 @@ fn a_row_without_a_colour_or_an_occurrence_token_omits_them() {
             overridden: false,
             occurrence_start: None,
             accuracy: OccurrenceAccuracy::Floating,
+            participation: Participation::default(),
+            can_move: false,
         }],
         write_states: Vec::new(),
+        reply_prompts: Vec::new(),
         now_data: None,
     };
 
