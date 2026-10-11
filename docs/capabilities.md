@@ -11,7 +11,7 @@ this row ports.
 | Accounts | Auto-detect from email address (JMAP probe, SRV, autoconfig, ISPDB, MX), with results from an unencrypted hop disclosed and needing explicit approval | 🚧 | account-autodetect.md |
 | Mail | Folder pane across accounts with nested folders and persisted expansion | 🚧 | folder-pane.md |
 | Mail | Flat and threaded message list with windowed paging | 🚧 | mail-calendar capabilities |
-| Calendar | Day, work week, and month grids with drag to create, move, resize | ⬜ | calendar.md |
+| Calendar | Day, work week, and month grids with drag to create, move, resize | 🚧 | grids, agenda, and drag move ship; resize is the dialog's end edit and create is the dialog, not a grid gesture; the host calendar dial is calendar.md's first gap |
 | Core | Reactive Rust to native binding, dispatch to immutable snapshots | 🚧 | |
 | Accounts | Settings accounts page lists every account, with per-service toggles, relinking, sign-in again, server editing, and removal | ⬜ | accounts.md |
 | Accounts | Outgoing name per account, asked once at connect, editable in settings, kept in step with the provider | ⬜ | sending.md |
@@ -67,32 +67,32 @@ this row ports.
 | Mail | Mark as spam or not spam, reported to the provider so its filter learns | ⬜ | reporting.md |
 | MCP | MCP server over a local socket, opt-in and off by default: read and act on mail from an MCP client, direct send behind its own toggle | ⬜ | mcp.md |
 | Mail | Configurable swipe actions per direction, with undo | ⬜ | |
-| Calendar | Agenda view with create and delete event | ⬜ | |
-| Calendar | Write affordances gated on per-row can_write | ⬜ | |
-| Calendar | Write-status feedback: spinner while saving, warning on unconfirmed, retry | ⬜ | |
-| Calendar | All-day and multi-day banners with a per-day overflow count that expands | ⬜ | |
-| Calendar | Calendar manager: per-calendar visibility and colour override, persisted | ⬜ | |
+| Calendar | Agenda view with create and delete event | 🚧 | calendar.md |
+| Calendar | Write affordances gated on per-row can_write | 🚧 | calendar.md |
+| Calendar | Write-status feedback: spinner while saving, warning on unconfirmed, retry | 🚧 | writing and failed-with-retry states settle per dispatch; calendar.md |
+| Calendar | All-day and multi-day banners with a per-day overflow count that expands | ⬜ | the all-day lane ships; the banner shape does not |
+| Calendar | Calendar manager: per-calendar visibility and colour override, persisted | 🚧 | visibility toggles ship; no colour override, nothing persisted; calendar.md |
 | Settings | Display settings: first day of week, 12 or 24-hour clock, light or dark appearance, calendar horizon | ⬜ | |
 | Calendar | The shape and horizon you left the calendar in, restored on launch | ⬜ | |
 | Calendar | The diary on screen from the store at launch, filled without opening it, there offline | ⬜ | |
 | Calendar | Calendar refreshes periodically while the app stays open | ⬜ | |
-| Calendar | Event creation with a calendar picker, all-day, notes, location | ⬜ | |
-| Calendar | Tap an event to view its detail and edit title, time, notes, location | ⬜ | |
+| Calendar | Event creation with a calendar picker, all-day, notes, location | 🚧 | calendar.md |
+| Calendar | Tap an event to view its detail and edit title, time, notes, location | 🚧 | calendar.md |
 | Calendar | Attendee list with responses, on the detail and read-only in the editor | ⬜ | |
-| Calendar | Deleting one occurrence of a repeating event asks this event or all events first | ⬜ | calendar.md |
-| Calendar | Editing a whole repeating event warns where the server would throw away single-occurrence changes | ⬜ | calendar.md |
-| Calendar | A repeating rule read back in full on the event detail | ⬜ | calendar.md |
-| Calendar | One occurrence of a repeating event shows that occurrence's date and time | ⬜ | calendar.md |
-| Calendar | Editing one occurrence of a repeating event asks this event or all events first | ⬜ | calendar.md |
-| Calendar | Setting a repeat rule: how often, how many periods to skip, weekdays, what ends it; a rule too detailed to state is shown, not offered | ⬜ | calendar.md |
-| Invitations | An invitation email shows a card: who is asking, when, where, how everyone answered, conflicts, that day's grid | ⬜ | invitations.md |
+| Calendar | Deleting one occurrence of a repeating event asks this event or all events first | 🚧 | calendar.md |
+| Calendar | Editing a whole repeating event warns where the server would throw away single-occurrence changes | 🚧 | calendar.md |
+| Calendar | A repeating rule read back in full on the event detail | ⬜ | the read-back is minimal; calendar.md's gap |
+| Calendar | One occurrence of a repeating event shows that occurrence's date and time | 🚧 | calendar.md |
+| Calendar | Editing one occurrence of a repeating event asks this event or all events first | 🚧 | calendar.md |
+| Calendar | Setting a repeat rule: how often, how many periods to skip, weekdays, what ends it; a rule too detailed to state is shown, not offered | 🚧 | create path only; edit-time restructuring is calendar.md's gap; calendar.md |
+| Invitations | An invitation email shows a card: who is asking, when, where, how everyone answered, conflicts, that day's grid | 🚧 | kind, participation, title, organiser; no roll-call, conflicts, or day grid; invitations.md |
 | Invitations | The invitation's own .ics part is not shown as a junk attachment; a really attached calendar file still is | ⬜ | |
-| Invitations | An unanswered meeting drawn as a hold on the grid, month, and agenda | ⬜ | |
-| Invitations | A declined meeting leaves the calendar on every provider; the invitation email is the way back | ⬜ | |
-| Invitations | Answer accept, maybe, or decline, with a note to the organiser where the account supports it | ⬜ | |
-| Invitations | An email-only invitation is put on the calendar when answered, and the reply emailed to the organiser where the server will not send it | ⬜ | invitations.md |
-| Invitations | A superseded invitation says it is out of date and stops offering an answer | ⬜ | |
-| Invitations | When the server cannot pass your answer on, you are told and offered email instead, rememberable per account | ⬜ | invitations.md |
+| Invitations | An unanswered meeting drawn as a hold on the grid, month, and agenda | 🚧 | invitations.md |
+| Invitations | A declined meeting leaves the calendar on every provider; the invitation email is the way back | 🚧 | invitations.md |
+| Invitations | Answer accept, maybe, or decline, with a note to the organiser where the account supports it | 🚧 | invitations.md |
+| Invitations | An email-only invitation is put on the calendar when answered, and the reply emailed to the organiser where the server will not send it | 🚧 | invitations.md |
+| Invitations | A superseded invitation says it is out of date and stops offering an answer | 🚧 | invitations.md |
+| Invitations | When the server cannot pass your answer on, you are told and offered email instead, rememberable per account | 🚧 | invitations.md |
 | Contacts | Unified contact list across account address books (CardDAV, JMAP, Google, Microsoft), with search and detail | ⬜ | contacts.md |
 | Contacts | Add and edit a contact in a writable address book; one source card named when a person is filed twice | ⬜ | |
 | Sending | Outbox keeps a message that could not be sent and sends it later by itself | 🚧 | sending.md |
@@ -173,7 +173,7 @@ this row ports.
 | A3 | Reading-pane translate into six languages, cached | 🚧 | ai-assist.md |
 | A4 | On-demand digest and analytics report with the AI documents panel | 🚧 | ai-digest.md |
 | A4 | Split inbox (All / Actioned / FYI) from the stored categorisation | 🚧 | ai-digest.md |
-| A4 | Meeting briefs | ⬜ | deferred: the calendar slice is the data dependency; ai-digest.md |
+| A4 | Meeting briefs | 🚧 | core and live relayed proof ship; the host calendar dial is calendar.md's first gap; ai-digest.md |
 
 ## Astra: Agent (sidecar host, per SPA0 spec D5)
 

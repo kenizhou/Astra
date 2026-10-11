@@ -88,12 +88,20 @@ use crate::{
     Account, App, AppObserver, FolderRef, Intent, Surface,
 };
 
-// The gated reading, drafts, send, reply, forward, and search tests: their own
-// files, so this one stays under the 500-line cap the gate enforces. The
-// explicit paths because this file is loaded through `#[path]` and so owns no
+// The gated reading, drafts, send, reply, forward, search, and calendar tests:
+// their own files, so this one stays under the 500-line cap the gate enforces.
+// The explicit paths because this file is loaded through `#[path]` and so owns no
 // directory a bare `mod` would resolve into. `proof` holds the fixtures the
 // three delivery proofs share (the two-account app, the composer document, the
 // cleanup sweep).
+#[path = "tests_live_harness/calendar.rs"]
+mod calendar;
+#[path = "tests_live_harness/calendar_brief.rs"]
+mod calendar_brief;
+#[path = "tests_live_harness/calendar_invite.rs"]
+mod calendar_invite;
+#[path = "tests_live_harness/calendar_proof.rs"]
+mod calendar_proof;
 #[path = "tests_live_harness/drafts.rs"]
 mod drafts;
 #[path = "tests_live_harness/forward.rs"]
