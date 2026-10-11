@@ -17,14 +17,14 @@ the ledger does not know happened.
 
 ## The verbs
 
-Twenty-two ship today: nine mail, drafts, and rules verbs, the six `ai`
+Twenty-six ship today: nine mail, drafts, and rules verbs, the ten `ai`
 verbs, and the seven `knowledge` and `snippets` verbs. The grammar is two
 positional
 words (`verb subverb`) plus flags, and flag order is free: the sidecar
 should spell `astra-cli [--json] [--correlation-id <id>] <verb> <subverb>
 [--flag <value> ...]`, always passing `--json` and the turn's
 `--correlation-id`, and treating everything after the two positionals as
-named flags. The six `ai` store verbs take their remaining operands as
+named flags. The `ai` store verbs take their remaining operands as
 bare positionals instead, the grammar their surfaces pinned; the
 `knowledge` and `snippets` verbs read and write their stores through
 named flags like the mail verbs. A call is unambiguous in text and in an
@@ -47,6 +47,10 @@ audit row.
 | `ai summary <account> <key> [<key>...]` | the stored summarise cache row (migration 0005) beside the audit ledger | `messages`: per key, the cached `summary` with the `body_hash` it was cached under and `created_at`, or `null` when nothing is cached; whether the row still hits is the app's serving-time body-hash check, which this read makes no claim about |
 | `ai style <account>` | the stored style profile (0004's sibling table) | `style`: the profile's `note` and `built_at`, or `null` when none was ever built |
 | `ai style rebuild` | nothing: the spelling parses and refuses | exit `3` with the model rule's refusal (below); `--preview` is the shared non-mutating usage error, there being no action to describe |
+| `ai digest <account>` | the latest stored digest (migration 0010) beside the audit ledger | `digest`: the document's `content` whole with `period_start`, `period_end`, `created_at`, and the generation turn's `correlation`, or `null` when no generation stored one |
+| `ai report <account>` | the latest stored analytics report (the same store's report kind) | `report`: the same fields under its own word; the kinds never bleed |
+| `ai digest generate` | nothing: the spelling parses and refuses | exit `3` with the model rule's refusal (below); `--preview` is the shared non-mutating usage error, there being no action to describe |
+| `ai report generate` | nothing: the spelling parses and refuses | exit `3` with the model rule's refusal (below); `--preview` is the shared non-mutating usage error, there being no action to describe |
 | `knowledge list --account <id>` | the knowledge store (0007) beside the audit ledger | `entries`: id, kind, text, `source_account`, `source_key`, `created_at`, newest first; the entry's text rides whole, the whole-body discipline `ai drafts` carries |
 | `knowledge forget --id <id>` | deletes one stored knowledge entry, the only exit | `id`, `state: forgotten`; `--preview` names the exact forgetting; an id no entry carries is a runtime error naming it |
 | `knowledge extract` | nothing: the spelling parses and refuses | exit `3` with the never-dials refusal (below); `--preview` is the shared non-mutating usage error |
@@ -81,8 +85,9 @@ Rules that bind every verb:
   once is a usage error.
 - **The store verbs answer without the engine.** `rules`, `ai`,
   `knowledge`, and `snippets` read and write the rules, results,
-  reply-drafting, knowledge, and snippet tables (the draft pool and
-  style profiles, the summarise cache, the knowledge entries, the
+  reply-drafting, documents, knowledge, and snippet tables (the draft
+  pool and style profiles, the summarise cache, the digests and
+  reports, the knowledge entries, the
   snippet library) beside the audit ledger in
   `ai.sqlite`, the one file every invocation already opens: no mail is
   read and no provider is dialled, so the verbs work against a cold data
@@ -108,7 +113,11 @@ Rules that bind every verb:
   the library, so both parse into the same refusal naming where the run
   happens; `knowledge list` and `snippets list` read what the app
   landed, and autocomplete and translate have no CLI spelling at all,
-  being editor and reading-pane gestures.
+  being editor and reading-pane gestures. The A4 document spellings
+  carry it the same way (the contracts in `docs/ai-digest.md`):
+  `ai digest` and `ai report` read the documents the app's panel
+  generated and stored, and the `generate` spellings parse into the
+  refusal naming where the one windowed call runs.
 - **The closed action set is spelled twice, by design.** The CLI's
   `CLOSED_ACTIONS` and the app layer's `Action::ALL` carry the same wire
   words in two crates that do not depend on each other; both are pinned
@@ -153,7 +162,11 @@ search` refuse identically (the A3 assist contracts live in
 `docs/ai-assist.md`): the extraction runs as the host's
 `knowledge_extract` command over the account's recent mail, the ranked
 search as the composer picker's search, and the agent reads what landed
-through `knowledge list` and `snippets list`.
+through `knowledge list` and `snippets list`. `ai digest generate` and
+`ai report generate` refuse identically too (the A4 document contracts
+live in `docs/ai-digest.md`): the generation runs as the panel's
+Generate button over the account's windowed mail, and the agent reads
+what landed through `ai digest` and `ai report`.
 
 ## The audit
 
@@ -197,11 +210,11 @@ known interaction, not a gap to close.
 
 | Rule | Status | Where |
 |---|---|---|
-| Twenty-two verbs with the pinned envelope | ✅ | `cli/src/verbs` |
+| Twenty-six verbs with the pinned envelope | ✅ | `cli/src/verbs` |
 | `--preview` on every mutating verb (drafts, rules, knowledge, and snippets), one shared builder each | ✅ | `cli/src/verbs/{drafts,rules,knowledge,snippets}.rs` |
 | Every invocation audited with a correlation id | ✅ | `cli/src/audit.rs`, `cli/src/verbs/mod.rs` |
 | Send-class verbs parsed and refused, exit 3 | ✅ | `cli/src/verbs/mod.rs` |
-| Model-class verbs (`ai style rebuild`, `knowledge extract`, `snippets search`) parsed and refused, exit 3 | ✅ | `cli/src/verbs/{ai,knowledge,snippets}.rs` |
+| Model-class verbs (`ai style rebuild`, `ai digest generate`, `ai report generate`, `knowledge extract`, `snippets search`) parsed and refused, exit 3 | ✅ | `cli/src/verbs/{ai,knowledge,snippets}.rs` |
 | Exit codes 0, 1, 2, 3 | ✅ | `cli/src/envelope.rs` |
 | Redacted argument previews (shapes, never text) | ✅ | `cli/src/audit.rs` |
 | Staged as the desktop bundle's `externalBin` | ✅ | `client/desktop/scripts/stage-cli.mjs` |

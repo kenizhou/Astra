@@ -417,6 +417,60 @@ async fn the_report_counts_the_sent_mailbox_s_rows_inside_the_window() {
     );
 }
 
+/// The digest summarises what arrived, so the account's own Sent mail
+/// rides nothing of it: the Sent mailbox's rows inside the window enter
+/// neither the rollup nor the listing, while the report keeps counting
+/// them as its separate statistic (the test above). The recorded A4
+/// decision, the honest fix over rewording the prompt.
+#[tokio::test]
+async fn the_digest_filters_the_sent_mailbox_s_rows_from_its_window() {
+    let mut messages = Vec::new();
+    let mut sources = Vec::new();
+    for at in 1..=2 {
+        let key = format!("m{at}");
+        messages.push(inbox_mail(&key, &format!("Note {at}"), 8 + at));
+        sources.push(source(&key));
+    }
+    for (at, hour) in [(1, 10), (2, 11)] {
+        let key = format!("s{at}");
+        messages.push(fakes::delivered_at(
+            fakes::mail(&key, "sent", &format!("Sent {at}")),
+            hour,
+            30,
+        ));
+        sources.push(source(&key));
+    }
+    let store = Arc::new(AiStore::open_in_memory().unwrap());
+    categorised(&store, "m1", "primary");
+    categorised(&store, "m2", "newsletter");
+    let complete = fakes::ai::FixtureComplete::answering(DIGESTED);
+    let probe = complete.clone();
+    let app = docs_app(
+        fakes::FakeProvider::with_sources(vec![fakes::inbox(), fakes::sent()], messages, sources),
+        complete,
+        Arc::clone(&store),
+    )
+    .await;
+
+    let view = app
+        .generate_document(&account(), 1, AiDocumentKind::Digest, day_end())
+        .await
+        .expect("the digest answers");
+    assert_eq!(view.content, "Two replies wait; the newsletter can wait.");
+    assert_eq!(probe.call_count(), 1, "the digest is one call");
+    let prompt = &probe.calls()[0].prompt;
+    assert!(
+        prompt.contains("primary: 1") && prompt.contains("newsletter: 1"),
+        "the rollup counts the arrived mail alone:\n{prompt}",
+    );
+    for sent in ["Sent 1", "Sent 2", "uncategorised"] {
+        assert!(
+            !prompt.contains(sent),
+            "the account's own Sent mail rides nothing of the digest:\n{prompt}",
+        );
+    }
+}
+
 // The split, empty-window, no-bundle, and wire-pin tests, a child of
 // this module so the fixtures above stay one compiled copy.
 #[cfg(test)]

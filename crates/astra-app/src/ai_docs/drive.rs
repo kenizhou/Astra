@@ -7,11 +7,14 @@
 //! whole), builds the stored categorisation from the results rows the
 //! incoming pass recorded, and hands both to the digest or report
 //! service under a correlation minted for the pull's own turn: ONE
-//! generation, then the document store's replace-shaped put. The latest
-//! read serves the store's newest row of one kind, and the split map is
-//! pure derivation over the stored categorisation: no model call at
-//! all. Without the AI bundle the generations refuse with the typed
-//! no-bundle failure and the reads answer their quiet empty.
+//! generation, then the document store's replace-shaped put. The
+//! digest's set filters the account's own Sent mail out (the prompt
+//! says what arrived; the report instead counts Sent rows inside the
+//! window as its own statistic). The latest read serves the store's
+//! newest row of one kind, and the split map is pure derivation over
+//! the stored categorisation: no model call at all. Without the AI
+//! bundle the generations refuse with the typed no-bundle failure and
+//! the reads answer their quiet empty.
 
 use astra_ai::{AiDocumentKind, AiStore, CorrelationId, NewAiDocument};
 use engine_api::{AccountId, MailListRow, MailboxId, MailboxRole, Provider, ProviderKey};
@@ -170,10 +173,11 @@ fn civil_date(row: &MailListRow) -> Option<Civil> {
 
 impl<P: Provider> App<P> {
     /// Generates the account's digest over the last `days` days: the
-    /// window's mail collected newest first with its stored
-    /// categorisation, ONE summarising generation under a correlation
-    /// minted for the pull, and the answer stored under the window's
-    /// period, a same-period row replaced.
+    /// window's arrived mail (the account's own Sent mail filtered out,
+    /// the digest summarising what arrived) collected newest first with
+    /// its stored categorisation, ONE summarising generation under a
+    /// correlation minted for the pull, and the answer stored under the
+    /// window's period, a same-period row replaced.
     ///
     /// # Errors
     /// [`DocumentError::NoBundle`] when the app runs no AI bundle;
@@ -304,9 +308,17 @@ impl<P: Provider> App<P> {
             if !in_period(row) {
                 continue;
             }
-            if let Some(sent) = sent.as_ref() {
-                if row.mailboxes.contains(sent) {
-                    sent_count += 1;
+            let sent_row = sent
+                .as_ref()
+                .is_some_and(|sent| row.mailboxes.contains(sent));
+            if sent_row {
+                sent_count += 1;
+                // The digest summarises what arrived, so the account's
+                // own Sent mail rides nothing of it; the report keeps the
+                // count as its separate statistic instead (the recorded
+                // A4 decision, the honest fix over rewording the prompt).
+                if kind == AiDocumentKind::Digest {
+                    continue;
                 }
             }
             let Some(body) = self.window_body(account, &row.mail.key).await else {

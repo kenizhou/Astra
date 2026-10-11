@@ -138,8 +138,8 @@
 
 | 功能 | 状态 | 备注 |
 |---|---|---|
-| 读动词与 --json 契约 | 🚧 | 已交付二十二个动词：账户、文件夹、邮件、规则、存储的 AI 读取（cold、results、drafts、summary、style）与知识及片段读取；随 SP2+ 切片增长；cli.md |
-| 带门控的变更动词与 --preview | 🚧 | drafts save 与 discard、rules create 与 delete、knowledge forget、snippets create 与 delete；模型类拼写（`ai style rebuild`、`knowledge extract`、`snippets search`）先解析后拒绝；cli.md |
+| 读动词与 --json 契约 | 🚧 | 已交付二十六个动词：账户、文件夹、邮件、规则、存储的 AI 读取（cold、results、drafts、summary、style、digest、report）与知识及片段读取；随 SP2+ 切片增长；cli.md |
+| 带门控的变更动词与 --preview | 🚧 | drafts save 与 discard、rules create 与 delete、knowledge forget、snippets create 与 delete；模型类拼写（`ai style rebuild`、`ai digest generate`、`ai report generate`、`knowledge extract`、`snippets search`）先解析后拒绝；cli.md |
 | 每次调用带相关性 id 审计 | 🚧 | ai.sqlite 账本；cli.md |
 | 发送类动词先解析后拒绝 | 🚧 | 退出码 3；cli.md |
 | 虚拟权限工具映射 | ⬜ | SPA0 |
@@ -172,7 +172,9 @@
 | A3 | 片段库：排序搜索与编写器选择器 | 🚧 | ai-assist.md |
 | A3 | 编写自动补全：仅手势悬浮条与会话关闭 | 🚧 | ai-assist.md |
 | A3 | 阅读窗格翻译：六语言带缓存 | 🚧 | ai-assist.md |
-| A4 | 摘要报、会议简报、分析报告、分栏收件箱 | ⬜ |
+| A4 | 带面板的按需摘要报与分析报告 | 🚧 | ai-digest.md |
+| A4 | 由存储分类推导的分栏收件箱（All / Actioned / FYI） | 🚧 | ai-digest.md |
+| A4 | 会议简报 | ⬜ | 延期：日历切片是其数据依赖；ai-digest.md |
 
 ## Astra：代理（边车宿主，见 SPA0 规范 D5）
 

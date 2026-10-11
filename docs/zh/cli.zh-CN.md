@@ -15,12 +15,12 @@
 
 ## 动词
 
-今天交付二十二个：九个邮件、草稿与规则动词，六个 `ai` 动词，七个
+今天交付二十六个：九个邮件、草稿与规则动词，十个 `ai` 动词，七个
 `knowledge` 与 `snippets` 动词。语法是两个位置词（`verb
 subverb`）加标志，且标志顺序自由：sidecar 应拼写为
 `astra-cli [--json] [--correlation-id <id>] <verb> <subverb> [--flag <value> ...]`，
 始终传 `--json` 与轮次的 `--correlation-id`，并把两个位置词之后的一切都当作
-具名标志。六个 `ai` 存储动词改为以裸位置词接受其余操作数，即其界面钉住的
+具名标志。`ai` 存储动词改为以裸位置词接受其余操作数，即其界面钉住的
 语法；`knowledge` 与 `snippets` 动词像邮件动词一样经具名标志读写其存储。
 一次调用在文本中、在审计行里都不含糊。
 
@@ -41,6 +41,10 @@ subverb`）加标志，且标志顺序自由：sidecar 应拼写为
 | `ai summary <account> <key> [<key>...]` | 审计账本旁的摘要缓存行（迁移 0005） | `messages`：每 key，缓存的 `summary`，附缓存它的 `body_hash` 与 `created_at`；无缓存时为 `null`。该行是否仍然命中是应用在服务时的正文哈希检查，本读取对此不做断言 |
 | `ai style <account>` | 已存的风格画像（0004 的姊妹表） | `style`：画像的 `note` 与 `built_at`；从未构建过时为 `null` |
 | `ai style rebuild` | 无：该拼写被解析后拒绝 | 以 `3` 退出并附模型规则的拒绝消息（见下）；`--preview` 走非变更动词共有的用法错误，因为没有可描述的动作 |
+| `ai digest <account>` | 审计账本旁最新的已存摘要报（迁移 0010） | `digest`：文档完整的 `content`，附 `period_start`、`period_end`、`created_at` 与生成回合的 `correlation`；没有生成过时为 `null` |
+| `ai report <account>` | 最新已存的分析报告（同一存储的 report 类别） | `report`：同样的字段挂在自己的词下；两个类别绝不互串 |
+| `ai digest generate` | 无：该拼写被解析后拒绝 | 以 `3` 退出并附模型规则的拒绝消息（见下）；`--preview` 走非变更动词共有的用法错误，因为没有可描述的动作 |
+| `ai report generate` | 无：该拼写被解析后拒绝 | 以 `3` 退出并附模型规则的拒绝消息（见下）；`--preview` 走非变更动词共有的用法错误，因为没有可描述的动作 |
 | `knowledge list --account <id>` | 审计账本旁的知识存储（0007） | `entries`：id、kind、text、`source_account`、`source_key`、`created_at`，最新优先；条目文本整段携带，与 `ai drafts` 的整正文纪律相同 |
 | `knowledge forget --id <id>` | 删除一条存储的知识条目，唯一出口 | `id`、`state: forgotten`；`--preview` 点名确切的遗忘；无条目携带的 id 是点名它的运行时错误 |
 | `knowledge extract` | 无：该拼写被解析后拒绝 | 以 `3` 退出并附永不拨号规则的拒绝消息（见下）；`--preview` 走非变更动词共有的用法错误 |
@@ -69,9 +73,9 @@ subverb`）加标志，且标志顺序自由：sidecar 应拼写为
 - **正文只来自一个来源。** `--plain`、`--file` 或 stdin；同时给两个是用法错误。
 - **走存储的动词不经引擎应答。** `rules`、`ai`、`knowledge` 与 `snippets`
   读写 `ai.sqlite` 中审计账本旁的规则表、结果表、回复起草表（草稿池与风格画像、
-  摘要缓存）、知识表与片段表，即每次调用都已打开的那一个文件：不读邮件、
-  不拨提供商，因此这些动词对冷数据目录的可用性与邮件动词对已同步目录的
-  可用性相同。
+  摘要缓存）、文档表（摘要报与分析报告）、知识表与片段表，即每次调用都已
+  打开的那一个文件：不读邮件、不拨提供商，因此这些动词对冷数据目录的可用性
+  与邮件动词对已同步目录的可用性相同。
 - **CLI 绝不拨模型。** `ai cold` 与 `ai results` 返回扫描记录下的内容，绝不是
   实时调用：判定在此存在仅因应用的收件扫描审判过该邮件，未审判的邮件应答
   `null`，绝不猜测。`ai drafts`、`ai summary` 与 `ai style` 把同样的诚实延伸到
@@ -84,7 +88,9 @@ subverb`）加标志，且标志顺序自由：sidecar 应拼写为
   契约见 `docs/ai-assist.md`）：`knowledge extract` 是对账户邮件的批次补全，
   `snippets search` 是对片段库的排序补全，两者都解析为点名运行之处的同一拒绝；
   `knowledge list` 与 `snippets list` 读取应用落下的内容，自动补全与翻译根本
-  没有 CLI 拼写，它们是编写器与阅读窗格的手势。
+  没有 CLI 拼写，它们是编写器与阅读窗格的手势。A4 文档拼写以同样方式延伸
+  （契约见 `docs/ai-digest.md`）：`ai digest` 与 `ai report` 读取应用面板
+  生成并存储的文档，`generate` 拼写解析为点名那一次窗口化调用运行之处的拒绝。
 - **封闭动作集刻意拼写两遍。** CLI 的 `CLOSED_ACTIONS` 与应用层的
   `Action::ALL` 在两个互不依赖的 crate 里携带同样的线词；两者各有自己的测试
   钉住，任一处变更都要落进两处。重复的句子与其代价见 `docs/ai-rules.md`。
@@ -118,6 +124,9 @@ subverb`）加标志，且标志顺序自由：sidecar 应拼写为
 以相同方式拒绝（A3 辅助契约见 `docs/ai-assist.md`）：抽取作为宿主的
 `knowledge_extract` 命令在账户最近的邮件上运行，排序搜索作为编写器选择器的
 搜索运行，agent 经 `knowledge list` 与 `snippets list` 读取落下的内容。
+`ai digest generate` 与 `ai report generate` 同样以相同方式拒绝（A4 文档
+契约见 `docs/ai-digest.md`）：生成作为面板的 Generate 按钮在账户窗口化
+邮件上运行，agent 经 `ai digest` 与 `ai report` 读取落下的内容。
 
 ## 审计
 
@@ -150,11 +159,11 @@ id、数量、长度。地址、主题与正文文本绝不进入账本。解析
 
 | 规则 | 状态 | 位置 |
 |---|---|---|
-| 二十二个动词与固定信封 | ✅ | `cli/src/verbs` |
+| 二十六个动词与固定信封 | ✅ | `cli/src/verbs` |
 | 每个变更动词（drafts、rules、knowledge 与 snippets）上的 `--preview`，各共享一个构建器 | ✅ | `cli/src/verbs/{drafts,rules,knowledge,snippets}.rs` |
 | 每次调用带相关性 id 审计 | ✅ | `cli/src/audit.rs`、`cli/src/verbs/mod.rs` |
 | 发送类动词先解析后拒绝，退出码 3 | ✅ | `cli/src/verbs/mod.rs` |
-| 模型类动词（`ai style rebuild`、`knowledge extract`、`snippets search`）先解析后拒绝，退出码 3 | ✅ | `cli/src/verbs/{ai,knowledge,snippets}.rs` |
+| 模型类动词（`ai style rebuild`、`ai digest generate`、`ai report generate`、`knowledge extract`、`snippets search`）先解析后拒绝，退出码 3 | ✅ | `cli/src/verbs/{ai,knowledge,snippets}.rs` |
 | 退出码 0、1、2、3 | ✅ | `cli/src/envelope.rs` |
 | 脱敏的参数预览（形状，绝非文本） | ✅ | `cli/src/audit.rs` |
 | 作为桌面安装包的 `externalBin` 分发 | ✅ | `client/desktop/scripts/stage-cli.mjs` |

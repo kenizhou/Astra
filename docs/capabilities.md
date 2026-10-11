@@ -137,8 +137,8 @@ this row ports.
 
 | Feature | Status | Notes |
 |---|---|---|
-| Read verbs with --json contract | 🚧 | twenty-two verbs ship: accounts, folders, messages, rules, the stored AI reads (cold, results, drafts, summary, style), and the knowledge and snippet reads; grows with SP2+ slices; cli.md |
-| Gated mutating verbs with --preview | 🚧 | drafts save and discard, rules create and delete, knowledge forget, snippets create and delete; the model-class spellings (`ai style rebuild`, `knowledge extract`, `snippets search`) parse and refuse; cli.md |
+| Read verbs with --json contract | 🚧 | twenty-six verbs ship: accounts, folders, messages, rules, the stored AI reads (cold, results, drafts, summary, style, digest, report), and the knowledge and snippet reads; grows with SP2+ slices; cli.md |
+| Gated mutating verbs with --preview | 🚧 | drafts save and discard, rules create and delete, knowledge forget, snippets create and delete; the model-class spellings (`ai style rebuild`, `ai digest generate`, `ai report generate`, `knowledge extract`, `snippets search`) parse and refuse; cli.md |
 | Every invocation audited with a correlation id | 🚧 | ai.sqlite ledger; cli.md |
 | Send-class verbs parsed but refused | 🚧 | exit 3; cli.md |
 | Virtual permission tools mapping | ⬜ | SPA0 |
@@ -171,7 +171,9 @@ this row ports.
 | A3 | Snippet library with ranked search and the composer picker | 🚧 | ai-assist.md |
 | A3 | Compose autocomplete: gesture-only chip with session dismiss | 🚧 | ai-assist.md |
 | A3 | Reading-pane translate into six languages, cached | 🚧 | ai-assist.md |
-| A4 | Digest, meeting briefs, analytics reports, split inbox | ⬜ |
+| A4 | On-demand digest and analytics report with the AI documents panel | 🚧 | ai-digest.md |
+| A4 | Split inbox (All / Actioned / FYI) from the stored categorisation | 🚧 | ai-digest.md |
+| A4 | Meeting briefs | ⬜ | deferred: the calendar slice is the data dependency; ai-digest.md |
 
 ## Astra: Agent (sidecar host, per SPA0 spec D5)
 

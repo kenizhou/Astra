@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! The `ai` verbs: the stored reads over the results store the incoming
-//! pass fills (migration 0003) and the reply-drafting tables (the draft
-//! pool and style profiles of 0004, the summarise cache of 0005), plus
-//! the one refused spelling. The CLI dials no model: a verdict, draft,
-//! summary, or profile exists here only because the app's pass or pull
-//! recorded it, an unjudged message answers null, never a guess, and the
-//! style rebuild refuses under the same rule rather than infer.
+//! pass fills (migration 0003), the reply-drafting tables (the draft
+//! pool and style profiles of 0004, the summarise cache of 0005), and
+//! the documents store (0010), plus the refused spellings. The CLI dials
+//! no model: a verdict, draft, summary, profile, digest, or report
+//! exists here only because the app's pass or pull recorded it, an
+//! unjudged message answers null, never a guess, and the style rebuild
+//! and the document generations refuse under the same rule rather than
+//! infer or summarise.
 
-use astra_ai::AiStore;
+use astra_ai::{AiDocumentKind, AiStore};
 use engine_api::AccountId;
 use serde_json::{json, Value};
 
@@ -22,6 +24,18 @@ const COLD_STAGE: &str = "cold";
 const STYLE_REBUILD_REFUSAL: &str = "a style rebuild is model work: the app \
      infers the note from Sent mail and rebuilds the profile; the astra-cli \
      dials no model, so the verb refuses. `ai style` reads what the app built";
+
+/// The document generation refusal's message for one kind's verb,
+/// naming the rule it enforces and the read that answers instead: the
+/// `ai style rebuild` precedent over the A4 documents.
+fn generate_refusal(kind: &str) -> String {
+    format!(
+        "a {kind} generation is model work: the app's panel runs the one windowed \
+         call over the account's mail and stores the document; the astra-cli \
+         dials no model, so the verb refuses. `ai {kind} <account>` reads what \
+         the app stored"
+    )
+}
 
 /// Answers each key's stored cold verdict: the newest `cold` stage row's
 /// word with the correlation that judged it and the store's stamp, or
@@ -158,6 +172,61 @@ pub(crate) fn style(store: &AiStore, account: &AccountId) -> Answer {
 /// with the pointer rather than pretend.
 pub(crate) fn style_rebuild() -> Answer {
     Err((Code::Refused, STYLE_REBUILD_REFUSAL.to_owned()))
+}
+
+/// Answers the account's latest stored digest: the content the one
+/// generation wrote with its window's period, the store's stamp, and the
+/// generation turn's correlation, or null when no generation stored one.
+/// The content rides whole: it is model-generated text the verb exists
+/// to read, the whole-body discipline `ai drafts` carries.
+pub(crate) fn digest(store: &AiStore, account: &AccountId) -> Answer {
+    document(store, account, AiDocumentKind::Digest, "digest")
+}
+
+/// Answers the account's latest stored analytics report, the digest
+/// read's own kind: the assembled three-section document with its
+/// window's period, or null when no report was generated.
+pub(crate) fn report(store: &AiStore, account: &AccountId) -> Answer {
+    document(store, account, AiDocumentKind::Report, "report")
+}
+
+/// One document kind's latest row as its verb answers it: the fields a
+/// caller audits beside the content (the period, the stamp, the
+/// generation turn's correlation), keyed under the kind's own word.
+fn document(store: &AiStore, account: &AccountId, kind: AiDocumentKind, word: &str) -> Answer {
+    let document = store
+        .latest_document(account.as_str(), kind)
+        .map_err(|err| {
+            (
+                Code::Runtime,
+                format!("the documents store could not be read: {err}"),
+            )
+        })?
+        .map(|row| {
+            json!({
+                "period_start": row.period_start,
+                "period_end": row.period_end,
+                "content": row.content,
+                "created_at": row.created_at,
+                "correlation": row.correlation.as_str(),
+            })
+        });
+    Ok(json!({ word: document }))
+}
+
+/// Refuses the digest generation: the spelling parses so the ledger
+/// names it, but no generation can run here. Summarising the window's
+/// mail is a model completion, the model seam lives in the desktop host,
+/// and the CLI holds no model connection and never will, so the verb
+/// refuses with the pointer to the panel and the read instead.
+pub(crate) fn digest_generate() -> Answer {
+    Err((Code::Refused, generate_refusal("digest")))
+}
+
+/// Refuses the report generation: the digest refusal's own rule over the
+/// analytics half, the panel's structured run pointed at instead.
+pub(crate) fn report_generate() -> Answer {
+    Err((Code::Refused, generate_refusal("report")))
 }
 
 /// One message's stored rows, the store's newest-first read both verbs

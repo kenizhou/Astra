@@ -21,6 +21,10 @@ mod live_tests;
 mod live_assist_tests;
 
 #[cfg(test)]
+#[path = "live_docs_tests.rs"]
+mod live_docs_tests;
+
+#[cfg(test)]
 #[path = "live_replies_tests.rs"]
 mod live_replies_tests;
 

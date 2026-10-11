@@ -118,6 +118,9 @@ pub(super) fn parse(args: &[String], stdin: &mut dyn Read) -> Result<Invocation,
             }
         }
         (Some("ai"), Some("style")) => style_verb(&ai_positionals(args))?,
+        (Some("ai"), Some(sub @ ("digest" | "report"))) => {
+            document_verb(&ai_positionals(args), sub)?
+        }
         (Some(_), Some(_)) => return Err(usage("unknown verb")),
         _ => {
             return Err(usage(
@@ -289,6 +292,34 @@ fn style_verb(positionals: &[&str]) -> Result<Verb, ParseFailure> {
     }
 }
 
+/// `ai digest` and `ai report`'s grammar: one account, or the refused
+/// `generate` spelling alone, the style pair's own shape (the account
+/// read beside the model work's refusal). Any further word is a usage
+/// error, so the tight grammar every ai verb carries holds here too.
+fn document_verb(positionals: &[&str], sub: &str) -> Result<Verb, ParseFailure> {
+    match (positionals.get(2).copied(), positionals.len()) {
+        (None, _) => Err(usage(&format!("ai {sub} wants an account (or `generate`)"))),
+        (Some("generate"), 3) => Ok(if sub == "digest" {
+            Verb::AiDigestGenerate
+        } else {
+            Verb::AiReportGenerate
+        }),
+        (Some("generate"), _) => Err(usage(&format!(
+            "ai {sub} generate wants no further words: the verb refuses whatever follows"
+        ))),
+        (Some(account), 3) => Ok(if sub == "digest" {
+            Verb::AiDigest {
+                account: (*account).to_owned(),
+            }
+        } else {
+            Verb::AiReport {
+                account: (*account).to_owned(),
+            }
+        }),
+        (Some(_), _) => Err(usage(&format!("ai {sub} takes one account and no keys"))),
+    }
+}
+
 /// The account positional the `ai` verbs take: the third word, after the
 /// verb and its subverb.
 fn positional_account(positionals: &[&str], verb: &str) -> Result<String, ParseFailure> {
@@ -405,7 +436,7 @@ pub(super) fn correlation_from(args: &[String]) -> CorrelationId {
 /// second positional the ledger may capture beside a verb word.
 const SUBVERBS: &[&str] = &[
     "list", "read", "save", "discard", "create", "delete", "cold", "results", "drafts", "summary",
-    "style", "forget", "extract", "search",
+    "style", "digest", "report", "forget", "extract", "search",
 ];
 
 /// The verb word of an unparsable line, best effort: the first positional,
