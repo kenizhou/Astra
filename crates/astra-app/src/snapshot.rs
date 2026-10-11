@@ -140,6 +140,7 @@ impl<P: Provider> App<P> {
             selection: None,
             visible_limit: u32::try_from(limit).unwrap_or(u32::MAX),
             view_mode: mode,
+            search: None,
         }
     }
 

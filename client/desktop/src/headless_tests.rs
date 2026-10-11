@@ -119,7 +119,7 @@ fn the_poll_times_out_with_the_last_snapshot_and_its_diff() {
         calls += 1;
         snapshot(&["INBOX"])
     });
-    let (_, diff) = outcome.expect_err("the probe never holds the tree");
+    let (_, diff) = *outcome.expect_err("the probe never holds the tree");
     assert_eq!(diff, vec!["missing folder: Projects".to_owned()]);
     assert!(calls > 1, "the poll kept pulling until the deadline");
 }

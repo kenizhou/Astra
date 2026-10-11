@@ -153,6 +153,7 @@ impl<P: Provider> App<P> {
             Intent::Drafts(change) => {
                 self.dispatch_drafts(change).await;
             }
+            Intent::Search { .. } | Intent::SetSearchScope { .. } => return Err(AppError::NotYet),
         }
         Ok(())
     }

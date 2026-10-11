@@ -113,7 +113,7 @@ pub use drafts::{DraftResume, DRAFT_AUTOSAVE_IDLE};
 pub use preferences::{load_preferences, preferences_path, save_preferences, Preferences};
 pub use protocol::{
     AppObserver, ComposeIntent, ComposerBlob, CompositionId, DraftsIntent, FolderIntent, Intent,
-    OutboxIntent, Surface, ViewMode,
+    OutboxIntent, SearchScope, Surface, ViewMode,
 };
 pub use reference::{FolderRef, MessageRef, QueuedRef, RowRef, ThreadRef};
 pub use surfaced::Surfaced;

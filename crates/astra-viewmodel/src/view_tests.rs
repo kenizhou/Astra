@@ -157,6 +157,7 @@ fn a_snapshot_with_message_rows_crosses_with_the_list_fields_after_the_trees() {
         }),
         visible_limit: 100,
         view_mode: ViewMode::Threaded,
+        search: None,
     };
 
     let json = serde_json::to_string(&snapshot).unwrap();
@@ -194,6 +195,7 @@ fn a_snapshot_at_rest_crosses_without_the_list_fields() {
         selection: None,
         visible_limit: 0,
         view_mode: ViewMode::Flat,
+        search: None,
     })
     .unwrap();
     assert_eq!(

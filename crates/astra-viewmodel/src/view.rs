@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::folders::AccountFolderRow;
 use crate::rows::{MessageRowView, RowKey, ViewMode};
+use crate::search::SearchState;
 
 /// An immutable mailbox-list snapshot for a surface to render: every account's
 /// folder tree, always populated, so the pane is available whatever else the
@@ -49,6 +50,15 @@ pub struct MailboxListSnapshot {
     /// mail crosses with no view mode at all.
     #[serde(default, skip_serializing_if = "is_flat")]
     pub view_mode: ViewMode,
+    /// The mailbox list's search state, present exactly while a search is
+    /// active.
+    ///
+    /// Absent on the wire when no search is running, the at-rest value, so a
+    /// snapshot nobody searched with crosses byte-identically to the shape it
+    /// carried before search existed, and an old emitter's JSON parses to
+    /// `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search: Option<SearchState>,
 }
 
 /// Whether a count is zero, the at-rest value [`MailboxListSnapshot`] skips.
