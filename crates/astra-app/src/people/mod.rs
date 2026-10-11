@@ -195,9 +195,9 @@ impl<P: Provider> App<P> {
             if synced {
                 // A landed sync resolves an unconfirmed write (its recovery
                 // is the re-read), but the Invalid sentence belongs to the
-                // form the user is still looking at: only the next write or
-                // an explicit dismissal clears it, never a background
-                // refresh that landed while the form sat unsubmitted.
+                // form the user is still looking at: only a later write
+                // clears it, never a background refresh that landed while
+                // the form sat unsubmitted.
                 let resolves = {
                     let writes = &self
                         .people_state

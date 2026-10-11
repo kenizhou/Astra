@@ -45,8 +45,8 @@ async fn the_list_lays_out_by_the_fold_not_the_engine_page_order() {
         .holding(named_card(
             "c-7",
             "book-1",
-            "Norway Ås",
-            &["norway@ex.test"],
+            "Ñandú Bird",
+            &["nandu@ex.test"],
         ))
         .holding(named_card(
             "c-8",
@@ -84,8 +84,8 @@ async fn the_list_lays_out_by_the_fold_not_the_engine_page_order() {
             // whose raw code-point order placed him after everybody.
             ("Émile Zola", "E"),
             ("Emma B", "E"),
-            // Ñ keeps N for himself.
-            ("Norway Ås", "N"),
+            // A real Ñ row keeps N: the leading base letter rule in both directions.
+            ("Ñandú Bird", "N"),
             // The O-variants (Ò..Ö) fold onto O, not N, and lay out inside it.
             ("Öberg Swede", "O"),
             ("Oscar Plain", "O"),
