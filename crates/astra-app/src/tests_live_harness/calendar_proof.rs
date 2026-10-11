@@ -40,7 +40,7 @@ pub(super) fn run_token() -> String {
 /// The raw CalDAV seeding helper: one HTTP/1.0 request over a fresh
 /// plaintext connection to the harness's shared HTTP listener, basic auth,
 /// `Connection: close` so reading to EOF is the whole response. Seeding
-/// only; no assertion ever rides this.
+/// only; no product assertion ever rides this.
 pub(super) fn dav(method: &str, account: &str, uid: &str, password: &str, body: &str) -> u16 {
     use std::io::{Read, Write};
     let base = super::jmap_base().expect("the gated run names the harness origin");
@@ -289,9 +289,6 @@ pub(super) fn event_of_account(
         .expect("the event reference")
 }
 
-/// Polls the calendar app with refreshes until `needle` holds rows,
-/// within the delivery timeout: the bounded wait for one of Stalwart's
-/// asynchronous scheduling legs, on the real state, never a fixed sleep.
 /// The bounded wait: polls with refreshes until `account` itself holds rows
 /// titled with `needle`, within the delivery timeout. Scoped to the one
 /// account because a needle can render on another account first (the

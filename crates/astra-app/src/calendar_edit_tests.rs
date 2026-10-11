@@ -284,6 +284,32 @@ fn an_occurrence_edit_with_one_edge_only_is_refused() {
 }
 
 #[test]
+fn an_occurrence_fill_keeps_absolute_duration_across_a_dst_boundary() {
+    // The engine materialises every occurrence's end as the master's
+    // absolute duration after that occurrence's own start: an overnight
+    // master whose own span crosses the spring-forward renders 22:00 to
+    // 07:00 (nine wall hours, eight elapsed), while every later occurrence
+    // renders 22:00 to 06:00 the next morning (eight wall hours). The fill
+    // must state the same end, or a content-only edit silently re-times the
+    // occurrence's end by the transition.
+    let mut event = weekly_event("evt-1", "Nightly", "2026-03-28T22:00:00");
+    event.duration = engine_api::Duration::from_parts(0, 0, 8, 0, 0, 0).unwrap();
+    let edit = EventEdit {
+        title: Some("Renamed".to_owned()),
+        occurrence: Some(local("2026-04-04T22:00:00")),
+        ..EventEdit::default()
+    };
+    let (_, patch) = build_patch(&event, &edit, stamp()).unwrap();
+    assert_eq!(
+        patch.end_edit(),
+        Some(&CalendarDateTime::Zoned {
+            local: local("2026-04-05T06:00:00"),
+            zone: TimeZoneId::iana("Europe/Amsterdam").unwrap(),
+        })
+    );
+}
+
+#[test]
 fn a_stored_rule_too_rich_for_the_editor_is_never_replaced() {
     let mut event = weekly_event("evt-1", "Standup", "2026-10-19T09:00:00");
     let mut rich = RecurrenceRule::new(Frequency::Monthly);

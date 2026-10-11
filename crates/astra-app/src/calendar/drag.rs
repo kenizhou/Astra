@@ -119,15 +119,42 @@ pub(crate) fn own_bounds(
 }
 
 /// The occurrence that starts at `original`: its own `(start, end)` in the
-/// event's own zone. Every occurrence of a series carries the master's
-/// wall-clock span, so the end is the named start plus that span.
+/// event's own zone. A timed occurrence's end is the master's **absolute**
+/// duration after that occurrence's own start, the same maths the engine's
+/// expansion applies: the master's wall span would drift by a
+/// daylight-saving transition the occurrence's own span crosses. An all-day
+/// occurrence's end is plain civil arithmetic on the master's day count.
 pub(crate) fn occurrence_bounds(
     event: &Event,
     original: LocalDateTime,
 ) -> Result<(LocalDateTime, LocalDateTime), CalendarEditError> {
-    let (master_start, master_end) = own_bounds(event)?;
-    let (days, minutes) = between(master_start, master_end);
-    Ok((original, shift(original, days, minutes)?))
+    match &event.start {
+        CalendarDateTime::Date(_) => {
+            let (master_start, master_end) = own_bounds(event)?;
+            let (days, _) = between(master_start, master_end);
+            Ok((original, shift(original, days, 0)?))
+        }
+        form @ (CalendarDateTime::Floating(_) | CalendarDateTime::Zoned { .. }) => {
+            let end = end_after(event, &render_in_form(form, original)).ok_or_else(|| {
+                CalendarEditError::Unrepresentable(
+                    "the occurrence's own times are not representable".into(),
+                )
+            })?;
+            Ok((original, end))
+        }
+    }
+}
+
+/// A wall clock rendered in the form `form` carries, for a timed event: the
+/// occurrence's start expressed the way the stored event states its own.
+fn render_in_form(form: &CalendarDateTime, local: LocalDateTime) -> CalendarDateTime {
+    match form {
+        CalendarDateTime::Zoned { zone, .. } => CalendarDateTime::Zoned {
+            local,
+            zone: zone.clone(),
+        },
+        _ => CalendarDateTime::Floating(local),
+    }
 }
 
 /// The event's end as a wall clock in its own zone. A zoned start is resolved
@@ -135,6 +162,13 @@ pub(crate) fn occurrence_bounds(
 /// crosses a daylight-saving boundary as elapsed time, not as the same clock
 /// the next day.
 fn end_wall_clock(event: &Event) -> Option<LocalDateTime> {
+    end_after(event, &event.start)
+}
+
+/// The wall clock `event`'s duration lands on when it starts at `start`,
+/// resolved as absolute elapsed time in the form `start` carries: the same
+/// maths the engine's expansion applies to every occurrence's end.
+fn end_after(event: &Event, start: &CalendarDateTime) -> Option<LocalDateTime> {
     let duration = event.duration;
     let span = core::time::Duration::new(
         duration
@@ -143,12 +177,9 @@ fn end_wall_clock(event: &Event) -> Option<LocalDateTime> {
             .saturating_add(duration.seconds()),
         duration.nanoseconds(),
     );
-    match &event.start {
+    match start {
         CalendarDateTime::Zoned { zone, .. } => {
-            let end = resolve_instant(&event.start)
-                .ok()
-                .flatten()?
-                .checked_add(span)?;
+            let end = resolve_instant(start).ok().flatten()?.checked_add(span)?;
             to_local(end, zone).ok()
         }
         CalendarDateTime::Floating(local) => {

@@ -117,7 +117,8 @@ move is cleared by the next publish, whichever way it settles.
 
 ## Meeting briefs
 
-`briefings(account, day)` generates the day's meeting brief on the Economy
+The day's meeting brief is generated on request (the host command
+`calendar_brief_generate`, the app's `generate_meeting_brief`) on the Economy
 tier, resolved through the use-case registry (never a literal at the call
 site), with one correlation id minted before the call and recorded in the
 ledger row. The meetings are re-read from the store, never a cached snapshot
