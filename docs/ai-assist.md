@@ -81,7 +81,9 @@ mutating verb with `--preview`) and the composer's picker. **The replace
 semantics**: a snippet is one row under its identity; an update rewrites
 title and body in place and touches `updated_at`, the stamp the
 recency-first listing ordering rides, so an edited snippet resurfaces
-first and no edit ever grows a second row.
+first and no edit ever grows a second row. No surface exercises
+`update_snippet` yet: the store keeps it ready, and no host command or
+CLI verb spells an edit.
 
 **Ranked search** (`SNIPPET_SEARCH_VERSION`, economy tier) is ONE
 structured completion over the whole library: the prompt numbers the
@@ -138,7 +140,8 @@ collapsible block beside the summary, labelled with its own language.
 `translate`, target language, body hash), one row per key: a new body
 hash for the same language replaces the row (the one-row-per-key replace
 semantics), and a different language holds its own row. A hit answers
-with **no** network call; the reading pane's re-expand reads it
+with **no** model call and no new ledger row (the body resolve still
+spends its engine fetch); the reading pane's re-expand reads it
 instantly. The failure direction is a false miss, never a stale hit: a
 failed or unparseable call caches nothing.
 

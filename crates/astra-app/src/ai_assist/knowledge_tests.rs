@@ -385,6 +385,33 @@ fn the_context_caps_at_ten_entries() {
 }
 
 #[test]
+fn a_multi_line_entry_renders_one_context_line() {
+    let store = AiStore::open_in_memory().unwrap();
+    store
+        .insert_knowledge(&NewKnowledgeEntry {
+            id: KnowledgeId::new("k-fold".to_owned()),
+            account: "work".to_owned(),
+            kind: "fact".to_owned(),
+            text: "The launch lands on Friday.\nThe demo follows.".to_owned(),
+            source_message_account: "work".to_owned(),
+            source_message_key: "m-1".to_owned(),
+            correlation: CorrelationId::new("c-1".to_owned()),
+        })
+        .unwrap();
+    let lines = knowledge_context(&account(), &store);
+    assert_eq!(
+        lines,
+        vec!["fact: The launch lands on Friday. The demo follows.".to_owned()],
+        "a multi-line entry renders one labelled line",
+    );
+    assert_eq!(
+        store.knowledge_for_account("work").unwrap()[0].text,
+        "The launch lands on Friday.\nThe demo follows.",
+        "the store keeps the entry's original text",
+    );
+}
+
+#[test]
 fn the_context_read_stays_per_account_and_survives_its_store() {
     let store = AiStore::open_in_memory().unwrap();
     store

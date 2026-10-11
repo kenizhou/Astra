@@ -297,7 +297,8 @@ pub fn knowledge_context(account: &AccountId, store: &AiStore) -> Vec<String> {
 /// projects, contacts alike, a foreign kind word included) by recency,
 /// the store's newest-first order preserved inside each group; the first
 /// [`KNOWLEDGE_CONTEXT_LIMIT`] entries render, one `kind: text` line
-/// each, the label the draft prompt's knowledge slot rides.
+/// each with the text flattened to that line, the label the draft
+/// prompt's knowledge slot rides.
 pub(super) fn context_lines(rows: &[KnowledgeEntryRow]) -> Vec<String> {
     let mut ranked: Vec<&KnowledgeEntryRow> = rows.iter().collect();
     ranked.sort_by_key(|row| {
@@ -306,8 +307,20 @@ pub(super) fn context_lines(rows: &[KnowledgeEntryRow]) -> Vec<String> {
     ranked
         .into_iter()
         .take(KNOWLEDGE_CONTEXT_LIMIT)
-        .map(|row| format!("{}: {}", row.kind, row.text))
+        .map(|row| format!("{}: {}", row.kind, flattened(&row.text)))
         .collect()
+}
+
+/// One entry's text as its single context line renders it: newlines to
+/// spaces, trimmed, so a multi-line entry cannot break the one labelled
+/// line the trusted half's discipline pins; the store keeps the
+/// original text untouched.
+fn flattened(text: &str) -> String {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Builds the versioned extraction prompt: the instruction (the closed
