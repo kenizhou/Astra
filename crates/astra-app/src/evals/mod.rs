@@ -17,6 +17,7 @@
 
 mod drive;
 mod drive_assist;
+mod drive_docs;
 
 #[cfg(test)]
 mod runner;
@@ -29,8 +30,9 @@ use crate::ai_rules::{
     CATEGORISE_PROMPT_VERSION, COLD_JUDGE_VERSION, RULES_MATCH_VERSION, RULES_PROMPT_VERSION,
 };
 use crate::{
-    AUTOCOMPLETE_VERSION, DRAFT_REPLY_PROMPT_VERSION, GATE_JUDGE_VERSION,
-    KNOWLEDGE_EXTRACT_VERSION, SNIPPET_SEARCH_VERSION, SUMMARISE_PROMPT_VERSION, TRANSLATE_VERSION,
+    AUTOCOMPLETE_VERSION, DIGEST_PROMPT_VERSION, DRAFT_REPLY_PROMPT_VERSION, GATE_JUDGE_VERSION,
+    KNOWLEDGE_EXTRACT_VERSION, REPORT_PROMPT_VERSION, SNIPPET_SEARCH_VERSION,
+    SPLIT_MAPPING_VERSION, SUMMARISE_PROMPT_VERSION, TRANSLATE_VERSION,
 };
 
 pub use drive::drive;
@@ -103,6 +105,13 @@ pub enum Feature {
     Autocomplete,
     /// The cached translate action through the completion seam.
     Translate,
+    /// The on-demand digest through the completion seam.
+    Digest,
+    /// The analytics report through the completion seam.
+    Report,
+    /// The split inbox's mapping, the pure derivation. No prompt text
+    /// rides; the mapping table's own version is pinned.
+    Split,
 }
 
 impl Feature {
@@ -122,13 +131,18 @@ impl Feature {
             "snippet_search" => Ok(Self::SnippetSearch),
             "autocomplete" => Ok(Self::Autocomplete),
             "translate" => Ok(Self::Translate),
+            "digest" => Ok(Self::Digest),
+            "report" => Ok(Self::Report),
+            "split" => Ok(Self::Split),
             _ => Err(format!("unknown feature {word:?}")),
         }
     }
 
-    /// The pipeline constant the feature's prompt text is pinned by, with
-    /// its spelling for the failure message; `None` for the redaction
-    /// feature, which pins output shapes instead of prompt text.
+    /// The pipeline constant the feature's pinned text is written
+    /// against, with its spelling for the failure message: the prompt
+    /// versions for the seam features, the mapping table's version for
+    /// the split; `None` for the redaction feature, which pins output
+    /// shapes instead of prompt text.
     fn version_pin(self) -> Option<(&'static str, &'static str)> {
         match self {
             Self::Generation => Some((RULES_PROMPT_VERSION, "RULES_PROMPT_VERSION")),
@@ -146,6 +160,9 @@ impl Feature {
             Self::SnippetSearch => Some((SNIPPET_SEARCH_VERSION, "SNIPPET_SEARCH_VERSION")),
             Self::Autocomplete => Some((AUTOCOMPLETE_VERSION, "AUTOCOMPLETE_VERSION")),
             Self::Translate => Some((TRANSLATE_VERSION, "TRANSLATE_VERSION")),
+            Self::Digest => Some((DIGEST_PROMPT_VERSION, "DIGEST_PROMPT_VERSION")),
+            Self::Report => Some((REPORT_PROMPT_VERSION, "REPORT_PROMPT_VERSION")),
+            Self::Split => Some((SPLIT_MAPPING_VERSION, "SPLIT_MAPPING_VERSION")),
         }
     }
 }

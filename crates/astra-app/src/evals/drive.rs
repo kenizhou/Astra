@@ -16,7 +16,7 @@ use crate::ai_rules::{
 };
 use crate::{chips_for, generate_reply, summarise, DraftConfidence, DraftContext, SummariseError};
 
-use super::drive_assist;
+use super::{drive_assist, drive_docs};
 use super::{Feature, Scenario};
 
 /// Drives one scenario over the given seams, whatever backs them: the
@@ -93,6 +93,9 @@ pub async fn drive(
         Feature::Translate => {
             drive_assist::translate_scenario(scenario, complete, &store, &correlation).await
         }
+        Feature::Digest => drive_docs::digest_scenario(scenario, complete, &correlation).await,
+        Feature::Report => drive_docs::report_scenario(scenario, complete, &correlation).await,
+        Feature::Split => drive_docs::split_scenario(scenario),
     }
 }
 
@@ -439,7 +442,7 @@ pub(super) fn str_field(value: &serde_json::Value, name: &str) -> Result<String,
 }
 
 /// A required array-of-strings field.
-fn strings_field(value: &serde_json::Value, name: &str) -> Result<Vec<String>, String> {
+pub(super) fn strings_field(value: &serde_json::Value, name: &str) -> Result<Vec<String>, String> {
     value
         .get(name)
         .and_then(serde_json::Value::as_array)

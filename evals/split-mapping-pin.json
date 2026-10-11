@@ -1,0 +1,25 @@
+{
+  "id": "split-mapping-pin",
+  "feature": "split",
+  "mode": "offline",
+  "prompt_version": "1",
+  "inputs": {
+    "stored": {
+      "m0": "primary",
+      "m1": "newsletter",
+      "m2": "receipt",
+      "m3": "notification",
+      "m4": "cold",
+      "m5": "rumour"
+    }
+  },
+  "expected": {
+    "map": [
+      ["m0", "actioned"],
+      ["m1", "fyi"],
+      ["m2", "fyi"],
+      ["m3", "fyi"],
+      ["m4", "fyi"]
+    ]
+  }
+}

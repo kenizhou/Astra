@@ -1,0 +1,46 @@
+{
+  "id": "report-three-sections",
+  "feature": "report",
+  "mode": "offline",
+  "prompt_version": "1",
+  "inputs": {
+    "account": "work",
+    "days": 7,
+    "messages": [
+      {
+        "key": "m0",
+        "from_name": "Ada Lovelace",
+        "from_address": "ada@example.test",
+        "subject": "Prototype timing",
+        "body": "Thanks for the update. Can we still land the prototype next Friday?",
+        "unread": true
+      },
+      {
+        "key": "m1",
+        "from_name": "Astra One",
+        "from_address": "astra1@example.test",
+        "subject": "Re: Prototype timing",
+        "body": "The build is on track; I will confirm the review dates once QA signs off.",
+        "unread": false
+      },
+      {
+        "key": "m2",
+        "from_name": "The Weekly Dispatch",
+        "from_address": "dispatch@example.test",
+        "subject": "The weekly dispatch",
+        "body": "This week: one launch, one review, and the budget question everyone is waiting on.",
+        "unread": false
+      }
+    ],
+    "stored": {
+      "m0": "primary",
+      "m1": "primary",
+      "m2": "newsletter"
+    },
+    "sent_count": 4,
+    "completion": "{\"executive_summary\":\"The user runs a small prototype team; the window holds one live primary thread, one newsletter, and a light sent trail.\",\"response_patterns\":\"Mail arrives from two regular senders and lands mostly in working hours; the unread sits in the primary thread while the newsletter waits unread-free.\",\"recommendations\":\"Answer the primary thread first thing each morning and batch the newsletter into one afternoon read; keep the sent trail short.\"}"
+  },
+  "expected": {
+    "report": "Executive summary\nThe user runs a small prototype team; the window holds one live primary thread, one newsletter, and a light sent trail.\n\nResponse patterns\nMail arrives from two regular senders and lands mostly in working hours; the unread sits in the primary thread while the newsletter waits unread-free.\n\nRecommendations\nAnswer the primary thread first thing each morning and batch the newsletter into one afternoon read; keep the sent trail short."
+  }
+}
