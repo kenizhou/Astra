@@ -17,7 +17,7 @@ import type {
 } from './composeRequest';
 import { sendingIntents } from './sending';
 import type { MailSubmission, OutboxIntent, SendingSnapshot } from './sending';
-import type { MailboxListSnapshot, RowKey, SyncProgressSnapshot, ViewMode } from './surfaces';
+import type { MailboxListSnapshot, RowKey, SearchScope, SyncProgressSnapshot, ViewMode } from './surfaces';
 
 // The composer document's whole type set, re-exported so this module stays the
 // one import point of the wire.
@@ -50,10 +50,9 @@ export interface ThreadRef {
   thread_id: string;
 }
 
-// The row an intent names and the snapshot's row key are one concept, so the
-// protocol names one type for it, exactly as the Rust side re-exports its
-// RowKey into the protocol.
-export type { RowKey, ViewMode };
+// Types an intent and a snapshot share, re-exported here exactly as the Rust
+// protocol re-exports them: the row key, the view mode, the search scope.
+export type { RowKey, SearchScope, ViewMode };
 
 /** One mailbox-list row an action names: a message, or a whole conversation. */
 export type RowRef = RowKey;
@@ -114,7 +113,9 @@ export type Intent =
   | { submit_rich_reply: ReplySubmission }
   | { submit_rich_forward: ForwardSubmission }
   | { outbox: OutboxIntent }
-  | { drafts: DraftsIntent };
+  | { drafts: DraftsIntent }
+  | { search: { query: string | null } }
+  | { set_search_scope: { scope: SearchScope } };
 
 /** Smart constructors for every intent, in the enum's own order. */
 export const intents = {
@@ -181,6 +182,10 @@ export const intents = {
   closeDraft: (composition: CompositionId): Intent => ({
     drafts: { close: { composition } },
   }),
+  /** Search the mail for the query, or clear the search with null. */
+  search: (query: string | null): Intent => ({ search: { query } }),
+  /** Narrow the search to a scope and re-run it over the live query. */
+  setSearchScope: (scope: SearchScope): Intent => ({ set_search_scope: { scope } }),
 };
 
 /**

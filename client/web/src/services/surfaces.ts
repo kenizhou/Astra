@@ -83,6 +83,29 @@ export interface MessageRowView {
   thread_count?: number;
 }
 
+/** What a search covers, crossing as a snake_case word. */
+export type SearchScope = 'all_except_trash' | 'current_folder' | 'current_account';
+
+/**
+ * The mailbox list's search state, present exactly while a search runs: what
+ * was asked for, what it covered, and what it found. The rows are the same
+ * shape the list uses, because a search is a mode over the list, not a second
+ * kind of list: whatever grouping the list is in, the results follow it.
+ */
+export interface SearchState {
+  /** The query exactly as the user typed it, prefixes and all: the echo the
+   * field shows, not the split the search ran with. */
+  query: string;
+  /** The scope the search ran under, echoed so a surface draws the filter the
+   * results actually honour. */
+  scope: SearchScope;
+  /** The results, newest first, grouped exactly as the mailbox list groups. */
+  rows: MessageRowView[];
+  /** How far back the search looked, in whole months: the narrowest sync
+   * depth among the accounts the scope covered. */
+  depth_months: number;
+}
+
 /** The mailbox-list snapshot the panes render after every pull. */
 export interface MailboxListSnapshot {
   /** Every account's sorted folder list, one entry per configured account. */
@@ -95,6 +118,8 @@ export interface MailboxListSnapshot {
   visible_limit?: number;
   /** The mode the rows are grouped in; absent when flat, the default. */
   view_mode?: ViewMode;
+  /** The search state; absent at rest, while no search is running. */
+  search?: SearchState;
 }
 
 /** One account's position between sync passes, crossing as a snake_case word. */
