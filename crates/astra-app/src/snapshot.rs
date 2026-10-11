@@ -62,15 +62,24 @@ impl<P: Provider> App<P> {
         let handles = self.account_handles().await;
         let ids: Vec<AccountId> = handles.iter().map(|account| account.id.clone()).collect();
         let limit = self.visible_limit();
-        // One read of the scope and the mode: the folder and the grouping it is drawn
-        // in are one value each, so a snapshot can never pair one account's folder with
-        // another's grouping.
+        // One read of the scope, the mode, and the search session: the folder,
+        // the grouping, and the query are each one value, so a snapshot can
+        // never pair one account's folder with another's grouping or a stale
+        // query.
         let scope = self.scope.lock().expect("scope mutex poisoned").clone();
         let mode = self.view_mode();
+        let session = self.search_session();
 
-        let mut snapshot = self
-            .mailbox_snapshot(&handles, &ids, &scope, mode, limit)
-            .await;
+        let mut snapshot = match &session.query {
+            Some(query) => {
+                self.search_snapshot(query, session.scope, &scope, mode, &handles, limit)
+                    .await
+            }
+            None => {
+                self.mailbox_snapshot(&handles, &ids, &scope, mode, limit)
+                    .await
+            }
+        };
         self.restamp_expansion(&mut snapshot);
         let accounts = snapshot.account_folders.len();
         let rows = snapshot.rows.len();
@@ -102,26 +111,7 @@ impl<P: Provider> App<P> {
         limit: usize,
     ) -> MailboxListSnapshot {
         let trees = self.load_rows(ids).await;
-        let mut account_folders = Vec::with_capacity(handles.len());
-        // How many rows the window still holds, spent account by account in pane
-        // order: the first accounts fill the page and the later ones wait for a
-        // ShowMore, which is the same contract the merged message list follows.
-        let mut budget = limit;
-        for (account, tree) in handles.iter().zip(trees.iter()) {
-            let mut folders = sorted_folder_rows(tree);
-            if folders.len() > budget {
-                folders.truncate(budget);
-            }
-            budget = budget.saturating_sub(folders.len());
-            account_folders.push(AccountFolderRow {
-                account_id: account.id.clone(),
-                display_name: account.identity.email.clone(),
-                // Open until the publisher stamps the persisted state over it; see
-                // `AccountFolderRow::expanded`.
-                expanded: true,
-                folders,
-            });
-        }
+        let account_folders = account_folder_rows(handles, &trees, limit);
         // The list fields stay at rest outside a folder view: a whole-account or
         // unified list is a later slice, and a snapshot built for the pane alone crosses
         // with exactly the shape it always had.
@@ -294,7 +284,7 @@ impl<P: Provider> App<P> {
     /// (an account added or removed) reloads.
     /// [`invalidate_list_cache`](Self::invalidate_list_cache) drops it after a sync so
     /// it never serves stale rows.
-    async fn load_rows(&self, accounts: &[AccountId]) -> Arc<Vec<Arc<Vec<Mailbox>>>> {
+    pub(crate) async fn load_rows(&self, accounts: &[AccountId]) -> Arc<Vec<Arc<Vec<Mailbox>>>> {
         if let Some(cached) = self
             .row_cache
             .lock()
@@ -433,4 +423,34 @@ impl<P: Provider> App<P> {
             Scope::AllInboxes | Scope::Account(_) => None,
         }
     }
+}
+
+/// The pane's account rows: every account's tree in pane order, the window's
+/// budget spent account by account so the first accounts fill the page and the
+/// later ones wait for a ShowMore, the same contract the merged message list
+/// follows. The folder view and the search view draw the same pane, so both
+/// project through here.
+pub(crate) fn account_folder_rows<P>(
+    handles: &[Arc<Account<P>>],
+    trees: &[Arc<Vec<Mailbox>>],
+    limit: usize,
+) -> Vec<AccountFolderRow> {
+    let mut account_folders = Vec::with_capacity(handles.len());
+    let mut budget = limit;
+    for (account, tree) in handles.iter().zip(trees.iter()) {
+        let mut folders = sorted_folder_rows(tree);
+        if folders.len() > budget {
+            folders.truncate(budget);
+        }
+        budget = budget.saturating_sub(folders.len());
+        account_folders.push(AccountFolderRow {
+            account_id: account.id.clone(),
+            display_name: account.identity.email.clone(),
+            // Open until the publisher stamps the persisted state over it; see
+            // `AccountFolderRow::expanded`.
+            expanded: true,
+            folders,
+        });
+    }
+    account_folders
 }

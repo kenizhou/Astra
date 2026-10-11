@@ -86,9 +86,13 @@ pub(crate) fn threaded(mut message: Message, thread: &str) -> Message {
 /// The message-row keys a snapshot lists, in display order; the shape every list
 /// assertion reads before it looks at any row's fields.
 pub(crate) fn row_keys(snapshot: &astra_viewmodel::MailboxListSnapshot) -> Vec<String> {
-    snapshot
-        .rows
-        .iter()
+    row_keys_from(&snapshot.rows)
+}
+
+/// The row keys of any list of message rows, in display order; the search
+/// state's rows read the same way the folder rows do.
+pub(crate) fn row_keys_from(rows: &[astra_viewmodel::MessageRowView]) -> Vec<String> {
+    rows.iter()
         .map(|row| match &row.key {
             astra_viewmodel::RowKey::Message { key, .. } => key.as_str().to_owned(),
             astra_viewmodel::RowKey::Thread { thread_id, .. } => thread_id.as_str().to_owned(),
@@ -128,6 +132,14 @@ pub(crate) fn sending_signals(surfaces: &Arc<Mutex<Vec<crate::Surface>>>) -> usi
 pub(crate) fn sent() -> engine_api::Mailbox {
     let mut mailbox = engine_api::Mailbox::new(MailboxId::try_from("sent").unwrap(), "Sent");
     mailbox.role = Some(engine_api::MailboxRole::Sent);
+    mailbox
+}
+
+/// The role-bearing Trash folder, so a scope fixture's default search has a
+/// deleted copy to exclude and a narrowed one to find.
+pub(crate) fn trash() -> engine_api::Mailbox {
+    let mut mailbox = engine_api::Mailbox::new(MailboxId::try_from("trash").unwrap(), "Trash");
+    mailbox.role = Some(engine_api::MailboxRole::Trash);
     mailbox
 }
 

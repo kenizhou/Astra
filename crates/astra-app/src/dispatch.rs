@@ -153,7 +153,29 @@ impl<P: Provider> App<P> {
             Intent::Drafts(change) => {
                 self.dispatch_drafts(change).await;
             }
-            Intent::Search { .. } | Intent::SetSearchScope { .. } => return Err(AppError::NotYet),
+            // The search family: a query is a mode over the list, not a
+            // destination. A blank field clears just as an explicit None does,
+            // because empty is navigation, not a search for nothing; clearing
+            // also drops the scope, so the next search opens across everything
+            // rather than silently inheriting a narrowing the user cannot see.
+            Intent::Search { query } => {
+                let query = query.filter(|query| !query.trim().is_empty());
+                self.set_search(query);
+                self.reset_window();
+                self.bump_generation();
+                self.rebuild_snapshot().await;
+            }
+            // Narrowing re-runs the live query rather than filtering the
+            // published rows, so the depth the state reports stays honest too.
+            // Without a live query there is nothing to re-run and nothing
+            // stored.
+            Intent::SetSearchScope { scope } => {
+                if self.narrow_search(scope) {
+                    self.reset_window();
+                    self.bump_generation();
+                    self.rebuild_snapshot().await;
+                }
+            }
         }
         Ok(())
     }
