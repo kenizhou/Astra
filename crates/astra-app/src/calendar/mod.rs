@@ -368,52 +368,55 @@ impl<P: Provider> App<P> {
 
     /// Widens the store's expansion horizon to cover the current window when
     /// it has escaped the watermark, in one coarse chunk per widening.
-    ///
-    /// The watermark rolls back to whatever stood before (nothing included) if
-    /// the expansion refuses (a concurrent sync holds the scope), because a
-    /// watermark the store never expanded to would make a later window inside
-    /// it skip its own expansion and render confidently empty, which is the
-    /// exact failure the watermark exists to prevent: re-syncing cannot repair
-    /// it, for a delta with no changes derives no occurrences.
     async fn ensure_horizon(&self) {
+        let window = self.calendar_inputs().window;
+        self.widen_horizon_to(window).await;
+    }
+
+    /// Widens every account's expansion horizon to cover `span` when it has
+    /// escaped the watermark, in one coarse chunk per widening, and reports
+    /// whether every store now covers it.
+    ///
+    /// The watermark is shared across accounts, so one widening expands every
+    /// account's store: a span the watermark claims but one store never
+    /// expanded to would make that account's later window inside it skip its
+    /// own expansion and render confidently empty. The watermark rolls back
+    /// to whatever stood before (nothing included) when any account's
+    /// expansion refuses (a concurrent sync holds the scope), which is the
+    /// exact failure the watermark exists to prevent: re-syncing cannot
+    /// repair it, for a delta with no changes derives no occurrences. The
+    /// stores an expansion already covered stay covered; an occurrence read
+    /// is windowed, so a store wider than the watermark costs nothing.
+    async fn widen_horizon_to(&self, span: Horizon) -> bool {
         let (want, previous) = {
             let mut state = self.calendar_state.lock().expect("calendar mutex poisoned");
-            let window = state.window.unwrap_or_else(|| {
-                let now = now_utc()
-                    .unwrap_or_else(|| UtcDateTime::new(2026, 1, 1, 0, 0, 0).expect("instant"));
-                default_window(now)
-            });
-            let chunk = core::time::Duration::from_secs(HORIZON_CHUNK_DAYS * 86_400);
-            let (start, end) = (
-                window.start,
-                window
-                    .horizon()
-                    .end()
-                    .checked_add(chunk)
-                    .unwrap_or_else(|| window.horizon().end()),
-            );
+            let end = span
+                .end()
+                .checked_add(core::time::Duration::from_secs(HORIZON_CHUNK_DAYS * 86_400))
+                .unwrap_or_else(|| span.end());
             let widened = match state.horizon {
-                Some((low, high)) if low <= start && end <= high => return,
-                Some((low, high)) => (low.min(start), high.max(end)),
-                None => (start, end),
+                Some((low, high)) if low <= span.start() && end <= high => return true,
+                Some((low, high)) => (low.min(span.start()), high.max(end)),
+                None => (span.start(), end),
             };
             (widened, state.horizon.replace(widened))
         };
         let horizon = Horizon::new(want.0, want.1).expect("a widened horizon is never empty");
         let zone = self.calendar_inputs().zone;
-        let mut any_failed = false;
+        let mut widened = true;
         for handle in self.account_handles().await {
             if let Err(err) = self.engine.expand_horizon(&handle.id, horizon, &zone).await {
-                any_failed = true;
+                widened = false;
                 log::warn!("calendar: the horizon could not be widened for one account: {err}");
             }
         }
-        if any_failed {
+        if !widened {
             self.calendar_state
                 .lock()
                 .expect("calendar mutex poisoned")
                 .horizon = previous;
         }
+        widened
     }
 
     /// The horizon a refresh's sync covers: the full watermark when one stands

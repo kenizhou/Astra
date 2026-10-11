@@ -172,8 +172,8 @@ export const intents = {
   // The submit and the outbox family, in the enum's own order between the
   // compose family and the drafts.
   ...sendingIntents,
-  // The calendar family, in the enum's own order between the drafts and
-  // the search.
+  // The calendar family, appended after the search verbs in the enum's own
+  // order.
   ...calendarIntents,
   /** Store the composer's current content in the account's Drafts folder. */
   saveDraft: (draft: DraftSave): Intent => ({

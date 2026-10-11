@@ -115,6 +115,9 @@ impl Provider for CalendarFake {
         _account: &AccountId,
         _cursor: Option<&SyncState>,
     ) -> ProviderResult<ScopeSync<Event>> {
+        if let Some(gate) = &self.event_gate {
+            gate.pass().await;
+        }
         {
             let mut left = self.fail_syncs.lock().unwrap();
             if *left > 0 {

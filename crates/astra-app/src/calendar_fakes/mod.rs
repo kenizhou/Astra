@@ -24,7 +24,10 @@ pub(crate) use fixtures::{
 
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
 };
 
 use engine_api::{
@@ -108,6 +111,60 @@ pub(crate) struct CalendarFake {
     pub puts: Arc<Mutex<Vec<EventWrite>>>,
     /// Every submitted message, in order (the iMIP reply rides here).
     pub submits: Arc<Mutex<Vec<Draft>>>,
+    /// While `Some` and closed, every event pass waits inside the fake, so a
+    /// test keeps the account's event scope leased: the `Busy` an expansion
+    /// or a second sync of that account then answers.
+    pub event_gate: Option<Arc<EventGate>>,
+}
+
+/// Holds the fake's event pass inside `sync_events` while closed: the
+/// account's event scope lease stays claimed, which is the scope contention
+/// whose `Busy` a widening must roll back from.
+pub(crate) struct EventGate {
+    /// Whether passes wait.
+    closed: AtomicBool,
+    /// Signalled when one pass has entered its wait, so the holder knows the
+    /// scope lease is claimed.
+    entered: tokio::sync::Notify,
+    /// Signalled to let a held pass through.
+    open: tokio::sync::Notify,
+}
+
+impl EventGate {
+    /// A gate that stands open: passes run through untouched.
+    pub(crate) fn new() -> Arc<Self> {
+        Arc::new(Self {
+            closed: AtomicBool::new(false),
+            entered: tokio::sync::Notify::new(),
+            open: tokio::sync::Notify::new(),
+        })
+    }
+
+    /// Closes the gate: event passes from now on hold inside the fake.
+    pub(crate) fn close(&self) {
+        self.closed.store(true, Ordering::SeqCst);
+    }
+
+    /// Waits until one event pass holds, so the account's scope is leased.
+    pub(crate) async fn until_held(&self) {
+        self.entered.notified().await;
+    }
+
+    /// Lets a held pass through and leaves the gate open again.
+    pub(crate) fn release(&self) {
+        self.closed.store(false, Ordering::SeqCst);
+        self.open.notify_one();
+    }
+
+    /// What one event pass runs: through untouched while open, a signalled
+    /// wait while closed.
+    async fn pass(&self) {
+        if !self.closed.load(Ordering::SeqCst) {
+            return;
+        }
+        self.entered.notify_one();
+        self.open.notified().await;
+    }
 }
 
 /// The delete recorder's log: one `(base, deletion)` pair per recorded call,
@@ -139,6 +196,7 @@ impl CalendarFake {
             deletes: Arc::new(Mutex::new(Vec::new())),
             puts: Arc::new(Mutex::new(Vec::new())),
             submits: Arc::new(Mutex::new(Vec::new())),
+            event_gate: None,
         }
     }
 

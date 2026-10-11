@@ -41,8 +41,7 @@ impl<P: Provider> App<P> {
     ) -> Result<MeetingBriefView, BriefDocumentError> {
         let pass = self.ai.as_ref().ok_or(BriefDocumentError::NoBundle)?;
         let window = self.day_window(day)?;
-        self.ensure_day_horizon(account, window).await;
-        let subjects = self.invitation_subjects(account).await;
+        self.ensure_day_horizon(window).await?;
         let rows = self
             .engine
             .occurrences_in(account, window)
@@ -69,6 +68,7 @@ impl<P: Provider> App<P> {
             .map(|handle| handle.identity.email.as_str().to_owned())
             .unwrap_or_default();
         let mut meetings = Vec::new();
+        let mut uids = Vec::new();
         for row in rows {
             let Some(master) = masters.get(row.event.as_str()) else {
                 continue;
@@ -82,6 +82,7 @@ impl<P: Provider> App<P> {
             {
                 continue;
             }
+            uids.push(master.uid.as_str().to_owned());
             meetings.push(BriefMeeting {
                 title: master.title.clone(),
                 start: row.start,
@@ -90,8 +91,25 @@ impl<P: Provider> App<P> {
                 organizer: organizer_of(master),
                 attendees: attendees_of(master),
                 location: location_of(master),
-                invitation_subject: subjects.get(master.uid.as_str()).cloned(),
+                invitation_subject: None,
             });
+        }
+        if meetings.is_empty() {
+            log::debug!("calendar: {day} holds no meetings for {account}");
+            return Ok(MeetingBriefView {
+                account: account.clone(),
+                day,
+                state: MeetingBriefState::NoMeetings,
+                brief: String::new(),
+                meetings: Vec::new(),
+            });
+        }
+        // The invitation link is context, never a dependency: the scan is
+        // spent only now that a meeting survived the diary's rules, so an
+        // empty or all-declined day pays nothing for it.
+        let subjects = self.invitation_subjects(account).await;
+        for (meeting, uid) in meetings.iter_mut().zip(&uids) {
+            meeting.invitation_subject = subjects.get(uid).cloned();
         }
         let view = MeetingBriefView {
             account: account.clone(),
@@ -112,10 +130,6 @@ impl<P: Provider> App<P> {
                 })
                 .collect(),
         };
-        if meetings.is_empty() {
-            log::debug!("calendar: {day} holds no meetings for {account}");
-            return Ok(view);
-        }
         let correlation = astra_ai::CorrelationId::generate();
         let brief = generate_meeting_brief(
             account,
@@ -150,36 +164,20 @@ impl<P: Provider> App<P> {
         Horizon::new(start, end).map_err(|err| BriefDocumentError::Occurrence(err.to_string()))
     }
 
-    /// Widens the store's expansion horizon to cover the brief day when
-    /// it has escaped the watermark, in the same coarse chunk the
-    /// `SetRange` intent widens in, scoped to the one account. The
-    /// watermark rolls back when the expansion refuses, for the reason
-    /// the intent's own widening gives.
-    async fn ensure_day_horizon(&self, account: &engine_api::AccountId, window: Horizon) {
-        let chunk = core::time::Duration::from_secs(super::HORIZON_CHUNK_DAYS * 86_400);
-        let (want, previous) = {
-            let mut state = self.calendar_state.lock().expect("calendar mutex poisoned");
-            let end = window.end().checked_add(chunk).unwrap_or(window.end());
-            let widened = match state.horizon {
-                Some((low, high)) if low <= window.start() && end <= high => return,
-                Some((low, high)) => (low.min(window.start()), high.max(end)),
-                None => (window.start(), end),
-            };
-            (widened, state.horizon.replace(widened))
-        };
-        let horizon = Horizon::new(want.0, want.1).expect("a widened horizon is never empty");
-        let zone = self.calendar_inputs().zone;
-        if self
-            .engine
-            .expand_horizon(account, horizon, &zone)
-            .await
-            .is_err()
-        {
-            log::warn!("calendar: the brief day's horizon could not be widened");
-            self.calendar_state
-                .lock()
-                .expect("calendar mutex poisoned")
-                .horizon = previous;
+    /// Widens every account's expansion horizon to cover the brief day when
+    /// it has escaped the watermark, through the same widening discipline
+    /// the `SetRange` intent rides: the watermark is shared, so the widening
+    /// expands every account's store and rolls the watermark back when any
+    /// store refuses. A refused widening is a day the store cannot see: the
+    /// pull answers the read failure rather than brief a day nothing
+    /// materialized.
+    async fn ensure_day_horizon(&self, window: Horizon) -> Result<(), BriefDocumentError> {
+        if self.widen_horizon_to(window).await {
+            Ok(())
+        } else {
+            Err(BriefDocumentError::Occurrence(
+                "the day's horizon could not be widened".to_owned(),
+            ))
         }
     }
 

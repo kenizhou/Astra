@@ -83,15 +83,16 @@ fn planning_input() -> BriefMeeting {
     }
 }
 
-/// Boots the app over `fake` with the scripted completion installed as the
-/// AI pass, lands the mail (so the invitation lives in the store), and
-/// syncs the diary over the fixture fortnight.
-async fn briefed(
-    fake: CalendarFake,
+/// Boots the app over `accounts` with the scripted completion installed as
+/// the AI pass, lands the mail (so the invitation lives in the store), and
+/// syncs every diary over the fixture fortnight: the boot leaves the horizon
+/// watermark covering 18 October through 2 December.
+async fn diary_app(
+    accounts: Vec<crate::Account<CalendarFake>>,
     complete: FixtureComplete,
     surfaces: &Arc<Mutex<Vec<Surface>>>,
 ) -> crate::App<CalendarFake> {
-    let app = calendar_app(vec![account("work", fake)], surfaces).with_ai_pass(Some(AiPass::new(
+    let app = calendar_app(accounts, surfaces).with_ai_pass(Some(AiPass::new(
         Box::new(FixtureJudge::scripted(&[])),
         Box::new(complete),
         Arc::new(AiStore::open_in_memory().unwrap()),
@@ -108,6 +109,15 @@ async fn briefed(
         .await
         .unwrap();
     app
+}
+
+/// The single-account shape of [`diary_app`]: the work diary over `fake`.
+async fn briefed(
+    fake: CalendarFake,
+    complete: FixtureComplete,
+    surfaces: &Arc<Mutex<Vec<Surface>>>,
+) -> crate::App<CalendarFake> {
+    diary_app(vec![account("work", fake)], complete, surfaces).await
 }
 
 /// The two-event day every drive test briefs: the plain standup and the
@@ -390,3 +400,8 @@ async fn an_app_without_the_ai_bundle_refuses_the_brief() {
         .expect_err("no bundle, no generation");
     assert!(matches!(refusal, BriefDocumentError::NoBundle));
 }
+
+// The horizon widening tests run in their own file, under this module,
+// reusing its fixtures.
+#[path = "calendar_brief_horizon_tests.rs"]
+mod horizon_tests;

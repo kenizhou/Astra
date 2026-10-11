@@ -285,5 +285,5 @@ fn the_shared_web_fixture_parses_as_the_snapshot() {
     let back: CalendarSnapshot = serde_json::from_str(raw).expect("the fixture parses");
     let wire = serde_json::to_value(&back).expect("the snapshot serialises");
     let raw: serde_json::Value = serde_json::from_str(raw).expect("the fixture is JSON");
-    assert_eq!(wire, raw, "the fixture round trips byte for byte");
+    assert_eq!(wire, raw, "the fixture round trips value for value");
 }
