@@ -1,0 +1,46 @@
+{
+  "id": "meeting-brief-two-meetings",
+  "feature": "meeting-brief",
+  "mode": "offline",
+  "prompt_version": "1",
+  "inputs": {
+    "account": "work",
+    "day": "2026-10-19",
+    "meetings": [
+      {
+        "title": "Standup",
+        "start": "2026-10-19T07:00:00Z",
+        "end": "2026-10-19T07:30:00Z",
+        "all_day": false
+      },
+      {
+        "title": "Sprint planning",
+        "start": "2026-10-19T12:00:00Z",
+        "end": "2026-10-19T13:00:00Z",
+        "all_day": false,
+        "organizer": "Boss <boss@test.local>",
+        "attendees": ["Info <info@test.local>", "Ada <ada@example.test>"],
+        "location": "Room A",
+        "invitation_subject": "Sprint planning"
+      }
+    ],
+    "completion": "{\"brief\":\"The standup opens the day; the planning needs the room booking confirmed.\"}"
+  },
+  "expected": {
+    "contains": [
+      "The day is 2026-10-19",
+      "Title: Standup",
+      "Title: Sprint planning",
+      "From 2026-10-19T07:00:00Z to 2026-10-19T07:30:00Z:",
+      "Organiser: Boss <",
+      "Attendees: Info <",
+      "Location: Room A",
+      "Invitation subject: Sprint planning"
+    ],
+    "omits": ["boss@test.local", "ada@example.test"],
+    "outcome": {
+      "state": "generated",
+      "brief": "The standup opens the day; the planning needs the room booking confirmed."
+    }
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "calendars": [
+    {
+      "account": "work",
+      "id": "cal-1",
+      "name": "Work",
+      "color": "#039be5",
+      "visible": true,
+      "can_write": true,
+      "is_default": true
+    }
+  ],
+  "occurrences": [
+    {
+      "account": "work",
+      "event": "/dav/cal/work/default/evt-1.ics",
+      "calendar": "cal-1",
+      "title": "Standup",
+      "start": "2026-10-19T07:00:00Z",
+      "end": "2026-10-19T07:30:00Z",
+      "all_day": false,
+      "recurring": true,
+      "overridden": true,
+      "occurrence_start": "2026-10-19T09:00:00",
+      "accuracy": "zoned",
+      "participation": "tentative",
+      "can_move": false,
+      "series_edit_warns": true
+    }
+  ],
+  "write_states": [
+    {
+      "account": "work",
+      "state": "writing"
+    }
+  ],
+  "reply_prompts": [
+    {
+      "account": "work",
+      "message": "imap:v1:u7@INBOX",
+      "summary": "Sprint planning",
+      "organizer": "boss@example.test",
+      "response": "accepted",
+      "status_code": "5.2"
+    }
+  ],
+  "now_data": {
+    "now": "2026-10-19T08:12:00Z",
+    "zone": "Europe/Amsterdam"
+  }
+}

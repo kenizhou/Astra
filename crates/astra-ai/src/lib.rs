@@ -72,6 +72,8 @@ mod summarise_cache_tests;
 mod text_cache_tests;
 #[cfg(test)]
 mod tier_tests;
+#[cfg(test)]
+mod use_case_tests;
 
 pub use ai_documents::{AiDocumentKind, AiDocumentRow, NewAiDocument};
 pub use ai_results::{AiResultRow, NewAiResult};

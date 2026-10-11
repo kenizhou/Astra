@@ -32,6 +32,7 @@ const ipc = vi.hoisted(() => ({
   draftStatus: vi.fn(),
   composeRequest: vi.fn(),
   sending: vi.fn(),
+  calendar: vi.fn(),
   addAccount: vi.fn(),
   imapTestConnection: vi.fn(),
 }));
@@ -44,6 +45,7 @@ vi.mock('@/services/ai', () => ai);
 
 import { hydrate, mountSurfaceEvents } from './surfaceEvents';
 import { useAccountStore } from '@/stores/accountStore';
+import { useCalendarStore } from '@/features/calendar/calendarStore';
 import { useComposeRequestStore } from '@/stores/composeRequestStore';
 import { useDraftStore } from '@/stores/draftStore';
 import { useFolderStore } from '@/stores/folderStore';
@@ -101,6 +103,15 @@ function resetStores() {
   useDraftStore.setState({ snapshot: null });
   useComposeRequestStore.setState({ snapshot: null });
   useSendingStore.setState({ snapshot: { rows: [] } });
+  useCalendarStore.setState({
+    calendars: [],
+    occurrences: [],
+    writeStates: [],
+    replyPrompts: [],
+    nowData: null,
+    view: 'month',
+    anchor: null,
+  });
   useSplitStore.setState({ entries: {}, filter: 'all' });
 }
 
@@ -119,6 +130,8 @@ beforeEach(() => {
   ipc.composeRequest.mockResolvedValue(null);
   ipc.sending.mockReset();
   ipc.sending.mockResolvedValue({ rows: [] });
+  ipc.calendar.mockReset();
+  ipc.calendar.mockResolvedValue({});
   resetStores();
 });
 
@@ -342,6 +355,31 @@ describe('the surface_changed listener', () => {
     await vi.waitFor(() => expect(useSendingStore.getState().snapshot.rows).toHaveLength(0));
   });
 
+  it('a calendar change pulls the snapshot into the calendar store', async () => {
+    ipc.calendar.mockResolvedValue({
+      calendars: [
+        {
+          account: 'work',
+          id: 'cal-1',
+          name: 'Work',
+          visible: true,
+          can_write: true,
+          is_default: true,
+        },
+      ],
+      occurrences: [],
+      now_data: { now: '2026-10-19T22:30:00Z', zone: 'Europe/Amsterdam' },
+    });
+    mountSurfaceEvents();
+    await vi.waitFor(() => expect(wire.handlers).toHaveLength(1));
+
+    emit('calendar');
+
+    await vi.waitFor(() => expect(useCalendarStore.getState().calendars).toHaveLength(1));
+    expect(useCalendarStore.getState().anchor).toBe('2026-10-20');
+    expect(ipc.mailboxList).not.toHaveBeenCalled();
+  });
+
   it('an unknown surface name is ignored without a pull', async () => {
     mountSurfaceEvents();
     await vi.waitFor(() => expect(wire.handlers).toHaveLength(1));
@@ -369,6 +407,7 @@ describe('hydration', () => {
   it('pulls every surface, marks the engine running, and opens setup when there is no account', async () => {
     ipc.mailboxList.mockResolvedValue({ account_folders: [] });
     ipc.syncProgress.mockResolvedValue({ accounts: [] });
+    ipc.calendar.mockResolvedValue({});
 
     await hydrate();
 
@@ -378,10 +417,12 @@ describe('hydration', () => {
     expect(ipc.draftStatus).toHaveBeenCalledTimes(1);
     expect(ipc.composeRequest).toHaveBeenCalledTimes(1);
     expect(ipc.sending).toHaveBeenCalledTimes(1);
+    expect(ipc.calendar).toHaveBeenCalledTimes(1);
     expect(useReadingStore.getState().snapshot).toBeNull();
     expect(useDraftStore.getState().snapshot).toBeNull();
     expect(useComposeRequestStore.getState().snapshot).toBeNull();
     expect(useSendingStore.getState().snapshot.rows).toHaveLength(0);
+    expect(useCalendarStore.getState().calendars).toEqual([]);
     expect(useUiStore.getState().engineState).toBe('running');
     expect(useUiStore.getState().accountSetupOpen).toBe(true);
   });

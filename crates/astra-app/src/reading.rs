@@ -15,10 +15,11 @@
 //! message carries no body at all.
 
 use astra_ai::CorrelationId;
-use astra_viewmodel::{AttachmentRow, MessageKey, ReadingSnapshot};
-use engine_api::{Engine, Message, MessageAttachment, Provider, SystemKeyword};
+use astra_viewmodel::{AttachmentRow, InvitationBlock, MessageKey, Participation, ReadingSnapshot};
+use engine_api::{addresses_match, Engine, Message, MessageAttachment, Provider, SystemKeyword};
 
 use crate::{
+    calendar::{classify, matched_attendee, supersede, InvitationKind},
     list_rows::format_instant,
     reference::{MessageRef, RowRef},
     sanitise, App,
@@ -143,16 +144,108 @@ impl<P: Provider> App<P> {
 
     /// Renders `message` through this app's engine and its account's first
     /// provider; `None` when the account is gone, holds no provider, or the
-    /// message does not resolve.
+    /// message does not resolve. A message the calendar recognises as an
+    /// invitation carries its block beside the body, decided on the same
+    /// resolution the render already made rather than a second one.
     async fn render_open(&self, message: &MessageRef) -> Option<ReadingSnapshot> {
         let handle = self.account_handle(&message.account).await?;
         let provider = handle.providers.first()?;
-        render_reading(&self.engine, provider, message).await
+        let (mut snapshot, original) = render_reading(&self.engine, provider, message).await?;
+        snapshot.invitation = self.reading_invitation(provider, message, &original).await;
+        Some(snapshot)
+    }
+
+    /// The open message's invitation block: the same two-condition gate the
+    /// answer path decides through, the stored copy the deposit leg keys on,
+    /// and the participation that copy holds for the attendee the invitation
+    /// matched. `None` when the message carries no scheduling part or the
+    /// method produces no card at all.
+    async fn reading_invitation(
+        &self,
+        provider: &P,
+        message: &MessageRef,
+        original: &Message,
+    ) -> Option<InvitationBlock> {
+        let scheduling = self
+            .engine
+            .message_scheduling(provider, &message.account, original)
+            .await
+            .ok()
+            .flatten()?;
+        let attendee = matched_attendee(&scheduling);
+        let gate = classify(&scheduling.message.method, attendee.is_some())?;
+        let event = &scheduling.message.event;
+        let stored = self.stored_event_by_uid(&message.account, event).await;
+        let stale = stored
+            .as_ref()
+            .is_some_and(|stored| stored.sequence > event.sequence);
+        Some(InvitationBlock {
+            kind: match supersede(gate, event.sequence, stored.as_ref()) {
+                InvitationKind::Rsvp => astra_viewmodel::InvitationKind::Rsvp,
+                InvitationKind::Cancelled => astra_viewmodel::InvitationKind::Cancelled,
+                InvitationKind::Informational => astra_viewmodel::InvitationKind::Informational,
+                // The downgrade and the stale flag agree by construction: both
+                // read the same stored `SEQUENCE`.
+                InvitationKind::Superseded => astra_viewmodel::InvitationKind::Superseded,
+            },
+            response: stored
+                .as_ref()
+                .map_or(Participation::NeedsAction, |stored| {
+                    stored_participation(stored, attendee.as_deref())
+                }),
+            stale,
+            summary: event.title.clone(),
+            organizer: organizer_of(event),
+        })
     }
 }
 
+/// This account's answer as the stored copy holds it, read off the attendee
+/// line the invitation itself matched (an alias, not necessarily the
+/// account's primary). The unanswered hold when no line of ours is on the
+/// stored event, the same default RFC 5545 gives an `ATTENDEE` with no
+/// `PARTSTAT`.
+fn stored_participation(stored: &engine_api::Event, attendee: Option<&str>) -> Participation {
+    let Some(attendee) = attendee else {
+        return Participation::NeedsAction;
+    };
+    stored
+        .participants
+        .iter()
+        .find(|participant| {
+            participant
+                .email
+                .as_deref()
+                .is_some_and(|address| addresses_match(address, attendee))
+        })
+        .map_or(Participation::NeedsAction, |participant| {
+            match participant.participation_status.as_str() {
+                "accepted" => Participation::Accepted,
+                "declined" => Participation::Declined,
+                "tentative" => Participation::Tentative,
+                "delegated" => Participation::Delegated,
+                // An unknown or vendor status is the honest hold: the card
+                // offers the answer rather than claiming one was given.
+                _ => Participation::NeedsAction,
+            }
+        })
+}
+
+/// The organiser's address, the participant holding the owner role: who an
+/// answer reaches. Empty when the invitation names none.
+fn organizer_of(event: &engine_api::Event) -> String {
+    event
+        .participants
+        .iter()
+        .find(|participant| participant.has_role(&engine_api::ParticipantRole::Owner))
+        .and_then(|participant| participant.email.clone())
+        .unwrap_or_default()
+}
+
 /// Renders `message` (its account and provider key bound together) into the
-/// reading snapshot: resolve it in the store, fetch the body through the
+/// reading snapshot beside the stored message it was resolved to, so a caller
+/// with more to read off the original (the invitation pass) does not resolve
+/// it a second time: resolve it in the store, fetch the body through the
 /// engine's cache-first reads, sanitise the HTML and resolve its inline `cid:`
 /// images into `data:` URIs, gate every remote reference behind placeholders,
 /// and list the attachment metadata. `None` when the message is not in the
@@ -164,7 +257,7 @@ pub(crate) async fn render_reading<P: Provider>(
     engine: &Engine,
     provider: &P,
     message: &MessageRef,
-) -> Option<ReadingSnapshot> {
+) -> Option<(ReadingSnapshot, Message)> {
     let original = resolve(engine, message).await?;
     let body = engine
         .message_body(provider, &message.account, &original)
@@ -230,7 +323,9 @@ pub(crate) async fn render_reading<P: Provider>(
         plain: body.plain().map(str::to_owned),
         attachments,
         remote_image_count,
+        invitation: None,
     })
+    .map(|snapshot| (snapshot, original))
 }
 
 /// Resolves `message` to its stored [`Message`], the read every body fetch is
@@ -279,3 +374,9 @@ fn attachment_row(attachment: &MessageAttachment) -> AttachmentRow {
 #[cfg(test)]
 #[path = "reading_tests.rs"]
 mod tests;
+
+// The invitation block's tests, split from the pipeline's own so each file
+// stays under the line cap.
+#[cfg(test)]
+#[path = "reading_invitation_tests.rs"]
+mod invitation_tests;

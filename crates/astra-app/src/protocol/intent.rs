@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::reference::{FolderRef, MessageRef, RowRef};
 
-use super::{ComposeIntent, ComposerBlob, DraftsIntent, OutboxIntent};
+use super::{CalendarIntent, ComposeIntent, ComposerBlob, DraftsIntent, OutboxIntent};
 
 /// How the mailbox list is grouped.
 ///
@@ -242,4 +242,8 @@ pub enum Intent {
         /// The scope to narrow the search to.
         scope: SearchScope,
     },
+    /// A change to the calendar view or a calendar write
+    /// ([`CalendarIntent`]): the window, the visible calendars, the event
+    /// create, edit, move, and delete verbs, and the invitation answer.
+    Calendar(CalendarIntent),
 }

@@ -23,8 +23,8 @@ use std::{
 
 use astra_app::{Chip, ComposeIntent, DraftResume, DraftsIntent, Intent, OutboxIntent};
 use astra_viewmodel::{
-    ComposeKind, ComposeRequestSnapshot, DraftSaveState, DraftStatusSnapshot, MailboxListSnapshot,
-    ReadingSnapshot, SendingSnapshot, SyncProgressSnapshot,
+    CalendarSnapshot, ComposeKind, ComposeRequestSnapshot, DraftSaveState, DraftStatusSnapshot,
+    MailboxListSnapshot, ReadingSnapshot, SendingSnapshot, SyncProgressSnapshot,
 };
 
 use crate::{
@@ -35,7 +35,7 @@ use crate::{
 
 pub(crate) use snapshots::{compose_prefill, open_snapshot};
 
-pub(crate) use port::{AssistSeeds, DocsSeeds};
+pub(crate) use port::{AssistSeeds, BriefSeeds, DocsSeeds};
 
 /// A scratch directory for one test's account index.
 fn scratch(name: &str) -> PathBuf {
@@ -111,6 +111,11 @@ pub(crate) struct FakeApp {
     /// The A4 documents pulls' seeds and their record, under the same
     /// one-struct-one-lock discipline.
     pub(crate) docs: Mutex<DocsSeeds>,
+    /// The calendar snapshot the pull answers with.
+    pub(crate) calendar: Mutex<CalendarSnapshot>,
+    /// The calendar brief pull's seeds and their record, under the same
+    /// one-struct-one-lock discipline.
+    pub(crate) brief: Mutex<BriefSeeds>,
 }
 
 impl FakeApp {
@@ -148,6 +153,8 @@ impl FakeApp {
             drafted_into: Mutex::new(Vec::new()),
             assist: Mutex::new(AssistSeeds::default()),
             docs: Mutex::new(DocsSeeds::default()),
+            calendar: Mutex::new(CalendarSnapshot::default()),
+            brief: Mutex::new(BriefSeeds::default()),
         })
     }
 

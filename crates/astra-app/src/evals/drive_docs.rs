@@ -17,6 +17,7 @@ use crate::ai_docs::{
     ReportError, StoredCategories,
 };
 use crate::ai_rules::AiComplete;
+use crate::{generate_meeting_brief, meeting_brief_prompt, BriefMeeting, MeetingBriefError};
 
 use super::drive::{expect, str_field, strings_field};
 use super::Scenario;
@@ -119,6 +120,56 @@ pub(super) fn split_scenario(scenario: &Scenario) -> Result<(), String> {
     expect(&scenario.expected, &json!({ "map": map }))
 }
 
+/// The meeting brief scenario: the fixture's day and meetings through the
+/// generation seam over the canned completion, the parsed brief compared
+/// beside the state word, with the prompt the service builds pinned
+/// first, deterministically through the same builder: the day line, the
+/// meetings' own facts, and the addresses the redactor must have masked.
+/// An empty day carries no completion at all: the strict offline script
+/// panics if the no-meetings path spends a call.
+pub(super) async fn meeting_brief_scenario(
+    scenario: &Scenario,
+    complete: &dyn AiComplete,
+    correlation: &CorrelationId,
+) -> Result<(), String> {
+    let account = account_field(&scenario.inputs)?;
+    let day = day_field(&scenario.inputs)?;
+    let meetings = brief_meetings_field(&scenario.inputs)?;
+    let prompt = meeting_brief_prompt(day, &meetings);
+    for needle in optional_strings(&scenario.expected, "contains")? {
+        if !prompt.contains(&needle) {
+            return Err(format!("the prompt dropped {needle:?}:\n{prompt}"));
+        }
+    }
+    for needle in optional_strings(&scenario.expected, "omits")? {
+        if prompt.contains(&needle) {
+            return Err(format!(
+                "the prompt rode {needle:?} past the redactor:\n{prompt}"
+            ));
+        }
+    }
+    let actual = if meetings.is_empty() {
+        let brief = generate_meeting_brief(&account, day, &meetings, correlation, complete)
+            .await
+            .map_err(|err| err.to_string())?;
+        if !brief.is_empty() {
+            return Err("the empty day answered a brief".to_owned());
+        }
+        json!({ "state": "no_meetings" })
+    } else {
+        match generate_meeting_brief(&account, day, &meetings, correlation, complete).await {
+            Ok(brief) => json!({ "state": "generated", "brief": brief }),
+            Err(err) => json!({ "error": brief_error_word(&err) }),
+        }
+    };
+    let expected = scenario
+        .expected
+        .get("outcome")
+        .cloned()
+        .ok_or_else(|| "carries no outcome object".to_owned())?;
+    expect(&expected, &actual)
+}
+
 /// The window's account, from the `account` field.
 fn account_field(inputs: &serde_json::Value) -> Result<AccountId, String> {
     AccountId::try_from(str_field(inputs, "account")?.as_str()).map_err(|err| err.to_string())
@@ -195,4 +246,76 @@ fn stored_field(inputs: &serde_json::Value) -> Result<StoredCategories, String> 
             ))
         })
         .collect()
+}
+
+/// The brief's civil day, from the `day` field's date word.
+fn day_field(inputs: &serde_json::Value) -> Result<engine_api::CalendarDate, String> {
+    str_field(inputs, "day")?
+        .parse::<engine_api::CalendarDate>()
+        .map_err(|err| err.to_string())
+}
+
+/// An optional array-of-strings field: absent answers empty, a present
+/// member that is not a string is still a malformed fixture.
+fn optional_strings(value: &serde_json::Value, name: &str) -> Result<Vec<String>, String> {
+    match value.get(name) {
+        Some(_) => strings_field(value, name),
+        None => Ok(Vec::new()),
+    }
+}
+
+/// The day's meetings, in the fixture's own order: the objects of the
+/// `meetings` array, every optional field absent rather than null.
+fn brief_meetings_field(inputs: &serde_json::Value) -> Result<Vec<BriefMeeting>, String> {
+    let array = inputs
+        .get("meetings")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| "carries no meetings array".to_owned())?;
+    let instant =
+        |one: &serde_json::Value, name: &str| -> Result<engine_api::UtcDateTime, String> {
+            one.get(name)
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| format!("the meeting carries no {name} instant"))?
+                .parse::<engine_api::UtcDateTime>()
+                .map_err(|err| err.to_string())
+        };
+    array
+        .iter()
+        .map(|one| {
+            Ok(BriefMeeting {
+                title: str_field(one, "title")?,
+                start: instant(one, "start")?,
+                end: instant(one, "end")?,
+                all_day: one
+                    .get("all_day")
+                    .and_then(serde_json::Value::as_bool)
+                    .ok_or_else(|| "the meeting carries no all_day boolean".to_owned())?,
+                organizer: one
+                    .get("organizer")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned),
+                attendees: match one.get("attendees") {
+                    Some(_) => strings_field(one, "attendees")?,
+                    None => Vec::new(),
+                },
+                location: one
+                    .get("location")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned),
+                invitation_subject: one
+                    .get("invitation_subject")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned),
+            })
+        })
+        .collect()
+}
+
+/// The failure word for a meeting brief outcome the scenario expects to
+/// fail: the seam's completion error or the unparseable output.
+fn brief_error_word(error: &MeetingBriefError) -> &'static str {
+    match error {
+        MeetingBriefError::Completion(_) => "completion",
+        MeetingBriefError::MalformedOutput(_) => "malformed",
+    }
 }

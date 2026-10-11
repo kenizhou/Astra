@@ -96,6 +96,9 @@ pub async fn drive(
         Feature::Digest => drive_docs::digest_scenario(scenario, complete, &correlation).await,
         Feature::Report => drive_docs::report_scenario(scenario, complete, &correlation).await,
         Feature::Split => drive_docs::split_scenario(scenario),
+        Feature::MeetingBrief => {
+            drive_docs::meeting_brief_scenario(scenario, complete, &correlation).await
+        }
     }
 }
 

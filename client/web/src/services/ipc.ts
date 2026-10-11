@@ -17,6 +17,8 @@ import type {
 } from './composeRequest';
 import { sendingIntents } from './sending';
 import type { MailSubmission, OutboxIntent, SendingSnapshot } from './sending';
+import type { CalendarIntentBody, InvitationBlock } from './calendar';
+import { calendarIntents } from './calendar';
 import type { MailboxListSnapshot, RowKey, SearchScope, SyncProgressSnapshot, ViewMode } from './surfaces';
 
 // The composer document's whole type set, re-exported so this module stays the
@@ -31,6 +33,16 @@ export * from './composeRequest';
 // The sending half (the submit payload, the outbox family, and the queue's
 // snapshot types), under the same re-export and split out for the line cap.
 export * from './sending';
+
+// The account-setup half (the connection and credential vocabulary, the
+// setup form's fields, the detection recommendation views, and the three
+// commands the setup flow dials), under the same re-export and split.
+export * from './setup';
+
+// The calendar half (the snapshot mirror, the intent family's
+// constructors, the snapshot pull, and the meeting brief call), under the
+// same re-export and split.
+export * from './calendar';
 
 /** A folder bound to its owning account; unique only within the account. */
 export interface FolderRef {
@@ -114,6 +126,7 @@ export type Intent =
   | { submit_rich_forward: ForwardSubmission }
   | { outbox: OutboxIntent }
   | { drafts: DraftsIntent }
+  | { calendar: CalendarIntentBody }
   | { search: { query: string | null } }
   | { set_search_scope: { scope: SearchScope } };
 
@@ -159,6 +172,9 @@ export const intents = {
   // The submit and the outbox family, in the enum's own order between the
   // compose family and the drafts.
   ...sendingIntents,
+  // The calendar family, appended after the search verbs in the enum's own
+  // order.
+  ...calendarIntents,
   /** Store the composer's current content in the account's Drafts folder. */
   saveDraft: (draft: DraftSave): Intent => ({
     drafts: {
@@ -233,6 +249,12 @@ export interface ReadingSnapshot {
   attachments?: AttachmentRow[];
   /** How many remote references the sanitised HTML carries, all blocked. */
   remote_image_count: number;
+  /**
+   * What the open message means to this account's calendar, when it is a
+   * scheduling message the calendar recognises: the card a surface mounts
+   * above the body. Absent for every other message.
+   */
+  invitation?: InvitationBlock;
 }
 
 /** The state of a composition's most recent draft save. */
@@ -292,149 +314,6 @@ export interface DraftPoolLanded {
   key: string;
 }
 
-/** How a mail connection is secured, crossing as a snake_case word. */
-export type ConnectionSecurity = 'implicit_tls' | 'start_tls';
-
-/** What the account authenticates with: a typed password or a sign-in grant. */
-export type SetupCredential = { password: string } | 'grant';
-
-/** A server certificate accepted after being shown, scoped to one server. */
-export interface CertificateException {
-  server_name: string;
-  sha256: string;
-}
-
-/** The fields the setup form collects, as the host's test command reads them. */
-export interface AccountSetup {
-  imap_host: string;
-  username: string;
-  credential: SetupCredential;
-  smtp_host?: string;
-  caldav_base_url?: string;
-  imap_security: ConnectionSecurity;
-  smtp_security: ConnectionSecurity;
-  accepted_certificate?: CertificateException;
-}
-
-/** The record an added account returns. */
-export interface AddedAccount {
-  account_id: string;
-  email: string;
-}
-
-/** A server certificate that did not verify, as the setup flow shows it. */
-export interface RejectedCertificateView {
-  server_name: string;
-  sha256: string;
-  subject_common_name: string | null;
-  subject_organisation: string | null;
-  issuer_common_name: string | null;
-  issuer_organisation: string | null;
-  not_before: number | null;
-  not_after: number | null;
-}
-
-/** The verdict of one setup connection test, as the setup flow reads it. */
-export type ImapTestOutcome =
-  | { ok: { account_id: string } }
-  | { rejected_certificate: { certificate: RejectedCertificateView; reason: string } }
-  | { failed: { message: string } };
-
-/** Why detection routed to manual setup; crosses as a bare word. */
-export type MissReason = 'InvalidEmail' | 'NothingFound' | 'NetworkError' | 'OauthOnlyProvider';
-
-/** A detected server rendered for the confirmation card. */
-export interface ServerSummary {
-  protocol: string;
-  hostname: string;
-  port: number;
-  security: string;
-  username: string;
-}
-
-/** The JMAP route's prefilled form. */
-export interface JmapRecommendation {
-  email: string;
-  server_url: string;
-  is_trusted: boolean;
-  source: string;
-  caldav_url?: string;
-  carddav_url?: string;
-}
-
-/** The password form's prefilled IMAP/SMTP settings. */
-export interface ImapRecommendation {
-  email: string;
-  imap_host: string;
-  smtp_host?: string;
-  imap_security: ConnectionSecurity;
-  smtp_security: ConnectionSecurity;
-  incoming: ServerSummary;
-  outgoing?: ServerSummary;
-  caldav_url?: string;
-  carddav_url?: string;
-  oauth_issuer?: string;
-  is_trusted: boolean;
-  source: string;
-}
-
-/** The calendar-and-contacts-only route. */
-export interface DavRecommendation {
-  email: string;
-  caldav_url?: string;
-  carddav_url?: string;
-}
-
-/**
- * Where the email-first setup step routes, with everything the target form
- * needs prefilled. The variants cross externally tagged, names as declared on
- * the Rust side; optional fields are absent rather than null when unset.
- */
-export type SetupRecommendation =
-  | { Jmap: JmapRecommendation }
-  | { Imap: ImapRecommendation }
-  | { Microsoft: { email: string } }
-  | { Google: { email: string } }
-  | { Dav: DavRecommendation }
-  | { Manual: { reason: MissReason } };
-
-/** One use an account can be put to; crosses as a bare word. */
-export type Capability = 'Mail' | 'Calendar' | 'Contacts' | 'Colleagues';
-
-/** One use a setup route offers, as the wizard renders its toggles. */
-export interface SetupChoice {
-  capability: Capability;
-  on: boolean;
-  server_found: boolean;
-}
-
-/** The lookup strategy a detection result came from; crosses as a bare word. */
-export type SourceKind =
-  | 'JmapWellKnown'
-  | 'JmapSrv'
-  | 'Autoconfig'
-  | 'AutoconfigWellKnown'
-  | 'Ispdb'
-  | 'ImapSrv'
-  | 'MxAutoconfig'
-  | 'MxIspdb';
-
-/** What one detection run found, before routing. */
-export type DetectedOutcome = 'jmap' | 'mail' | 'dav' | { nothing: { network_error: boolean } };
-
-/** The summary line of a detection run: the outcome and the winning strategy. */
-export interface DetectedSummary {
-  outcome: DetectedOutcome;
-  source_kind: SourceKind | null;
-}
-
-/** The result of one detection run, as the setup flow reads it. */
-export interface RecommendationView {
-  recommendation: SetupRecommendation;
-  choices: SetupChoice[];
-  detected: DetectedSummary;
-}
-
 /** Dispatches one intent onto the app's runtime. */
 export function dispatch(intent: Intent): Promise<void> {
   return invoke('dispatch', { intent });
@@ -482,19 +361,4 @@ export function sending(): Promise<SendingSnapshot> {
  */
 export function composeRequest(): Promise<ComposeRequestSnapshot | null> {
   return invoke('compose_request');
-}
-
-/** Adds one account from its config TOML: dials, persists, first sync. */
-export function addAccount(configToml: string): Promise<AddedAccount> {
-  return invoke('add_account', { configToml });
-}
-
-/** Tests one setup's connection once, before anything is stored. */
-export function imapTestConnection(setup: AccountSetup): Promise<ImapTestOutcome> {
-  return invoke('imap_test_connection', { setup });
-}
-
-/** Detects the mail-server settings for one email, bounded to five seconds. */
-export function detectAccountSettings(email: string): Promise<RecommendationView> {
-  return invoke('detect_account_settings', { email });
 }

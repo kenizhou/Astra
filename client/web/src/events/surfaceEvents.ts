@@ -12,6 +12,7 @@ import { listen } from '@tauri-apps/api/event';
 
 import { splitMap } from '@/services/ai';
 import {
+  calendar,
   composeRequest,
   draftStatus,
   mailboxList,
@@ -20,6 +21,7 @@ import {
   syncProgress,
 } from '@/services/ipc';
 import { useAccountStore } from '@/stores/accountStore';
+import { useCalendarStore } from '@/features/calendar/calendarStore';
 import { useComposeRequestStore } from '@/stores/composeRequestStore';
 import { useDraftStore } from '@/stores/draftStore';
 import { useFolderStore } from '@/stores/folderStore';
@@ -37,7 +39,8 @@ export type Surface =
   | 'reading'
   | 'draft_status'
   | 'sending'
-  | 'compose_request';
+  | 'compose_request'
+  | 'calendar';
 
 /**
  * Tauri presence guard, evaluated at module load so jsdom tests that install
@@ -154,6 +157,11 @@ export function pullSurface(surface: Surface): Promise<void> {
       useSendingStore.getState().applySnapshot(snapshot);
     });
   }
+  if (surface === 'calendar') {
+    return calendar().then((snapshot) => {
+      useCalendarStore.getState().applySnapshot(snapshot);
+    });
+  }
   return syncProgress().then((snapshot) => {
     useUiStore.getState().applySyncProgress(snapshot);
   });
@@ -179,7 +187,8 @@ export function mountSurfaceEvents(): () => void {
         surface === 'reading' ||
         surface === 'draft_status' ||
         surface === 'sending' ||
-        surface === 'compose_request'
+        surface === 'compose_request' ||
+        surface === 'calendar'
       ) {
         void pullSurface(surface);
       }
@@ -215,6 +224,8 @@ export async function hydrate(): Promise<void> {
   useComposeRequestStore.getState().applySnapshot(pendingRequest);
   const queue = await sending();
   useSendingStore.getState().applySnapshot(queue);
+  const diary = await calendar();
+  useCalendarStore.getState().applySnapshot(diary);
   useUiStore.getState().markRunning();
   if (snapshot.account_folders.length === 0) {
     useUiStore.getState().setAccountSetupOpen(true);

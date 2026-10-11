@@ -91,6 +91,8 @@ pub fn run() {
             commands::ai_docs::report_generate,
             commands::ai_docs::latest_document,
             commands::ai_docs::split_map,
+            commands::calendar::calendar,
+            commands::calendar::calendar_brief_generate,
             commands::add_account,
             commands::imap_test_connection,
             commands::detect_account_settings,

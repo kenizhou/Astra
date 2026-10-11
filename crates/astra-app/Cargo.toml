@@ -57,6 +57,13 @@ astra-autodetect = { path = "../astra-autodetect" }
 engine-core.workspace = true
 # The same fake names the provider-side stream and error types.
 engine-provider.workspace = true
+# The calendar leg of the gated live harness suite: the real CalDAV adapter
+# the live calendar proofs sync and write through.
+provider-caldav.workspace = true
+# The relayed meeting-brief proof's transport, built over the engine's TLS
+# policy the same way the desktop host builds the background client.
+engine-tls.workspace = true
+reqwest.workspace = true
 serde_json.workspace = true
 # The test executor (`#[tokio::test]`); tests may build a runtime, the library may not.
 # test-util pauses the clock the autosave tests read.

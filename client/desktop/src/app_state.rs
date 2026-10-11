@@ -7,16 +7,16 @@ use std::sync::Arc;
 
 use astra_ai::{AiDocumentKind, KnowledgeId};
 use astra_app::{
-    Account, App, Chip, CompositionId, DigestView, DocumentError, DocumentView, DraftResume,
-    ExtractionSummary, Intent, KnowledgeView, Snippet, SplitEntry, SummariseMessageError,
-    TranslateLanguage,
+    Account, App, BriefDocumentError, Chip, CompositionId, DigestView, DocumentError, DocumentView,
+    DraftResume, ExtractionSummary, Intent, KnowledgeView, MeetingBriefView, Snippet, SplitEntry,
+    SummariseMessageError, TranslateLanguage,
 };
 use astra_viewmodel::{
-    ComposeRequestSnapshot, DraftStatusSnapshot, MailboxListSnapshot, ReadingSnapshot,
-    SendingSnapshot, SyncProgressSnapshot,
+    CalendarSnapshot, ComposeRequestSnapshot, DraftStatusSnapshot, MailboxListSnapshot,
+    ReadingSnapshot, SendingSnapshot, SyncProgressSnapshot,
 };
 use async_trait::async_trait;
-use engine_api::{AccountId, Provider, ProviderKey};
+use engine_api::{AccountId, CalendarDate, Provider, ProviderKey};
 
 use crate::{AccountCredentialStore, AccountDials, AppRuntime, LlmClient, SidecarRelay};
 
@@ -189,6 +189,24 @@ pub(crate) trait AppPort: Send + Sync {
     /// The account's split map over its stored categorisation: the
     /// pure derivation, no model call at all.
     async fn split_map(&self, account: &AccountId) -> Vec<SplitEntry>;
+
+    /// The published calendar snapshot, for the host's pull after a
+    /// calendar signal.
+    fn calendar(&self) -> CalendarSnapshot;
+
+    /// Generates the account's meeting brief over the civil day: the
+    /// store re-read of the day's occurrences and one generation, the
+    /// empty day answered as the no-meetings view with no call spent.
+    ///
+    /// # Errors
+    ///
+    /// Returns the core's own failure when no AI bundle runs, the day
+    /// cannot be read, or the generation fails.
+    async fn generate_meeting_brief(
+        &self,
+        account: &AccountId,
+        day: CalendarDate,
+    ) -> Result<MeetingBriefView, BriefDocumentError>;
 }
 
 #[async_trait]
@@ -316,6 +334,18 @@ impl AppPort for App<HostProvider> {
 
     async fn split_map(&self, account: &AccountId) -> Vec<SplitEntry> {
         App::split_map(self, account).await
+    }
+
+    fn calendar(&self) -> CalendarSnapshot {
+        App::calendar(self)
+    }
+
+    async fn generate_meeting_brief(
+        &self,
+        account: &AccountId,
+        day: CalendarDate,
+    ) -> Result<MeetingBriefView, BriefDocumentError> {
+        App::generate_meeting_brief(self, account, day).await
     }
 }
 

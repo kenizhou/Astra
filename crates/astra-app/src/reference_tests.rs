@@ -2,7 +2,7 @@
 //! Tests for the typed references: the single construction point validating the halves
 //! of each, and the wire form every reference crosses in.
 
-use super::{FolderRef, MessageRef, QueuedRef, RowRef, ThreadRef};
+use super::{CalendarRef, EventRef, FolderRef, MessageRef, QueuedRef, RowRef, ThreadRef};
 
 #[test]
 fn from_parts_needs_a_well_formed_account_half() {
@@ -86,6 +86,48 @@ fn a_folder_reference_crosses_as_its_two_halves() {
     assert_eq!(json, r#"{"account":"acct-1","key":"INBOX"}"#);
     let back: FolderRef = serde_json::from_str(&json).unwrap();
     assert_eq!(back, reference);
+}
+
+#[test]
+fn an_event_reference_needs_both_halves_well_formed() {
+    // A provider key is validated like the account, exactly as a message reference: a
+    // blank half never rides a calendar intent into the core.
+    let reference =
+        EventRef::from_parts("acct-1", "/dav/cal/acct-1/default/evt-1.ics".to_owned()).unwrap();
+    assert_eq!(reference.account.as_str(), "acct-1");
+    assert_eq!(reference.key.as_str(), "/dav/cal/acct-1/default/evt-1.ics");
+    assert!(EventRef::from_parts("", "/dav/evt-1.ics".to_owned()).is_none());
+    assert!(EventRef::from_parts("acct-1", String::new()).is_none());
+}
+
+#[test]
+fn a_calendar_reference_needs_both_halves_well_formed() {
+    // The calendar half routes the write (two accounts can each hold a calendar whose
+    // key is `default`), so it validates exactly as the event half does.
+    let reference = CalendarRef::from_parts("acct-1", "default".to_owned()).unwrap();
+    assert_eq!(reference.account.as_str(), "acct-1");
+    assert_eq!(reference.key.as_str(), "default");
+    assert!(CalendarRef::from_parts("", "default".to_owned()).is_none());
+    assert!(CalendarRef::from_parts("acct-1", String::new()).is_none());
+}
+
+#[test]
+fn an_event_and_a_calendar_reference_cross_as_their_two_halves() {
+    let event =
+        EventRef::from_parts("acct-1", "/dav/cal/acct-1/default/evt-1.ics".to_owned()).unwrap();
+    let json = serde_json::to_string(&event).unwrap();
+    assert_eq!(
+        json,
+        r#"{"account":"acct-1","key":"/dav/cal/acct-1/default/evt-1.ics"}"#
+    );
+    let back: EventRef = serde_json::from_str(&json).unwrap();
+    assert_eq!(back, event);
+
+    let calendar = CalendarRef::from_parts("acct-1", "default".to_owned()).unwrap();
+    let json = serde_json::to_string(&calendar).unwrap();
+    assert_eq!(json, r#"{"account":"acct-1","key":"default"}"#);
+    let back: CalendarRef = serde_json::from_str(&json).unwrap();
+    assert_eq!(back, calendar);
 }
 
 #[test]

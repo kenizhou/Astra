@@ -19,6 +19,7 @@ mod ai_replies;
 mod ai_results;
 mod ai_rules;
 mod boot;
+mod calendar;
 mod compose_request;
 mod dispatch;
 mod drafts;
@@ -53,6 +54,13 @@ mod tests_live_harness;
 // than its own.
 #[cfg(test)]
 mod dispatch_fakes;
+
+// The calendar slice's test fixtures: the calendar-and-mail provider the
+// calendar tests drive, at the crate root for the same reason. Each calendar
+// module's tests attach to the module itself, the house pattern.
+#[cfg(test)]
+#[path = "calendar_fakes/mod.rs"]
+mod calendar_fakes;
 
 // The eval harness: the scenario fixtures under the repository's evals/
 // directory, driven through the same seams the unit tests exercise. The
@@ -109,14 +117,20 @@ pub use ai_rules::{
     MATCH_CONTEXT_BODY_CAP, RULES_MATCH_VERSION, RULES_PROMPT_VERSION,
 };
 pub use boot::{boot, BootError, SpawnedTask};
+pub use calendar::{
+    generate_meeting_brief, meeting_brief_prompt, BriefDocumentError, BriefMeeting,
+    BriefMeetingRow, MeetingBriefError, MeetingBriefState, MeetingBriefView,
+    BRIEF_INVITATION_SCAN_LIMIT, MEETING_BRIEF_PROMPT_VERSION,
+};
 pub use dispatch::AppError;
 pub use drafts::{DraftResume, DRAFT_AUTOSAVE_IDLE};
 pub use preferences::{load_preferences, preferences_path, save_preferences, Preferences};
 pub use protocol::{
-    AppObserver, ComposeIntent, ComposerBlob, CompositionId, DraftsIntent, FolderIntent, Intent,
-    OutboxIntent, SearchScope, Surface, ViewMode,
+    AppObserver, CalendarIntent, ComposeIntent, ComposerBlob, CompositionId, DraftsIntent,
+    EventDrag, EventEdge, EventEdit, FolderIntent, Intent, OutboxIntent, RecurrenceChange,
+    RepeatEnd, RepeatRule, RsvpAnswer, SearchScope, Surface, ViewMode,
 };
-pub use reference::{FolderRef, MessageRef, QueuedRef, RowRef, ThreadRef};
+pub use reference::{CalendarRef, EventRef, FolderRef, MessageRef, QueuedRef, RowRef, ThreadRef};
 pub use surfaced::Surfaced;
 
 /// The app runtime: owns one [`Engine`] shared across every configured [`Account`],
@@ -189,6 +203,14 @@ pub struct App<P> {
     /// snapshot rather than read back out of it: what is open and what was last
     /// published are two facts, and only this one drives the republish.
     open_reading: Mutex<Option<crate::reference::MessageRef>>,
+    /// The calendar snapshot and its signal: the calendar manager set, the
+    /// visible window's occurrences, the write states, and the now line, as
+    /// one thing. See `calendar`.
+    calendar: Surfaced<astra_viewmodel::CalendarSnapshot>,
+    /// The calendar view state a rebuild projects and the intents move: the
+    /// window, the visible set, the anchor, the horizon watermark, the write
+    /// states, and the reply prompts. See `calendar`.
+    calendar_state: Mutex<calendar::CalendarState>,
     /// The sync-progress snapshot and its signal: what every mail pass reports its
     /// per-account position through, published on change by the
     /// [`SyncObserver`](engine_api::SyncObserver) fold in `sync_progress`.
@@ -277,6 +299,8 @@ impl<P: Provider> App<P> {
             draft_status: Surfaced::new(Surface::DraftStatus, Arc::clone(&observer)),
             compose_request: Surfaced::new(Surface::ComposeRequest, Arc::clone(&observer)),
             compose_source: Mutex::new(None),
+            calendar: Surfaced::new(Surface::Calendar, Arc::clone(&observer)),
+            calendar_state: Mutex::new(calendar::CalendarState::new()),
             sending: Surfaced::new(Surface::Sending, observer),
             outbox: Mutex::new(outbox::Outbox::default()),
             drafts: Mutex::new(Drafts::default()),
