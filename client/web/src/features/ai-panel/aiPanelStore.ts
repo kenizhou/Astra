@@ -3,7 +3,10 @@
 // shows, the window the days selector names, and each kind's slot (the
 // latest document, its read, and the generation in flight). Every ask
 // crosses through the ai service's wrappers; a refusal lands as a typed
-// error carrying which half failed and the host's own sentence.
+// error carrying which half failed and the host's own sentence. An open
+// epoch guards every write: an ask that resolves after the panel opened
+// another account writes nothing, so a document or refusal always
+// belongs to the account on screen.
 
 import { create } from 'zustand';
 
@@ -54,6 +57,13 @@ interface AiPanelState {
   days: number;
   /** The account the panel serves; null before the first open. */
   account: string | null;
+  /**
+   * The open epoch: every open() bumps it, and each ask captures the
+   * epoch it left on. An ask that resolves after a later open (an
+   * account switch mid-flight) writes nothing, so one account's answer
+   * can never land in the account the panel now serves.
+   */
+  epoch: number;
   /** Each kind's slot. */
   docs: Record<DocumentKind, KindSlot>;
   /** The kind whose generation is in flight; null at rest. */
@@ -82,6 +92,7 @@ export const useAiPanelStore = create<AiPanelState>((set, get) => ({
   tab: 'digest',
   days: DAYS_DEFAULT,
   account: null,
+  epoch: 0,
   docs: { digest: { ...emptySlot }, report: { ...emptySlot } },
   generating: null,
 
@@ -90,15 +101,21 @@ export const useAiPanelStore = create<AiPanelState>((set, get) => ({
       tab: 'digest',
       days: DAYS_DEFAULT,
       account: null,
+      epoch: 0,
       docs: { digest: { ...emptySlot }, report: { ...emptySlot } },
       generating: null,
     }),
 
   open: (account) => {
-    set({
+    // The bump retires every ask still in flight for the account the
+    // panel is leaving, and the generating reset hands the button to
+    // the account arriving.
+    set((state) => ({
       account,
+      epoch: state.epoch + 1,
+      generating: null,
       docs: { digest: { ...emptySlot }, report: { ...emptySlot } },
-    });
+    }));
     void get().pull('digest');
     void get().pull('report');
   },
@@ -108,7 +125,7 @@ export const useAiPanelStore = create<AiPanelState>((set, get) => ({
   setDays: (days) => set({ days }),
 
   pull: async (kind) => {
-    const account = get().account;
+    const { account, epoch } = get();
     if (account === null) {
       return;
     }
@@ -117,6 +134,9 @@ export const useAiPanelStore = create<AiPanelState>((set, get) => ({
     }));
     try {
       const latest = await latestDocument(account, kind);
+      if (get().epoch !== epoch) {
+        return;
+      }
       set((state) => ({
         docs: {
           ...state.docs,
@@ -134,6 +154,9 @@ export const useAiPanelStore = create<AiPanelState>((set, get) => ({
         },
       }));
     } catch (err) {
+      if (get().epoch !== epoch) {
+        return;
+      }
       set((state) => ({
         docs: {
           ...state.docs,
@@ -147,7 +170,7 @@ export const useAiPanelStore = create<AiPanelState>((set, get) => ({
   },
 
   generate: async (kind) => {
-    const { account, days, generating } = get();
+    const { account, days, generating, epoch } = get();
     if (account === null || generating !== null) {
       return;
     }
@@ -157,6 +180,9 @@ export const useAiPanelStore = create<AiPanelState>((set, get) => ({
         kind === 'digest'
           ? await digestGenerate(account, days)
           : await reportGenerate(account, days);
+      if (get().epoch !== epoch) {
+        return;
+      }
       set((state) => ({
         generating: null,
         docs: {
@@ -172,6 +198,9 @@ export const useAiPanelStore = create<AiPanelState>((set, get) => ({
         },
       }));
     } catch (err) {
+      if (get().epoch !== epoch) {
+        return;
+      }
       set((state) => ({
         generating: null,
         docs: {

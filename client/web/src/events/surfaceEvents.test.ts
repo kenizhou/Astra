@@ -160,6 +160,31 @@ describe('the surface_changed listener', () => {
     expect(useSplitStore.getState().entries['home']?.size).toBe(0);
   });
 
+  it('a rejecting split map never blocks the snapshot or the other accounts', async () => {
+    ipc.mailboxList.mockResolvedValue(mailboxFixture);
+    ai.splitMap.mockImplementation(async (account: string) => {
+      if (account === 'work') {
+        throw new Error('the split read refused');
+      }
+      return [{ key: 'imap:v1:u9', side: 'actioned' }];
+    });
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    mountSurfaceEvents();
+    await vi.waitFor(() => expect(wire.handlers).toHaveLength(1));
+
+    emit('mailbox_list');
+
+    // The snapshot itself landed, the healthy account's map applied, and
+    // the refusing account's absence is the only trace of its failure.
+    await vi.waitFor(() => expect(useFolderStore.getState().accounts).toHaveLength(2));
+    await vi.waitFor(() =>
+      expect(useSplitStore.getState().entries['home']?.get('imap:v1:u9')).toBe('actioned'),
+    );
+    expect(useSplitStore.getState().entries['work']).toBeUndefined();
+    expect(errorLog).toHaveBeenCalled();
+    errorLog.mockRestore();
+  });
+
   it('a sync_progress change pulls the snapshot into the ui store', async () => {
     ipc.syncProgress.mockResolvedValue({
       accounts: [{ account: 'work', state: 'syncing', detail: 'folders 3 of 10' }],
@@ -383,6 +408,22 @@ describe('hydration', () => {
     expect(ai.splitMap).toHaveBeenCalledWith('work');
     expect(ai.splitMap).toHaveBeenCalledWith('home');
     expect(useSplitStore.getState().entries['home']?.get('imap:v1:u9')).toBe('actioned');
+  });
+
+  it('continues hydration when a split map rejects', async () => {
+    ipc.mailboxList.mockResolvedValue(mailboxFixture);
+    ipc.syncProgress.mockResolvedValue({ accounts: [] });
+    ai.splitMap.mockRejectedValue(new Error('the split read refused'));
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    await hydrate();
+
+    // The mail surfaces hydrated and the engine reached running despite
+    // the split read's refusal.
+    expect(useListStore.getState().rows).toHaveLength(2);
+    expect(useUiStore.getState().engineState).toBe('running');
+    expect(useUiStore.getState().accountSetupOpen).toBe(false);
+    errorLog.mockRestore();
   });
 
   it('seeds an open reading the host published before the mount', async () => {

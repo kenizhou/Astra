@@ -2,10 +2,11 @@
 // The AI documents panel: the digest and report tabs over their latest
 // stored documents, the days selector beside the Generate and Regenerate
 // button, and the alert region that surfaces a refused read or
-// generation. The panel rides above the status bar's right corner beside
-// the agent and outbox panels, opened by the status bar's AI toggle (the
-// placement choice the plan asked the picker to record); it serves the
-// selected folder's account, the first account until one is.
+// generation above whatever document still shows. The panel rides above
+// the status bar's right corner beside the agent and outbox panels,
+// opened by the status bar's AI toggle (the placement choice the plan
+// asked the picker to record); it serves the selected folder's account,
+// the first account until one is.
 
 import { useEffect } from 'react';
 
@@ -122,11 +123,12 @@ export function AiPanel() {
         <p className="px-3 py-3 text-xs text-muted-foreground">No account to read.</p>
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
-          {slot.error !== null ? (
+          {slot.error !== null && (
             <p role="alert" className="mb-2 text-[11px] text-destructive">
               {slot.error.message}
             </p>
-          ) : slot.document === null && slot.loading ? (
+          )}
+          {slot.document === null && slot.loading ? (
             <p aria-live="polite" className="text-[11px] text-muted-foreground">
               Loading
             </p>

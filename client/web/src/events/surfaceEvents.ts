@@ -102,16 +102,26 @@ export function createListenerRegistry(): ListenerRegistry {
 /**
  * Pulls every account's split map beside the mailbox-list snapshot: the
  * map is a pure store read the host serves per account, so the list's
- * side views follow every snapshot the same as its rows.
+ * side views follow every snapshot the same as its rows. Each pull
+ * settles alone: one account's refused read logs and steps aside, never
+ * aborting the snapshot pull it rides or the hydration behind it.
  */
 function pullSplitMaps(snapshot: MailboxListSnapshot): Promise<void> {
   return Promise.all(
-    snapshot.account_folders.map((account) => splitMap(account.account_id)),
-  ).then((maps) => {
-    snapshot.account_folders.forEach((account, index) => {
-      useSplitStore.getState().applyMap(account.account_id, maps[index] ?? []);
-    });
-  });
+    snapshot.account_folders.map((account) =>
+      splitMap(account.account_id).then(
+        (entries) => {
+          useSplitStore.getState().applyMap(account.account_id, entries);
+        },
+        (err) => {
+          console.error(
+            `surface-events: the ${account.account_id} split map failed to pull`,
+            err,
+          );
+        },
+      ),
+    ),
+  ).then(() => undefined);
 }
 
 /** Pulls one surface's snapshot into the store that renders it. */

@@ -256,9 +256,30 @@ describe('generation', () => {
       source: 'generate',
       message: 'the ai surface refused: no bundle runs',
     });
-    // The refusal kept the generation offered: no document landed, so the
-    // button still says Generate.
+    // The refusal kept the generation offered and the slot honest: still
+    // empty, so the button still says Generate.
+    expect(screen.getByText('No digest yet.')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Generate' })).toBeTruthy();
+  });
+
+  it('keeps the stored document showing under a failed regeneration', async () => {
+    ai.latestDocument.mockResolvedValue(digestDoc);
+    ai.digestGenerate.mockRejectedValue('the ai surface refused: no bundle runs');
+    useUiStore.getState().setAiPanelOpen(true);
+    render(<AiPanel />);
+
+    await waitFor(() =>
+      expect(screen.getByText('Two replies wait, one newsletter rides.')).toBeTruthy(),
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Regenerate' }));
+    });
+
+    // The refusal paints the alert, and the stored digest stays on show
+    // under it: a failed regeneration hides nothing.
+    expect(screen.getByRole('alert').textContent).toBe('the ai surface refused: no bundle runs');
+    expect(screen.getByText('Two replies wait, one newsletter rides.')).toBeTruthy();
+    expect(screen.getByText('3 Oct 2026 to 9 Oct 2026')).toBeTruthy();
   });
 
   it('surfaces a refused read in the alert region', async () => {
@@ -278,7 +299,7 @@ describe('generation', () => {
 });
 
 describe('the account', () => {
-    it('serves the selected folder account', async () => {
+  it('serves the selected folder account', async () => {
     useFolderStore.setState({ selected: { account: 'home', key: 'INBOX' } });
     useUiStore.getState().setAiPanelOpen(true);
     render(<AiPanel />);
@@ -311,5 +332,143 @@ describe('the account', () => {
 
     await waitFor(() => expect(ai.latestDocument).toHaveBeenCalledWith('home', 'report'));
     expect(useAiPanelStore.getState().account).toBe('home');
+  });
+});
+
+describe('the account switch race', () => {
+  /** Seeds both accounts so the selector shows and the panel can switch. */
+  function seedTwoAccounts(): void {
+    useAccountStore.setState({
+      accounts: [
+        { accountId: 'work', displayName: 'Work' },
+        { accountId: 'home', displayName: 'Home' },
+      ],
+    });
+  }
+
+  /** Switches the panel to the home account through the selector. */
+  async function switchToHome(): Promise<void> {
+    fireEvent.change(screen.getByRole('combobox', { name: 'Document account' }), {
+      target: { value: 'home' },
+    });
+    await waitFor(() => expect(useAiPanelStore.getState().account).toBe('home'));
+  }
+
+  it('drops the old account answer when the account switches mid-generate', async () => {
+    seedTwoAccounts();
+    let answerWork: (value: unknown) => void = () => undefined;
+    ai.digestGenerate.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          answerWork = resolve;
+        }),
+    );
+    ai.latestDocument.mockResolvedValue(null);
+    useUiStore.getState().setAiPanelOpen(true);
+    render(<AiPanel />);
+
+    await waitFor(() => expect(useAiPanelStore.getState().account).toBe('work'));
+    fireEvent.click(screen.getByRole('button', { name: 'Generate' }));
+    expect(useAiPanelStore.getState().generating).toBe('digest');
+
+    await switchToHome();
+    // The switch owns the button again: nothing of the old account's ask
+    // keeps it held.
+    expect(useAiPanelStore.getState().generating).toBeNull();
+    const button = screen.getByRole('button', { name: 'Generate' }) as HTMLButtonElement;
+    expect(button.disabled).toBeFalsy();
+
+    await act(async () => {
+      answerWork({ ...generated, content: 'The old work window.' });
+      await Promise.resolve();
+    });
+
+    // The stale answer never lands in the new account's slot.
+    expect(useAiPanelStore.getState().docs.digest.document).toBeNull();
+    expect(screen.queryByText('The old work window.')).toBeNull();
+    expect(screen.getByText('No digest yet.')).toBeTruthy();
+  });
+
+  it('drops the old account refusal when the account switches mid-generate', async () => {
+    seedTwoAccounts();
+    let refuseWork: () => void = () => undefined;
+    ai.digestGenerate.mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          refuseWork = reject;
+        }),
+    );
+    ai.latestDocument.mockResolvedValue(null);
+    useUiStore.getState().setAiPanelOpen(true);
+    render(<AiPanel />);
+
+    await waitFor(() => expect(useAiPanelStore.getState().account).toBe('work'));
+    fireEvent.click(screen.getByRole('button', { name: 'Generate' }));
+    await switchToHome();
+
+    await act(async () => {
+      refuseWork();
+      await Promise.resolve();
+    });
+
+    expect(useAiPanelStore.getState().docs.digest.error).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('drops the old account pull when the account switches mid-read', async () => {
+    seedTwoAccounts();
+    let answerWork: (value: unknown) => void = () => undefined;
+    ai.latestDocument.mockImplementation(
+      (account: string, kind: string) =>
+        new Promise((resolve) => {
+          if (account === 'work' && kind === 'digest') {
+            answerWork = resolve;
+          } else {
+            resolve(null);
+          }
+        }),
+    );
+    useUiStore.getState().setAiPanelOpen(true);
+    render(<AiPanel />);
+
+    await waitFor(() => expect(useAiPanelStore.getState().account).toBe('work'));
+    await switchToHome();
+
+    await act(async () => {
+      answerWork(digestDoc);
+      await Promise.resolve();
+    });
+
+    expect(useAiPanelStore.getState().docs.digest.document).toBeNull();
+    expect(screen.queryByText('Two replies wait, one newsletter rides.')).toBeNull();
+    expect(screen.getByText('No digest yet.')).toBeTruthy();
+  });
+
+  it('drops the old account read refusal when the account switches mid-read', async () => {
+    seedTwoAccounts();
+    let refuseWork: () => void = () => undefined;
+    ai.latestDocument.mockImplementation(
+      (account: string, kind: string) =>
+        new Promise((resolve, reject) => {
+          if (account === 'work' && kind === 'digest') {
+            refuseWork = reject;
+          } else {
+            resolve(null);
+          }
+        }),
+    );
+    useUiStore.getState().setAiPanelOpen(true);
+    render(<AiPanel />);
+
+    await waitFor(() => expect(useAiPanelStore.getState().account).toBe('work'));
+    await switchToHome();
+
+    await act(async () => {
+      refuseWork();
+      await Promise.resolve();
+    });
+
+    expect(useAiPanelStore.getState().docs.digest.error).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 });
