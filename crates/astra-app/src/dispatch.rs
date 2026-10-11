@@ -99,6 +99,10 @@ impl<P: Provider> App<P> {
                 self.close_reading();
             }
             Intent::Folders(_change) => return Err(AppError::NotYet),
+            // The calendar family lands as its own slice; the intents cross the
+            // wire already, and the dispatch answers them once the snapshot
+            // exists.
+            Intent::Calendar(_change) => return Err(AppError::NotYet),
             // The compose family: the prefill is computed and published, never
             // returned; the composer opens on the surface's snapshot.
             Intent::Compose(change) => {

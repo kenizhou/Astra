@@ -6,6 +6,7 @@
 //! engine, grouping and ordering live here, so every surface shares one definition of
 //! what is on screen.
 
+mod calendar;
 mod compose_request;
 mod drafts;
 mod folders;
@@ -16,6 +17,10 @@ mod sending;
 mod sync_progress;
 pub mod view;
 
+pub use calendar::{
+    CalendarRow, CalendarSnapshot, CalendarWriteRow, CalendarWriteState, NowLineData,
+    OccurrenceAccuracy, OccurrenceRow,
+};
 pub use compose_request::{ComposeKind, ComposeRequestSnapshot};
 pub use drafts::{DraftSaveState, DraftStatusSnapshot};
 pub use folders::{folder_role, sorted_folder_rows, AccountFolderRow, FolderRole, FolderRow};

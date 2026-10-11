@@ -7,7 +7,7 @@
 //! A reference is built **once**, at the IPC boundary, from the very row the host acted
 //! on; both halves travel together from there on.
 
-use engine_api::{AccountId, PendingOpId, ProviderKey};
+use engine_api::{AccountId, CalendarId, PendingOpId, ProviderKey};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// A folder of one account, identified by its owning account and folder key **together**.
@@ -53,6 +53,65 @@ impl MessageRef {
     /// the single construction point, at the IPC boundary. Returns `None` if either half
     /// is malformed, so the caller can drop the intent rather than risk routing to the
     /// wrong account or editing no message at all.
+    #[must_use]
+    pub fn from_parts(account: &str, key: String) -> Option<Self> {
+        Some(Self {
+            account: AccountId::try_from(account).ok()?,
+            key: ProviderKey::new(key).ok()?,
+        })
+    }
+}
+
+/// A calendar of one account, identified by its owning account and calendar key
+/// **together**.
+///
+/// A calendar key is unique only *within* an account (two accounts can each hold
+/// a calendar keyed `default`), so every calendar an intent names or a snapshot
+/// row carries travels with the account that owns it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CalendarRef {
+    /// The account that owns the calendar (the calendar row's account).
+    pub account: AccountId,
+    /// The calendar's key, as projected into the snapshot's calendar rows; unique
+    /// only within `account`.
+    pub key: CalendarId,
+}
+
+impl CalendarRef {
+    /// Builds a calendar reference from a host's `account` id and calendar `key`
+    /// strings; the single construction point, at the IPC boundary. Returns `None`
+    /// if either half is malformed, so the caller can drop the intent rather than
+    /// route a write into the wrong account's calendar.
+    #[must_use]
+    pub fn from_parts(account: &str, key: String) -> Option<Self> {
+        Some(Self {
+            account: AccountId::try_from(account).ok()?,
+            key: CalendarId::new(ProviderKey::new(key).ok()?),
+        })
+    }
+}
+
+/// An event of one account, identified by its owning account and provider key
+/// **together**.
+///
+/// The key is the **master** event's: an occurrence of a recurring series is
+/// not a stored object of its own, so the occurrence an edit or delete means
+/// is named beside the key (by its original start), never by a synthetic key
+/// for the instance.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EventRef {
+    /// The account that owns the event (the occurrence row's account).
+    pub account: AccountId,
+    /// The master event's provider key; unique only within `account`.
+    pub key: ProviderKey,
+}
+
+impl EventRef {
+    /// Builds an event reference from a host's `account` id and provider `key`
+    /// strings; the single construction point, at the IPC boundary. Returns
+    /// `None` if either half is malformed, so the caller can drop the intent
+    /// rather than risk routing to the wrong account or editing no event at
+    /// all.
     #[must_use]
     pub fn from_parts(account: &str, key: String) -> Option<Self> {
         Some(Self {

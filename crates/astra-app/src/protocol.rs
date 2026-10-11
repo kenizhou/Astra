@@ -4,12 +4,17 @@
 //! dispatches. These are the pure types the runtime drives; each crosses the IPC as JSON.
 
 mod intent;
+mod intent_calendar;
 mod intent_compose;
 mod intent_drafts;
 mod intent_outbox;
 mod status;
 
 pub use intent::{FolderIntent, Intent, SearchScope, ViewMode};
+pub use intent_calendar::{
+    CalendarIntent, EventDrag, EventEdge, EventEdit, RecurrenceChange, RepeatEnd, RepeatRule,
+    RsvpAnswer,
+};
 pub use intent_compose::ComposeIntent;
 pub use intent_drafts::{CompositionId, DraftsIntent};
 pub use intent_outbox::OutboxIntent;
@@ -47,6 +52,13 @@ pub enum Surface {
     /// whatever it held, so the host repaints on every signal rather than
     /// debouncing them. `None` from the pull means no request is pending.
     ComposeRequest,
+    /// The calendar: the calendar manager set, the visible window's
+    /// occurrences, the write states, and the now line. Every publish is one
+    /// transition of the view (a sync landed, a write settled, the window
+    /// moved), so the host repaints on every signal rather than debouncing
+    /// them; a grid holding a pending write must not miss the state that
+    /// follows it.
+    Calendar,
 }
 
 /// Host-resolved bytes for one composer blob handle.
@@ -94,3 +106,8 @@ mod submit_tests;
 #[cfg(test)]
 #[path = "protocol_search_tests.rs"]
 mod search_tests;
+
+// The calendar family's intents and surface word, split for the same reason.
+#[cfg(test)]
+#[path = "protocol_calendar_tests.rs"]
+mod calendar_tests;

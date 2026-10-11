@@ -113,10 +113,11 @@ pub use dispatch::AppError;
 pub use drafts::{DraftResume, DRAFT_AUTOSAVE_IDLE};
 pub use preferences::{load_preferences, preferences_path, save_preferences, Preferences};
 pub use protocol::{
-    AppObserver, ComposeIntent, ComposerBlob, CompositionId, DraftsIntent, FolderIntent, Intent,
-    OutboxIntent, SearchScope, Surface, ViewMode,
+    AppObserver, CalendarIntent, ComposeIntent, ComposerBlob, CompositionId, DraftsIntent,
+    EventDrag, EventEdge, EventEdit, FolderIntent, Intent, OutboxIntent, RecurrenceChange,
+    RepeatEnd, RepeatRule, RsvpAnswer, SearchScope, Surface, ViewMode,
 };
-pub use reference::{FolderRef, MessageRef, QueuedRef, RowRef, ThreadRef};
+pub use reference::{CalendarRef, EventRef, FolderRef, MessageRef, QueuedRef, RowRef, ThreadRef};
 pub use surfaced::Surfaced;
 
 /// The app runtime: owns one [`Engine`] shared across every configured [`Account`],
