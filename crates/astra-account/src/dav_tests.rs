@@ -162,6 +162,24 @@ fn a_dav_section_round_trips_through_the_stored_form() {
     let dav = parsed.dav.as_ref().expect("the dav section survives");
     assert!(dav.caldav_url.is_none());
     assert_eq!(dav.carddav_url.as_deref(), Some("https://card.example.net"));
+
+    // A section with no password round-trips without inventing the key: a
+    // stored document without one loads as far as the dial, which is where
+    // the missing credential is answered.
+    let no_password = load_str(
+        "[imap]\naddr=\"imap.example.net:993\"\nserver_name=\"imap.example.net\"\n\
+         username=\"you@example.net\"\n\n[dav]\ncaldav_url=\"https://cal.example.net\"\n\
+         username=\"you@example.net\"\n",
+    )
+    .expect("valid config");
+    let stored = no_password.to_toml().expect("serialisable config");
+    assert!(
+        !stored.contains("password"),
+        "the absent key crosses unasked: {stored}"
+    );
+    let parsed = load_str(&stored).expect("round-trips");
+    let dav = parsed.dav.as_ref().expect("the dav section survives");
+    assert!(dav.password.is_none());
 }
 
 #[test]

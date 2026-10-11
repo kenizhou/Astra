@@ -106,10 +106,14 @@ impl core::fmt::Debug for DavProviders {
 /// after the fallback, both under the account's shared TLS policy. An
 /// account with no dav section dials nothing and succeeds empty.
 ///
+/// The legs dial independently: a server that splits them, or one origin
+/// that is momentarily unreachable, costs only its own leg (logged), never
+/// the other half of the diary.
+///
 /// # Errors
 ///
 /// Returns [`AccountError::MissingCredential`] when the section stores no
-/// password, and [`AccountError::Dav`] when either dial fails: the caller
+/// password, and [`AccountError::Dav`] when BOTH dials fail: a caller then
 /// keeps the account's mail half standing and logs.
 pub async fn connect_dav_providers(config: &AccountConfig) -> Result<DavProviders, AccountError> {
     let Some(dav) = config.dav.as_ref() else {
@@ -126,21 +130,37 @@ pub async fn connect_dav_providers(config: &AccountConfig) -> Result<DavProvider
         caldav: None,
         carddav: None,
     };
+    let mut failure = None;
     if let Some(origin) = dav.caldav_origin() {
-        let caldav = CalDavProvider::connect(
+        match CalDavProvider::connect(
             CalDavConfig::new(origin.to_owned(), credentials.clone()).with_tls(tls.clone()),
         )
         .await
-        .map_err(|err| AccountError::Dav(err.to_string()))?;
-        providers.caldav = Some(Box::new(caldav));
+        {
+            Ok(caldav) => providers.caldav = Some(Box::new(caldav)),
+            Err(err) => {
+                log::warn!("dav: the calendar leg failed to dial: {err}");
+                failure = Some(AccountError::Dav(err.to_string()));
+            }
+        }
     }
     if let Some(origin) = dav.carddav_origin() {
-        let carddav = CardDavProvider::connect(
+        match CardDavProvider::connect(
             CardDavConfig::new(origin.to_owned(), credentials).with_tls(tls),
         )
         .await
-        .map_err(|err| AccountError::Dav(err.to_string()))?;
-        providers.carddav = Some(Box::new(carddav));
+        {
+            Ok(carddav) => providers.carddav = Some(Box::new(carddav)),
+            Err(err) => {
+                log::warn!("dav: the contacts leg failed to dial: {err}");
+                failure = failure.or(Some(AccountError::Dav(err.to_string())));
+            }
+        }
+    }
+    if providers.caldav.is_none() && providers.carddav.is_none() {
+        return Err(failure.unwrap_or(AccountError::Dav(
+            "the dav section names no origin that could be dialed".to_owned(),
+        )));
     }
     Ok(providers)
 }

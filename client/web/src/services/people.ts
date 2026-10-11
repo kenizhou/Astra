@@ -207,7 +207,8 @@ export interface RecipientSuggestion {
   email: string;
   person_id?: number;
   display_name: string;
-  provenance?: PersonSourceRow[];
+  /** The cards a history-only suggestion was seen on: account and contact ids. */
+  provenance?: { account: string; contact: string }[];
   sent_count: number;
   last_sent?: string;
   is_saved: boolean;

@@ -160,6 +160,7 @@ dependencies = [
  "engine-provider",
  "engine-tls",
  "futures",
+ "log",
  "provider-caldav",
  "provider-imap",
  "rcgen",

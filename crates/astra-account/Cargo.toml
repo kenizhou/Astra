@@ -14,6 +14,10 @@ workspace = true
 # a concrete setup form.
 astra-autodetect = { path = "../astra-autodetect" }
 engine-api.workspace = true
+# The dav dial logs a leg that failed while the other stands: the account's
+# own errors carry what a caller needs, but a half-up diary is worth a line
+# at the source.
+log.workspace = true
 # The engine's sync cursors and raw MIME type appear in the `Provider` trait's own
 # method signatures (`SyncState`, `SyncUpdate`, `RawMime`) and are re-exported by
 # neither `engine-api` nor `engine-provider`, so implementing the trait names them
