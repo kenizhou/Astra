@@ -238,6 +238,52 @@ fn a_repeat_rule_belongs_to_the_series_not_to_one_occurrence() {
 }
 
 #[test]
+fn an_occurrence_content_edit_carries_both_clocks_unchanged() {
+    // The engine's CalDAV path refuses a first-touch instance patch without
+    // both clocks, because the copy would inherit the master's slot. A host
+    // that edits only the content states no clocks, so both come back as the
+    // occurrence's own unchanged times.
+    let event = weekly_event("evt-1", "Standup", "2026-10-19T09:00:00");
+    let edit = EventEdit {
+        title: Some("Renamed".to_owned()),
+        occurrence: Some(local("2026-11-09T09:00:00")),
+        ..EventEdit::default()
+    };
+    let (_, patch) = build_patch(&event, &edit, stamp()).unwrap();
+    let zone = TimeZoneId::iana("Europe/Amsterdam").unwrap();
+    assert_eq!(
+        patch.start_edit(),
+        Some(&CalendarDateTime::Zoned {
+            local: local("2026-11-09T09:00:00"),
+            zone: zone.clone(),
+        })
+    );
+    assert_eq!(
+        patch.end_edit(),
+        Some(&CalendarDateTime::Zoned {
+            local: local("2026-11-09T10:00:00"),
+            zone,
+        })
+    );
+}
+
+#[test]
+fn an_occurrence_edit_with_one_edge_only_is_refused() {
+    // One edge without the other is neither a content edit nor a complete
+    // move; guessing the missing half would silently re-time the occurrence.
+    let event = weekly_event("evt-1", "Standup", "2026-10-19T09:00:00");
+    let edit = EventEdit {
+        start: Some(local("2026-11-09T10:00:00")),
+        occurrence: Some(local("2026-11-09T09:00:00")),
+        ..EventEdit::default()
+    };
+    assert_eq!(
+        build_patch(&event, &edit, stamp()).unwrap_err(),
+        CalendarEditError::OccurrenceNeedsBothEdges
+    );
+}
+
+#[test]
 fn a_stored_rule_too_rich_for_the_editor_is_never_replaced() {
     let mut event = weekly_event("evt-1", "Standup", "2026-10-19T09:00:00");
     let mut rich = RecurrenceRule::new(Frequency::Monthly);

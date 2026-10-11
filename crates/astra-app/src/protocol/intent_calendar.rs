@@ -163,9 +163,11 @@ pub struct EventEdit {
     /// **original** start. `None` edits the **whole series**; there is no
     /// default on purpose, for the reason on [`EventDrag::occurrence`].
     ///
-    /// Editing a single occurrence requires `start` **and** `end` (the series
-    /// master's are the first occurrence's times, not this one's); pass them
-    /// unchanged if the edit is not a move.
+    /// Editing a single occurrence states `start` **and** `end` (the series
+    /// master's are the first occurrence's times, not this one's). A host
+    /// that states neither is making a content-only edit: the app fills both
+    /// unchanged from the stored event, whose zone only it holds. One edge
+    /// without the other is neither and is refused.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub occurrence: Option<LocalDateTime>,
     /// The occurrence `start` and `end` were **read from**, when this edit is

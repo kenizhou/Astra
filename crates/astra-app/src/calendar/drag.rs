@@ -50,7 +50,14 @@ const MAX_DRAG_DAYS: i64 = 366;
 /// shifted result are not representable.
 pub(crate) fn apply_drag(event: &Event, drag: &EventDrag) -> Result<EventEdit, CalendarEditError> {
     let (days, minutes) = bounded(drag, event.start.is_all_day())?;
-    let (start, end) = own_bounds(event)?;
+    // One occurrence moves on its own clock. The engine writes an override's
+    // times from this patch, and the master's bounds are the first
+    // occurrence's, so shifting those would land a later occurrence in the
+    // series' opening slot.
+    let (start, end) = match drag.occurrence {
+        Some(original) => occurrence_bounds(event, original)?,
+        None => own_bounds(event)?,
+    };
     let (start, end) = match drag.edge {
         // Both edges by the same delta: the duration comes out bit-identical,
         // so there is nothing to clamp.
@@ -109,6 +116,18 @@ pub(crate) fn own_bounds(
             Ok((*local, end_wall_clock(event).ok_or_else(unrepresentable)?))
         }
     }
+}
+
+/// The occurrence that starts at `original`: its own `(start, end)` in the
+/// event's own zone. Every occurrence of a series carries the master's
+/// wall-clock span, so the end is the named start plus that span.
+pub(crate) fn occurrence_bounds(
+    event: &Event,
+    original: LocalDateTime,
+) -> Result<(LocalDateTime, LocalDateTime), CalendarEditError> {
+    let (master_start, master_end) = own_bounds(event)?;
+    let (days, minutes) = between(master_start, master_end);
+    Ok((original, shift(original, days, minutes)?))
 }
 
 /// The event's end as a wall clock in its own zone. A zoned start is resolved

@@ -33,7 +33,7 @@ use thiserror::Error;
 
 use crate::protocol::{EventEdit, RecurrenceChange, RepeatEnd, RepeatRule};
 
-use super::drag::series_bounds_after;
+use super::drag::{occurrence_bounds, series_bounds_after};
 
 /// Why a write intent cannot be mapped onto an engine shape. Each names a rule
 /// the caller (a surface, or a test) can act on, never a message to parse.
@@ -52,6 +52,11 @@ pub(crate) enum CalendarEditError {
     /// state the shift the user made.
     #[error("an edit shifted from an occurrence needs both its start and its end")]
     ShiftNeedsBothEdges,
+    /// An occurrence edit that states one clock without the other: neither a
+    /// content edit (which states neither) nor a complete move (which states
+    /// both), and guessing the missing half would re-time the occurrence.
+    #[error("an occurrence edit needs both its start and its end, or neither")]
+    OccurrenceNeedsBothEdges,
     /// The drag exceeds the bound that keeps the civil-date arithmetic inside
     /// representable calendar time.
     #[error("a drag of {0} days is beyond the 366-day limit")]
@@ -192,6 +197,19 @@ pub(crate) fn build_patch(
             (Some(start), Some(end))
         }
         _ => (edit.start, edit.end),
+    };
+    // An instance patch states the occurrence's own times: the engine's
+    // CalDAV path refuses a first-touch override without both, because the
+    // copy would inherit the master's slot. A host that states neither is
+    // making a content-only edit, so both come back unchanged from the stored
+    // event; one edge without the other is neither and refuses typed.
+    let (start, end) = match (edit.occurrence, start, end) {
+        (Some(original), None, None) => {
+            let (start, end) = occurrence_bounds(event, original)?;
+            (Some(start), Some(end))
+        }
+        (Some(_), Some(_), Some(_)) | (None, _, _) => (start, end),
+        (Some(_), _, _) => return Err(CalendarEditError::OccurrenceNeedsBothEdges),
     };
     if let Some(start) = start {
         patch = patch.start(in_event_form(&event.start, start)?);

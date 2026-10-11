@@ -113,3 +113,32 @@ fn a_drag_names_one_occurrence_by_its_original_start() {
     let (target, _) = build_patch(&event, &edit, utc("2026-10-19T10:00:00Z")).unwrap();
     assert!(matches!(target, engine_api::PatchTarget::Instance(_)));
 }
+
+#[test]
+fn dragging_a_later_occurrence_shifts_its_own_clock_not_the_masters() {
+    // The engine writes an override's times from this patch, and the master's
+    // bounds are the FIRST occurrence's times: shifting those for a later
+    // occurrence would land the block in the series' opening slot.
+    let event = weekly_event("evt-1", "Standup", "2026-10-19T09:00:00");
+    let drag = EventDrag {
+        edge: EventEdge::Whole,
+        days: 1,
+        minutes: 30,
+        occurrence: Some(local("2026-11-09T09:00:00")),
+    };
+    let edit = apply_drag(&event, &drag).unwrap();
+    assert_eq!(edit.start, Some(local("2026-11-10T09:30:00")));
+    assert_eq!(edit.end, Some(local("2026-11-10T10:30:00")));
+
+    // An edge resize of that occurrence rides its own clock too: the dragged
+    // end moves from the occurrence's end, clamped at its own start.
+    let drag = EventDrag {
+        edge: EventEdge::End,
+        days: 0,
+        minutes: -120,
+        occurrence: Some(local("2026-11-09T09:00:00")),
+    };
+    let edit = apply_drag(&event, &drag).unwrap();
+    assert_eq!(edit.start, Some(local("2026-11-09T09:00:00")));
+    assert_eq!(edit.end, Some(local("2026-11-09T09:15:00")));
+}

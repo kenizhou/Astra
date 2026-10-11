@@ -85,7 +85,12 @@ export interface CalendarEventEdit {
   notes?: string;
   location?: string;
   recurrence?: RecurrenceChange;
-  /** The one occurrence this edits; absent edits the whole series. */
+  /**
+   * The one occurrence this edits; absent edits the whole series. An
+   * occurrence edit states both clocks for a move; stating neither is a
+   * content-only edit, and the app fills both unchanged from the stored
+   * event. One edge without the other is refused.
+   */
   occurrence?: string;
   /** The occurrence the editor's clocks were read from, for a series edit. */
   times_from_occurrence?: string;
