@@ -404,3 +404,71 @@ async fn a_refused_write_fails_and_a_landed_unconfirmed_one_waits_for_a_reread()
         "the landed write is there to keep"
     );
 }
+
+#[tokio::test]
+async fn an_edit_the_app_refused_before_saying_anything_lands_as_invalid() {
+    // No leg installed: the edit arm's refusal is the Invalid sentence under
+    // the form, not a silent log line the user never sees.
+    let surfaces = Arc::new(Mutex::new(Vec::new()));
+    let fake = PeopleFake::with_book().holding(named_card(
+        "c-1",
+        "book-1",
+        "Ada Lovelace",
+        &["ada@ex.test"],
+    ));
+    let app = people_app(vec![account("work", fake)], &surfaces);
+    app.dispatch(Intent::People(PeopleIntent::Refresh))
+        .await
+        .unwrap();
+
+    app.dispatch(Intent::People(PeopleIntent::UpdateContact {
+        card: CardRef::from_parts(1, "work", "c-1".to_owned()).unwrap(),
+        patch: ContactPatchInput {
+            emails: Some(vec!["ada2@ex.test".to_owned()]),
+            ..ContactPatchInput::default()
+        },
+    }))
+    .await
+    .unwrap();
+    assert_eq!(
+        app.people().write_states,
+        vec![astra_viewmodel::PeopleWriteRow {
+            account: work(),
+            state: PeopleWriteState::Invalid,
+        }],
+        "the refused edit is a typed sentence, not a silent return"
+    );
+}
+
+#[tokio::test]
+async fn a_refresh_does_not_erase_the_invalid_sentence() {
+    // The Invalid sentence belongs to the form still on screen; a landed
+    // background sync resolves an unconfirmed write but must not clear it.
+    let surfaces = Arc::new(Mutex::new(Vec::new()));
+    let fake = PeopleFake::with_book();
+    let app = people_app(vec![account("work", fake.clone())], &surfaces);
+    install(&app, "work", fake);
+    app.dispatch(Intent::People(PeopleIntent::Refresh))
+        .await
+        .unwrap();
+    let book = AddressBookRef::from_parts("work", "book-1".to_owned()).unwrap();
+    app.dispatch(Intent::People(PeopleIntent::CreateContact {
+        book,
+        draft: ContactDraftInput::default(),
+    }))
+    .await
+    .unwrap();
+    assert_eq!(
+        app.people().write_states[0].state,
+        PeopleWriteState::Invalid
+    );
+
+    app.dispatch(Intent::People(PeopleIntent::Refresh))
+        .await
+        .unwrap();
+    assert_eq!(
+        app.people().write_states[0].state,
+        PeopleWriteState::Invalid,
+        "the landed sync left the form's own sentence standing"
+    );
+}

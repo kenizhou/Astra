@@ -61,6 +61,7 @@ impl<P: Provider> App<P> {
             Ok(engine_draft) => engine_draft,
             Err(err) => {
                 log::warn!("people: the create could not be built: {err}");
+                self.refuse_people_write(&book.account).await;
                 return;
             }
         };
@@ -94,16 +95,22 @@ impl<P: Provider> App<P> {
     pub(crate) async fn update_person_contact(&self, card: &CardRef, patch: &ContactPatchInput) {
         let Some(leg) = self.people_writable_leg(&card.account) else {
             log::info!("people: the account has no writable contacts leg; the edit was refused");
+            self.refuse_people_write(&card.account).await;
             return;
         };
         let base = match self.engine.contact_card(&card.account, &card.card).await {
             Ok(Some(base)) => base,
             Ok(None) => {
+                // The form the user is still looking at names a card the
+                // store no longer holds: the app refused the edit before
+                // anything was sent, the Invalid sentence's own case.
                 log::info!("people: the card is no longer held; the edit was refused");
+                self.refuse_people_write(&card.account).await;
                 return;
             }
             Err(err) => {
                 log::warn!("people: the card read failed: {err}");
+                self.refuse_people_write(&card.account).await;
                 return;
             }
         };
@@ -202,16 +209,10 @@ impl<P: Provider> App<P> {
     }
 }
 
-/// A unique-per-intent idempotency key for a people write, from the wall
-/// clock and a process counter, the same mint the calendar writes use.
+/// A unique-per-intent idempotency key for a people write, from the shared
+/// mint under the family's own prefix.
 fn people_idempotency() -> String {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static SEQ: AtomicU64 = AtomicU64::new(0);
-    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_nanos());
-    format!("people:{nanos}:{seq}")
+    crate::mint_idempotency("people")
 }
 
 #[cfg(test)]

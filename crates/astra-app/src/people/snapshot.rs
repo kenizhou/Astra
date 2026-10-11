@@ -83,7 +83,13 @@ impl<P: Provider> App<P> {
     /// the id resolves to nobody, which is also what a person whose every
     /// card has since been tombstoned resolves to: nothing left to show.
     async fn person_detail(&self, open: PersonId) -> Option<astra_viewmodel::PersonDetail> {
-        let person = self.engine.person(open).await.ok().flatten()?;
+        let person = match self.engine.person(open).await {
+            Ok(person) => person?,
+            Err(err) => {
+                log::warn!("people: the person read failed: {err}");
+                return None;
+            }
+        };
         let sources = match self.engine.person_sources(person.id).await {
             Ok(sources) => sources,
             Err(err) => {

@@ -87,16 +87,30 @@ pub(crate) fn build_create_draft(
             single_property("t1", &json!({ "name": role })),
         );
     }
-    if !draft.emails.is_empty() {
+    // Blank entries a form leaves behind never become blank properties: the
+    // card only carries the values somebody typed.
+    let emails: Vec<&str> = draft
+        .emails
+        .iter()
+        .map(|address| address.trim())
+        .filter(|address| !address.is_empty())
+        .collect();
+    if !emails.is_empty() {
         card.insert(
             "emails".to_owned(),
-            fresh_properties(&draft.emails, |address| json!({ "address": address }), "e"),
+            fresh_properties(&emails, |address| json!({ "address": address }), "e"),
         );
     }
-    if !draft.phones.is_empty() {
+    let phones: Vec<&str> = draft
+        .phones
+        .iter()
+        .map(|number| number.trim())
+        .filter(|number| !number.is_empty())
+        .collect();
+    if !phones.is_empty() {
         card.insert(
             "phones".to_owned(),
-            fresh_properties(&draft.phones, |number| json!({ "number": number }), "p"),
+            fresh_properties(&phones, |number| json!({ "number": number }), "p"),
         );
     }
     let card: ContactCard = serde_json::from_value(Value::Object(card))
@@ -184,7 +198,7 @@ fn single_property(id: &str, value: &Value) -> Value {
 
 /// A whole new property map: one property per value, ids minted `prefix1`
 /// onward, no metadata to carry.
-fn fresh_properties(values: &[String], render: impl Fn(&str) -> Value, prefix: &str) -> Value {
+fn fresh_properties(values: &[&str], render: impl Fn(&str) -> Value, prefix: &str) -> Value {
     let properties = values
         .iter()
         .enumerate()

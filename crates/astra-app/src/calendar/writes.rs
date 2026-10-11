@@ -395,16 +395,10 @@ impl<P: Provider> App<P> {
     }
 }
 
-/// A unique-per-intent idempotency key for a calendar write, from the wall
-/// clock and a process counter, the same mint the mail edits use.
+/// A unique-per-intent idempotency key for a calendar write, from the shared
+/// mint under the family's own prefix.
 pub(crate) fn generated_idempotency() -> String {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static SEQ: AtomicU64 = AtomicU64::new(0);
-    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_nanos());
-    format!("cal:{nanos}:{seq}")
+    crate::mint_idempotency("cal")
 }
 
 /// A fresh cross-system `UID` for a created event: globally unique by the

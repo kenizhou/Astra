@@ -21,9 +21,9 @@ use serde::{Deserialize, Serialize};
 /// not a zeroed one.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PeopleSnapshot {
-    /// The unified people the current query matched, in the engine's page
-    /// order: what the list lays out, one row per person whatever number of
-    /// cards and accounts were joined into them.
+    /// The unified people the current query matched, re-ordered into the
+    /// rebuild's fold: one alphabet with one trailing `#` bucket, one row per
+    /// person whatever number of cards and accounts were joined into them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rows: Vec<PersonRow>,
     /// The open person's detail, or nothing when the list is showing with

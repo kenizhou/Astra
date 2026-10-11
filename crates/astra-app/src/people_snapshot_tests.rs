@@ -27,16 +27,40 @@ async fn the_list_lays_out_by_the_fold_not_the_engine_page_order() {
         .holding(named_card(
             "c-4",
             "book-1",
-            "Яна Иванова",
-            &["yana@ex.test"],
+            "Öberg Swede",
+            &["oberg@ex.test"],
         ))
         .holding(named_card(
             "c-5",
             "book-1",
+            "Oscar Plain",
+            &["oscar@ex.test"],
+        ))
+        .holding(named_card(
+            "c-6",
+            "book-1",
+            "Černý Czech",
+            &["cerny@ex.test"],
+        ))
+        .holding(named_card(
+            "c-7",
+            "book-1",
+            "Norway Ås",
+            &["norway@ex.test"],
+        ))
+        .holding(named_card(
+            "c-8",
+            "book-1",
+            "Яна Иванова",
+            &["yana@ex.test"],
+        ))
+        .holding(named_card(
+            "c-9",
+            "book-1",
             "3M Worker",
             &["worker3@ex.test"],
         ))
-        .holding(named_card("c-6", "book-1", "", &["quiet@ex.test"]));
+        .holding(named_card("c-10", "book-1", "", &["quiet@ex.test"]));
     let app = people_app(vec![account("work", fake.clone())], &surfaces);
     install(&app, "work", fake);
     app.dispatch(Intent::People(PeopleIntent::Refresh))
@@ -52,11 +76,19 @@ async fn the_list_lays_out_by_the_fold_not_the_engine_page_order() {
     assert_eq!(
         laid_out,
         vec![
+            // Č folds onto C, not D: the extended ranges sit on the base
+            // letter they stand on.
+            ("Černý Czech", "C"),
             ("Emil Plain", "E"),
             // Émile files between Emil and Emma: the fold re-orders the page,
             // whose raw code-point order placed him after everybody.
             ("Émile Zola", "E"),
             ("Emma B", "E"),
+            // Ñ keeps N for himself.
+            ("Norway Ås", "N"),
+            // The O-variants (Ò..Ö) fold onto O, not N, and lay out inside it.
+            ("Öberg Swede", "O"),
+            ("Oscar Plain", "O"),
             // No name: the display stays empty for the host's own words, and
             // the row files under the address's letter.
             ("", "Q"),

@@ -96,9 +96,12 @@ impl<P: Provider> App<P> {
 
     /// Installs `leg` as `account`'s contacts leg, replacing whatever stood
     /// there: the reconnect path, handing the engine a fresh adapter handle.
-    /// Call it before the first people dispatch; an app with no leg installed
-    /// still lists people already in the store, and its writes have nowhere
-    /// to go.
+    /// One leg per account is the rule today (a CardDAV dial); the state
+    /// holds a vec because an account with a personal book beside a
+    /// directory leg will need more than one, and that extension grows this
+    /// API rather than the type. Call it before the first people dispatch;
+    /// an app with no leg installed still lists people already in the
+    /// store, and its writes have nowhere to go.
     pub fn install_contacts(&self, account: &AccountId, leg: ContactsLeg) {
         self.people_state
             .lock()
@@ -190,7 +193,24 @@ impl<P: Provider> App<P> {
                 }
             }
             if synced {
-                self.clear_people_write(&account);
+                // A landed sync resolves an unconfirmed write (its recovery
+                // is the re-read), but the Invalid sentence belongs to the
+                // form the user is still looking at: only the next write or
+                // an explicit dismissal clears it, never a background
+                // refresh that landed while the form sat unsubmitted.
+                let resolves = {
+                    let writes = &self
+                        .people_state
+                        .lock()
+                        .expect("people mutex poisoned")
+                        .writes;
+                    writes
+                        .get(&account)
+                        .is_none_or(|state| !matches!(state, PeopleWriteState::Invalid))
+                };
+                if resolves {
+                    self.clear_people_write(&account);
+                }
             }
         }
         self.rebuild_people().await;
@@ -266,8 +286,8 @@ fn fold_letter(character: char) -> Option<char> {
         // base letter per the fold rule, and Latin Extended-A (macrons,
         // breves, ogoneks, the ligatures) folded the same way.
         'À'..='Å' | 'à'..='å' | 'Æ' | 'æ' | '\u{0100}'..='\u{0105}' => Some('A'),
-        'Ç' | 'ç' | '\u{0106}'..='\u{010B}' => Some('C'),
-        'Ð' | 'ð' | '\u{010C}'..='\u{0111}' => Some('D'),
+        'Ç' | 'ç' | '\u{0106}'..='\u{010D}' => Some('C'),
+        'Ð' | 'ð' | '\u{010E}'..='\u{0111}' => Some('D'),
         'È'..='Ë' | 'è'..='ë' | '\u{0112}'..='\u{011B}' => Some('E'),
         'Ì'..='Ï' | 'ì'..='ï' | '\u{0128}'..='\u{0133}' => Some('I'),
         '\u{011C}'..='\u{0123}' => Some('G'),
@@ -275,8 +295,8 @@ fn fold_letter(character: char) -> Option<char> {
         '\u{0134}'..='\u{0135}' => Some('J'),
         '\u{0136}'..='\u{0138}' => Some('K'),
         '\u{0139}'..='\u{0142}' => Some('L'),
-        'Ñ'..='Ö' | 'ñ'..='ö' | '\u{0143}'..='\u{014B}' => Some('N'),
-        'Ø' | 'ø' | '\u{014C}'..='\u{0153}' => Some('O'),
+        'Ñ' | 'ñ' | '\u{0143}'..='\u{014B}' => Some('N'),
+        'Ò'..='Ö' | 'ò'..='ö' | 'Ø' | 'ø' | '\u{014C}'..='\u{0153}' => Some('O'),
         '\u{0154}'..='\u{0159}' => Some('R'),
         'ß' | '\u{015A}'..='\u{0161}' | '\u{017F}' => Some('S'),
         'Þ' | 'þ' | '\u{0162}'..='\u{0167}' => Some('T'),
