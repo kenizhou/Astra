@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The shell's chrome state: the theme mode the title bar toggles, the engine's
 // lifecycle as the shell sees it, the sync states the status bar draws, and
-// whether the account setup flow or the outbox panel is up.
+// whether the account setup flow, the outbox panel, the agent panel, or the
+// AI documents panel is up.
 
 import { create } from 'zustand';
 
@@ -22,6 +23,8 @@ interface UiStoreState {
   outboxOpen: boolean;
   /** Whether the agent panel is up over the shell's corner. */
   agentOpen: boolean;
+  /** Whether the AI documents panel is up over the shell's corner. */
+  aiPanelOpen: boolean;
   setTheme: (mode: ThemeMode) => void;
   toggleTheme: () => void;
   markRunning: () => void;
@@ -29,6 +32,7 @@ interface UiStoreState {
   setAccountSetupOpen: (open: boolean) => void;
   setOutboxOpen: (open: boolean) => void;
   setAgentOpen: (open: boolean) => void;
+  setAiPanelOpen: (open: boolean) => void;
 }
 
 /** Applies the theme classes on the document root; the tokens live on them. */
@@ -45,6 +49,7 @@ export const useUiStore = create<UiStoreState>((set) => ({
   accountSetupOpen: false,
   outboxOpen: false,
   agentOpen: false,
+  aiPanelOpen: false,
 
   setTheme: (mode) => {
     applyThemeClass(mode);
@@ -66,4 +71,6 @@ export const useUiStore = create<UiStoreState>((set) => ({
   setOutboxOpen: (open) => set({ outboxOpen: open }),
 
   setAgentOpen: (open) => set({ agentOpen: open }),
+
+  setAiPanelOpen: (open) => set({ aiPanelOpen: open }),
 }));
