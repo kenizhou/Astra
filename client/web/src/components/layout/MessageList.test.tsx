@@ -5,7 +5,8 @@
 // highlight following the open message), every intent crossing back
 // (show more, view mode, mark read, set flagged, open message) with its
 // exact payload, and the split filter (the badges, the side views, the
-// unmapped rows riding All only, and the selection reset).
+// unmapped rows riding All only, and the selection reset). The search
+// results mode has its own file: MessageList.search.test.tsx.
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -96,6 +97,7 @@ beforeEach(() => {
     visibleLimit: 0,
     selection: null,
     selectedKey: null,
+    search: null,
   });
   useReadingStore.setState({ snapshot: null, showRemoteImages: false });
   useSplitStore.setState({ entries: {}, filter: 'all' });

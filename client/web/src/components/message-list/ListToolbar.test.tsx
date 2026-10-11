@@ -19,6 +19,7 @@ describe('the split control', () => {
         splitFilter="all"
         splitCounts={{ all: 12, actioned: 7, fyi: 3 }}
         onSplitFilter={() => undefined}
+        search={null}
       />,
     );
 
@@ -36,6 +37,7 @@ describe('the split control', () => {
         splitFilter="fyi"
         splitCounts={{ all: 12, actioned: 7, fyi: 3 }}
         onSplitFilter={() => undefined}
+        search={null}
       />,
     );
 
@@ -53,6 +55,7 @@ describe('the split control', () => {
         splitFilter="all"
         splitCounts={{ all: 12, actioned: 7, fyi: 3 }}
         onSplitFilter={onSplitFilter}
+        search={null}
       />,
     );
 
@@ -74,6 +77,7 @@ describe('the split control', () => {
         splitFilter="all"
         splitCounts={{ all: 0, actioned: 0, fyi: 0 }}
         onSplitFilter={() => undefined}
+        search={null}
       />,
     );
 

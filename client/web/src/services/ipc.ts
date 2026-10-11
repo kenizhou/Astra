@@ -50,8 +50,8 @@ export interface ThreadRef {
   thread_id: string;
 }
 
-// Types an intent and a snapshot share, re-exported here exactly as the Rust
-// protocol re-exports them: the row key, the view mode, the search scope.
+// Types an intent and a snapshot share: the view mode and the search scope as
+// the Rust protocol re-exports them; the row key stands in for its RowRef twin.
 export type { RowKey, SearchScope, ViewMode };
 
 /** One mailbox-list row an action names: a message, or a whole conversation. */
