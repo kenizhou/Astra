@@ -137,8 +137,8 @@ this row ports.
 
 | Feature | Status | Notes |
 |---|---|---|
-| Read verbs with --json contract | 🚧 | fifteen verbs ship: accounts, folders, messages, rules, and the stored AI reads (cold, results, drafts, summary, style); grows with SP2+ slices; cli.md |
-| Gated mutating verbs with --preview | 🚧 | drafts save and discard, rules create and delete; the model-class `ai style rebuild` parses and refuses; cli.md |
+| Read verbs with --json contract | 🚧 | twenty-two verbs ship: accounts, folders, messages, rules, the stored AI reads (cold, results, drafts, summary, style), and the knowledge and snippet reads; grows with SP2+ slices; cli.md |
+| Gated mutating verbs with --preview | 🚧 | drafts save and discard, rules create and delete, knowledge forget, snippets create and delete; the model-class spellings (`ai style rebuild`, `knowledge extract`, `snippets search`) parse and refuse; cli.md |
 | Every invocation audited with a correlation id | 🚧 | ai.sqlite ledger; cli.md |
 | Send-class verbs parsed but refused | 🚧 | exit 3; cli.md |
 | Virtual permission tools mapping | ⬜ | SPA0 |
@@ -167,7 +167,10 @@ this row ports.
 | A2 | Smart reply chips: gated surfacing, accept into the reply composer, dismissal | 🚧 | the gate and chips ship; no badge surface on categorisation yet; ai-replies.md |
 | A2 | Summarisation with cache | 🚧 | the reading pane's summarise block; ai-replies.md |
 | A2 | Assistant chat with tool budget | ⬜ |
-| A3 | Knowledge, persona, snippets, autocomplete, translate | ⬜ |
+| A3 | Knowledge: batch extraction with sources, draft-prompt shaping, forget | 🚧 | ai-assist.md |
+| A3 | Snippet library with ranked search and the composer picker | 🚧 | ai-assist.md |
+| A3 | Compose autocomplete: gesture-only chip with session dismiss | 🚧 | ai-assist.md |
+| A3 | Reading-pane translate into six languages, cached | 🚧 | ai-assist.md |
 | A4 | Digest, meeting briefs, analytics reports, split inbox | ⬜ |
 
 ## Astra: Agent (sidecar host, per SPA0 spec D5)

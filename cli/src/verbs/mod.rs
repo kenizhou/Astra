@@ -20,6 +20,9 @@ pub(crate) mod fakes;
 pub(crate) mod folders;
 #[cfg(test)]
 mod folders_tests;
+pub(crate) mod knowledge;
+#[cfg(test)]
+mod knowledge_tests;
 pub(crate) mod messages;
 #[cfg(test)]
 mod messages_tests;
@@ -28,6 +31,9 @@ mod parse;
 pub(crate) mod rules;
 #[cfg(test)]
 mod rules_tests;
+pub(crate) mod snippets;
+#[cfg(test)]
+mod snippets_tests;
 
 pub(crate) use offline::Offline;
 
@@ -128,6 +134,32 @@ pub(crate) enum Verb {
         /// The stored rule's id.
         id: String,
     },
+    /// List one account's knowledge entries, newest first.
+    KnowledgeList {
+        /// The account id from the index.
+        account: String,
+    },
+    /// Forget one stored knowledge entry by id.
+    KnowledgeForget {
+        /// The entry's id.
+        id: String,
+    },
+    /// The refused extraction: the model seam lives in the app.
+    KnowledgeExtract,
+    /// List the snippet library, the most recently touched first.
+    SnippetsList,
+    /// Store one snippet, title and body text included.
+    SnippetsCreate {
+        /// The assembled arguments, body text included.
+        args: SnippetArgs,
+    },
+    /// Delete one stored snippet by id.
+    SnippetsDelete {
+        /// The snippet's id.
+        id: String,
+    },
+    /// The refused search: the model seam lives in the app.
+    SnippetsSearch,
     /// Read the stored cold verdicts for messages, never a live call.
     AiCold {
         /// The account id from the index.
@@ -178,6 +210,13 @@ impl Verb {
             Self::RulesList => "rules list",
             Self::RulesCreate { .. } => "rules create",
             Self::RulesDelete { .. } => "rules delete",
+            Self::KnowledgeList { .. } => "knowledge list",
+            Self::KnowledgeForget { .. } => "knowledge forget",
+            Self::KnowledgeExtract => "knowledge extract",
+            Self::SnippetsList => "snippets list",
+            Self::SnippetsCreate { .. } => "snippets create",
+            Self::SnippetsDelete { .. } => "snippets delete",
+            Self::SnippetsSearch => "snippets search",
             Self::AiCold { .. } => "ai cold",
             Self::AiResults { .. } => "ai results",
             Self::AiDrafts { .. } => "ai drafts",
@@ -195,8 +234,23 @@ impl Verb {
                 | Self::DraftsDiscard { .. }
                 | Self::RulesCreate { .. }
                 | Self::RulesDelete { .. }
+                | Self::KnowledgeForget { .. }
+                | Self::SnippetsCreate { .. }
+                | Self::SnippetsDelete { .. }
         )
     }
+}
+
+/// `snippets create`'s arguments, with the body text resolved at parse
+/// time so the audit preview can count it and execution cannot fail
+/// reading it, the drafts precedent.
+pub(crate) struct SnippetArgs {
+    /// The snippet's short title, the picker's label.
+    pub(crate) title: String,
+    /// The snippet's body, the text an insert places at the cursor.
+    pub(crate) body: String,
+    /// Which source the body came from, for the audit preview.
+    pub(crate) source: &'static str,
 }
 
 /// `drafts save`'s arguments, with the body text resolved at parse time so
@@ -274,7 +328,7 @@ async fn dispatch(args: &[String], data_dir: &Path, stdin: &mut dyn Read) -> Run
             invocation.verb.name().to_owned(),
             audit::arg_preview(&invocation.verb),
         ),
-        Err(ref failure) => (raw_verb(args, failure.code), String::new()),
+        Err(ref failure) => (parse::raw_verb(args, failure.code), String::new()),
     };
     let preview_held = matches!(&parsed, Ok(invocation) if invocation.preview);
     let outcome = if preview_held {
@@ -318,32 +372,6 @@ fn audit_outcome(run: &Run) -> &'static str {
     }
 }
 
-/// The subverbs the verbs spell: the CLI's own vocabulary, the only
-/// second positional the ledger may capture beside a verb word.
-const SUBVERBS: &[&str] = &[
-    "list", "read", "save", "discard", "create", "delete", "cold", "results", "drafts", "summary",
-    "style",
-];
-
-/// The verb word of an unparsable line, best effort: the first positional,
-/// joined with the subverb only when the subverb is the CLI's own
-/// vocabulary. A caller-typed positional never reaches the ledger (the
-/// correlation id already ties the whole line to its turn), and a refused
-/// send-class line records its single verb word alone.
-fn raw_verb(args: &[String], code: Code) -> String {
-    let positionals = parse::positional_words(args);
-    let Some(word) = positionals.first().copied() else {
-        return "-".to_owned();
-    };
-    if code == Code::Refused {
-        return word.to_owned();
-    }
-    match positionals.get(1) {
-        Some(&sub) if SUBVERBS.contains(&sub) => format!("{word} {sub}"),
-        _ => word.to_owned(),
-    }
-}
-
 /// Executes one parsed invocation against the data dir. The mail verbs
 /// open the engine store; the rules and AI verbs answer straight from the
 /// audit ledger's own store, the one file every invocation already
@@ -358,6 +386,16 @@ async fn execute(invocation: &Invocation, data_dir: &Path, store: &AiStore) -> A
             actions,
         } => return rules::create(store, name, condition, actions, invocation.preview),
         Verb::RulesDelete { id } => return rules::delete(store, id, invocation.preview),
+        Verb::KnowledgeList { account } => {
+            let account = account_id(data_dir, account)?;
+            return knowledge::list(store, &account);
+        }
+        Verb::KnowledgeForget { id } => return knowledge::forget(store, id, invocation.preview),
+        Verb::KnowledgeExtract => return knowledge::extract(),
+        Verb::SnippetsList => return snippets::list(store),
+        Verb::SnippetsCreate { args } => return snippets::create(store, args, invocation.preview),
+        Verb::SnippetsDelete { id } => return snippets::delete(store, id, invocation.preview),
+        Verb::SnippetsSearch => return snippets::search(),
         Verb::AiCold { account, keys } => {
             let account = account_id(data_dir, account)?;
             return ai::cold(store, &account, keys);
@@ -395,6 +433,13 @@ async fn execute(invocation: &Invocation, data_dir: &Path, store: &AiStore) -> A
         | Verb::RulesList
         | Verb::RulesCreate { .. }
         | Verb::RulesDelete { .. }
+        | Verb::KnowledgeList { .. }
+        | Verb::KnowledgeForget { .. }
+        | Verb::KnowledgeExtract
+        | Verb::SnippetsList
+        | Verb::SnippetsCreate { .. }
+        | Verb::SnippetsDelete { .. }
+        | Verb::SnippetsSearch
         | Verb::AiCold { .. }
         | Verb::AiResults { .. }
         | Verb::AiDrafts { .. }

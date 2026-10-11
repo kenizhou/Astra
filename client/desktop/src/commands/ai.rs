@@ -98,7 +98,10 @@ pub(crate) fn knowledge_list_of(state: &AppState, account: &AccountId) -> Vec<Kn
 }
 
 /// Runs one knowledge extraction over the account's most recent mail:
-/// `limit` messages at most, the thirty cap when none was named. The
+/// `limit` messages at most, the thirty cap when none was named and
+/// again when a named limit sits over it (the service's batch guard
+/// would drop the surplus anyway, but the window read would spend its
+/// body fetches first, so the cap lives here at the boundary). The
 /// command returns when the run is done, so the surface's spinner is the
 /// only progress there is.
 pub(crate) async fn knowledge_extract_of(
@@ -106,10 +109,10 @@ pub(crate) async fn knowledge_extract_of(
     account: &AccountId,
     limit: Option<usize>,
 ) -> ExtractionSummary {
-    state
-        .app
-        .knowledge_extract(account, limit.unwrap_or(KNOWLEDGE_EXTRACT_LIMIT))
-        .await
+    let capped = limit.map_or(KNOWLEDGE_EXTRACT_LIMIT, |limit| {
+        limit.min(KNOWLEDGE_EXTRACT_LIMIT)
+    });
+    state.app.knowledge_extract(account, capped).await
 }
 
 /// Forgets one knowledge entry by its identity, answering whether any
@@ -238,8 +241,9 @@ pub(crate) fn knowledge_list(state: State<'_, AppState>, account: AccountId) -> 
 }
 
 /// Runs one knowledge extraction over the account's most recent mail,
-/// `limit` messages at most and the thirty cap when none was named, and
-/// answers the run's summary once the run is done.
+/// `limit` messages at most with the thirty cap when none was named and
+/// again for a named limit over it, and answers the run's summary once
+/// the run is done.
 // Tauri's command macro hands `State` by value; the wrapper only reads through it.
 #[allow(clippy::needless_pass_by_value)]
 #[tauri::command]

@@ -8,7 +8,7 @@ use std::path::Path;
 
 use astra_ai::CorrelationId;
 
-use super::{DraftArgs, Invocation, ParseFailure, Verb, DEFAULT_LIMIT, SEND_CLASS};
+use super::{DraftArgs, Invocation, ParseFailure, SnippetArgs, Verb, DEFAULT_LIMIT, SEND_CLASS};
 use crate::envelope::Code;
 
 /// The refusal's message, naming the rule it enforces.
@@ -71,6 +71,24 @@ pub(super) fn parse(args: &[String], stdin: &mut dyn Read) -> Result<Invocation,
         (Some("rules"), Some("delete")) => Verb::RulesDelete {
             id: required(args, "--id")?,
         },
+        (Some("knowledge"), Some("list")) => Verb::KnowledgeList {
+            account: required(args, "--account")?,
+        },
+        (Some("knowledge"), Some("forget")) => Verb::KnowledgeForget {
+            id: required(args, "--id")?,
+        },
+        // The never-dials rule's edge: the spelling parses whatever else
+        // the line carried, so the refusal (not a usage error) answers a
+        // caller that reached for the model-backed run.
+        (Some("knowledge"), Some("extract")) => Verb::KnowledgeExtract,
+        (Some("snippets"), Some("list")) => Verb::SnippetsList,
+        (Some("snippets"), Some("create")) => Verb::SnippetsCreate {
+            args: snippet_args(args)?,
+        },
+        (Some("snippets"), Some("delete")) => Verb::SnippetsDelete {
+            id: required(args, "--id")?,
+        },
+        (Some("snippets"), Some("search")) => Verb::SnippetsSearch,
         (Some("ai"), Some("cold")) => {
             let ai_words = ai_positionals(args);
             Verb::AiCold {
@@ -154,6 +172,37 @@ fn draft_args(args: &[String], stdin: &mut dyn Read) -> Result<DraftArgs, ParseF
         body,
         source,
     })
+}
+
+/// Reads `snippets create`'s arguments, resolving the body from exactly
+/// one of `--body` or `--body-file`, the drafts one-source discipline
+/// over the snippet's own pair.
+fn snippet_args(args: &[String]) -> Result<SnippetArgs, ParseFailure> {
+    let title = non_empty(required(args, "--title")?, "--title")?;
+    let file = owned_value(args, "--body-file")?;
+    let resolved = match (one_value(args, "--body")?, file) {
+        (Some(_), Some(_)) | (None, None) => {
+            return Err(usage(
+                "the body comes from one source: --body or --body-file",
+            ))
+        }
+        (Some(text), None) => SnippetArgs {
+            title,
+            body: non_empty((*text).to_owned(), "--body")?,
+            source: "arg",
+        },
+        (None, Some(path)) => SnippetArgs {
+            title,
+            body: non_empty(
+                std::fs::read_to_string(Path::new(&path)).map_err(|err| {
+                    usage(&format!("the --body-file body could not be read: {err}"))
+                })?,
+                "--body-file",
+            )?,
+            source: "file",
+        },
+    };
+    Ok(resolved)
 }
 
 /// A flag that must carry a value, read as an owned `String`.
@@ -350,4 +399,30 @@ pub(super) fn correlation_from(args: &[String]) -> CorrelationId {
         index += 1;
     }
     CorrelationId::generate()
+}
+
+/// The subverbs the verbs spell: the CLI's own vocabulary, the only
+/// second positional the ledger may capture beside a verb word.
+const SUBVERBS: &[&str] = &[
+    "list", "read", "save", "discard", "create", "delete", "cold", "results", "drafts", "summary",
+    "style", "forget", "extract", "search",
+];
+
+/// The verb word of an unparsable line, best effort: the first positional,
+/// joined with the subverb only when the subverb is the CLI's own
+/// vocabulary. A caller-typed positional never reaches the ledger (the
+/// correlation id already ties the whole line to its turn), and a refused
+/// send-class line records its single verb word alone.
+pub(super) fn raw_verb(args: &[String], code: Code) -> String {
+    let positionals = positional_words(args);
+    let Some(word) = positionals.first().copied() else {
+        return "-".to_owned();
+    };
+    if code == Code::Refused {
+        return word.to_owned();
+    }
+    match positionals.get(1) {
+        Some(&sub) if SUBVERBS.contains(&sub) => format!("{word} {sub}"),
+        _ => word.to_owned(),
+    }
 }

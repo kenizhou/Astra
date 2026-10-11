@@ -249,14 +249,22 @@ fn the_extraction_pull_crosses_and_defaults_its_limit() {
         .runtime
         .block_on(|| knowledge_extract_of(&state, &account, Some(10)));
     assert_eq!(capped.extracted, 2);
+    let over = state
+        .runtime
+        .block_on(|| knowledge_extract_of(&state, &account, Some(5_000)));
+    assert_eq!(over.extracted, 2);
     assert_eq!(
         app.assist.lock().unwrap().extracted_into.as_slice(),
         [
             ("work".to_owned(), astra_app::KNOWLEDGE_EXTRACT_LIMIT),
-            ("work".to_owned(), 10)
+            ("work".to_owned(), 10),
+            ("work".to_owned(), astra_app::KNOWLEDGE_EXTRACT_LIMIT)
         ]
         .as_slice(),
-        "an absent limit crosses as the thirty cap and a named one as itself",
+        "an absent limit crosses as the thirty cap, a named one as itself \
+         while it sits under the cap, and a named one over the cap as the \
+         cap: the window would fetch bodies for messages the batch can \
+         never carry",
     );
 }
 

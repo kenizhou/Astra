@@ -17,15 +17,18 @@ the ledger does not know happened.
 
 ## The verbs
 
-Fifteen ship today: nine mail, drafts, and rules verbs plus the six `ai`
-verbs. The grammar is two positional
+Twenty-two ship today: nine mail, drafts, and rules verbs, the six `ai`
+verbs, and the seven `knowledge` and `snippets` verbs. The grammar is two
+positional
 words (`verb subverb`) plus flags, and flag order is free: the sidecar
 should spell `astra-cli [--json] [--correlation-id <id>] <verb> <subverb>
 [--flag <value> ...]`, always passing `--json` and the turn's
 `--correlation-id`, and treating everything after the two positionals as
-named flags. The nine store-backed verbs (`rules` and `ai`) take their
-remaining operands as bare positionals instead, the grammar their
-surfaces pinned. A call is unambiguous in text and in an audit row.
+named flags. The six `ai` store verbs take their remaining operands as
+bare positionals instead, the grammar their surfaces pinned; the
+`knowledge` and `snippets` verbs read and write their stores through
+named flags like the mail verbs. A call is unambiguous in text and in an
+audit row.
 
 | Verb | Reads | Answer's `data` |
 |---|---|---|
@@ -44,6 +47,13 @@ surfaces pinned. A call is unambiguous in text and in an audit row.
 | `ai summary <account> <key> [<key>...]` | the stored summarise cache row (migration 0005) beside the audit ledger | `messages`: per key, the cached `summary` with the `body_hash` it was cached under and `created_at`, or `null` when nothing is cached; whether the row still hits is the app's serving-time body-hash check, which this read makes no claim about |
 | `ai style <account>` | the stored style profile (0004's sibling table) | `style`: the profile's `note` and `built_at`, or `null` when none was ever built |
 | `ai style rebuild` | nothing: the spelling parses and refuses | exit `3` with the model rule's refusal (below); `--preview` is the shared non-mutating usage error, there being no action to describe |
+| `knowledge list --account <id>` | the knowledge store (0007) beside the audit ledger | `entries`: id, kind, text, `source_account`, `source_key`, `created_at`, newest first; the entry's text rides whole, the whole-body discipline `ai drafts` carries |
+| `knowledge forget --id <id>` | deletes one stored knowledge entry, the only exit | `id`, `state: forgotten`; `--preview` names the exact forgetting; an id no entry carries is a runtime error naming it |
+| `knowledge extract` | nothing: the spelling parses and refuses | exit `3` with the never-dials refusal (below); `--preview` is the shared non-mutating usage error |
+| `snippets list` | the snippet library (0008) beside the audit ledger | `snippets`: id, title, body, `created_at`, `updated_at`, the most recently touched first; the body rides whole, the insert places exactly it |
+| `snippets create --title <t> (--body <text> or --body-file <path>)` | writes one snippet to the snippet store | `snippet` (id, title, body, the store's stamps) and `state: created`; `--preview` prints the exact snippet the store would take; the body comes from one source, two at once is a usage error |
+| `snippets delete --id <id>` | deletes one stored snippet | `id`, `state: deleted`; `--preview` names the exact deletion; an id no snippet carries is a runtime error naming it |
+| `snippets search` | nothing: the spelling parses and refuses | exit `3` with the never-dials refusal (below); the ranked search runs in the app's composer picker, and the agent filters `snippets list` itself |
 
 Rules that bind every verb:
 
@@ -69,17 +79,19 @@ Rules that bind every verb:
   preview; the audit row's outcome says `preview`.
 - **The body comes from one source.** `--plain`, `--file`, or stdin; two at
   once is a usage error.
-- **The store verbs answer without the engine.** `rules` and `ai` read and
-  write the rules, results, and reply-drafting tables (the draft pool and
-  style profiles, the summarise cache) beside the audit ledger in
+- **The store verbs answer without the engine.** `rules`, `ai`,
+  `knowledge`, and `snippets` read and write the rules, results,
+  reply-drafting, knowledge, and snippet tables (the draft pool and
+  style profiles, the summarise cache, the knowledge entries, the
+  snippet library) beside the audit ledger in
   `ai.sqlite`, the one file every invocation already opens: no mail is
   read and no provider is dialled, so the verbs work against a cold data
   dir exactly as the mail verbs work against a synced one.
 - **The CLI never dials a model.** `ai cold` and `ai results` return what
   a pass recorded, never a live call: a verdict exists here only because
   the app's incoming pass judged the message, and an unjudged message
-  answers `null`, never a guess. `ai drafts`, `ai summary`, and
-  `ai style` extend the same honesty to the reply-drafting tables: a
+  answers `null`, never a guess. `ai drafts`, `ai summary`, and `ai
+  style` extend the same honesty to the reply-drafting tables: a
   pool, cache, or profile row exists only because the app's drafting
   driver or pulls recorded it. The generation seam is the same
   honesty: `rules create` takes an explicit condition sentence and
@@ -89,7 +101,14 @@ Rules that bind every verb:
   stores what it is given (the seam recorded in `docs/ai-rules.md`).
   `ai style rebuild` carries the rule to its refused edge: the rebuild
   is a model inference, so the spelling parses into the refusal below
-  rather than pretend to infer.
+  rather than pretend to infer. The A3 assist spellings carry it
+  further (the never-dials rule, the contracts in
+  `docs/ai-assist.md`): `knowledge extract` is a batch completion over
+  the account's mail and `snippets search` is a ranked completion over
+  the library, so both parse into the same refusal naming where the run
+  happens; `knowledge list` and `snippets list` read what the app
+  landed, and autocomplete and translate have no CLI spelling at all,
+  being editor and reading-pane gestures.
 - **The closed action set is spelled twice, by design.** The CLI's
   `CLOSED_ACTIONS` and the app layer's `Action::ALL` carry the same wire
   words in two crates that do not depend on each other; both are pinned
@@ -129,7 +148,12 @@ style read after the daily cap passes infers a fresh note from Sent mail
 deviation from the spec's mutating-verb sentence live in
 `docs/ai-replies.md`). The verb ships no `--preview`, because there is no
 action to describe. Exit `3`, ledger outcome `refused`, the row naming
-the full `ai style rebuild` spelling.
+the full `ai style rebuild` spelling. `knowledge extract` and `snippets
+search` refuse identically (the A3 assist contracts live in
+`docs/ai-assist.md`): the extraction runs as the host's
+`knowledge_extract` command over the account's recent mail, the ranked
+search as the composer picker's search, and the agent reads what landed
+through `knowledge list` and `snippets list`.
 
 ## The audit
 
@@ -173,11 +197,11 @@ known interaction, not a gap to close.
 
 | Rule | Status | Where |
 |---|---|---|
-| Fifteen verbs with the pinned envelope | ✅ | `cli/src/verbs` |
-| `--preview` on every mutating verb (drafts and rules), one shared builder each | ✅ | `cli/src/verbs/{drafts,rules}.rs` |
+| Twenty-two verbs with the pinned envelope | ✅ | `cli/src/verbs` |
+| `--preview` on every mutating verb (drafts, rules, knowledge, and snippets), one shared builder each | ✅ | `cli/src/verbs/{drafts,rules,knowledge,snippets}.rs` |
 | Every invocation audited with a correlation id | ✅ | `cli/src/audit.rs`, `cli/src/verbs/mod.rs` |
 | Send-class verbs parsed and refused, exit 3 | ✅ | `cli/src/verbs/mod.rs` |
-| Model-class verb (`ai style rebuild`) parsed and refused, exit 3 | ✅ | `cli/src/verbs/ai.rs` |
+| Model-class verbs (`ai style rebuild`, `knowledge extract`, `snippets search`) parsed and refused, exit 3 | ✅ | `cli/src/verbs/{ai,knowledge,snippets}.rs` |
 | Exit codes 0, 1, 2, 3 | ✅ | `cli/src/envelope.rs` |
 | Redacted argument previews (shapes, never text) | ✅ | `cli/src/audit.rs` |
 | Staged as the desktop bundle's `externalBin` | ✅ | `client/desktop/scripts/stage-cli.mjs` |

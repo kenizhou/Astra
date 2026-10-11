@@ -113,9 +113,13 @@ sqlite。迁移为手工实现，每个迁移一个事务并在 `ai_migrations` 
 后台客户端（`client/desktop/src/ai/`）服务非聊天补全：双协议（openai
 `POST {base}/chat/completions` 带 bearer 密钥；anthropic `POST
 {base}/v1/messages` 带 `x-api-key` 与 `anthropic-version: 2023-06-01`、
-`max_tokens` 1024），链上每条目一次尝试，可重试失败（连接与传输错误、5xx、
+`max_tokens` 1024、`thinking` 关闭），链上每条目一次尝试，可重试失败（连接与传输错误、5xx、
 429、畸形的 2xx 信封）推进到下一条目，`Retry-After` 按 delta 秒数执行并封顶
 两秒，鉴权（401、403）与配额（402、各提供方的余额耗尽报文）对本次调用终局。
+thinking 的关闭是刻意的：经验证的 anthropic 兼容端点默认推理，可能把整个
+`max_tokens` 预算花在 thinking 块上、答出无文本的 2xx（A1 套件记录过的端点
+行为，对引人斟酌的提示词是系统性的，A3 的自动补全询问即是）；没有界面消费
+thinking，客户端便以 Anthropic 自己的关闭拼写一律不要。
 错误串只到状态级：响应体绝不流入。A1 收件扫描经其补全与判定接缝消费该客户端
 （`docs/ai-rules.md` 契约）；聊天面板的模型走 sidecar。
 
