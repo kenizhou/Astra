@@ -5,7 +5,8 @@
 // split filter stays on the client, its state held by the split store,
 // because the core owes no side view of its own. A live search replaces
 // the folder's own toolbar: the result count and the depth note stand
-// where the folder name stood, the split control hides (its sides derive
+// where the folder name stood (a zero horizon claims no note), the split
+// control hides (its sides derive
 // from the folder the search is not showing), and the exit affordance
 // clears the search back to the folder view.
 
@@ -59,11 +60,13 @@ export function ListToolbar({ folderName, viewMode, splitFilter, splitCounts, on
           <span className="shrink-0 text-[13px] font-semibold text-foreground">
             {search.rows.length === 1 ? '1 result' : `${search.rows.length} results`}
           </span>
-          <span className="min-w-0 truncate text-xs text-muted-foreground">
-            {search.depth_months === 1
-              ? 'Searched the last month'
-              : `Searched the last ${search.depth_months} months`}
-          </span>
+          {search.depth_months > 0 && (
+            <span className="min-w-0 truncate text-xs text-muted-foreground">
+              {search.depth_months === 1
+                ? 'Searched the last month'
+                : `Searched the last ${search.depth_months} months`}
+            </span>
+          )}
         </span>
       )}
       <div className="flex items-center gap-3">

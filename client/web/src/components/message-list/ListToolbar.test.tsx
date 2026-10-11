@@ -2,10 +2,13 @@
 // The list toolbar's split control: three segmented buttons carrying the
 // counts of the snapshot's rows per side, the pressed state following the
 // chosen filter, and every click crossing back with the side it names.
+// The search header beside them: the depth note stated at a nonzero
+// horizon and absent at zero, where the search claims no horizon at all.
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import type { SearchState } from '@/services/surfaces';
 import { ListToolbar } from './ListToolbar';
 
 afterEach(cleanup);
@@ -83,5 +86,47 @@ describe('the split control', () => {
 
     expect(screen.getByRole('button', { name: 'Threaded' }).getAttribute('aria-pressed')).toBe('true');
     expect(screen.getByRole('button', { name: 'All 0' })).toBeTruthy();
+  });
+});
+
+describe('the search header', () => {
+  /** A live search state with the given horizon and nothing found. */
+  const liveSearch = (depth_months: number): SearchState => ({
+    query: 'compiler',
+    scope: 'all_except_trash',
+    rows: [],
+    depth_months,
+  });
+
+  it('states the singular depth note at a one-month horizon', () => {
+    render(
+      <ListToolbar
+        folderName="Inbox"
+        viewMode="flat"
+        splitFilter="all"
+        splitCounts={{ all: 0, actioned: 0, fyi: 0 }}
+        onSplitFilter={() => undefined}
+        search={liveSearch(1)}
+      />,
+    );
+
+    expect(screen.getByText('0 results')).toBeTruthy();
+    expect(screen.getByText('Searched the last month')).toBeTruthy();
+  });
+
+  it('states no depth note at a zero horizon', () => {
+    render(
+      <ListToolbar
+        folderName="Inbox"
+        viewMode="flat"
+        splitFilter="all"
+        splitCounts={{ all: 0, actioned: 0, fyi: 0 }}
+        onSplitFilter={() => undefined}
+        search={liveSearch(0)}
+      />,
+    );
+
+    expect(screen.getByText('0 results')).toBeTruthy();
+    expect(screen.queryByText(/^Searched the last/)).toBeNull();
   });
 });

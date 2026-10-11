@@ -58,9 +58,10 @@ wider vocabulary is the engine's to parse.
 Matching belongs to the engine. The app splits the two product operators out
 of the raw string, then hands them back **inside the engine's own query
 string** (the engine's search surface accepts them there), so no app-side
-filtering of results runs: the filter narrows inside the match itself, exactly
-as the same query typed raw would. The split exists to be forgiving where the
-engine is strict:
+filtering of the from:/to: operators runs (the scope's folder filter is
+app-side): the filter narrows inside the match itself, exactly as the same
+query typed raw would. The split exists to be forgiving where the engine is
+strict:
 
 - **A prefix with no value is dropped, not refused.** The engine refuses
   `from:` outright and would kill the whole query; the split drops the token
