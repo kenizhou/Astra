@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The reading pane: the right-hand column of the shell. Nothing open draws
 // the empty state with the compose actions standing disabled; a pulled
-// snapshot draws its header, its AI replies surfaces (the smart replies
-// strip, the summarise block, and the translate block, all keyed to the
-// open message and standing absent with nothing to show), its body (the
-// sandboxed HTML, the plain fallback, or a no-body note), and its
-// attachment rows, with the compose actions dispatching the family for the
-// open message and the close button crossing back as close_reading.
+// snapshot draws its header, the invitation card when the message is a
+// scheduling one, its AI replies surfaces (the smart replies strip, the
+// summarise block, and the translate block, all keyed to the open message
+// and standing absent with nothing to show), its body (the sandboxed HTML,
+// the plain fallback, or a no-body note), and its attachment rows, with the
+// compose actions dispatching the family for the open message and the close
+// button crossing back as close_reading.
 
 import { AttachmentList } from '@/components/reading-pane/AttachmentList';
+import { InvitationCard } from '@/components/reading-pane/InvitationCard';
 import { MessageHtml } from '@/components/reading-pane/MessageHtml';
 import { ReadingActions } from '@/components/reading-pane/ReadingActions';
 import { ReadingHeader } from '@/components/reading-pane/ReadingHeader';
@@ -79,6 +81,9 @@ export function ReadingPane() {
         fromAddress={snapshot.from_address}
         sentAt={snapshot.sent_at}
       />
+      {snapshot.invitation !== undefined && (
+        <InvitationCard message={snapshot.message} invitation={snapshot.invitation} />
+      )}
       <SmartReplies />
       <SummaryBlock />
       <TranslateBlock />

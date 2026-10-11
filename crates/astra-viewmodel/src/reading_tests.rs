@@ -43,6 +43,7 @@ fn a_full_reading_snapshot_crosses_with_every_optional_key() {
             },
         ],
         remote_image_count: 2,
+        invitation: None,
     };
 
     let json = serde_json::to_string(&snapshot).unwrap();
@@ -82,6 +83,7 @@ fn a_plain_only_reading_snapshot_crosses_with_no_optional_keys() {
         plain: Some("Sandwiches at noon.".to_owned()),
         attachments: Vec::new(),
         remote_image_count: 0,
+        invitation: None,
     };
 
     let json = serde_json::to_string(&snapshot).unwrap();
@@ -177,4 +179,94 @@ fn a_thread_row_key_is_rejected_as_a_reading_key() {
         thread_id: engine_api::ThreadId::try_from("th-7").unwrap(),
     };
     assert_eq!(MessageKey::try_from(row), Err(NotAMessageRow));
+}
+
+#[test]
+fn an_invitation_block_crosses_after_the_body_with_snake_case_words() {
+    let snapshot = ReadingSnapshot {
+        message: MessageKey {
+            account: account("work"),
+            key: key("imap:v1:u42"),
+        },
+        subject: "Sprint planning".to_owned(),
+        from_name: "Boss".to_owned(),
+        from_address: "boss@test.local".to_owned(),
+        sent_at: "2026-10-09T08:30:00Z".to_owned(),
+        html: None,
+        plain: Some("When: 30 July".to_owned()),
+        attachments: Vec::new(),
+        remote_image_count: 0,
+        invitation: Some(InvitationBlock {
+            kind: InvitationKind::Rsvp,
+            response: Participation::NeedsAction,
+            stale: false,
+            summary: "Sprint planning".to_owned(),
+            organizer: "boss@test.local".to_owned(),
+        }),
+    };
+
+    let json = serde_json::to_string(&snapshot).unwrap();
+    assert_eq!(
+        json,
+        concat!(
+            r#"{"message":{"account":"work","key":"imap:v1:u42"},"#,
+            r#""subject":"Sprint planning","#,
+            r#""from_name":"Boss","#,
+            r#""from_address":"boss@test.local","#,
+            r#""sent_at":"2026-10-09T08:30:00Z","#,
+            r#""plain":"When: 30 July","#,
+            r#""remote_image_count":0,"#,
+            r#""invitation":{"kind":"rsvp","response":"needs_action","#,
+            r#""stale":false,"summary":"Sprint planning","#,
+            r#""organizer":"boss@test.local"}}"#
+        )
+    );
+
+    let back: ReadingSnapshot = serde_json::from_str(&json).unwrap();
+    assert_eq!(back, snapshot);
+}
+
+#[test]
+fn every_invitation_kind_crosses_as_its_own_snake_case_word() {
+    for (kind, word) in [
+        (InvitationKind::Rsvp, "rsvp"),
+        (InvitationKind::Cancelled, "cancelled"),
+        (InvitationKind::Informational, "informational"),
+        (InvitationKind::Superseded, "superseded"),
+    ] {
+        let block = InvitationBlock {
+            kind,
+            response: Participation::Tentative,
+            stale: true,
+            summary: "Sprint planning".to_owned(),
+            organizer: "boss@test.local".to_owned(),
+        };
+        assert_eq!(
+            serde_json::to_string(&block).unwrap(),
+            format!(
+                concat!(
+                    r#"{{"kind":"{word}","response":"tentative","#,
+                    r#""stale":true,"summary":"Sprint planning","#,
+                    r#""organizer":"boss@test.local"}}"#,
+                ),
+                word = word
+            )
+        );
+    }
+}
+
+#[test]
+fn a_reading_snapshot_without_the_invitation_block_crosses_no_key() {
+    // The additive-wire case: a snapshot from before the block existed parses
+    // with no invitation, and one that holds none crosses no key at all.
+    let back: ReadingSnapshot = serde_json::from_str(concat!(
+        r#"{"message":{"account":"work","key":"imap:v1:u42"},"#,
+        r#""subject":"S","from_name":"A","from_address":"a@b.test","#,
+        r#""sent_at":"2026-10-09T08:30:00Z","remote_image_count":0}"#
+    ))
+    .unwrap();
+    assert_eq!(back.invitation, None);
+
+    let json = serde_json::to_string(&back).unwrap();
+    assert!(!json.contains(r#""invitation""#));
 }

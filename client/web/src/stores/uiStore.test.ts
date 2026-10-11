@@ -21,3 +21,17 @@ describe('the ui store theme', () => {
     expect(document.documentElement.classList.contains('light')).toBe(false);
   });
 });
+
+describe('the ui store shell view', () => {
+  it('mail is the default view', () => {
+    useUiStore.setState({ shellView: 'mail' });
+    expect(useUiStore.getState().shellView).toBe('mail');
+  });
+
+  it('switches to the calendar and back', () => {
+    useUiStore.getState().setShellView('calendar');
+    expect(useUiStore.getState().shellView).toBe('calendar');
+    useUiStore.getState().setShellView('mail');
+    expect(useUiStore.getState().shellView).toBe('mail');
+  });
+});

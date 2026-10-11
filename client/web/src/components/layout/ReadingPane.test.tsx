@@ -202,4 +202,30 @@ describe('the reading pane', () => {
     expect(screen.getByRole('button', { name: 'Translate' })).toBeTruthy();
     expect(screen.getByRole('combobox', { name: 'Translate to' })).toBeTruthy();
   });
+
+  it('mounts the invitation card above the body when the snapshot carries one', () => {
+    useReadingStore.getState().applySnapshot(
+      snapshot({
+        invitation: {
+          kind: 'rsvp',
+          response: 'needs_action',
+          stale: false,
+          summary: 'Sprint planning',
+          organizer: 'boss@example.test',
+        },
+      }),
+    );
+    render(<ReadingPane />);
+
+    const region = screen.getByRole('region', { name: 'Invitation' });
+    expect(region.textContent).toContain('Sprint planning');
+    expect(screen.getByRole('button', { name: 'Accept' })).toBeTruthy();
+  });
+
+  it('mounts no invitation card for a plain message', () => {
+    useReadingStore.getState().applySnapshot(snapshot());
+    render(<ReadingPane />);
+
+    expect(screen.queryByRole('region', { name: 'Invitation' })).toBeNull();
+  });
 });

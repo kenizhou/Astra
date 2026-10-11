@@ -24,7 +24,9 @@ pub use calendar::{
 pub use compose_request::{ComposeKind, ComposeRequestSnapshot};
 pub use drafts::{DraftSaveState, DraftStatusSnapshot};
 pub use folders::{folder_role, sorted_folder_rows, AccountFolderRow, FolderRole, FolderRow};
-pub use reading::{AttachmentRow, MessageKey, NotAMessageRow, ReadingSnapshot};
+pub use reading::{
+    AttachmentRow, InvitationBlock, InvitationKind, MessageKey, NotAMessageRow, ReadingSnapshot,
+};
 pub use rows::{MessageRowView, RowKey, ViewMode};
 pub use search::{SearchScope, SearchState};
 pub use sending::{queued_row, QueuedKey, QueuedRow, QueuedState, SendingSnapshot};

@@ -13,7 +13,7 @@
 use engine_api::{AccountId, ProviderKey};
 use serde::{Deserialize, Serialize};
 
-use crate::RowKey;
+use crate::{Participation, RowKey};
 
 /// The identity of the one message a reading snapshot holds the body of.
 ///
@@ -136,6 +136,53 @@ pub struct ReadingSnapshot {
     /// `0` means the body has nothing remote to load, and a surface offers no
     /// toggle for it.
     pub remote_image_count: u32,
+    /// What the open message means to this account's calendar, when it is a
+    /// scheduling message the calendar recognises: the card a surface mounts
+    /// above the body. Absent for every other message, crossing no key at all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invitation: Option<InvitationBlock>,
+}
+
+/// What the open message means to this account's calendar: the two-condition
+/// gate's verdict, narrowed to the kinds a reading surface can act on or
+/// sentence. Crosses as a snake_case word.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InvitationKind {
+    /// A reply is owed and this account is the one that owes it: the card a
+    /// surface offers its accept, maybe, and decline controls on.
+    Rsvp,
+    /// The organiser cancelled the meeting. No reply is possible.
+    Cancelled,
+    /// The details, and no response owed: the message is informational for
+    /// this account.
+    Informational,
+    /// The calendar holds a newer revision of the same meeting, so the copy on
+    /// screen is out of date. No response: answering it would agree to times
+    /// that are no longer the meeting's.
+    Superseded,
+}
+
+/// The invitation card's own state: what the message is, where this account
+/// stands in the meeting it names, and whether the copy on screen is out of
+/// date, beside the meeting's title and the organiser's address (who an
+/// answer or an emailed reply reaches).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InvitationBlock {
+    /// The gate's verdict, picking which affordances the card offers.
+    pub kind: InvitationKind,
+    /// How this account stands in the meeting **as the calendar holds it**:
+    /// the answer already given, or the unanswered hold. A surface shows the
+    /// standing beside the answer it offers, and a hold stays a hold.
+    pub response: Participation,
+    /// Whether the calendar holds a newer revision of the same meeting than
+    /// the copy on screen: the sentence that says so is the card's, whatever
+    /// the kind.
+    pub stale: bool,
+    /// The meeting's title, as the invitation carries it.
+    pub summary: String,
+    /// The organiser's address: who an answer reaches.
+    pub organizer: String,
 }
 
 #[cfg(test)]

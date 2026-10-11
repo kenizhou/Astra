@@ -292,6 +292,24 @@ export interface NowLineData {
   zone: string;
 }
 
+/**
+ * The invitation card above the reading pane's body: what the open message
+ * means to this account's calendar. The words are the two-condition gate's,
+ * the same verdict the answer path decides through.
+ */
+export interface InvitationBlock {
+  /** The gate's verdict, picking which affordances the card offers. */
+  kind: 'rsvp' | 'cancelled' | 'informational' | 'superseded';
+  /** How this account stands in the meeting as the calendar holds it. */
+  response: Participation;
+  /** Whether the calendar holds a newer revision than the copy on screen. */
+  stale: boolean;
+  /** The meeting's title, as the invitation carries it. */
+  summary: string;
+  /** The organiser's address: who an answer reaches. */
+  organizer: string;
+}
+
 /** The calendar snapshot the surface renders after every pull. */
 export interface CalendarSnapshot {
   calendars?: CalendarRow[];

@@ -17,7 +17,7 @@ import type {
 } from './composeRequest';
 import { sendingIntents } from './sending';
 import type { MailSubmission, OutboxIntent, SendingSnapshot } from './sending';
-import type { CalendarIntentBody } from './calendar';
+import type { CalendarIntentBody, InvitationBlock } from './calendar';
 import { calendarIntents } from './calendar';
 import type { MailboxListSnapshot, RowKey, SearchScope, SyncProgressSnapshot, ViewMode } from './surfaces';
 
@@ -249,6 +249,12 @@ export interface ReadingSnapshot {
   attachments?: AttachmentRow[];
   /** How many remote references the sanitised HTML carries, all blocked. */
   remote_image_count: number;
+  /**
+   * What the open message means to this account's calendar, when it is a
+   * scheduling message the calendar recognises: the card a surface mounts
+   * above the body. Absent for every other message.
+   */
+  invitation?: InvitationBlock;
 }
 
 /** The state of a composition's most recent draft save. */

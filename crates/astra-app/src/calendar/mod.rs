@@ -39,6 +39,10 @@ pub use brief::{
     BRIEF_INVITATION_SCAN_LIMIT, MEETING_BRIEF_PROMPT_VERSION,
 };
 
+// The invitation gate, shared with the reading pipeline so the card above the
+// open message's body and the answer path decide through one verdict.
+pub(crate) use invite::{classify, matched_attendee, supersede, InvitationKind};
+
 /// The visible window's default length, in days: the six weeks a month grid
 /// needs, with a week of history behind now so a cold app that has never seen
 /// a `SetRange` still paints the week it is in.

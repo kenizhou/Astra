@@ -3,11 +3,11 @@
 // click on one of the dedicated drag regions toggles maximise. The handler
 // lives on the regions alone, never on the header: a double click on a button
 // bubbles to the header, and an answer there would net the control an extra
-// toggle on top of its own clicks. The product name, the search box, the
-// theme toggle, and the account setup entry sit on the strip as their own
-// no-drag targets by virtue of being the event's target rather than the
-// region itself. The search box holds the strip's centre between two drag
-// regions, the scope dropdown riding inside it.
+// toggle on top of its own clicks. The product name, the shell's view
+// switch, the search box, the theme toggle, and the account setup entry sit
+// on the strip as their own no-drag targets by virtue of being the event's
+// target rather than the region itself. The search box holds the strip's
+// centre between two drag regions, the scope dropdown riding inside it.
 
 import { useEffect, useRef, useState } from 'react';
 
@@ -18,6 +18,45 @@ import { dispatch, intents } from '@/services/ipc';
 import { useListStore } from '@/stores/listStore';
 import { useUiStore } from '@/stores/uiStore';
 import type { SearchScope } from '@/services/surfaces';
+import type { ShellView } from '@/stores/uiStore';
+
+/** The shell's views the switch offers; Contacts joins this list later. */
+const SHELL_VIEWS: ReadonlyArray<{ id: ShellView; label: string }> = [
+  { id: 'mail', label: 'Mail' },
+  { id: 'calendar', label: 'Calendar' },
+];
+
+/** The shell's view switch: which feature fills the content row. */
+export function ShellSwitch() {
+  const shellView = useUiStore((s) => s.shellView);
+  const setShellView = useUiStore((s) => s.setShellView);
+
+  return (
+    <div
+      role="group"
+      aria-label="View"
+      className="ml-2 flex overflow-hidden rounded-[var(--radius)] border border-border"
+    >
+      {SHELL_VIEWS.map(({ id, label }) => (
+        <button
+          key={id}
+          type="button"
+          aria-pressed={shellView === id}
+          onClick={() => setShellView(id)}
+          className={`px-2 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+            id === 'mail' ? '' : 'border-l border-border'
+          } ${
+            shellView === id
+              ? 'bg-selected font-medium text-selected-text'
+              : 'text-muted-foreground hover:bg-hover hover:text-foreground'
+          }`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 /** How long the search box sits quiet before its query crosses. */
 export const SEARCH_DEBOUNCE_MS = 500;
@@ -143,6 +182,8 @@ export function TitleBar() {
       >
         Astra Mail
       </span>
+
+      <ShellSwitch />
 
       <div
         data-tauri-drag-region

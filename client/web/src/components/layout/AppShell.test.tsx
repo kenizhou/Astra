@@ -35,6 +35,7 @@ beforeEach(() => {
   ipc.dispatch.mockResolvedValue(undefined);
   ipc.draftResume.mockReset();
   ipc.draftResume.mockResolvedValue(null);
+  useUiStore.getState().setShellView('mail');
   useAccountStore.setState({ accounts: [{ accountId: 'work', displayName: 'Work' }] });
   useComposerStore.setState({
     open: false,
@@ -147,5 +148,38 @@ describe('the shell outbox wiring', () => {
 
     expect(screen.getByRole('region', { name: 'Outbox' })).toBeTruthy();
     expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe('{"outbox":"show"}');
+  });
+});
+
+describe('the shell view switch', () => {
+  it('shows the mail panes by default', () => {
+    render(<AppShell />);
+
+    expect(screen.getByRole('region', { name: 'Message list' })).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'Calendar' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Mail' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Calendar' }).getAttribute('aria-pressed')).toBe(
+      'false',
+    );
+  });
+
+  it('switches to the calendar and back', () => {
+    render(<AppShell />);
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Calendar' }));
+    });
+
+    expect(useUiStore.getState().shellView).toBe('calendar');
+    expect(screen.getByRole('region', { name: 'Calendar' })).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'Message list' })).toBeNull();
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Mail' }));
+    });
+
+    expect(useUiStore.getState().shellView).toBe('mail');
+    expect(screen.getByRole('region', { name: 'Message list' })).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'Calendar' })).toBeNull();
   });
 });
