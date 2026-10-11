@@ -105,10 +105,10 @@ this row ports.
 | Contacts | Sender avatars: a coloured monogram, replaced by an address-book photo | ⬜ | avatars.md |
 | Contacts | The same person in several accounts is one row, joined on a shared address, and says so | ⬜ | |
 | Composer | Recipient autosuggest ranked from synced contacts and from people you have written to | ⬜ | |
-| Search | from: and to: search DSL, unified across accounts, newest first, every folder but Trash | ⬜ | search.md |
-| Search | Search scope filter: narrow to the current folder and back to all mail | ⬜ | |
-| Search | Search says how far back it looked, with a link to change the depth | ⬜ | search.md |
-| Search | Search results follow the list's conversation grouping | ⬜ | |
+| Search | from: and to: search DSL, unified across accounts, newest first, every folder but Trash | 🚧 | search.md |
+| Search | Search scope filter: narrow to the current folder and back to all mail | 🚧 | search.md |
+| Search | Search says how far back it looked, with a link to change the depth | 🚧 | search.md |
+| Search | Search results follow the list's conversation grouping | 🚧 | search.md |
 | Sync | Per-account fetch depth and message size, with every folder synced within the depth | ⬜ | |
 | Sync | Sync progress: a bar under the list for a started download, a status line for background passes, Sync paused when throttled | 🚧 | sync-progress.md |
 | Settings | Unified settings screen: language, appearance, time zone, conversation grouping, swipe actions, per-account fetch, quote style, default send account, reset, About | ⬜ | |
