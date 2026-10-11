@@ -37,7 +37,12 @@
 //! astra1 with the threading pinned (`In-Reply-To` matching the original's
 //! `Message-ID` for the reply; `References` only, under a `Fwd:` subject, for the
 //! forward). Both withdraw every copy they made, so astra1's INBOX ends the run
-//! holding the three seeded notes again and astra2 holds nothing.
+//! holding the three seeded notes again and astra2 holds nothing. The gated search
+//! test (`search`) reads rather than writes: it needs no seed of its own and no
+//! cleanup, because every query it runs crosses the engine's real search surface over
+//! the corpus the seed already pinned (the three INBOX notes, plus the rich note in
+//! Projects, so the `from:` hit proves the answer crosses folders), and the harness
+//! keeps its seeded shape whatever the queries find.
 //!
 //! The JMAP-detection test cannot dial `https://example.test/.well-known/jmap` (the
 //! harness domain resolves nowhere), so it rebases the probe onto the harness's plain
@@ -83,11 +88,12 @@ use crate::{
     Account, App, AppObserver, FolderRef, Intent, Surface,
 };
 
-// The gated reading, drafts, send, reply, and forward tests: their own files, so
-// this one stays under the 500-line cap the gate enforces. The explicit paths
-// because this file is loaded through `#[path]` and so owns no directory a bare
-// `mod` would resolve into. `proof` holds the fixtures the three delivery proofs
-// share (the two-account app, the composer document, the cleanup sweep).
+// The gated reading, drafts, send, reply, forward, and search tests: their own
+// files, so this one stays under the 500-line cap the gate enforces. The
+// explicit paths because this file is loaded through `#[path]` and so owns no
+// directory a bare `mod` would resolve into. `proof` holds the fixtures the
+// three delivery proofs share (the two-account app, the composer document, the
+// cleanup sweep).
 #[path = "tests_live_harness/drafts.rs"]
 mod drafts;
 #[path = "tests_live_harness/forward.rs"]
@@ -98,6 +104,8 @@ mod proof;
 mod reading;
 #[path = "tests_live_harness/reply.rs"]
 mod reply;
+#[path = "tests_live_harness/search.rs"]
+mod search;
 #[path = "tests_live_harness/send.rs"]
 mod send;
 

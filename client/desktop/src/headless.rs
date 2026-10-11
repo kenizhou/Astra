@@ -267,7 +267,7 @@ fn poll_until_complete<F>(
     timeout: Duration,
     interval: Duration,
     mut probe: F,
-) -> Result<MailboxListSnapshot, (MailboxListSnapshot, Vec<String>)>
+) -> Result<MailboxListSnapshot, Box<(MailboxListSnapshot, Vec<String>)>>
 where
     F: FnMut() -> MailboxListSnapshot,
 {
@@ -279,7 +279,7 @@ where
             return Ok(snapshot);
         }
         if Instant::now() >= deadline {
-            return Err((snapshot, diff));
+            return Err(Box::new((snapshot, diff)));
         }
         std::thread::sleep(interval);
         snapshot = probe();
@@ -291,9 +291,10 @@ fn wait_for_tree(state: &AppState, env: &SliceEnv) -> Result<String, String> {
     eprintln!("slice: polling the mailbox list for the folder tree");
     match poll_until_complete(env.timeout, POLL_INTERVAL, || mailbox_list_of(state)) {
         Ok(snapshot) => serde_json::to_string_pretty(&snapshot).map_err(|err| err.to_string()),
-        Err((snapshot, diff)) => {
+        Err(last) => {
             // The tree as it last stood goes to stdout beside the failure, so the
             // report shows the diff against something.
+            let (snapshot, diff) = *last;
             if let Ok(json) = serde_json::to_string_pretty(&snapshot) {
                 println!("{json}");
             }

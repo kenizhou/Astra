@@ -4,7 +4,7 @@
 // writes them, and an at-rest snapshot crosses without them at all.
 import { describe, expect, it } from 'vitest';
 
-import type { MailboxListSnapshot } from './surfaces';
+import type { MailboxListSnapshot, SearchState } from './surfaces';
 import fixtureJson from './__fixtures__/mailbox_list.json';
 
 // The literal a snapshot full of message rows crosses as: two trees, then
@@ -86,5 +86,54 @@ describe('the shared fixture', () => {
     // Flat is the default the wire skips, and nothing is selected.
     expect('view_mode' in fixture).toBe(false);
     expect('selection' in fixture).toBe(false);
+  });
+});
+
+// Both literals are byte-for-byte the JSON astra-viewmodel's search_tests.rs
+// asserts, so the search state cannot drift between the host and the surface.
+describe('the search state wire', () => {
+  it('crosses with the query, the scope, the rows, and the depth', () => {
+    const state = JSON.parse(
+      '{"query":"from:ada monitor","scope":"current_folder","rows":[' +
+        '{"key":{"thread":{"account":"work","thread_id":"th-7"}},"account_id":"work",' +
+        '"sender_name":"Grace Hopper","sender_address":"grace@example.test",' +
+        '"subject":"Re: Compiler design","sent_at":"2026-10-08T16:05:00Z",' +
+        '"unread":false,"flagged":true,"has_attachments":false,"thread_count":3}],' +
+        '"depth_months":3}',
+    ) as SearchState;
+
+    expect(state.query).toBe('from:ada monitor');
+    expect(state.scope).toBe('current_folder');
+    expect(state.rows).toEqual([
+      {
+        key: { thread: { account: 'work', thread_id: 'th-7' } },
+        account_id: 'work',
+        sender_name: 'Grace Hopper',
+        sender_address: 'grace@example.test',
+        subject: 'Re: Compiler design',
+        sent_at: '2026-10-08T16:05:00Z',
+        unread: false,
+        flagged: true,
+        has_attachments: false,
+        thread_count: 3,
+      },
+    ]);
+    expect(state.depth_months).toBe(3);
+  });
+
+  it('rides the snapshot as one more field, absent while no search runs', () => {
+    const snapshot = JSON.parse(
+      '{"account_folders":[],"search":{"query":"monitor","scope":"all_except_trash","rows":[],"depth_months":6}}',
+    ) as MailboxListSnapshot;
+
+    expect(snapshot.search).toEqual({
+      query: 'monitor',
+      scope: 'all_except_trash',
+      rows: [],
+      depth_months: 6,
+    });
+
+    const atRest = JSON.parse(AT_REST) as MailboxListSnapshot;
+    expect(atRest.search).toBeUndefined();
   });
 });

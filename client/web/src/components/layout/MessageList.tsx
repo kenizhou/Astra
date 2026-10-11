@@ -7,7 +7,8 @@
 // window itself, so a full window keeps offering to grow. A single click
 // selects and opens (selection is open, the highlight following the open
 // message), and ShowMore grows the window the core owes whenever the rows
-// fill it.
+// fill it. A live search state replaces the folder rows with the result
+// rows through the same window and the same open flow, keyed by message.
 
 import { useEffect, useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -20,7 +21,7 @@ import { useFolderStore } from '@/stores/folderStore';
 import { useListStore } from '@/stores/listStore';
 import { useReadingStore } from '@/stores/readingStore';
 import { splitCounts, useSplitStore, visibleRows } from '@/stores/splitStore';
-import type { RowKey } from '@/services/surfaces';
+import type { MessageRowView, RowKey } from '@/services/surfaces';
 
 /** The selected folder's display name, straight off the folder tree. */
 function folderDisplayName(
@@ -34,18 +35,92 @@ function folderDisplayName(
   return account?.folders.find((f) => f.key === selected.key)?.name ?? null;
 }
 
+interface RowWindowProps {
+  /** The rows the mode is showing, in the snapshot's own order. */
+  rows: MessageRowView[];
+  /** The key the highlight follows: the open message, or the local click. */
+  highlight: RowKey | null;
+  /** The clock the stamps are formatted against. */
+  now: Date;
+  /** Records the local selection when a row is clicked. */
+  openRow: (key: RowKey) => void;
+  /** Whether the grow affordance shows; only the folder window can fill. */
+  showMore: boolean;
+}
+
+/** The virtualised row window both list modes draw their rows through. */
+function RowWindow({ rows, highlight, now, openRow, showMore }: RowWindowProps) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 56,
+    overscan: 12,
+  });
+
+  return (
+    <div
+      ref={scrollRef}
+      role="listbox"
+      aria-label="Messages"
+      className="min-h-0 flex-1 overflow-y-auto"
+    >
+      <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+        {virtualizer.getVirtualItems().map((item) => {
+          const row = rows[item.index];
+          if (row === undefined) {
+            return null;
+          }
+          return (
+            <div
+              key={item.key}
+              data-index={item.index}
+              ref={virtualizer.measureElement}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                transform: `translateY(${item.start}px)`,
+              }}
+            >
+              <MessageRow
+                row={row}
+                selected={sameRowKey(row.key, highlight)}
+                now={now}
+                onSelect={openRow}
+              />
+            </div>
+          );
+        })}
+      </div>
+      {showMore && (
+        <button
+          type="button"
+          onClick={() => void dispatch(intents.showMore())}
+          className="w-full border-t border-border px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        >
+          Show more
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function MessageList() {
   const rows = useListStore((s) => s.rows);
   const viewMode = useListStore((s) => s.viewMode);
   const visibleLimit = useListStore((s) => s.visibleLimit);
   const selectedKey = useListStore((s) => s.selectedKey);
   const select = useListStore((s) => s.select);
+  const search = useListStore((s) => s.search);
   const openSnapshot = useReadingStore((s) => s.snapshot);
   const accounts = useFolderStore((s) => s.accounts);
   const folder = useFolderStore((s) => s.selected);
   const splitFilter = useSplitStore((s) => s.filter);
   const entries = useSplitStore((s) => s.entries);
 
+  const searching = search !== null;
   const shownRows = visibleRows(rows, splitFilter, entries);
   const counts = splitCounts(rows, entries);
 
@@ -59,10 +134,12 @@ export function MessageList() {
     openSnapshot === null ? null : { message: openSnapshot.message };
   const highlight = openKey ?? selectedKey;
 
-  // A filter that hides the selected row takes the selection with it: the
-  // highlight must never name a row the side view does not show.
+  // A view that hides the selected row takes the selection with it: the
+  // highlight must never name a row the pane does not show, whichever row
+  // set the live mode is drawing.
+  const viewRows = searching ? search.rows : shownRows;
   const selectedHidden =
-    selectedKey !== null && !shownRows.some((row) => sameRowKey(row.key, selectedKey));
+    selectedKey !== null && !viewRows.some((row) => sameRowKey(row.key, selectedKey));
   useEffect(() => {
     if (selectedHidden) {
       useListStore.getState().select(null);
@@ -78,13 +155,6 @@ export function MessageList() {
     }
   };
 
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const virtualizer = useVirtualizer({
-    count: shownRows.length,
-    getScrollElement: () => scrollRef.current,
-    estimateSize: () => 56,
-    overscan: 12,
-  });
   const now = new Date();
 
   // The window compares against every row the snapshot sent, not the side
@@ -104,59 +174,22 @@ export function MessageList() {
         splitFilter={splitFilter}
         splitCounts={counts}
         onSplitFilter={(filter) => useSplitStore.getState().setFilter(filter)}
+        search={search}
       />
-      {folder === null ? (
+      {searching ? (
+        search.rows.length === 0 ? (
+          <p className="p-4 text-sm text-muted-foreground">No results.</p>
+        ) : (
+          <RowWindow rows={search.rows} highlight={highlight} now={now} openRow={openRow} showMore={false} />
+        )
+      ) : folder === null ? (
         <p className="p-4 text-sm text-muted-foreground">Select a folder to read its mail.</p>
       ) : !showRows ? (
         <p className="p-4 text-sm text-muted-foreground">No messages in this folder.</p>
       ) : shownRows.length === 0 ? (
         <p className="p-4 text-sm text-muted-foreground">No messages on this side.</p>
       ) : (
-        <div
-          ref={scrollRef}
-          role="listbox"
-          aria-label="Messages"
-          className="min-h-0 flex-1 overflow-y-auto"
-        >
-          <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
-            {virtualizer.getVirtualItems().map((item) => {
-              const row = shownRows[item.index];
-              if (row === undefined) {
-                return null;
-              }
-              return (
-                <div
-                  key={item.key}
-                  data-index={item.index}
-                  ref={virtualizer.measureElement}
-                  style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    width: '100%',
-                    transform: `translateY(${item.start}px)`,
-                  }}
-                >
-                  <MessageRow
-                    row={row}
-                    selected={sameRowKey(row.key, highlight)}
-                    now={now}
-                    onSelect={openRow}
-                  />
-                </div>
-              );
-            })}
-          </div>
-          {windowIsFull && (
-            <button
-              type="button"
-              onClick={() => void dispatch(intents.showMore())}
-              className="w-full border-t border-border px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-            >
-              Show more
-            </button>
-          )}
-        </div>
+        <RowWindow rows={shownRows} highlight={highlight} now={now} openRow={openRow} showMore={windowIsFull} />
       )}
     </section>
   );

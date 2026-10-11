@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! The message-list projection: the windowed engine rows of the selected folder turned
-//! into the [`MessageRowView`]s the snapshot carries. Pure, so both surfaces share one
-//! definition of what is on screen; the reads that feed it (and the cache they answer
-//! from) live in `snapshot`, the row types in the view-model.
+//! into the [`MessageRowView`]s the snapshot carries, and a search's resolved hits
+//! projected the same way. Pure, so both surfaces share one definition of what is on
+//! screen; the reads that feed it (and the cache they answer from) live in `snapshot`
+//! and `search`, the row types in the view-model.
 //!
 //! Every ordering here is total. Tied rows (same instant, or both undated) break on
 //! `(account, key)`, so two projections of the same mailbox produce the same row
@@ -31,6 +32,123 @@ pub(crate) fn project(
         ViewMode::Flat => flat(rows, folder, limit),
         ViewMode::Threaded => threaded(rows, folder, limit),
     }
+}
+
+/// One message a search resolved: a hit the engine matched, or a completed
+/// thread member that did not. A hit is what lists a conversation; the other
+/// members ride in it, the same in-scope and out-of-scope split the folder
+/// view's threaded projection reads.
+pub(crate) struct SearchMessage {
+    /// The store row.
+    pub(crate) row: Arc<MailListRow>,
+    /// Whether this member matched the query.
+    pub(crate) matched: bool,
+}
+
+/// Projects a search's resolved `messages` into at most `limit` snapshot rows,
+/// in the `mode` the list is grouped in: a search obeys the list's grouping
+/// like any other list. Flat, every hit newest first; threaded, the
+/// conversations the hits belong to, each carried whole, labelled and ordered
+/// by its newest matching member, so a reply the query said nothing about
+/// neither lists a conversation nor lifts it up the results.
+pub(crate) fn search_project(
+    mode: ViewMode,
+    messages: &[SearchMessage],
+    limit: usize,
+) -> Vec<MessageRowView> {
+    match mode {
+        ViewMode::Flat => search_flat(messages, limit),
+        ViewMode::Threaded => search_threaded(messages, limit),
+    }
+}
+
+/// The hits, newest first.
+fn search_flat(messages: &[SearchMessage], limit: usize) -> Vec<MessageRowView> {
+    let mut hits: Vec<&SearchMessage> = messages.iter().filter(|message| message.matched).collect();
+    hits.sort_by(|a, b| newest_first(&a.row, &b.row).then_with(|| tiebreak(&a.row, &b.row)));
+    hits.into_iter()
+        .take(limit)
+        .map(|hit| message_row(&hit.row))
+        .collect()
+}
+
+/// The hit conversations, newest match first.
+fn search_threaded(messages: &[SearchMessage], limit: usize) -> Vec<MessageRowView> {
+    let mut groups: HashMap<(&str, &str), Vec<&SearchMessage>> = HashMap::new();
+    for message in messages {
+        let group = (message.row.account.as_str(), thread_key(&message.row));
+        groups.entry(group).or_default().push(message);
+    }
+    // Only conversations a hit touches show, and each is ordered by its latest
+    // matching member: the order answers the query, not the mail.
+    let mut shown: Vec<((&str, &str), Vec<&SearchMessage>)> = groups
+        .into_iter()
+        .filter(|(_, members)| members.iter().any(|member| member.matched))
+        .collect();
+    shown.sort_by(|(key_a, members_a), (key_b, members_b)| {
+        let latest_a = latest_match(members_a);
+        let latest_b = latest_match(members_b);
+        Reverse(latest_a)
+            .cmp(&Reverse(latest_b))
+            .then_with(|| key_a.cmp(key_b))
+    });
+    shown
+        .into_iter()
+        .take(limit)
+        .map(|((_, thread), members)| hit_conversation(thread, &members))
+        .collect()
+}
+
+/// One hit conversation as a snapshot row: its face the newest member that
+/// matched (the label that answers the query), its count every member, the
+/// non-matching ones included. A group of one is a message row, the same shape
+/// it takes in the folder view.
+fn hit_conversation(thread: &str, members: &[&SearchMessage]) -> MessageRowView {
+    if members.len() == 1 {
+        return message_row(&members[0].row);
+    }
+    let face = members
+        .iter()
+        .filter(|member| member.matched)
+        .min_by(|a, b| newest_first(&a.row, &b.row).then_with(|| tiebreak(&a.row, &b.row)))
+        .expect("a shown group holds a matching member");
+    // Unreachable for any group that reached here: the key is a resolved thread
+    // id or a message's non-empty provider key, and both parse. Guarded rather
+    // than unwrapped so a future key shape degrades to a message row instead of
+    // panicking a release build.
+    let Ok(thread_id) = ThreadId::try_from(thread) else {
+        debug_assert!(false, "a conversation key always parses as a thread id");
+        return message_row(&face.row);
+    };
+    let row = &face.row;
+    MessageRowView {
+        key: RowKey::Thread {
+            account: row.account.clone(),
+            thread_id,
+        },
+        account_id: row.account.clone(),
+        sender_name: sender_name(&row.mail),
+        sender_address: row.mail.from_addr.clone().unwrap_or_default(),
+        subject: row.mail.subject.clone().unwrap_or_default(),
+        sent_at: row.mail.date_utc.map_or_else(String::new, format_instant),
+        unread: members
+            .iter()
+            .any(|member| member.row.mail.flags.is_unread()),
+        flagged: members.iter().any(|member| member.row.mail.flags.flagged()),
+        has_attachments: members.iter().any(|member| member.row.mail.has_attachment),
+        thread_count: Some(count(members.len())),
+    }
+}
+
+/// The newest instant among a conversation's matching members; `None` sinks
+/// below every dated conversation.
+fn latest_match(members: &[&SearchMessage]) -> Option<UtcDateTime> {
+    members
+        .iter()
+        .filter(|member| member.matched)
+        .map(|member| member.row.mail.date_utc)
+        .max()
+        .flatten()
 }
 
 /// A flat list of the folder's messages, newest first.

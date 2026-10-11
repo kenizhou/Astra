@@ -31,6 +31,7 @@ mod reading;
 mod reference;
 mod row_cache;
 mod sanitise;
+mod search;
 mod snapshot;
 mod submit;
 mod surfaced;
@@ -113,7 +114,7 @@ pub use drafts::{DraftResume, DRAFT_AUTOSAVE_IDLE};
 pub use preferences::{load_preferences, preferences_path, save_preferences, Preferences};
 pub use protocol::{
     AppObserver, ComposeIntent, ComposerBlob, CompositionId, DraftsIntent, FolderIntent, Intent,
-    OutboxIntent, Surface, ViewMode,
+    OutboxIntent, SearchScope, Surface, ViewMode,
 };
 pub use reference::{FolderRef, MessageRef, QueuedRef, RowRef, ThreadRef};
 pub use surfaced::Surfaced;
@@ -210,6 +211,10 @@ pub struct App<P> {
     /// re-showing the same list costs nothing. `None` after a sync invalidates it,
     /// until the next read reloads it.
     row_cache: Mutex<Option<CachedRows>>,
+    /// The live search session: the query the field holds and the scope it
+    /// runs under, or no query at all. Session state, never persisted; see
+    /// `search`.
+    search: Mutex<crate::search::SearchSession>,
     /// The shown folder's cached load: the newest rows of the selected folder's account,
     /// so re-projecting the same list costs nothing. `None` after a sync or a write
     /// invalidates it, until the next read reloads it.
@@ -284,6 +289,7 @@ impl<P: Provider> App<P> {
             visible_limit: Mutex::new(PAGE),
             generation: AtomicU64::new(0),
             row_cache: Mutex::new(None),
+            search: Mutex::new(crate::search::SearchSession::default()),
             mail_row_cache: Mutex::new(None),
             row_cache_generation: AtomicU64::new(0),
             connector,

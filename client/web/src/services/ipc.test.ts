@@ -196,6 +196,27 @@ describe('the intent wire', () => {
       '{"drafts":{"close":{"composition":"compose-1"}}}',
     );
   });
+
+  // Both literals are byte-for-byte the JSON astra-app's protocol_search_tests.rs
+  // asserts, so neither side of the search wire can drift.
+  it('carries the search query, or clears the search with an explicit null', () => {
+    expect(JSON.stringify(intents.search('from:ada monitor'))).toBe(
+      '{"search":{"query":"from:ada monitor"}}',
+    );
+    expect(JSON.stringify(intents.search(null))).toBe('{"search":{"query":null}}');
+  });
+
+  it('carries each search scope as a plain snake_case word', () => {
+    expect(JSON.stringify(intents.setSearchScope('all_except_trash'))).toBe(
+      '{"set_search_scope":{"scope":"all_except_trash"}}',
+    );
+    expect(JSON.stringify(intents.setSearchScope('current_folder'))).toBe(
+      '{"set_search_scope":{"scope":"current_folder"}}',
+    );
+    expect(JSON.stringify(intents.setSearchScope('current_account'))).toBe(
+      '{"set_search_scope":{"scope":"current_account"}}',
+    );
+  });
 });
 
 describe('the command wrappers', () => {

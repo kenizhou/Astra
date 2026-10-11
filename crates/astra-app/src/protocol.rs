@@ -9,7 +9,7 @@ mod intent_drafts;
 mod intent_outbox;
 mod status;
 
-pub use intent::{FolderIntent, Intent, ViewMode};
+pub use intent::{FolderIntent, Intent, SearchScope, ViewMode};
 pub use intent_compose::ComposeIntent;
 pub use intent_drafts::{CompositionId, DraftsIntent};
 pub use intent_outbox::OutboxIntent;
@@ -89,3 +89,8 @@ mod tests;
 #[cfg(test)]
 #[path = "protocol_submit_tests.rs"]
 mod submit_tests;
+
+// The search family's intents, split for the same reason.
+#[cfg(test)]
+#[path = "protocol_search_tests.rs"]
+mod search_tests;

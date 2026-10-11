@@ -3,10 +3,15 @@
 // right, the split inbox's segmented control beside the flat/threaded one.
 // The view mode crosses back as one set_view_mode intent per click; the
 // split filter stays on the client, its state held by the split store,
-// because the core owes no side view of its own.
+// because the core owes no side view of its own. A live search replaces
+// the folder's own toolbar: the result count and the depth note stand
+// where the folder name stood (a zero horizon claims no note), the split
+// control hides (its sides derive
+// from the folder the search is not showing), and the exit affordance
+// clears the search back to the folder view.
 
 import { dispatch, intents } from '@/services/ipc';
-import type { ViewMode } from '@/services/surfaces';
+import type { SearchState, ViewMode } from '@/services/surfaces';
 import type { SplitFilter } from '@/stores/splitStore';
 
 const MODES: ReadonlyArray<{ id: ViewMode; label: string }> = [
@@ -32,36 +37,58 @@ interface ListToolbarProps {
   splitCounts: { all: number; actioned: number; fyi: number };
   /** Records the side the user chose. */
   onSplitFilter: (filter: SplitFilter) => void;
+  /** The live search state; its results header replaces the folder's own. */
+  search: SearchState | null;
 }
 
-export function ListToolbar({ folderName, viewMode, splitFilter, splitCounts, onSplitFilter }: ListToolbarProps) {
+export function ListToolbar({ folderName, viewMode, splitFilter, splitCounts, onSplitFilter, search }: ListToolbarProps) {
   const switchMode = (mode: ViewMode) => {
     void dispatch(intents.setViewMode(mode));
+  };
+  const exitSearch = () => {
+    void dispatch(intents.search(null));
   };
 
   return (
     <div className="flex h-[var(--pane-header-h)] shrink-0 items-center justify-between gap-2 border-b border-border bg-surface px-3">
-      <span className="min-w-0 truncate text-[13px] font-semibold text-foreground">
-        {folderName ?? 'Mail'}
-      </span>
+      {search === null ? (
+        <span className="min-w-0 truncate text-[13px] font-semibold text-foreground">
+          {folderName ?? 'Mail'}
+        </span>
+      ) : (
+        <span className="flex min-w-0 items-baseline gap-2">
+          <span className="shrink-0 text-[13px] font-semibold text-foreground">
+            {search.rows.length === 1 ? '1 result' : `${search.rows.length} results`}
+          </span>
+          {search.depth_months > 0 && (
+            <span className="min-w-0 truncate text-xs text-muted-foreground">
+              {search.depth_months === 1
+                ? 'Searched the last month'
+                : `Searched the last ${search.depth_months} months`}
+            </span>
+          )}
+        </span>
+      )}
       <div className="flex items-center gap-3">
-        <div role="group" aria-label="Split" className="flex items-center gap-1">
-          {SIDES.map(({ id, label }) => (
-            <button
-              key={id}
-              type="button"
-              aria-pressed={splitFilter === id}
-              onClick={() => onSplitFilter(id)}
-              className={`rounded-[var(--radius-xs)] px-2 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                splitFilter === id
-                  ? 'bg-selected font-medium text-foreground'
-                  : 'text-muted-foreground hover:bg-hover hover:text-foreground'
-              }`}
-            >
-              {label} {splitCounts[id]}
-            </button>
-          ))}
-        </div>
+        {search === null && (
+          <div role="group" aria-label="Split" className="flex items-center gap-1">
+            {SIDES.map(({ id, label }) => (
+              <button
+                key={id}
+                type="button"
+                aria-pressed={splitFilter === id}
+                onClick={() => onSplitFilter(id)}
+                className={`rounded-[var(--radius-xs)] px-2 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                  splitFilter === id
+                    ? 'bg-selected font-medium text-foreground'
+                    : 'text-muted-foreground hover:bg-hover hover:text-foreground'
+                }`}
+              >
+                {label} {splitCounts[id]}
+              </button>
+            ))}
+          </div>
+        )}
         <div role="group" aria-label="View mode" className="flex items-center gap-1">
           {MODES.map(({ id, label }) => (
             <button
@@ -79,6 +106,15 @@ export function ListToolbar({ folderName, viewMode, splitFilter, splitCounts, on
             </button>
           ))}
         </div>
+        {search !== null && (
+          <button
+            type="button"
+            onClick={exitSearch}
+            className="rounded-[var(--radius-xs)] px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            Exit search
+          </button>
+        )}
       </div>
     </div>
   );

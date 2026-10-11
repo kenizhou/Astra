@@ -18,6 +18,14 @@ use super::{ComposeIntent, ComposerBlob, DraftsIntent, OutboxIntent};
 /// here to keep the protocol the one import a host needs.
 pub use astra_viewmodel::ViewMode;
 
+/// What a search covers: every folder but Trash by default, or the current
+/// folder or account.
+///
+/// Defined in the view-model, beside the search state that carries it, so the
+/// intent that changes the scope and the snapshot that echoes it name one
+/// type; re-exported here to keep the protocol the one import a host needs.
+pub use astra_viewmodel::SearchScope;
+
 /// What the folder pane asks the runtime to do to an account's folders.
 ///
 /// Each change goes through the engine's outbox, so one made offline is drawn in the pane
@@ -215,4 +223,23 @@ pub enum Intent {
     /// What the composer asks the runtime to do with the draft it is holding
     /// ([`DraftsIntent`]): save it, discard it, or save and close.
     Drafts(DraftsIntent),
+    /// Search the mail for `query`, or clear the search. `Some` runs the
+    /// query over the current scope and publishes the results on the
+    /// mailbox-list surface as its search state; `None` leaves search and
+    /// restores the view it was opened from, the same account and folder,
+    /// unsearched. Clearing also resets the scope to the default, in the core
+    /// and in the client's control, as one action, so the next search is
+    /// never silently smaller than it looks.
+    Search {
+        /// The query to search for, or `None` to clear the search.
+        query: Option<String>,
+    },
+    /// Narrow the search to `scope` and re-run it over the live query. The
+    /// scope answers how far beyond the folder on screen a search reaches;
+    /// changing it re-searches rather than filtering the published rows, so
+    /// the depth the state reports stays honest too.
+    SetSearchScope {
+        /// The scope to narrow the search to.
+        scope: SearchScope,
+    },
 }
