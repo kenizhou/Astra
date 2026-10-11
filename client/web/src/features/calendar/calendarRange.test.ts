@@ -2,7 +2,8 @@
 // The calendar layout math: civil-day keys localised into the snapshot's own
 // zone, the month grid and week rows over them, the wall-clock to instant
 // conversion a window anchor needs, and the drag snapping with the same
-// 366-day bound the core's drag arithmetic enforces.
+// 366-day bound the core's drag arithmetic enforces, beside the optimistic
+// shift a committed drag renders from.
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -12,6 +13,7 @@ import {
   addMonths,
   dayKeyOf,
   dragFromGrid,
+  instantAfterDrag,
   instantOfZoned,
   minutesInZone,
   monthGrid,
@@ -183,5 +185,39 @@ describe('drag snapping', () => {
     // A span past the bound answers null: the gesture never crosses the IPC.
     expect(dragFromGrid({ day: 0, minutes: 0 }, { day: 400, minutes: 0 })).toBeNull();
     expect(dragFromGrid({ day: 400, minutes: 0 }, { day: 0, minutes: 0 })).toBeNull();
+    // A negative-minute remainder carries a day the trunc would drop; the
+    // floor matches the core's div_euclid, so the refusal agrees on both sides.
+    expect(dragFromGrid({ day: 0, minutes: 15 }, { day: -366, minutes: -15 })).toBeNull();
+  });
+});
+
+describe('the optimistic drag shift', () => {
+  it('moves an instant by a wall-clock delta in the zone', () => {
+    // 09:00 in Amsterdam, half an hour later.
+    expect(instantAfterDrag('2026-10-19T07:00:00Z', 0, 30, 'Europe/Amsterdam')).toBe(
+      '2026-10-19T07:30:00Z',
+    );
+    // Backwards, before midnight: 00:15 on the 19th less an hour is 23:15 on
+    // the 18th.
+    expect(instantAfterDrag('2026-10-18T22:15:00Z', 0, -60, 'Europe/Amsterdam')).toBe(
+      '2026-10-18T21:15:00Z',
+    );
+  });
+
+  it('carries the clock across midnight in both directions', () => {
+    // 23:30 plus an hour is 00:30 the next civil day.
+    expect(instantAfterDrag('2026-10-19T21:30:00Z', 0, 60, 'Europe/Amsterdam')).toBe(
+      '2026-10-19T22:30:00Z',
+    );
+    expect(instantAfterDrag('2026-10-19T22:30:00Z', 0, 60, 'Europe/Amsterdam')).toBe(
+      '2026-10-19T23:30:00Z',
+    );
+  });
+
+  it('keeps the wall clock over a whole-day move, DST included', () => {
+    // 09:00 on Saturday carried to Sunday keeps 09:00 across the fall-back.
+    expect(instantAfterDrag('2026-10-24T07:00:00Z', 1, 0, 'Europe/Amsterdam')).toBe(
+      '2026-10-25T08:00:00Z',
+    );
   });
 });

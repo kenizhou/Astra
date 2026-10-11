@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The event dialog: creation over the anchor day, and the edit split the
 // wire's own shapes force. A content edit crosses through the update intent;
-// a time edit crosses through the drag currency, whose wall-clock delta is
-// the same in any zone, so an editor that shows the display zone's clock
-// never mistranslates a zoned event it cannot see the zone of. One-vs-all
-// scopes a recurring row; a series edit that would discard per-occurrence
-// changes is confirmed first; the repeat rule is read-only (the snapshot
-// carries no rule to seed an editor with, and a rule half-seen is a rule
-// silently rewritten).
+// a time edit crosses through the drag currency, whose delta the core
+// applies in the event's own wall clock: exact for floating and all-day
+// events, the drag semantics for zoned ones. One-vs-all scopes a recurring
+// row; a series edit that would discard per-occurrence changes is confirmed
+// first; the repeat rule is read-only (the snapshot carries no rule to seed
+// an editor with, and a rule half-seen is a rule silently rewritten).
 
 import { useMemo, useState } from 'react';
 
@@ -119,10 +118,6 @@ export function EventDialog({ row, onClose }: EventDialogProps) {
   const eventRef = editing ? { account: row.account, key: row.event } : null;
   const thisScope = scopeable && scope === 'this';
 
-  /** The content fields, disabled in a one-occurrence scope: a title belongs
-   * to the series, and the occurrence edit the wire takes cannot carry one. */
-  const contentDisabled = thisScope;
-
   const save = (confirmed = false): void => {
     if (row === null) {
       create();
@@ -133,17 +128,25 @@ export function EventDialog({ row, onClose }: EventDialogProps) {
       setConfirmSeries(true);
       return;
     }
-    const edit: { title?: string; notes?: string; location?: string } = {};
-    if (!contentDisabled && summary !== row.title && summary.trim() !== '') {
+    const edit: { title?: string; notes?: string; location?: string; occurrence?: string } = {};
+    // An emptied summary is a title clear: the wire's three-state title
+    // carries it rather than silently keeping the old words.
+    if (summary.trim() !== row.title) {
       edit.title = summary.trim();
     }
-    if (!contentDisabled && location.trim() !== '') {
+    if (location.trim() !== '') {
       edit.location = location.trim();
     }
-    if (!contentDisabled && notes.trim() !== '') {
+    if (notes.trim() !== '') {
       edit.notes = notes.trim();
     }
+    // A content edit under This event lands on the one occurrence the wire
+    // addresses by its token, the same scope the time edit takes; the token
+    // rides an edit, never travels alone.
     if (Object.keys(edit).length > 0) {
+      if (thisScope && row.occurrence_start !== undefined) {
+        edit.occurrence = row.occurrence_start;
+      }
       void dispatch(intents.updateCalendarEvent({ account: row.account, key: row.event }, edit));
     }
     const startChanged = startText !== localValueOf(row.start, zone);
@@ -152,24 +155,30 @@ export function EventDialog({ row, onClose }: EventDialogProps) {
       const moved = dateText !== day;
       if (moved && eventRef !== null) {
         const delta = localDelta(`${day}T00:00`, `${dateText}T00:00`);
-        move(delta.days, delta.minutes);
+        move('whole', delta.days, delta.minutes);
       }
     } else if ((startChanged || endChanged) && eventRef !== null) {
       // Both edges shift by the start's delta, the same whole-move the grid
-      // drag makes; a resize is the drag gesture's own affordance.
-      const delta = localDelta(localValueOf(row.start, zone), startText);
-      move(delta.days, delta.minutes);
+      // drag makes; an end-only edit is the resize, the end's own delta on
+      // the end edge, which the core clamps to the quarter-hour floor.
+      if (startChanged) {
+        const delta = localDelta(localValueOf(row.start, zone), startText);
+        move('whole', delta.days, delta.minutes);
+      } else {
+        const delta = localDelta(localValueOf(row.end, zone), endText);
+        move('end', delta.days, delta.minutes);
+      }
     }
     onClose();
   };
 
   /** Sends the move intent, scoped to the one occurrence when it stands. */
-  const move = (days: number, minutes: number): void => {
+  const move = (edge: 'whole' | 'end', days: number, minutes: number): void => {
     if (eventRef === null || row === null) {
       return;
     }
     const drag: EventDrag = {
-      edge: 'whole',
+      edge,
       days,
       minutes,
       ...(thisScope ? { occurrence: row.occurrence_start } : {}),
@@ -263,7 +272,6 @@ export function EventDialog({ row, onClose }: EventDialogProps) {
                 aria-label="Summary"
                 value={summary}
                 onChange={(event) => setSummary(event.target.value)}
-                disabled={contentDisabled}
                 className={fieldClass()}
               />
             </label>
@@ -380,7 +388,6 @@ export function EventDialog({ row, onClose }: EventDialogProps) {
                 aria-label="Location"
                 value={location}
                 onChange={(event) => setLocation(event.target.value)}
-                disabled={contentDisabled}
                 placeholder={editing ? 'Leave empty to keep' : ''}
                 className={fieldClass()}
               />
@@ -391,7 +398,6 @@ export function EventDialog({ row, onClose }: EventDialogProps) {
                 aria-label="Notes"
                 value={notes}
                 onChange={(event) => setNotes(event.target.value)}
-                disabled={contentDisabled}
                 placeholder={editing ? 'Leave empty to keep' : ''}
                 className="min-h-[56px] w-full rounded-[var(--radius-xs)] border border-input bg-background px-2 py-1 text-xs text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-ring"
               />
@@ -422,10 +428,8 @@ export function EventDialog({ row, onClose }: EventDialogProps) {
                 </label>
               </fieldset>
             )}
-            {contentDisabled && (
-              <p className="text-xs text-muted-foreground">
-                The title and notes belong to the whole series; the times are yours to move.
-              </p>
+            {!editing && writable.length === 0 && (
+              <p className="text-xs text-[var(--warning)]">There is no calendar you can write to.</p>
             )}
 
             <div className="flex items-center justify-between gap-2 border-t border-border pt-3">
@@ -455,7 +459,10 @@ export function EventDialog({ row, onClose }: EventDialogProps) {
                 <button
                   type="button"
                   onClick={() => save()}
-                  className="rounded-[var(--radius)] bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground transition-colors hover:opacity-90"
+                  // With no writable calendar there is nothing to save into:
+                  // the note says so rather than a save that silently no-ops.
+                  disabled={!editing && writable.length === 0}
+                  className="rounded-[var(--radius)] bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Save
                 </button>

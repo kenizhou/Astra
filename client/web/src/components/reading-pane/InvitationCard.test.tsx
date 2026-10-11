@@ -109,7 +109,7 @@ describe('the invitation card', () => {
     expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
   });
 
-  it('sentences a superseded copy and says it is out of date', () => {
+  it('sentences a superseded copy without repeating the stale line', () => {
     render(
       <InvitationCard
         message={message}
@@ -120,6 +120,8 @@ describe('the invitation card', () => {
     expect(
       screen.getByText('A newer invitation for this meeting exists; this copy is out of date.'),
     ).toBeTruthy();
+    // The sentence already says it: the generic stale line stays unsaid.
+    expect(screen.queryByText('This copy is out of date.')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
   });
 

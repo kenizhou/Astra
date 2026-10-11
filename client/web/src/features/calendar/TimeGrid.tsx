@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The shared time grid: an hour gutter, one column per civil day with an
 // all-day lane above, blocks placed by their zone-local clock and packed
-// where they overlap, the now line advanced by the host clock, and the drag
-// gesture bound over the columns. The day and work-week grids are this grid
-// over different day sets.
+// where they overlap, the now line anchored on the snapshot's own instant,
+// and the drag gesture bound over the columns, its committed move held
+// optimistically until the next publish. The day and work-week grids are
+// this grid over different day sets.
+
+import { useMemo } from 'react';
 
 import type { OccurrenceRow } from '@/services/ipc';
 
 import { useCalendarStore } from './calendarStore';
-import { dayKeyOf, minutesInZone } from './calendarRange';
+import { dayKeyOf, instantAfterDrag, minutesInZone } from './calendarRange';
 import {
   DAY_H,
   GUTTER_W,
@@ -65,6 +68,14 @@ function Block({
       title={block.row.title === '' ? '(no title)' : block.row.title}
       onPointerDown={onPointerDown}
       onClick={onClick}
+      onKeyDown={(event) => {
+        // The keyboard's own click: Enter and Space open the editor the way
+        // a pointer click does.
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onClick();
+        }
+      }}
       style={{
         position: 'absolute',
         top: minuteTop(block.startMinute),
@@ -178,9 +189,33 @@ export function TimeGrid({ days, ariaLabel, onOpenEvent }: TimeGridProps) {
   const calendars = useCalendarStore((s) => s.calendars);
   const nowData = useCalendarStore((s) => s.nowData);
   const zone = nowData?.zone ?? 'Etc/UTC';
-  const now = useZonedNow(nowData !== null ? zone : null);
+  const now = useZonedNow(nowData);
   const nowDay = now !== null ? dayKeyOf(now, zone) : null;
-  const drag = useEventDrag(days.length);
+  const drag = useEventDrag(days.length, occurrences);
+
+  // A committed drag holds its moved position until the next publish: the
+  // grid lays the shifted row out as an ordinary row at its new clock, so
+  // the block lands where the write is going rather than snapping back to
+  // the row the unconfirmed snapshot still holds.
+  const laidOut = useMemo(() => {
+    const pending = drag.pending;
+    if (pending === null) {
+      return occurrences;
+    }
+    return occurrences.map((row) => {
+      if (row !== pending.row) {
+        return row;
+      }
+      // An all-day row has no clock to move along; the core drops the
+      // minutes of an all-day drag, and the optimistic row drops them too.
+      const minutes = row.all_day ? 0 : pending.minutes;
+      return {
+        ...row,
+        start: instantAfterDrag(row.start, pending.days, minutes, zone),
+        end: instantAfterDrag(row.end, pending.days, minutes, zone),
+      };
+    });
+  }, [occurrences, drag.pending, zone]);
 
   const colorOf = (row: OccurrenceRow): string | undefined =>
     calendars.find(
@@ -216,7 +251,7 @@ export function TimeGrid({ days, ariaLabel, onOpenEvent }: TimeGridProps) {
             aria-label={`All day, ${fullDayLabel(dayKey)}`}
             className="flex min-h-[24px] min-w-0 flex-1 flex-col gap-0.5 border-l border-border px-1 py-0.5"
           >
-            {dayBlocks(occurrences, dayKey, zone).allDay.map((row) => (
+            {dayBlocks(laidOut, dayKey, zone).allDay.map((row) => (
               <button
                 key={`${row.account}:${row.event}`}
                 type="button"
@@ -260,7 +295,7 @@ export function TimeGrid({ days, ariaLabel, onOpenEvent }: TimeGridProps) {
             key={dayKey}
             dayKey={dayKey}
             zone={zone}
-            occurrences={occurrences}
+            occurrences={laidOut}
             colorOf={colorOf}
             dragging={drag.dragging}
             beginDrag={drag.beginDrag}

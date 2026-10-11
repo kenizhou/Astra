@@ -121,6 +121,23 @@ describe('the day grid', () => {
     }
   });
 
+  it('anchors the now line on the snapshot instant, not the host clock', () => {
+    vi.useFakeTimers();
+    // The host reads an hour past the snapshot's own instant.
+    vi.setSystemTime(new Date('2026-10-19T09:12:00Z'));
+    try {
+      seedStore([row()]);
+      render(<DayGrid onOpenEvent={() => undefined} />);
+
+      // The line stands where the snapshot placed it (10:12 in Amsterdam)
+      // and the skew does not displace it; only elapsed host time moves it.
+      const line = screen.getByLabelText('Now');
+      expect(line.getAttribute('style')).toContain('top: 448.8px');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('hides the now line on a day that is not today', () => {
     seedStore([row()]);
     useCalendarStore.getState().setAnchor('2026-10-20');
@@ -167,6 +184,52 @@ describe('the day grid', () => {
       '{"calendar":{"move_event":{"event":{"account":"work","key":"/dav/cal/work/default/one.ics"},' +
         '"drag":{"edge":"whole","days":0,"minutes":-15}}}}',
     );
+  });
+
+  it('holds the dragged position optimistically until the next publish', () => {
+    seedStore([row()]);
+    render(<DayGrid onOpenEvent={() => undefined} />);
+
+    const grid = screen.getByLabelText('Day grid, Monday 19 October 2026');
+    fireEvent.pointerDown(screen.getByText('Standup').closest('[data-block]')!, {
+      pointerId: 1,
+      clientX: 60,
+      clientY: 396,
+    });
+    fireEvent.pointerUp(grid, { pointerId: 1, clientX: 60, clientY: 407 });
+
+    expect(ipc.dispatch).toHaveBeenCalledTimes(1);
+    // No publish has confirmed the write yet: the block stands a slot down,
+    // at 09:15, rather than snapping back to the row the snapshot still holds.
+    expect(screen.getByText('Standup').closest('[data-block]')!.getAttribute('style')).toContain(
+      'top: 407px',
+    );
+
+    // The next publish lands without the write behind it: the optimistic
+    // position goes and the block renders the snapshot's own row again.
+    act(() => {
+      useCalendarStore.getState().applySnapshot({
+        calendars: [],
+        occurrences: [row()],
+        now_data: { now: '2026-10-19T08:12:00Z', zone: 'Europe/Amsterdam' },
+      });
+    });
+    expect(screen.getByText('Standup').closest('[data-block]')!.getAttribute('style')).toContain(
+      'top: 396px',
+    );
+  });
+
+  it('opens the event from the keyboard on Enter and Space', () => {
+    const theRow = row();
+    seedStore([theRow]);
+    const opened: OccurrenceRow[] = [];
+    render(<DayGrid onOpenEvent={(r) => opened.push(r)} />);
+
+    const block = screen.getByText('Standup').closest('[data-block]')!;
+    fireEvent.keyDown(block, { key: 'Enter' });
+    fireEvent.keyDown(block, { key: ' ' });
+
+    expect(opened).toEqual([theRow, theRow]);
   });
 
   it('never drags a block the calendar says is not movable', () => {

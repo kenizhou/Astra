@@ -3,9 +3,11 @@
 // up somewhere else, converted through the shared geometry into the drag
 // payload the move intent takes, both ends snapped to the slot grid. The
 // maths itself lives in calendarRange and gridGeometry; this hook only holds
-// the gesture and dispatches its result.
+// the gesture and dispatches its result. A committed drag holds its moved
+// position optimistically until the snapshot's next publish replaces the
+// rows it was drawn from.
 
-import { useCallback, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 
 import { dispatch, intents } from '@/services/ipc';
 import type { OccurrenceRow } from '@/services/ipc';
@@ -23,10 +25,22 @@ interface DragState {
   to: GridPoint;
 }
 
+/** A committed drag the next publish has not confirmed or refused yet. */
+export interface PendingMove {
+  /** The row as it stood when the drag committed. */
+  row: OccurrenceRow;
+  /** The drag's day delta. */
+  days: number;
+  /** The drag's minute delta. */
+  minutes: number;
+}
+
 /** The drag plumbing a time grid binds to its columns container. */
 export interface EventDrag {
   /** The gesture in flight, for the ghost the grid draws while it lasts. */
   dragging: DragState | null;
+  /** The committed drag whose moved position renders until the next publish. */
+  pending: PendingMove | null;
   /** Starts a drag of `row` from a pointer down on its block. */
   beginDrag: (row: OccurrenceRow, event: React.PointerEvent) => void;
   /**
@@ -43,18 +57,29 @@ export interface EventDrag {
 }
 
 /**
- * The drag gesture over a grid of `dayCount` day columns. The hook owns the
- * grid's ref, which the grid attaches to its columns container so every
- * pointer position converts against the box the user is actually looking at,
- * read at event time rather than render time.
+ * The drag gesture over a grid of `dayCount` day columns, over the
+ * occurrence rows the snapshot holds. The hook owns the grid's ref, which
+ * the grid attaches to its columns container so every pointer position
+ * converts against the box the user is actually looking at, read at event
+ * time rather than render time. The rows clear the pending overlay: a
+ * publish that confirms the write renders the moved row itself, and one
+ * that refuses it snaps the block back to what the store still holds.
  */
-export function useEventDrag(dayCount: number): EventDrag & {
+export function useEventDrag(
+  dayCount: number,
+  occurrences: OccurrenceRow[],
+): EventDrag & {
   gridRef: RefObject<HTMLDivElement | null>;
 } {
   const [dragging, setDragging] = useState<DragState | null>(null);
+  const [pending, setPending] = useState<PendingMove | null>(null);
   const gesture = useRef<DragState | null>(null);
   const clickToConsume = useRef(false);
   const gridRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    setPending(null);
+  }, [occurrences]);
 
   const beginDrag = useCallback(
     (row: OccurrenceRow, event: React.PointerEvent) => {
@@ -106,6 +131,7 @@ export function useEventDrag(dayCount: number): EventDrag & {
       return;
     }
     clickToConsume.current = true;
+    setPending({ row: state.row, days: delta.days, minutes: delta.minutes });
     void dispatch(
       intents.moveCalendarEvent(
         { account: state.row.account, key: state.row.event },
@@ -144,6 +170,7 @@ export function useEventDrag(dayCount: number): EventDrag & {
   return {
     gridRef,
     dragging,
+    pending,
     beginDrag,
     consumeClick,
     handlers: { onPointerMove, onPointerUp, onPointerCancel },

@@ -202,9 +202,30 @@ export function dragFromGrid(
 ): { days: number; minutes: number } | null {
   const days = to.day - from.day;
   const minutes = snapToSlot(to.minutes) - snapToSlot(from.minutes);
-  const span = days + Math.trunc(minutes / DAY_MINUTES);
+  // The floor matches the core's div_euclid: a negative-minute remainder
+  // carries a day of span the trunc would drop.
+  const span = days + Math.floor(minutes / DAY_MINUTES);
   if (Math.abs(span) > MAX_DRAG_DAYS) {
     return null;
   }
   return { days, minutes };
+}
+
+/**
+ * An instant after the wall-clock drag delta `{days, minutes}` in `zone`: the
+ * optimistic position a committed drag renders from until the next publish
+ * confirms where the write landed. Civil-day arithmetic, the same currency
+ * the core applies in the event's own zone.
+ */
+export function instantAfterDrag(
+  instant: string,
+  days: number,
+  minutes: number,
+  zone: string,
+): string {
+  const at = new Date(instant);
+  const total = minutesInZone(at, zone) + minutes;
+  const day = addDays(dayKeyOf(at, zone), days + Math.floor(total / DAY_MINUTES));
+  const minuteOfDay = ((total % DAY_MINUTES) + DAY_MINUTES) % DAY_MINUTES;
+  return instantOfZoned(day, minuteOfDay, zone);
 }

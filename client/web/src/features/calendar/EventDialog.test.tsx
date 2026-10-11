@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The event dialog: creation with the repeat choices, the edit split (a
 // content edit through the update intent, a time edit through the drag
-// currency, which is zone-independent wall-clock arithmetic), the one-vs-all
-// choice on a recurring row, the series warning that names what a series
-// edit would discard, and the read-only recurrence degradation.
+// currency, whose delta the core applies in the event's own wall clock), the
+// end-only edit as the end-edge drag, the one-vs-all choice on a recurring
+// row, the series warning that names what a series edit would discard, and
+// the read-only recurrence degradation.
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -130,6 +131,26 @@ describe('the event dialog create flow', () => {
       '"description":"Bring the numbers"',
     );
   });
+
+  it('disables Save with a note when no calendar is writable', () => {
+    useCalendarStore.setState({
+      calendars: [
+        {
+          account: 'work',
+          id: 'cal-1',
+          name: 'Work',
+          color: '#039be5',
+          visible: true,
+          can_write: false,
+          is_default: true,
+        },
+      ],
+    });
+    render(<EventDialog row={null} onClose={onClose} />);
+
+    expect(screen.getByText('There is no calendar you can write to.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Save' })).toHaveProperty('disabled', true);
+  });
 });
 
 describe('the event dialog edit flow', () => {
@@ -176,6 +197,73 @@ describe('the event dialog edit flow', () => {
     );
     expect(sent).toContain(
       '{"calendar":{"move_event":{"event":{"account":"work","key":"/dav/cal/work/default/evt-1.ics"},"drag":{"edge":"whole","days":0,"minutes":15}}}}',
+    );
+  });
+
+  it('sends an end-only edit as an end-edge drag carrying the end delta', () => {
+    render(<EventDialog row={row()} onClose={onClose} />);
+
+    // The row shows 09:00 to 09:30; only the end moves, to 10:00: a resize,
+    // the end's own delta on the end edge.
+    fireEvent.change(screen.getByLabelText('End'), { target: { value: '2026-10-19T10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(ipc.dispatch).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
+      '{"calendar":{"move_event":{"event":{"account":"work","key":"/dav/cal/work/default/evt-1.ics"},' +
+        '"drag":{"edge":"end","days":0,"minutes":30}}}}',
+    );
+  });
+
+  it('scopes an end-only edit to the occurrence it stands on', () => {
+    render(
+      <EventDialog row={row({ recurring: true, occurrence_start: '2026-10-19T09:00:00' })} onClose={onClose} />,
+    );
+
+    fireEvent.change(screen.getByLabelText('End'), { target: { value: '2026-10-19T10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
+      '{"calendar":{"move_event":{"event":{"account":"work","key":"/dav/cal/work/default/evt-1.ics"},' +
+        '"drag":{"edge":"end","days":0,"minutes":30,"occurrence":"2026-10-19T09:00:00"}}}}',
+    );
+  });
+
+  it('sends nothing when neither edge nor content changed', () => {
+    render(<EventDialog row={row()} onClose={onClose} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(ipc.dispatch).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('carries a content edit on the one occurrence under This event', () => {
+    render(
+      <EventDialog row={row({ recurring: true, occurrence_start: '2026-10-19T09:00:00' })} onClose={onClose} />,
+    );
+
+    expect(screen.getByLabelText('Summary')).toHaveProperty('disabled', false);
+    fireEvent.change(screen.getByLabelText('Summary'), { target: { value: 'Renamed' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(ipc.dispatch).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
+      '{"calendar":{"update_event":{"event":{"account":"work","key":"/dav/cal/work/default/evt-1.ics"},' +
+        '"edit":{"title":"Renamed","occurrence":"2026-10-19T09:00:00"}}}}',
+    );
+  });
+
+  it('honours clearing the summary as a title clear', () => {
+    render(<EventDialog row={row()} onClose={onClose} />);
+
+    fireEvent.change(screen.getByLabelText('Summary'), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(ipc.dispatch).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
+      '{"calendar":{"update_event":{"event":{"account":"work","key":"/dav/cal/work/default/evt-1.ics"},' +
+        '"edit":{"title":""}}}}',
     );
   });
 

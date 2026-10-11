@@ -4,7 +4,7 @@
 // offers its accept, maybe, and decline controls through the respond intent
 // and re-pulls the reading pane so the card carries the standing the diary
 // now holds; the other kinds render their sentence with no controls; a
-// stale copy says so.
+// stale copy of a kind whose sentence does not already say so, says so.
 
 import { dispatch, intents } from '@/services/ipc';
 import { pullSurface } from '@/events/surfaceEvents';
@@ -103,7 +103,9 @@ export function InvitationCard({ message, invitation }: InvitationCardProps) {
       ) : (
         <p className="mt-1 text-xs text-muted-foreground">{kindSentence(invitation.kind)}</p>
       )}
-      {invitation.kind !== 'rsvp' && invitation.stale && (
+      {/* A superseded copy's own sentence already says it is out of date;
+       * the generic stale line names only the kinds that do not. */}
+      {invitation.kind !== 'rsvp' && invitation.kind !== 'superseded' && invitation.stale && (
         <p className="mt-1 text-[11px] text-[var(--warning)]">This copy is out of date.</p>
       )}
     </section>

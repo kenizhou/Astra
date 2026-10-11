@@ -145,14 +145,13 @@ impl<P: Provider> App<P> {
     /// Renders `message` through this app's engine and its account's first
     /// provider; `None` when the account is gone, holds no provider, or the
     /// message does not resolve. A message the calendar recognises as an
-    /// invitation carries its block beside the body.
+    /// invitation carries its block beside the body, decided on the same
+    /// resolution the render already made rather than a second one.
     async fn render_open(&self, message: &MessageRef) -> Option<ReadingSnapshot> {
         let handle = self.account_handle(&message.account).await?;
         let provider = handle.providers.first()?;
-        let mut snapshot = render_reading(&self.engine, provider, message).await?;
-        if let Some(original) = resolve(&self.engine, message).await {
-            snapshot.invitation = self.reading_invitation(provider, message, &original).await;
-        }
+        let (mut snapshot, original) = render_reading(&self.engine, provider, message).await?;
+        snapshot.invitation = self.reading_invitation(provider, message, &original).await;
         Some(snapshot)
     }
 
@@ -189,9 +188,11 @@ impl<P: Provider> App<P> {
                 // read the same stored `SEQUENCE`.
                 InvitationKind::Superseded => astra_viewmodel::InvitationKind::Superseded,
             },
-            response: stored.as_ref().map_or(Participation::NeedsAction, |stored| {
-                stored_participation(stored, attendee.as_deref())
-            }),
+            response: stored
+                .as_ref()
+                .map_or(Participation::NeedsAction, |stored| {
+                    stored_participation(stored, attendee.as_deref())
+                }),
             stale,
             summary: event.title.clone(),
             organizer: organizer_of(event),
@@ -242,7 +243,9 @@ fn organizer_of(event: &engine_api::Event) -> String {
 }
 
 /// Renders `message` (its account and provider key bound together) into the
-/// reading snapshot: resolve it in the store, fetch the body through the
+/// reading snapshot beside the stored message it was resolved to, so a caller
+/// with more to read off the original (the invitation pass) does not resolve
+/// it a second time: resolve it in the store, fetch the body through the
 /// engine's cache-first reads, sanitise the HTML and resolve its inline `cid:`
 /// images into `data:` URIs, gate every remote reference behind placeholders,
 /// and list the attachment metadata. `None` when the message is not in the
@@ -254,7 +257,7 @@ pub(crate) async fn render_reading<P: Provider>(
     engine: &Engine,
     provider: &P,
     message: &MessageRef,
-) -> Option<ReadingSnapshot> {
+) -> Option<(ReadingSnapshot, Message)> {
     let original = resolve(engine, message).await?;
     let body = engine
         .message_body(provider, &message.account, &original)
@@ -322,6 +325,7 @@ pub(crate) async fn render_reading<P: Provider>(
         remote_image_count,
         invitation: None,
     })
+    .map(|snapshot| (snapshot, original))
 }
 
 /// Resolves `message` to its stored [`Message`], the read every body fetch is

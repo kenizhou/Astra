@@ -68,7 +68,7 @@ export function AgendaView({ onOpenEvent }: { onOpenEvent: (row: OccurrenceRow) 
   const calendars = useCalendarStore((s) => s.calendars);
   const nowData = useCalendarStore((s) => s.nowData);
   const zone = nowData?.zone ?? 'Etc/UTC';
-  const now = useZonedNow(nowData !== null ? zone : null);
+  const now = useZonedNow(nowData);
   const today = now !== null ? dayKeyOf(now, zone) : null;
 
   const byDay = useMemo(() => {
