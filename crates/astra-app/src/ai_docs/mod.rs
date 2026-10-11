@@ -12,6 +12,7 @@
 //! derivation over the same rows.
 
 mod digest;
+mod drive;
 mod report;
 mod split;
 
@@ -28,6 +29,10 @@ mod report_tests;
 mod split_tests;
 
 pub use digest::{digest_prompt, generate_digest, DigestError, DIGEST_PROMPT_VERSION};
+pub use drive::{
+    window_bounds, DigestView, DocumentError, DocumentView, SplitEntry,
+    DOCUMENT_WINDOW_DEFAULT_DAYS, DOCUMENT_WINDOW_READ_LIMIT,
+};
 pub use report::{generate_report, report_prompt, ReportError, REPORT_PROMPT_VERSION};
 pub use split::{side_for, split_map, SplitSide, SPLIT_MAPPING, SPLIT_MAPPING_VERSION};
 

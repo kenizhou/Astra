@@ -87,9 +87,10 @@ pub use ai_assist::{
 };
 pub use ai_docs::{
     digest_prompt, generate_digest, generate_report, report_prompt, side_for, split_map,
-    DigestError, DocMessage, ReportError, SplitSide, StoredCategories, DIGEST_PROMPT_VERSION,
-    DOCUMENT_BODY_CAP, DOCUMENT_HEAD_LIMIT, DOCUMENT_WINDOW_MAX_DAYS, REPORT_PROMPT_VERSION,
-    SPLIT_MAPPING, SPLIT_MAPPING_VERSION,
+    window_bounds, DigestError, DigestView, DocMessage, DocumentError, DocumentView, ReportError,
+    SplitEntry, SplitSide, StoredCategories, DIGEST_PROMPT_VERSION, DOCUMENT_BODY_CAP,
+    DOCUMENT_HEAD_LIMIT, DOCUMENT_WINDOW_DEFAULT_DAYS, DOCUMENT_WINDOW_MAX_DAYS,
+    DOCUMENT_WINDOW_READ_LIMIT, REPORT_PROMPT_VERSION, SPLIT_MAPPING, SPLIT_MAPPING_VERSION,
 };
 pub use ai_replies::{
     body_hash, chips_for, draft_prompt, generate_reply, style_profile, style_prompt, summarise,

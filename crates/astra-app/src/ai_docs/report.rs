@@ -46,7 +46,7 @@ struct Reported {
 /// Failures of the report generation: the seam's completion error and
 /// an output no parse or repair could save. The service propagates
 /// both; the caller decides the surface.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ReportError {
     /// The completion seam failed; the message is the host's.
     #[error("report generation call failed: {0}")]
