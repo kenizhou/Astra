@@ -68,8 +68,10 @@ pub struct PersonRow {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub account_count: Option<u32>,
     /// The section letter the row files under: an uppercased letter, or `#`
-    /// for anything that does not start with one. The engine's page order and
-    /// this fold agree, so the list reads one alphabet with one `#` bucket.
+    /// for anything that does not start with one. The fold is the rebuild's
+    /// (the engine orders by raw lowercased code points and does not fold),
+    /// so the rebuild must lay the rows out by its own fold order, not the
+    /// page's, or the sections and the order disagree.
     pub section: String,
     /// The person's primary address, the first email their sources carry:
     /// what the avatar's colour is keyed on and a tap-to-mail affordance
@@ -90,6 +92,8 @@ pub struct Monogram {
     pub initials: String,
     /// The fill behind the letters, a CSS colour from the shared palette,
     /// keyed on the lowercased primary address so it is stable per person.
+    /// A free string on the wire; the palette itself is finite and the
+    /// rebuild only ever emits a slot from it.
     pub colour: String,
 }
 
