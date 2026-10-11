@@ -277,6 +277,79 @@ fn a_stored_rule_too_rich_for_the_editor_is_never_replaced() {
 }
 
 #[test]
+fn a_wkst_other_than_the_default_degrades_rather_than_silently_rebuilding() {
+    // The round trip is the guard itself: the projection carries no week
+    // start, so a rule that states one comes back with the default where the
+    // stored rule had Sunday, does not match, and stays read-only. A
+    // checklist of known fields would have had to name `WKST` by hand.
+    let mut event = weekly_event("evt-1", "Standup", "2026-10-19T09:00:00");
+    event.recurrence.as_mut().unwrap().rules[0].first_day_of_week = Weekday::Su;
+    assert!(
+        !rule_is_editable(event.recurrence.as_ref()),
+        "editing it would rewrite the rule with the default week start, \
+         changing which days a weekly rule produces"
+    );
+
+    // The same refusal on the write path: a `Set` over it never builds.
+    let edit = EventEdit {
+        recurrence: Some(RecurrenceChange::Set(RepeatRule {
+            frequency: Frequency::Weekly,
+            interval: 1,
+            weekdays: Vec::new(),
+            end: RepeatEnd::Never,
+        })),
+        ..EventEdit::default()
+    };
+    assert_eq!(
+        build_patch(&event, &edit, stamp()).unwrap_err(),
+        CalendarEditError::RuleTooRich
+    );
+}
+
+#[test]
+fn an_exrule_carrying_set_degrades_to_read_only() {
+    // A rule whose instances are subtracted is a set an editor built from one
+    // frequency cannot state, whatever the two rules look like alone.
+    let mut event = weekly_event("evt-1", "Standup", "2026-10-19T09:00:00");
+    event
+        .recurrence
+        .as_mut()
+        .unwrap()
+        .excluded_rules
+        .push(RecurrenceRule::new(Frequency::Daily));
+    assert!(!rule_is_editable(event.recurrence.as_ref()));
+}
+
+#[test]
+fn a_bound_the_editor_cannot_state_exactly_degrades_to_read_only() {
+    // The editor's date control states "the last day that recurs"; a stored
+    // `UNTIL` at mid-day is a finer statement than that, and rewriting it to
+    // the day's final second would silently add every occurrence that
+    // afternoon. The round trip refuses instead: the projection loses the
+    // clock, the rebuild puts the final second back, and they differ.
+    let mut event = weekly_event("evt-1", "Standup", "2026-10-19T09:00:00");
+    event.recurrence.as_mut().unwrap().rules[0].bound =
+        RecurrenceBound::Until(local("2026-11-03T12:00:00"));
+    assert!(!rule_is_editable(event.recurrence.as_ref()));
+
+    // The one bound the editor does state exactly: the final second of the
+    // named day, the same rule the create path writes.
+    event.recurrence.as_mut().unwrap().rules[0].bound =
+        RecurrenceBound::Until(local("2026-11-03T23:59:59"));
+    assert!(rule_is_editable(event.recurrence.as_ref()));
+}
+
+#[test]
+fn a_repeat_measured_in_hours_degrades_to_read_only() {
+    let mut event = weekly_event("evt-1", "Standup", "2026-10-19T09:00:00");
+    event.recurrence.as_mut().unwrap().rules[0].frequency = Frequency::Hourly;
+    assert!(
+        !rule_is_editable(event.recurrence.as_ref()),
+        "a repeat in hours is not a calendar repeat any editor offers"
+    );
+}
+
+#[test]
 fn clocks_read_from_one_occurrence_become_the_series_shift() {
     // An editor opened on the third occurrence shows its times; writing them
     // onto the master would delete every earlier occurrence. Naming where the

@@ -26,11 +26,24 @@ use astra_viewmodel::{
     CalendarRow, CalendarSnapshot, NowLineData, OccurrenceAccuracy, OccurrenceRow, Participation,
 };
 use engine_api::{
-    addresses_match, to_local, AccountId, CalendarDateTime, Event, Provider, ProviderKey,
-    TimeZoneId, UtcDateTime,
+    addresses_match, to_local, AccountId, CalendarDateTime, Event, OverrideSurvival, Provider,
+    ProviderKey, TimeZoneId, UtcDateTime,
 };
 
 use crate::{calendar::CalendarInputs, App};
+
+/// Whether a **series** edit on a master carrying `has_overrides` must warn:
+/// the two facts ANDed, never either alone, because each alone is noise. The
+/// server's policy says what a series edit costs (a transport that keeps
+/// every override costs nothing), and whether this series holds any
+/// per-occurrence change says whether the user has anything to lose; a
+/// warning on a clean series is what teaches people to click past the one
+/// that mattered. The rebuild marks each occurrence row with it, and the
+/// write path consults the same shape, so the row a surface asks with and the
+/// write it then sends can never disagree.
+pub(crate) fn series_edit_warns(survival: Option<OverrideSurvival>, has_overrides: bool) -> bool {
+    has_overrides && survival.is_some_and(OverrideSurvival::warns_on_series_edit)
+}
 
 /// How this account stands in a stored event, for the row's `participation`.
 ///
@@ -164,8 +177,12 @@ impl<P: Provider> App<P> {
         let mut calendars = Vec::new();
         let mut occurrences = Vec::new();
         for handle in self.account_handles().await {
+            let survival = handle
+                .providers
+                .first()
+                .and_then(|provider| provider.connection_info().capabilities.override_survival());
             let rows = self
-                .calendar_rows(&handle.id, &handle.identity.email, &inputs)
+                .calendar_rows(&handle.id, &handle.identity.email, &inputs, survival)
                 .await;
             calendars.extend(rows.0);
             occurrences.extend(rows.1);
@@ -194,12 +211,15 @@ impl<P: Provider> App<P> {
     /// One account's calendar rows and joined occurrence rows over the window.
     /// The masters are resolved in one targeted read
     /// ([`Engine::events_by_keys`]) over exactly the keys the window's rows
-    /// name, never a decode of the account's whole diary.
+    /// name, never a decode of the account's whole diary. `survival` is the
+    /// account transport's series-edit policy, the fact the series warning's
+    /// second half reads.
     async fn calendar_rows(
         &self,
         account: &AccountId,
         my_address: &str,
         inputs: &CalendarInputs,
+        survival: Option<OverrideSurvival>,
     ) -> (Vec<CalendarRow>, Vec<OccurrenceRow>) {
         let Ok(engine_calendars) = self.engine.calendars(account).await else {
             return (Vec::new(), Vec::new());
@@ -285,6 +305,13 @@ impl<P: Provider> App<P> {
                     accuracy: accuracy_of(&master.start),
                     participation,
                     can_move: can_write && owns_or_organizes(master, my_address),
+                    series_edit_warns: series_edit_warns(
+                        survival,
+                        master
+                            .recurrence
+                            .as_ref()
+                            .is_some_and(|recurrence| !recurrence.overrides.is_empty()),
+                    ),
                 })
             })
             .collect();

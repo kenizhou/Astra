@@ -302,6 +302,29 @@ pub enum CalendarIntent {
         /// refuses a `false` rather than pretending to hold it back.
         notify_organizer: bool,
     },
+    /// Answer the reply-delivery-failure prompt: whether to email the
+    /// organiser the iTIP `REPLY` the calendar server reported it could not
+    /// deliver, and whether the account learns the decision. The pending
+    /// prompt (the most recently raised one, the question a surface is
+    /// showing) clears either way; the answer itself already landed on the
+    /// calendar long before the question arose, so nothing here re-writes it.
+    AnswerReplyPrompt {
+        /// Whether to send the reply by mail, through the account's submit
+        /// path. `false` dismisses the question without sending: the organiser
+        /// is not told, which is a decision the user is entitled to make.
+        send: bool,
+        /// Whether the account learns the decision for next time: a
+        /// remembered send mails every future reply this account's server
+        /// fails to deliver, with no question asked; a remembered refusal
+        /// never asks and never mails. Absent (`false`), the question is
+        /// asked again the next time a delivery fails.
+        remember: bool,
+        /// The subject line the reply carries, when the host composed a
+        /// localised one; absent, the reply quotes the invitation's own
+        /// subject back, prefixed the RFC 5322 way.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reply_subject: Option<String>,
+    },
     /// Move the grids' navigation anchor to `date` (the jump-to-today and the
     /// date picker). The anchor positions the view; the window itself is
     /// [`SetRange`](Self::SetRange)'s.

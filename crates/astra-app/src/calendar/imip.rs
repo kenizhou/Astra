@@ -209,7 +209,9 @@ fn reply_subject(original: &Message) -> String {
 impl<P: Provider> App<P> {
     /// Builds the iTIP `REPLY` and mails it through the account's submit
     /// path: the step the organiser actually sees, on the route where nothing
-    /// else would carry it.
+    /// else would carry it. `subject_override` is the line the host composed
+    /// when it composed one; absent, the reply quotes the invitation's own
+    /// subject back.
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn send_imip_reply(
         &self,
@@ -220,6 +222,7 @@ impl<P: Provider> App<P> {
         attendee: &str,
         response: RsvpAnswer,
         comment: Option<&str>,
+        subject_override: Option<&str>,
     ) {
         let event = &scheduling.message.event;
         let Some(organizer) = scheduling.message.organizer().map(str::to_owned) else {
@@ -255,7 +258,7 @@ impl<P: Provider> App<P> {
             stamp: now_utc().unwrap_or(starts_at),
             comment,
         });
-        let subject = reply_subject(original);
+        let subject = subject_override.map_or_else(|| reply_subject(original), str::to_owned);
         let body = match comment.map(str::trim).filter(|note| !note.is_empty()) {
             Some(note) => format!("{subject}\r\n\r\n{note}"),
             None => subject.clone(),
@@ -287,9 +290,23 @@ impl<P: Provider> App<P> {
         let at = self.account_ordinal(account).await;
         match self.engine.submit_mail(provider, account, &draft).await {
             Ok(_) => log::info!("calendar[a{at}]: the iTIP reply was submitted"),
-            Err(err) => log::warn!("calendar[a{at}]: the iTIP reply could not be sent: {err}"),
+            Err(err) => {
+                // The answer stands on the calendar; only the telling failed,
+                // and a telling that silently went nowhere leaves the user
+                // believing an organiser who has heard nothing.
+                log::warn!("calendar[a{at}]: the iTIP reply could not be sent: {err}");
+                self.mark_calendar_write(
+                    account,
+                    astra_viewmodel::CalendarWriteState::FailedWithRetry,
+                );
+                self.rebuild_calendar().await;
+            }
         }
         self.drain_account(account).await;
         self.rebuild_sending().await;
     }
 }
+
+#[cfg(test)]
+#[path = "../calendar_imip_tests.rs"]
+mod tests;

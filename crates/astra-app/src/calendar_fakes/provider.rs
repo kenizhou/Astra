@@ -31,7 +31,7 @@ impl Provider for CalendarFake {
             .with_mail()
             .with_message_source()
             .with_calendars()
-            .with_calendar_writes(WriteGuard::Enforced, engine_api::OverrideSurvival::kept())
+            .with_calendar_writes(WriteGuard::Enforced, self.override_survival)
             .with_calendar_rsvp(RsvpControls {
                 comment: self.rsvp_comment,
                 suppress_notification: true,
@@ -136,6 +136,13 @@ impl Provider for CalendarFake {
         draft: &Draft,
         hand_over: &HandOver<'_>,
     ) -> ProviderResult<SubmissionReceipt> {
+        {
+            let mut left = self.fail_submits.lock().unwrap();
+            if *left > 0 {
+                *left -= 1;
+                return Err(ProviderError::retryable("the submit was refused"));
+            }
+        }
         self.submits.lock().unwrap().push(draft.clone());
         let handed_over = hand_over.commit().await?;
         Ok(SubmissionReceipt::filed(
@@ -164,6 +171,9 @@ impl CalendarWrites for CalendarFake {
         _account: &AccountId,
         draft: &EventDraft,
     ) -> ProviderResult<EventWriteReceipt> {
+        if !self.consume_write_refusal() {
+            return Err(ProviderError::invalid_state("the write was rejected"));
+        }
         self.creates.lock().unwrap().push(draft.clone());
         let mut event = Event::new(
             EventId::try_from(format!("/cal/{}.ics", draft.uid.as_str()).as_str()).unwrap(),
@@ -191,6 +201,9 @@ impl CalendarWrites for CalendarFake {
         base: &Event,
         edit: &EventEdit,
     ) -> ProviderResult<EventWriteReceipt> {
+        if !self.consume_write_refusal() {
+            return Err(ProviderError::invalid_state("the write was rejected"));
+        }
         self.patches
             .lock()
             .unwrap()
@@ -303,6 +316,20 @@ impl CalendarWrites for CalendarFake {
 fn receipt(event: EventId, uid: Uid, delivery: engine_api::ReplyDelivery) -> EventWriteReceipt {
     EventWriteReceipt::new(event, uid, RevisionTokens::from_etag(ETag::new("\"v1\"")))
         .with_reply_delivery(delivery)
+}
+
+impl CalendarFake {
+    /// Consumes one scripted write refusal, reporting whether the write may
+    /// proceed. A refused write is never recorded: a server that rejects a
+    /// request has done nothing with it.
+    fn consume_write_refusal(&self) -> bool {
+        let mut left = self.fail_writes.lock().unwrap();
+        if *left > 0 {
+            *left -= 1;
+            return false;
+        }
+        true
+    }
 }
 
 /// The duration between two calendar values, in the engine's own calendar

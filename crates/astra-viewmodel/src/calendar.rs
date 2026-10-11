@@ -79,9 +79,10 @@ pub struct CalendarRow {
 /// row is the join: the occurrence's resolved instants beside the master's
 /// title, calendar, and markers, plus the occurrence token a drag or a
 /// one-occurrence write hands back.
-// The four booleans are independent facts of the row (an all-day event can
+// The five booleans are independent facts of the row (an all-day event can
 // repeat, a repeat can carry an override, and none of that says whether the
-// block may be dragged), not states of one machine, so they stay booleans.
+// block may be dragged or its series warned about), not states of one
+// machine, so they stay booleans.
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OccurrenceRow {
@@ -140,6 +141,17 @@ pub struct OccurrenceRow {
     /// which does not exist yet.
     #[serde(default)]
     pub can_move: bool,
+    /// Whether a **series** edit on this event must ask first: the account's
+    /// server discards the changes the user made to individual occurrences of
+    /// this series, and the series carries some. A surface shows its confirm
+    /// over a series edit when this is set; a clean series, or a server that
+    /// keeps overrides, never warns, because a warning that cannot matter is
+    /// what teaches people to click past the one that does.
+    ///
+    /// The default, so a row from before this field existed (the additive-wire
+    /// case) never warns.
+    #[serde(default)]
+    pub series_edit_warns: bool,
 }
 
 /// How this account stands in a meeting: the word a grid picks its hold
@@ -197,17 +209,19 @@ pub struct CalendarWriteRow {
 /// Where a calendar write has got to. Crosses as a snake_case word.
 ///
 /// Two states, because those are the two a person can act on: a write settling
-/// (the spinner) and a write whose local view could not be confirmed (the
-/// warning with a retry). A write that settled cleanly crosses no row at all.
+/// (the spinner) and a write that did not settle cleanly (the warning with a
+/// retry). A write that settled cleanly crosses no row at all.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CalendarWriteState {
     /// A calendar write is in flight.
     Writing,
-    /// The last write could not be confirmed: the server may hold it or not,
-    /// so the retry is a **re-read**, never the same write issued again, and
-    /// the row stays until a refresh or the next write resolves it. A failed
-    /// confirmation is not a rejected change.
+    /// The last write did not settle cleanly: the engine refused it outright,
+    /// or it landed with only the local confirmation missing. The row does not
+    /// say which, because the next step is the same either way: a re-read (a
+    /// refresh) resolves the row and shows whether the change is there to keep
+    /// or needs making again. Never re-issue the same write before that
+    /// re-read.
     FailedWithRetry,
 }
 

@@ -2,11 +2,16 @@
 //! The write tail: every calendar write intent's shared shape. Each write is
 //! gated on the target calendar's `may_write` (read from the store's own copy
 //! of the access rights, because a write into an unknown calendar is not a
-//! write this app can stand behind), marked in flight in the view state before
-//! the engine call, and settled from the reconcile the engine's facade already
-//! ran: `Applied` clears the row, anything else means the write **landed**
-//! (only the local confirmation is missing) and marks `FailedWithRetry`, whose
-//! one recovery is the re-read a refresh performs.
+//! write this app can stand behind), every occurrence-scoped one re-mints its
+//! token against the store before it writes (a token is an identifier this
+//! core minted, never a time to trust), each write is marked in flight in the
+//! view state before the engine call, and settled from the reconcile the
+//! engine's facade already ran: `Applied` clears the row, anything else means
+//! the write **landed** (only the local confirmation is missing) and marks
+//! `FailedWithRetry`, whose one recovery is the re-read a refresh performs. A
+//! write the engine refuses outright marks the same row, because a change
+//! that silently went nowhere is indistinguishable on screen from one that
+//! was never asked for.
 //!
 //! Every write carries a fresh idempotency key (the engine's outbox is
 //! idempotent by it) and every create a fresh cross-system `UID`, both minted
@@ -20,6 +25,7 @@ use crate::{
         drag::apply_drag,
         edit::{self, NewEvent},
         now_utc,
+        snapshot::series_edit_warns,
     },
     reference::CalendarRef,
     App, EventRef,
@@ -64,10 +70,14 @@ impl<P: Provider> App<P> {
             location,
             recurrence,
         };
+        let Some(stamp) = now_utc() else {
+            log::warn!("calendar: the wall clock is not representable; the create was refused");
+            return;
+        };
         let draft = match edit::build_draft(
             &new,
             engine_api::Uid::new(mint_event_uid()).expect("a minted uid"),
-            now_utc().expect("the clock"),
+            stamp,
         ) {
             Ok(draft) => draft,
             Err(err) => {
@@ -95,8 +105,7 @@ impl<P: Provider> App<P> {
             }
             Err(err) => {
                 log::warn!("calendar: the create was refused: {err}");
-                self.clear_calendar_write(&calendar.account);
-                self.rebuild_calendar().await;
+                self.fail_calendar_write(&calendar.account).await;
             }
         }
     }
@@ -116,7 +125,17 @@ impl<P: Provider> App<P> {
             log::warn!("calendar: the account has no provider to write through");
             return;
         };
-        let stamp = now_utc().expect("the clock");
+        if let Err(err) = self
+            .check_occurrence_token(&event.account, &base, edit.occurrence)
+            .await
+        {
+            log::info!("calendar: the edit was refused: {err}");
+            return;
+        }
+        let Some(stamp) = now_utc() else {
+            log::warn!("calendar: the wall clock is not representable; the edit was refused");
+            return;
+        };
         let (target, patch) = match edit::build_patch(&base, edit, stamp) {
             Ok(built) => built,
             Err(err) => {
@@ -149,7 +168,17 @@ impl<P: Provider> App<P> {
                 return;
             }
         };
-        let stamp = now_utc().expect("the clock");
+        if let Err(err) = self
+            .check_occurrence_token(&event.account, &base, drag.occurrence)
+            .await
+        {
+            log::info!("calendar: the move was refused: {err}");
+            return;
+        }
+        let Some(stamp) = now_utc() else {
+            log::warn!("calendar: the wall clock is not representable; the move was refused");
+            return;
+        };
         let (target, patch) = match edit::build_patch(&base, &drag_edit, stamp) {
             Ok(built) => built,
             Err(err) => {
@@ -162,7 +191,10 @@ impl<P: Provider> App<P> {
     }
 
     /// The shared tail of an edit and a move: mark the write in flight, patch,
-    /// settle the outcome.
+    /// settle the outcome. A series patch on a series the warning marks is
+    /// the one write that can cost the user work they did weeks ago, so it is
+    /// named in the log here even though the asking is the surface's (the
+    /// row's flag is what a surface asks with; the core cannot ask).
     async fn patch_calendar(
         &self,
         provider: &P,
@@ -171,6 +203,20 @@ impl<P: Provider> App<P> {
         target: engine_api::PatchTarget,
         patch: engine_api::EventPatch,
     ) {
+        if base.is_recurring()
+            && matches!(target, engine_api::PatchTarget::Series)
+            && series_edit_warns(
+                provider.connection_info().capabilities.override_survival(),
+                base.recurrence
+                    .as_ref()
+                    .is_some_and(|recurrence| !recurrence.overrides.is_empty()),
+            )
+        {
+            log::warn!(
+                "calendar: the series edit may discard the occurrences changed individually; \
+                 the server does not keep them"
+            );
+        }
         self.mark_calendar_write(account, CalendarWriteState::Writing);
         self.rebuild_calendar().await;
         match self
@@ -192,8 +238,7 @@ impl<P: Provider> App<P> {
             }
             Err(err) => {
                 log::warn!("calendar: the edit was refused: {err}");
-                self.clear_calendar_write(account);
-                self.rebuild_calendar().await;
+                self.fail_calendar_write(account).await;
             }
         }
     }
@@ -211,8 +256,18 @@ impl<P: Provider> App<P> {
             log::warn!("calendar: the account has no provider to write through");
             return;
         };
-        let deletion = match edit::build_deletion(&base, occurrence, now_utc().expect("the clock"))
+        if let Err(err) = self
+            .check_occurrence_token(&event.account, &base, occurrence)
+            .await
         {
+            log::info!("calendar: the delete was refused: {err}");
+            return;
+        }
+        let Some(stamp) = now_utc() else {
+            log::warn!("calendar: the wall clock is not representable; the delete was refused");
+            return;
+        };
+        let deletion = match edit::build_deletion(&base, occurrence, stamp) {
             Ok(deletion) => deletion,
             Err(err) => {
                 log::info!("calendar: the delete could not be built: {err}");
@@ -240,8 +295,7 @@ impl<P: Provider> App<P> {
             }
             Err(err) => {
                 log::warn!("calendar: the delete was refused: {err}");
-                self.clear_calendar_write(&event.account);
-                self.rebuild_calendar().await;
+                self.fail_calendar_write(&event.account).await;
             }
         }
     }
@@ -327,6 +381,16 @@ impl<P: Provider> App<P> {
                 self.mark_calendar_write(account, CalendarWriteState::FailedWithRetry);
             }
         }
+        self.rebuild_calendar().await;
+    }
+
+    /// Marks the account's row for a write the engine refused outright: the
+    /// change went nowhere, and a surface that watched the write start must
+    /// also see that it did not settle. The row's recovery is the same
+    /// re-read a refresh performs, which shows the change is not there and
+    /// may be made again.
+    async fn fail_calendar_write(&self, account: &AccountId) {
+        self.mark_calendar_write(account, CalendarWriteState::FailedWithRetry);
         self.rebuild_calendar().await;
     }
 }

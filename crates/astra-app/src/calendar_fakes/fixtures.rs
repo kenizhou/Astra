@@ -67,6 +67,21 @@ pub(crate) fn weekly_event(key: &str, title: &str, start: &str) -> Event {
     event
 }
 
+/// A weekly zoned series carrying one overridden occurrence (the Tuesday a
+/// week after the fixtures' Monday start, excluded the way an occurrence
+/// delete writes one): the diary shape the series warning reads. The override
+/// sits on a later occurrence so the master's own start still materializes.
+pub(crate) fn overridden_weekly_event(key: &str, title: &str, start: &str) -> Event {
+    let mut event = weekly_event(key, title, start);
+    if let Some(recurrence) = &mut event.recurrence {
+        recurrence.overrides.insert(
+            local("2026-11-03T09:00:00"),
+            engine_api::RecurrenceOverride::Excluded,
+        );
+    }
+    event
+}
+
 /// An all-day event `key` titled `title` on `date`, one day long.
 pub(crate) fn all_day_event(key: &str, title: &str, date: &str) -> Event {
     let mut event = Event::new(

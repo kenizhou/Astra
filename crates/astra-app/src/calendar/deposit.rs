@@ -98,7 +98,11 @@ impl<P: Provider> App<P> {
             }
             Err(err) => {
                 log::info!("calendar: the meeting could not be stored: {err}");
-                self.clear_calendar_write(account);
+                self.mark_calendar_write(
+                    account,
+                    astra_viewmodel::CalendarWriteState::FailedWithRetry,
+                );
+                self.rebuild_calendar().await;
                 return None;
             }
         }
@@ -130,8 +134,12 @@ fn for_storage(raw: &str) -> Option<String> {
     if !raw.contains("BEGIN:VCALENDAR") {
         return None;
     }
+    // One trailing newline is stripped and re-added rather than split away,
+    // so a source that ends without one, or with a blank line, crosses byte
+    // for byte rather than gaining or losing an empty line at the end.
+    let body = raw.strip_suffix("\r\n").unwrap_or(raw);
     let mut out = String::new();
-    for content in raw.split("\r\n") {
+    for content in body.split("\r\n") {
         if content
             .trim_end()
             .to_ascii_uppercase()
@@ -184,3 +192,7 @@ fn encode_path_segment(segment: &str) -> String {
     }
     out
 }
+
+#[cfg(test)]
+#[path = "../calendar_deposit_tests.rs"]
+mod tests;

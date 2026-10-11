@@ -36,8 +36,8 @@ use engine_api::{
 };
 
 use crate::{
-    calendar::writes::generated_idempotency, protocol::RsvpAnswer, reading::resolve, App,
-    MessageRef,
+    calendar::prompt::ReplyFallback, calendar::writes::generated_idempotency, protocol::RsvpAnswer,
+    reading::resolve, App, MessageRef,
 };
 
 /// What a reading view may offer for one scheduling message: the two-condition
@@ -278,14 +278,47 @@ impl<P: Provider> App<P> {
                     .await;
                 match route {
                     ReplyRoute::Server => {
-                        self.read_reply_delivery(
+                        // A broken delivery promise becomes the user's
+                        // decision: the account's standing answer decides
+                        // between mailing the reply ourselves (no question
+                        // asked), staying silent (no question offered), and
+                        // asking, which is where every account starts.
+                        if let Some(prompt) = read_reply_delivery(
                             &message,
                             event,
                             response,
                             comment.as_deref(),
                             &write.write.reply_delivery,
-                        )
-                        .await;
+                        ) {
+                            match self.reply_fallback_for(&message.account) {
+                                ReplyFallback::Always => {
+                                    log::info!(
+                                        "calendar: emailing the reply ourselves; the account \
+                                         says always"
+                                    );
+                                    self.send_imip_reply(
+                                        provider,
+                                        &message.account,
+                                        &original,
+                                        &scheduling,
+                                        &attendee,
+                                        response,
+                                        comment.as_deref(),
+                                        None,
+                                    )
+                                    .await;
+                                }
+                                ReplyFallback::Never => {
+                                    log::info!(
+                                        "calendar: not asking; the account says never email a \
+                                         reply it cannot deliver"
+                                    );
+                                }
+                                ReplyFallback::Ask => {
+                                    self.raise_reply_prompt(prompt).await;
+                                }
+                            }
+                        }
                     }
                     ReplyRoute::ClientImip => {
                         if notify_organizer {
@@ -297,6 +330,7 @@ impl<P: Provider> App<P> {
                                 &attendee,
                                 response,
                                 comment.as_deref(),
+                                None,
                             )
                             .await;
                         } else {
@@ -308,75 +342,81 @@ impl<P: Provider> App<P> {
             }
             Err(err) => {
                 log::warn!("calendar: the answer was refused: {err}");
-                self.clear_calendar_write(&message.account);
+                self.mark_calendar_write(
+                    &message.account,
+                    astra_viewmodel::CalendarWriteState::FailedWithRetry,
+                );
                 self.rebuild_calendar().await;
             }
         }
     }
 
-    /// Reads what the server reported about delivering the answer, on the
-    /// route that trusted it to: `Failed` records the prompt (mail as the user
-    /// is the user's decision), anything else, including silence, is logged
-    /// and left alone.
-    async fn read_reply_delivery(
-        &self,
-        message: &MessageRef,
-        event: &Event,
-        response: RsvpAnswer,
-        comment: Option<&str>,
-        delivery: &engine_api::ReplyDelivery,
-    ) {
-        if let engine_api::ReplyDelivery::Failed { status } = delivery {
-            let organizer = event
-                .participants
-                .iter()
-                .find(|participant| participant.has_role(&engine_api::ParticipantRole::Owner))
-                .and_then(|participant| participant.email.clone())
-                .unwrap_or_default();
-            let prompt = crate::calendar::ReplyPrompt {
-                account: message.account.clone(),
-                message: message.key.clone(),
-                summary: event.title.clone(),
-                organizer,
-                response: match response {
-                    RsvpAnswer::Accepted => Participation::Accepted,
-                    RsvpAnswer::Tentative => Participation::Tentative,
-                    RsvpAnswer::Declined => Participation::Declined,
-                },
-                comment: comment.map(str::to_owned),
-                status_code: status.clone(),
-            };
-            {
-                let mut state = self.calendar_state.lock().expect("calendar mutex poisoned");
-                // One prompt per invitation: a re-answer replaces the question
-                // it supersedes rather than stacking beside it.
-                state.prompts.retain(|standing| {
-                    standing.account != prompt.account || standing.message != prompt.message
-                });
-                state.prompts.push(prompt);
-            }
-            log::warn!(
-                "calendar: the server could not deliver the reply (status {status}); the \
-                 prompt is recorded"
-            );
-            self.rebuild_calendar().await;
-        } else {
-            match delivery {
-                engine_api::ReplyDelivery::Delivered { status } => {
-                    log::info!("calendar: the server delivered the reply (status {status})");
-                }
-                engine_api::ReplyDelivery::Unrecognized { status } => {
-                    log::info!(
-                        "calendar: the server reported an unrecognized delivery status ({status})"
-                    );
-                }
-                engine_api::ReplyDelivery::NotReported => {
-                    log::info!("calendar: the server reported nothing about the reply's delivery");
-                }
-                engine_api::ReplyDelivery::Failed { .. } => {}
-            }
+    /// Records the reply-delivery-failure prompt and publishes it: the
+    /// question a surface asks about mail sent as the user.
+    async fn raise_reply_prompt(&self, prompt: crate::calendar::ReplyPrompt) {
+        {
+            let mut state = self.calendar_state.lock().expect("calendar mutex poisoned");
+            // One prompt per invitation: a re-answer replaces the question it
+            // supersedes rather than stacking beside it.
+            state.prompts.retain(|standing| {
+                standing.account != prompt.account || standing.message != prompt.message
+            });
+            state.prompts.push(prompt);
         }
+        self.rebuild_calendar().await;
     }
+}
+
+/// Reads what the server reported about delivering the answer, on the
+/// route that trusted it to: `Failed` builds the reply-delivery-failure
+/// prompt for the caller to raise or resolve (mail as the user is the
+/// user's decision), anything else, including silence, is logged and
+/// left alone.
+fn read_reply_delivery(
+    message: &MessageRef,
+    event: &Event,
+    response: RsvpAnswer,
+    comment: Option<&str>,
+    delivery: &engine_api::ReplyDelivery,
+) -> Option<crate::calendar::ReplyPrompt> {
+    let status = match delivery {
+        engine_api::ReplyDelivery::Failed { status } => status.clone(),
+        engine_api::ReplyDelivery::Delivered { status } => {
+            log::info!("calendar: the server delivered the reply (status {status})");
+            return None;
+        }
+        engine_api::ReplyDelivery::Unrecognized { status } => {
+            log::info!("calendar: the server reported an unrecognized delivery status ({status})");
+            return None;
+        }
+        engine_api::ReplyDelivery::NotReported => {
+            log::info!("calendar: the server reported nothing about the reply's delivery");
+            return None;
+        }
+    };
+    let organizer = event
+        .participants
+        .iter()
+        .find(|participant| participant.has_role(&engine_api::ParticipantRole::Owner))
+        .and_then(|participant| participant.email.clone())
+        .unwrap_or_default();
+    log::warn!(
+        "calendar: the server could not deliver the reply (status {status}); the answer \
+         stands and the telling does not"
+    );
+    Some(crate::calendar::ReplyPrompt {
+        account: message.account.clone(),
+        message: message.key.clone(),
+        summary: event.title.clone(),
+        organizer,
+        response: match response {
+            RsvpAnswer::Accepted => Participation::Accepted,
+            RsvpAnswer::Tentative => Participation::Tentative,
+            RsvpAnswer::Declined => Participation::Declined,
+        },
+        comment: comment.map(str::to_owned),
+        status_code: status,
+    })
 }
 
 #[cfg(test)]

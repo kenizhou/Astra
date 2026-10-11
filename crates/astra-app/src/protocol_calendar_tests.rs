@@ -383,6 +383,34 @@ fn an_invitation_answer_names_the_message_and_the_answer() {
 }
 
 #[test]
+fn the_prompt_answer_carries_the_decision_and_skips_the_absent_subject() {
+    // The plain send: no subject override crosses a key at all. The three
+    // fields mirror mail-calendar's prompt answer one for one.
+    round_trips(
+        &Intent::Calendar(CalendarIntent::AnswerReplyPrompt {
+            send: true,
+            remember: false,
+            reply_subject: None,
+        }),
+        r#"{"calendar":{"answer_reply_prompt":{"send":true,"remember":false}}}"#,
+    );
+    // The remembered refusal with a host-composed subject: the organiser is
+    // not emailed, the account learns it, and the reply that a later send
+    // would carry has its words.
+    round_trips(
+        &Intent::Calendar(CalendarIntent::AnswerReplyPrompt {
+            send: false,
+            remember: true,
+            reply_subject: Some("Zusage: Sprint planning".to_owned()),
+        }),
+        concat!(
+            r#"{"calendar":{"answer_reply_prompt":{"send":false,"remember":true,"#,
+            r#""reply_subject":"Zusage: Sprint planning"}}}"#
+        ),
+    );
+}
+
+#[test]
 fn the_calendar_surface_crosses_as_its_renamed_word() {
     assert_eq!(
         serde_json::to_string(&Surface::Calendar).unwrap(),

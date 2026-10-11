@@ -249,7 +249,7 @@ fn shift(
 /// Days from the civil epoch (1970-01-01) for a proleptic-Gregorian date:
 /// Howard Hinnant's `days_from_civil`, exact for every date the engine can
 /// represent and free of leap-year special cases.
-fn from_civil(year: i32, month: u8, day: u8) -> i64 {
+pub(crate) fn from_civil(year: i32, month: u8, day: u8) -> i64 {
     let (y, m, d) = (i64::from(year), i64::from(month), i64::from(day));
     // Shift the year to start in March, so a leap day falls at the end of a
     // "year".
@@ -261,10 +261,10 @@ fn from_civil(year: i32, month: u8, day: u8) -> i64 {
     era * 146_097 + day_of_era - 719_468
 }
 
-/// The calendar date at a day number: the inverse of [`from_civil`]. Saturates
-/// on a day number outside representable calendar time, which the drag bound
-/// keeps unreachable.
-fn date_at(day: i64) -> engine_api::CalendarDate {
+/// The calendar date at a day number: the inverse of [`from_civil`].
+/// Saturates on a day number outside representable calendar time, which the
+/// drag bound keeps unreachable.
+pub(crate) fn date_at(day: i64) -> engine_api::CalendarDate {
     let z = day + 719_468;
     let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
     let day_of_era = z - era * 146_097;

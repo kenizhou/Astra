@@ -9,10 +9,12 @@ use astra_viewmodel::{OccurrenceAccuracy, Participation};
 use engine_api::{CalendarId, Memberships};
 
 use crate::calendar_fakes::{
-    account, all_day_event, calendar, calendar_app, meeting, readonly, utc, weekly_event,
-    zoned_event, CalendarFake,
+    account, all_day_event, calendar, calendar_app, meeting, overridden_weekly_event, readonly,
+    utc, weekly_event, zoned_event, CalendarFake,
 };
 use crate::{reference::CalendarRef, CalendarIntent, Intent, Surface};
+
+use super::series_edit_warns;
 
 /// The fortnight the diary fixtures live in, as the range every test sets
 /// first (a test that relied on the default window would rely on the real
@@ -216,5 +218,82 @@ async fn the_now_line_rides_every_rebuild() {
     assert_eq!(
         now.zone, "Etc/UTC",
         "the display zone until a zone intent exists"
+    );
+}
+
+#[tokio::test]
+async fn a_series_that_carries_overrides_warns_where_the_server_discards_them() {
+    let surfaces = Arc::new(Mutex::new(Vec::new()));
+    let fake = CalendarFake::with_calendar_and_mail()
+        .discarding_overrides()
+        .holding(weekly_event("evt-clean", "Standup", "2026-10-19T09:00:00"))
+        .holding(overridden_weekly_event(
+            "evt-touched",
+            "Planning",
+            "2026-10-20T11:00:00",
+        ));
+    let app = synced(fake, &surfaces).await;
+
+    let snapshot = app.calendar();
+    // The clean series: the user has nothing to lose, so nothing warns. A
+    // warning that cannot matter is what teaches people to click past the
+    // one that does.
+    assert!(
+        snapshot
+            .occurrences
+            .iter()
+            .filter(|row| row.event.as_str() == "evt-clean")
+            .all(|row| !row.series_edit_warns),
+        "a clean series never warns"
+    );
+    // The series the user changed one occurrence of: every row of it carries
+    // the warning, because every row of it opens the same series editor.
+    let touched: Vec<_> = snapshot
+        .occurrences
+        .iter()
+        .filter(|row| row.event.as_str() == "evt-touched")
+        .collect();
+    assert!(!touched.is_empty(), "the touched series joined");
+    assert!(
+        touched.iter().all(|row| row.series_edit_warns),
+        "every occurrence of the override-carrying series warns"
+    );
+    // The two facts are ANDed: no policy fact, no warning (and no write
+    // either, which the may_write gate already refuses).
+    assert!(!series_edit_warns(None, true));
+    assert!(!series_edit_warns(
+        Some(engine_api::OverrideSurvival::kept()),
+        true
+    ));
+    assert!(!series_edit_warns(
+        Some(engine_api::OverrideSurvival {
+            survives_time_change: false,
+            survives_rule_change: false,
+            clobbers_own_fields: true,
+        }),
+        false
+    ));
+}
+
+#[tokio::test]
+async fn a_server_that_keeps_overrides_never_warns() {
+    // The default fake is a CalDAV-shaped transport: overrides survive a
+    // series edit by construction, so the very same override-carrying series
+    // that warns elsewhere carries no warning here.
+    let surfaces = Arc::new(Mutex::new(Vec::new()));
+    let fake = CalendarFake::with_calendar_and_mail().holding(overridden_weekly_event(
+        "evt-touched",
+        "Planning",
+        "2026-10-20T11:00:00",
+    ));
+    let app = synced(fake, &surfaces).await;
+
+    assert!(
+        app.calendar()
+            .occurrences
+            .iter()
+            .filter(|row| row.event.as_str() == "evt-touched")
+            .all(|row| !row.series_edit_warns),
+        "the server keeps the user's overrides; there is nothing to say"
     );
 }

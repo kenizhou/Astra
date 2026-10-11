@@ -18,7 +18,8 @@ mod fixtures;
 mod provider;
 
 pub(crate) use fixtures::{
-    all_day_event, calendar, local, meeting, readonly, utc, weekly_event, zoned_event,
+    all_day_event, calendar, local, meeting, overridden_weekly_event, readonly, utc, weekly_event,
+    zoned_event,
 };
 
 use std::{
@@ -86,6 +87,15 @@ pub(crate) struct CalendarFake {
     /// Whether the RSVP verb can carry a note for the organiser (the
     /// capability): `false` is the transport that must refuse one.
     pub rsvp_comment: bool,
+    /// What a series-level edit does to the occurrences the user changed
+    /// individually (the capability): the warning's server half.
+    pub override_survival: engine_api::OverrideSurvival,
+    /// How many calendar writes to refuse ("the write was rejected"), so an
+    /// engine refusal can be scripted.
+    pub fail_writes: Arc<Mutex<u32>>,
+    /// How many submits to refuse ("the mail could not be sent"), so the iMIP
+    /// reply's failure can be scripted.
+    pub fail_submits: Arc<Mutex<u32>>,
     /// Every recorded create, in order.
     pub creates: Arc<Mutex<Vec<EventDraft>>>,
     /// Every recorded `(base, edit)` patch, in order.
@@ -120,6 +130,9 @@ impl CalendarFake {
             reply_delivery: engine_api::ReplyDelivery::NotReported,
             schedules: true,
             rsvp_comment: true,
+            override_survival: engine_api::OverrideSurvival::kept(),
+            fail_writes: Arc::new(Mutex::new(0)),
+            fail_submits: Arc::new(Mutex::new(0)),
             creates: Arc::new(Mutex::new(Vec::new())),
             patches: Arc::new(Mutex::new(Vec::new())),
             rsvps: Arc::new(Mutex::new(Vec::new())),
@@ -155,6 +168,20 @@ impl CalendarFake {
     pub(crate) fn without_rsvp_notes(self) -> Self {
         Self {
             rsvp_comment: false,
+            ..self
+        }
+    }
+
+    /// Marks the transport as one whose series edits discard the occurrences
+    /// the user changed individually: the measured Google shape, where the
+    /// moves revert and the renames spread.
+    pub(crate) fn discarding_overrides(self) -> Self {
+        Self {
+            override_survival: engine_api::OverrideSurvival {
+                survives_time_change: false,
+                survives_rule_change: false,
+                clobbers_own_fields: true,
+            },
             ..self
         }
     }

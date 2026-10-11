@@ -26,8 +26,8 @@ use std::num::NonZeroU32;
 
 use engine_api::{
     resolve_instant, resolve_instant_in, CalendarDate, CalendarDateTime, DraftRecurrence, Event,
-    EventDeletion, EventDraft, EventPatch, LocalDateTime, Occurrence, PatchTarget, RecurrenceBound,
-    RecurrenceRule, TimeZoneId, Uid, UtcDateTime,
+    EventDeletion, EventDraft, EventPatch, Frequency, LocalDateTime, Occurrence, PatchTarget,
+    RecurrenceBound, RecurrenceRule, TimeZoneId, Uid, UtcDateTime,
 };
 use thiserror::Error;
 
@@ -56,6 +56,12 @@ pub(crate) enum CalendarEditError {
     /// representable calendar time.
     #[error("a drag of {0} days is beyond the 366-day limit")]
     DragTooFar(i64),
+    /// The occurrence token names no occurrence the store holds: stale from a
+    /// series that changed under the view that minted it, or minted by
+    /// nobody. The write is refused rather than split at a time the rule
+    /// never produced.
+    #[error("the occurrence this write names is not one the calendar holds")]
+    StaleOccurrence,
     /// A wall clock the mapping tried to render does not exist as a calendar
     /// value (an out-of-range date).
     #[error("{0}")]
@@ -132,29 +138,7 @@ fn draft_recurrence(
     rule: &RepeatRule,
     start: &CalendarDateTime,
 ) -> Result<DraftRecurrence, CalendarEditError> {
-    let interval = NonZeroU32::new(rule.interval)
-        .ok_or_else(|| CalendarEditError::Unrepresentable("a zero interval".to_owned()))?;
-    let mut engine_rule = RecurrenceRule::new(rule.frequency);
-    engine_rule.interval = interval;
-    engine_rule.by_day = rule
-        .weekdays
-        .iter()
-        .map(|day| engine_api::NDay {
-            day: *day,
-            nth_of_period: None,
-        })
-        .collect();
-    engine_rule.bound = match rule.end {
-        RepeatEnd::Never => RecurrenceBound::Unbounded,
-        RepeatEnd::AfterCount(count) => RecurrenceBound::Count(
-            NonZeroU32::new(count)
-                .ok_or_else(|| CalendarEditError::Unrepresentable("a zero count".to_owned()))?,
-        ),
-        // The inclusive-date rule: the day named is the last one that recurs,
-        // so the bound is its final second rather than its midnight, which
-        // would cut the day's own occurrence.
-        RepeatEnd::OnDate(date) => RecurrenceBound::Until(day_end(date)?),
-    };
+    let engine_rule = rebuild_rule(rule)?;
     let RecurrenceBound::Until(until) = &engine_rule.bound else {
         return Ok(DraftRecurrence::new(engine_rule));
     };
@@ -276,25 +260,100 @@ pub(crate) fn build_deletion(
 }
 
 /// Whether the stored `Recurrence` is one this editor can describe in full
-/// through [`RepeatRule`]: no rule at all (a one-off), or exactly one rule made
-/// only of the parts the editor carries. Anything else stays read-only.
+/// through [`RepeatRule`]: no rule at all (a one-off), or exactly one rule
+/// that survives a describe/rebuild round trip. Anything else stays
+/// read-only.
+///
+/// The fit is decided by the **round trip**, not by a checklist of the fields
+/// this version knows about: the stored rule is projected onto
+/// [`RepeatRule`] (dropping whatever the editor cannot hold) and rebuilt
+/// through [`rebuild_rule`], the same construction a `Set` would write. A
+/// checklist would decide the same question by hand and be wrong the day the
+/// engine gains a field: a rule carrying it would look editable, the editor
+/// would seed itself from a projection missing that field, and saving would
+/// write the rule back without it. Silently, on the user's real series. The
+/// round trip cannot make that mistake: a field this module does not carry is
+/// a field the rebuilt rule does not match on, so the rule degrades to
+/// read-only instead of being quietly rewritten. A `WKST` other than the
+/// default, an exclusion rule, a skip policy, a rule measured in hours: all
+/// of them refuse by coming back different, not by being named.
 pub(crate) fn rule_is_editable(recurrence: Option<&engine_api::Recurrence>) -> bool {
     let Some(recurrence) = recurrence else {
         return true;
     };
+    // More than one rule, or a rule whose instances are subtracted, is a set
+    // an editor built from one frequency cannot state.
     let [rule] = recurrence.rules.as_slice() else {
         return false;
     };
-    rule.rscale.is_none()
-        && rule.by_month_day.is_empty()
-        && rule.by_month.is_empty()
-        && rule.by_year_day.is_empty()
-        && rule.by_week_no.is_empty()
-        && rule.by_hour.is_empty()
-        && rule.by_minute.is_empty()
-        && rule.by_second.is_empty()
-        && rule.by_set_position.is_empty()
-        && rule.by_day.iter().all(|day| day.nth_of_period.is_none())
+    if !recurrence.excluded_rules.is_empty() {
+        return false;
+    }
+    describe_rule(rule)
+        .and_then(|simple| rebuild_rule(&simple).ok())
+        .is_some_and(|rebuilt| rebuilt == *rule)
+}
+
+/// Projects one stored rule onto [`RepeatRule`], dropping whatever the
+/// editor cannot state. Lossy by design; [`rule_is_editable`] is what decides
+/// whether anything was lost, by rebuilding and comparing.
+fn describe_rule(rule: &RecurrenceRule) -> Option<RepeatRule> {
+    // A repeat measured in hours or finer is not a calendar repeat any
+    // editor offers, so it is not one this editor pretends to describe.
+    if matches!(
+        rule.frequency,
+        Frequency::Hourly | Frequency::Minutely | Frequency::Secondly
+    ) {
+        return None;
+    }
+    // A weekday pinned to its nth occurrence in the period is a part the
+    // editor does not carry at all, rather than one it drops: naming every
+    // Monday is not naming the fourth.
+    if rule.by_day.iter().any(|day| day.nth_of_period.is_some()) {
+        return None;
+    }
+    Some(RepeatRule {
+        frequency: rule.frequency,
+        interval: rule.interval.get(),
+        weekdays: rule.by_day.iter().map(|day| day.day).collect(),
+        end: match &rule.bound {
+            RecurrenceBound::Unbounded => RepeatEnd::Never,
+            RecurrenceBound::Count(count) => RepeatEnd::AfterCount(count.get()),
+            RecurrenceBound::Until(until) => {
+                RepeatEnd::OnDate(CalendarDate::new(until.year(), until.month(), until.day()).ok()?)
+            }
+        },
+    })
+}
+
+/// Rebuilds the engine rule a [`RepeatRule`] stands for: the one construction
+/// shared by the create path and the editability round trip, so a rule the
+/// editor writes can never differ from a rule the editor was allowed to edit.
+fn rebuild_rule(rule: &RepeatRule) -> Result<RecurrenceRule, CalendarEditError> {
+    let interval = NonZeroU32::new(rule.interval)
+        .ok_or_else(|| CalendarEditError::Unrepresentable("a zero interval".to_owned()))?;
+    let mut engine_rule = RecurrenceRule::new(rule.frequency);
+    engine_rule.interval = interval;
+    engine_rule.by_day = rule
+        .weekdays
+        .iter()
+        .map(|day| engine_api::NDay {
+            day: *day,
+            nth_of_period: None,
+        })
+        .collect();
+    engine_rule.bound = match rule.end {
+        RepeatEnd::Never => RecurrenceBound::Unbounded,
+        RepeatEnd::AfterCount(count) => RecurrenceBound::Count(
+            NonZeroU32::new(count)
+                .ok_or_else(|| CalendarEditError::Unrepresentable("a zero count".to_owned()))?,
+        ),
+        // The inclusive-date rule: the day named is the last one that recurs,
+        // so the bound is its final second rather than its midnight, which
+        // would cut the day's own occurrence.
+        RepeatEnd::OnDate(date) => RecurrenceBound::Until(day_end(date)?),
+    };
+    Ok(engine_rule)
 }
 
 /// The engine's [`Occurrence`] for one original start, named the way every

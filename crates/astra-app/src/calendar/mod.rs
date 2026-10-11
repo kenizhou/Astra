@@ -18,6 +18,8 @@ mod drag;
 mod edit;
 mod imip;
 mod invite;
+mod prompt;
+mod scope;
 mod snapshot;
 mod writes;
 
@@ -26,6 +28,7 @@ use std::collections::{HashMap, HashSet};
 use astra_viewmodel::{CalendarWriteRow, CalendarWriteState, Participation, ReplyPromptRow};
 use engine_api::{AccountId, Horizon, Provider, TimeZoneId, UtcDateTime};
 
+use crate::calendar::prompt::ReplyFallback;
 use crate::{reference::CalendarRef, App, CalendarIntent};
 
 /// The visible window's default length, in days: the six weeks a month grid
@@ -68,6 +71,12 @@ pub(crate) struct CalendarState {
     zone: String,
     /// The answers whose reply the server reported it could not deliver.
     prompts: Vec<ReplyPrompt>,
+    /// Each account's standing answer to the reply-delivery-failure prompt:
+    /// whether to email the organiser ourselves when the account's calendar
+    /// server cannot deliver a reply. Absent means ask, every time, because
+    /// sending mail as the user is the user's decision to make once per
+    /// server, not once for ever.
+    reply_fallbacks: HashMap<AccountId, ReplyFallback>,
 }
 
 impl CalendarState {
@@ -78,6 +87,20 @@ impl CalendarState {
             zone: "Etc/UTC".to_owned(),
             ..Self::default()
         }
+    }
+}
+
+/// The window a rebuild or a refresh falls back to before the first
+/// `SetRange`: six weeks around `now`, a week of them behind, so a cold app
+/// still paints the week it is in. One definition, because a refresh that
+/// synced a different span than the one the rebuild reads would materialize
+/// occurrences the grid never shows, and show ones it never synced.
+pub(crate) fn default_window(now: UtcDateTime) -> Window {
+    Window {
+        start: now
+            .checked_sub(core::time::Duration::from_hours(7 * 24))
+            .unwrap_or(now),
+        days: DEFAULT_WINDOW_DAYS,
     }
 }
 
@@ -177,12 +200,7 @@ impl<P: Provider> App<P> {
         let now = now_utc().unwrap_or_else(|| {
             UtcDateTime::new(2026, 1, 1, 0, 0, 0).expect("a representable instant")
         });
-        let window = state.window.unwrap_or(Window {
-            start: now
-                .checked_sub(core::time::Duration::from_hours(7 * 24))
-                .unwrap_or(now),
-            days: DEFAULT_WINDOW_DAYS,
-        });
+        let window = state.window.unwrap_or_else(|| default_window(now));
         CalendarInputs {
             window: window.horizon(),
             zone: TimeZoneId::iana(&state.zone).unwrap_or_else(|_| TimeZoneId::utc()),
@@ -266,6 +284,14 @@ impl<P: Provider> App<P> {
                 self.respond_to_invitation(message, response, comment, notify_organizer)
                     .await;
             }
+            CalendarIntent::AnswerReplyPrompt {
+                send,
+                remember,
+                reply_subject,
+            } => {
+                self.answer_reply_prompt(send, remember, reply_subject)
+                    .await;
+            }
             CalendarIntent::SetDate { date } => {
                 self.calendar_state
                     .lock()
@@ -347,10 +373,7 @@ impl<P: Provider> App<P> {
             let window = state.window.unwrap_or_else(|| {
                 let now = now_utc()
                     .unwrap_or_else(|| UtcDateTime::new(2026, 1, 1, 0, 0, 0).expect("instant"));
-                Window {
-                    start: now,
-                    days: DEFAULT_WINDOW_DAYS,
-                }
+                default_window(now)
             });
             let chunk = core::time::Duration::from_secs(HORIZON_CHUNK_DAYS * 86_400);
             let (start, end) = (
@@ -386,8 +409,8 @@ impl<P: Provider> App<P> {
     }
 
     /// The horizon a refresh's sync covers: the full watermark when one stands
-    /// (so a refresh never narrows what the app has expanded), the current
-    /// window otherwise.
+    /// (so a refresh never narrows what the app has expanded), the default
+    /// window around now otherwise, matching the window a cold rebuild reads.
     fn sync_horizon(&self) -> Horizon {
         let state = self.calendar_state.lock().expect("calendar mutex poisoned");
         match state.horizon {
@@ -398,12 +421,9 @@ impl<P: Provider> App<P> {
                 }
                 .horizon()
             }),
-            None => Window {
-                start: now_utc().unwrap_or_else(|| {
-                    UtcDateTime::new(2026, 1, 1, 0, 0, 0).expect("a representable instant")
-                }),
-                days: DEFAULT_WINDOW_DAYS,
-            }
+            None => default_window(now_utc().unwrap_or_else(|| {
+                UtcDateTime::new(2026, 1, 1, 0, 0, 0).expect("a representable instant")
+            }))
             .horizon(),
         }
     }

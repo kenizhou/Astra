@@ -46,6 +46,7 @@ fn the_wire_shape_is_snake_case_and_carries_every_row_kind() {
             accuracy: OccurrenceAccuracy::Zoned,
             participation: Participation::Tentative,
             can_move: false,
+            series_edit_warns: true,
         }],
         write_states: vec![CalendarWriteRow {
             account: account("work"),
@@ -95,7 +96,8 @@ fn the_wire_shape_is_snake_case_and_carries_every_row_kind() {
                     "occurrence_start": "2026-10-19T09:00:00",
                     "accuracy": "zoned",
                     "participation": "tentative",
-                    "can_move": false
+                    "can_move": false,
+                    "series_edit_warns": true
                 }
             ],
             "write_states": [
@@ -190,6 +192,10 @@ fn the_participation_words_cross_as_snake_case_and_default_to_a_commitment() {
     let row: OccurrenceRow = serde_json::from_value(old_wire).expect("the old wire parses");
     assert_eq!(row.participation, Participation::Accepted);
     assert!(!row.can_move);
+    assert!(
+        !row.series_edit_warns,
+        "a row from before the warning existed never warns"
+    );
 }
 
 #[test]
@@ -241,6 +247,7 @@ fn a_row_without_a_colour_or_an_occurrence_token_omits_them() {
             accuracy: OccurrenceAccuracy::Floating,
             participation: Participation::default(),
             can_move: false,
+            series_edit_warns: false,
         }],
         write_states: Vec::new(),
         reply_prompts: Vec::new(),
