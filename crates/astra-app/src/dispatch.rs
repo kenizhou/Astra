@@ -99,10 +99,13 @@ impl<P: Provider> App<P> {
                 self.close_reading();
             }
             Intent::Folders(_change) => return Err(AppError::NotYet),
-            // The people family lands as its own slice; the intents cross
-            // the wire already, and the dispatch answers them once the
-            // snapshot exists.
-            Intent::People(_change) => return Err(AppError::NotYet),
+            // The people family: the reads position the list and the detail
+            // over the engine's own matching, the writes name a card, and
+            // every outcome the people snapshot's write states and create
+            // targets carry, never a return value.
+            Intent::People(change) => {
+                self.dispatch_people(change).await;
+            }
             // The calendar family: reads position the grids (and widen the
             // engine's expansion horizon to cover the window), writes change
             // the diary, and every outcome the calendar snapshot's write

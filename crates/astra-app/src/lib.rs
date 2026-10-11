@@ -26,6 +26,7 @@ mod drafts;
 mod list_rows;
 mod mail_writes;
 mod outbox;
+mod people;
 mod preferences;
 mod protocol;
 mod reading;
@@ -61,6 +62,12 @@ mod dispatch_fakes;
 #[cfg(test)]
 #[path = "calendar_fakes/mod.rs"]
 mod calendar_fakes;
+
+// The people slice's test fixtures: the contacts-leg provider the people
+// tests drive, beside the calendar's for the same reason.
+#[cfg(test)]
+#[path = "people_fakes/mod.rs"]
+mod people_fakes;
 
 // The eval harness: the scenario fixtures under the repository's evals/
 // directory, driven through the same seams the unit tests exercise. The
@@ -215,6 +222,14 @@ pub struct App<P> {
     /// window, the visible set, the anchor, the horizon watermark, the write
     /// states, and the reply prompts. See `calendar`.
     calendar_state: Mutex<calendar::CalendarState>,
+    /// The people snapshot and its signal: the unified rows, the open
+    /// person's detail, the write states, and the create targets, as one
+    /// thing. See `people`.
+    people: Surfaced<astra_viewmodel::PeopleSnapshot>,
+    /// The people view state a rebuild projects and the intents move: the
+    /// contacts legs the host installed, the current query, the open person,
+    /// and the write states. See `people`.
+    people_state: Mutex<people::PeopleState>,
     /// The sync-progress snapshot and its signal: what every mail pass reports its
     /// per-account position through, published on change by the
     /// [`SyncObserver`](engine_api::SyncObserver) fold in `sync_progress`.
@@ -305,6 +320,8 @@ impl<P: Provider> App<P> {
             compose_source: Mutex::new(None),
             calendar: Surfaced::new(Surface::Calendar, Arc::clone(&observer)),
             calendar_state: Mutex::new(calendar::CalendarState::new()),
+            people: Surfaced::new(Surface::People, Arc::clone(&observer)),
+            people_state: Mutex::new(people::PeopleState::new()),
             sending: Surfaced::new(Surface::Sending, observer),
             outbox: Mutex::new(outbox::Outbox::default()),
             drafts: Mutex::new(Drafts::default()),
