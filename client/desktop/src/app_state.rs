@@ -5,10 +5,11 @@
 
 use std::sync::Arc;
 
-use astra_ai::KnowledgeId;
+use astra_ai::{AiDocumentKind, KnowledgeId};
 use astra_app::{
-    Account, App, Chip, CompositionId, DraftResume, ExtractionSummary, Intent, KnowledgeView,
-    Snippet, SummariseMessageError, TranslateLanguage,
+    Account, App, Chip, CompositionId, DigestView, DocumentError, DocumentView, DraftResume,
+    ExtractionSummary, Intent, KnowledgeView, Snippet, SplitEntry, SummariseMessageError,
+    TranslateLanguage,
 };
 use astra_viewmodel::{
     ComposeRequestSnapshot, DraftStatusSnapshot, MailboxListSnapshot, ReadingSnapshot,
@@ -152,6 +153,42 @@ pub(crate) trait AppPort: Send + Sync {
         key: &ProviderKey,
         lang: TranslateLanguage,
     ) -> String;
+
+    /// Generates the account's digest over the last `days` days and
+    /// stores it under the window's period.
+    ///
+    /// # Errors
+    ///
+    /// Returns the core's own failure when no AI bundle runs, the
+    /// window cannot be read, the generation fails, or the store
+    /// refuses the put.
+    async fn generate_digest(
+        &self,
+        account: &AccountId,
+        days: u32,
+    ) -> Result<DigestView, DocumentError>;
+
+    /// Generates the account's analytics report over the last `days`
+    /// days and stores it under the window's period.
+    ///
+    /// # Errors
+    ///
+    /// Returns the core's own failure when no AI bundle runs, the
+    /// window cannot be read, the generation fails, or the store
+    /// refuses the put.
+    async fn generate_report(
+        &self,
+        account: &AccountId,
+        days: u32,
+    ) -> Result<DigestView, DocumentError>;
+
+    /// The account's newest stored document of one kind, or `None`
+    /// when no generation has stored one.
+    fn latest_document(&self, account: &AccountId, kind: AiDocumentKind) -> Option<DocumentView>;
+
+    /// The account's split map over its stored categorisation: the
+    /// pure derivation, no model call at all.
+    async fn split_map(&self, account: &AccountId) -> Vec<SplitEntry>;
 }
 
 #[async_trait]
@@ -255,6 +292,30 @@ impl AppPort for App<HostProvider> {
         lang: TranslateLanguage,
     ) -> String {
         App::translate_message(self, account, key, lang).await
+    }
+
+    async fn generate_digest(
+        &self,
+        account: &AccountId,
+        days: u32,
+    ) -> Result<DigestView, DocumentError> {
+        App::generate_digest(self, account, days).await
+    }
+
+    async fn generate_report(
+        &self,
+        account: &AccountId,
+        days: u32,
+    ) -> Result<DigestView, DocumentError> {
+        App::generate_report(self, account, days).await
+    }
+
+    fn latest_document(&self, account: &AccountId, kind: AiDocumentKind) -> Option<DocumentView> {
+        App::latest_document(self, account, kind)
+    }
+
+    async fn split_map(&self, account: &AccountId) -> Vec<SplitEntry> {
+        App::split_map(self, account).await
     }
 }
 

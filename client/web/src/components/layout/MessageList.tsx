@@ -3,11 +3,13 @@
 // with @tanstack/react-virtual the way KY windows its list (an absolutely
 // positioned row per virtual item, measured as it mounts, a fixed estimate
 // before the first measure). The rows come straight from the snapshot the
-// pulls keep fresh; a single click selects and opens (selection is open,
-// the highlight following the open message), and ShowMore grows the window
-// the core owes whenever the rows fill it.
+// pulls keep fresh; the split filter narrows what renders, never the
+// window itself, so a full window keeps offering to grow. A single click
+// selects and opens (selection is open, the highlight following the open
+// message), and ShowMore grows the window the core owes whenever the rows
+// fill it.
 
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 
 import { ListToolbar } from '@/components/message-list/ListToolbar';
@@ -17,6 +19,7 @@ import { dispatch, intents } from '@/services/ipc';
 import { useFolderStore } from '@/stores/folderStore';
 import { useListStore } from '@/stores/listStore';
 import { useReadingStore } from '@/stores/readingStore';
+import { splitCounts, useSplitStore, visibleRows } from '@/stores/splitStore';
 import type { RowKey } from '@/services/surfaces';
 
 /** The selected folder's display name, straight off the folder tree. */
@@ -40,6 +43,11 @@ export function MessageList() {
   const openSnapshot = useReadingStore((s) => s.snapshot);
   const accounts = useFolderStore((s) => s.accounts);
   const folder = useFolderStore((s) => s.selected);
+  const splitFilter = useSplitStore((s) => s.filter);
+  const entries = useSplitStore((s) => s.entries);
+
+  const shownRows = visibleRows(rows, splitFilter, entries);
+  const counts = splitCounts(rows, entries);
 
   // The highlight follows the open message first: the reading snapshot is
   // the record of what is open, and the local click selection covers the
@@ -50,6 +58,16 @@ export function MessageList() {
   const openKey: RowKey | null =
     openSnapshot === null ? null : { message: openSnapshot.message };
   const highlight = openKey ?? selectedKey;
+
+  // A filter that hides the selected row takes the selection with it: the
+  // highlight must never name a row the side view does not show.
+  const selectedHidden =
+    selectedKey !== null && !shownRows.some((row) => sameRowKey(row.key, selectedKey));
+  useEffect(() => {
+    if (selectedHidden) {
+      useListStore.getState().select(null);
+    }
+  }, [selectedHidden]);
 
   const openRow = (key: RowKey): void => {
     select(key);
@@ -62,13 +80,16 @@ export function MessageList() {
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
-    count: rows.length,
+    count: shownRows.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 56,
     overscan: 12,
   });
   const now = new Date();
 
+  // The window compares against every row the snapshot sent, not the side
+  // view: rows behind the load window may belong to the chosen side, so a
+  // full window keeps offering to grow whatever the filter shows.
   const windowIsFull = visibleLimit > 0 && rows.length === visibleLimit;
   const showRows = folder !== null && rows.length > 0;
 
@@ -77,11 +98,19 @@ export function MessageList() {
       aria-label="Message list"
       className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background"
     >
-      <ListToolbar folderName={folderDisplayName(accounts, folder)} viewMode={viewMode} />
+      <ListToolbar
+        folderName={folderDisplayName(accounts, folder)}
+        viewMode={viewMode}
+        splitFilter={splitFilter}
+        splitCounts={counts}
+        onSplitFilter={(filter) => useSplitStore.getState().setFilter(filter)}
+      />
       {folder === null ? (
         <p className="p-4 text-sm text-muted-foreground">Select a folder to read its mail.</p>
       ) : !showRows ? (
         <p className="p-4 text-sm text-muted-foreground">No messages in this folder.</p>
+      ) : shownRows.length === 0 ? (
+        <p className="p-4 text-sm text-muted-foreground">No messages on this side.</p>
       ) : (
         <div
           ref={scrollRef}
@@ -91,7 +120,7 @@ export function MessageList() {
         >
           <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
             {virtualizer.getVirtualItems().map((item) => {
-              const row = rows[item.index];
+              const row = shownRows[item.index];
               if (row === undefined) {
                 return null;
               }

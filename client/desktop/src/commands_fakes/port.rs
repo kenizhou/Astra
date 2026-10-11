@@ -5,10 +5,11 @@
 //! assist answers, everything the command tests seed or assert in one
 //! place behind the fake's own locks.
 
-use astra_ai::KnowledgeId;
+use astra_ai::{AiDocumentKind, KnowledgeId};
 use astra_app::{
-    AppError, Chip, CompositionId, DraftResume, ExtractionSummary, Intent, KnowledgeView, Snippet,
-    SummariseMessageError, TranslateLanguage,
+    AppError, Chip, CompositionId, DigestView, DocumentError, DocumentView, DraftResume,
+    ExtractionSummary, Intent, KnowledgeView, Snippet, SplitEntry, SummariseMessageError,
+    TranslateLanguage,
 };
 use astra_viewmodel::{
     ComposeKind, ComposeRequestSnapshot, DraftStatusSnapshot, MailboxListSnapshot, ReadingSnapshot,
@@ -47,6 +48,43 @@ pub(crate) struct AssistSeeds {
     /// The (account, key, lang) triples the translate action was asked
     /// for, the lang as its wire word.
     pub(crate) translated_into: Vec<(String, String, String)>,
+}
+
+/// The A4 documents pulls' seeds and their record: every field the
+/// documents command tests seed or assert, in one place.
+pub(crate) struct DocsSeeds {
+    /// The generate pulls' answer, an `Err` standing in for the typed
+    /// refusal a test maps onto the command error.
+    pub(crate) generated: Result<DigestView, DocumentError>,
+    /// The (account, kind word, days) triples the generate pulls were
+    /// asked for, the days as the boundary clamped them.
+    pub(crate) generated_into: Vec<(String, String, u32)>,
+    /// The latest read's answer.
+    pub(crate) latest: Option<DocumentView>,
+    /// The (account, kind word) pairs the latest read was asked for.
+    pub(crate) latest_into: Vec<(String, String)>,
+    /// The split pull's answer.
+    pub(crate) split: Vec<SplitEntry>,
+    /// The accounts the split pull was asked about.
+    pub(crate) split_into: Vec<String>,
+}
+
+impl Default for DocsSeeds {
+    fn default() -> Self {
+        Self {
+            generated: Ok(DigestView {
+                period_start: 0,
+                period_end: 0,
+                content: String::new(),
+                regenerated: false,
+            }),
+            generated_into: Vec::new(),
+            latest: None,
+            latest_into: Vec::new(),
+            split: Vec::new(),
+            split_into: Vec::new(),
+        }
+    }
 }
 
 impl FakeApp {
@@ -259,5 +297,48 @@ impl AppPort for FakeApp {
             lang.as_str().to_owned(),
         ));
         assist.translation.clone()
+    }
+
+    async fn generate_digest(
+        &self,
+        account: &AccountId,
+        days: u32,
+    ) -> Result<DigestView, DocumentError> {
+        let mut docs = self.docs.lock().unwrap();
+        docs.generated_into.push((
+            account.as_str().to_owned(),
+            AiDocumentKind::Digest.as_str().to_owned(),
+            days,
+        ));
+        docs.generated.clone()
+    }
+
+    async fn generate_report(
+        &self,
+        account: &AccountId,
+        days: u32,
+    ) -> Result<DigestView, DocumentError> {
+        let mut docs = self.docs.lock().unwrap();
+        docs.generated_into.push((
+            account.as_str().to_owned(),
+            AiDocumentKind::Report.as_str().to_owned(),
+            days,
+        ));
+        docs.generated.clone()
+    }
+
+    fn latest_document(&self, account: &AccountId, kind: AiDocumentKind) -> Option<DocumentView> {
+        let mut docs = self.docs.lock().unwrap();
+        docs.latest_into
+            .push((account.as_str().to_owned(), kind.as_str().to_owned()));
+        // The seeded row answers only its own kind, the way the store's
+        // newest-row-per-kind read does.
+        docs.latest.clone().filter(|view| view.kind == kind)
+    }
+
+    async fn split_map(&self, account: &AccountId) -> Vec<SplitEntry> {
+        let mut docs = self.docs.lock().unwrap();
+        docs.split_into.push(account.as_str().to_owned());
+        docs.split.clone()
     }
 }

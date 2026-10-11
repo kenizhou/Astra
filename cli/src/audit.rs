@@ -49,15 +49,19 @@ pub(crate) fn record(
 pub(crate) fn arg_preview(verb: &Verb) -> String {
     match verb {
         // The account-only previews and the empty ones: the account lists
-        // (folder, style, knowledge) carry the account alone, the
-        // no-argument lists and the refused spellings (no account
-        // resolves, no action runs) carry nothing.
+        // (folder, style, digest, report, knowledge) carry the account
+        // alone, the no-argument lists and the refused spellings (no
+        // account resolves, no action runs) carry nothing.
         Verb::FoldersList { account }
         | Verb::AiStyle { account }
+        | Verb::AiDigest { account }
+        | Verb::AiReport { account }
         | Verb::KnowledgeList { account } => format!("account={account}"),
         Verb::AccountsList
         | Verb::RulesList
         | Verb::AiStyleRebuild
+        | Verb::AiDigestGenerate
+        | Verb::AiReportGenerate
         | Verb::KnowledgeExtract
         | Verb::SnippetsList
         | Verb::SnippetsSearch => String::new(),

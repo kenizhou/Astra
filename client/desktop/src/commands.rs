@@ -36,6 +36,10 @@ pub(crate) mod sending;
 // pulls), under the same split.
 pub(crate) mod ai;
 
+// The AI documents command surface (the digest and report generations,
+// the latest read, and the split map), under the same split.
+pub(crate) mod ai_docs;
+
 /// A command failure, serialised to the webview as its display string: a sentence a
 /// surface can show, with the reason the host saw.
 #[derive(Debug, thiserror::Error)]

@@ -35,7 +35,7 @@ use crate::{
 
 pub(crate) use snapshots::{compose_prefill, open_snapshot};
 
-pub(crate) use port::AssistSeeds;
+pub(crate) use port::{AssistSeeds, DocsSeeds};
 
 /// A scratch directory for one test's account index.
 fn scratch(name: &str) -> PathBuf {
@@ -108,6 +108,9 @@ pub(crate) struct FakeApp {
     /// The A3 assist pulls' seeds and their record, one struct under one
     /// lock so a pull and its answer cannot tear.
     pub(crate) assist: Mutex<AssistSeeds>,
+    /// The A4 documents pulls' seeds and their record, under the same
+    /// one-struct-one-lock discipline.
+    pub(crate) docs: Mutex<DocsSeeds>,
 }
 
 impl FakeApp {
@@ -144,6 +147,7 @@ impl FakeApp {
             dismissed: Mutex::new(Vec::new()),
             drafted_into: Mutex::new(Vec::new()),
             assist: Mutex::new(AssistSeeds::default()),
+            docs: Mutex::new(DocsSeeds::default()),
         })
     }
 

@@ -231,3 +231,19 @@ fn a3_use_cases_pin_their_tiers_and_wire_words() {
         assert_eq!(use_case.as_str(), wire);
     }
 }
+
+#[test]
+fn a4_use_cases_pin_their_tiers_and_wire_words() {
+    let cases = [
+        (LlmUseCase::Digest, ModelTier::Default, "digest"),
+        (LlmUseCase::Report, ModelTier::Default, "report"),
+    ];
+    for (use_case, tier, wire) in cases {
+        assert_eq!(use_case.tier(), tier);
+        assert_eq!(
+            serde_json::to_string(&use_case).unwrap(),
+            format!("\"{wire}\"")
+        );
+        assert_eq!(use_case.as_str(), wire);
+    }
+}

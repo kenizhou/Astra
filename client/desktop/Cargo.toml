@@ -89,3 +89,7 @@ rusqlite = { workspace = true, features = ["fallible_uint"] }
 # autodetection builds its fetcher; the plain-HTTP fixture never exercises
 # the TLS path, but the client build needs the installed provider.
 engine-tls.workspace = true
+# The live documents suite reads a stored window's period bounds back as
+# civil UTC instants, the same conversion the app core's window filter
+# makes over the engine's rows.
+time.workspace = true

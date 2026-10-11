@@ -67,6 +67,12 @@ pub enum LlmUseCase {
     /// The reading pane's translate action (default tier; A3): the open
     /// message rendered into the chosen target language.
     Translate,
+    /// The on-demand digest generation (default tier; A4): the one
+    /// summarising call over the window's category rollup.
+    Digest,
+    /// The analytics report generation (default tier; A4): the one
+    /// structured call over the window's computed statistics.
+    Report,
 }
 
 impl LlmUseCase {
@@ -92,6 +98,8 @@ impl LlmUseCase {
             Self::SnippetSearch => "snippet_search",
             Self::Autocomplete => "autocomplete",
             Self::Translate => "translate",
+            Self::Digest => "digest",
+            Self::Report => "report",
         }
     }
 
@@ -110,7 +118,9 @@ impl LlmUseCase {
             | Self::CategorizeSender
             | Self::CleanInbox
             | Self::PromptToRules
-            | Self::Translate => ModelTier::Default,
+            | Self::Translate
+            | Self::Digest
+            | Self::Report => ModelTier::Default,
             Self::JudgeColdEmail
             | Self::JudgeDlp
             | Self::JudgeInjection

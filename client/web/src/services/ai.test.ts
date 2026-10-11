@@ -30,20 +30,29 @@ import {
   chipsFor,
   composeAutocomplete,
   composeFromDraft,
+  digestGenerate,
   dismissChips,
   knowledgeExtract,
   knowledgeForget,
   knowledgeList,
+  latestDocument,
   onDraftPoolLanded,
+  reportGenerate,
   snippetList,
   snippetSearch,
+  splitMap,
   summariseMessage,
   translateMessage,
 } from './ai';
 import type {
+  DigestView,
+  DocumentKind,
+  DocumentView,
   ExtractionSummary,
   KnowledgeView,
   SnippetView,
+  SplitEntry,
+  SplitSide,
   TranslateLanguage,
 } from './ai';
 
@@ -242,5 +251,109 @@ describe('the ai replies service', () => {
       'spanish',
     ];
     expect(languages).toHaveLength(6);
+  });
+
+  it('generates the digest by the account, the days named or the default implied', async () => {
+    wire.invoke.mockResolvedValue({
+      period_start: 1,
+      period_end: 2,
+      content: 'Two replies wait.',
+      regenerated: false,
+    });
+    const view = await digestGenerate('work');
+    expect(view).toEqual<DigestView>({
+      period_start: 1,
+      period_end: 2,
+      content: 'Two replies wait.',
+      regenerated: false,
+    });
+    expect(wire.invoke).toHaveBeenCalledWith('digest_generate', { account: 'work' });
+    await digestGenerate('work', 3);
+    expect(wire.invoke).toHaveBeenLastCalledWith('digest_generate', { account: 'work', days: 3 });
+  });
+
+  it('generates the report over the same shape under its own command', async () => {
+    wire.invoke.mockResolvedValue({
+      period_start: 1,
+      period_end: 2,
+      content: 'A launch week.',
+      regenerated: true,
+    });
+    const view = await reportGenerate('work', 7);
+    expect(view).toEqual<DigestView>({
+      period_start: 1,
+      period_end: 2,
+      content: 'A launch week.',
+      regenerated: true,
+    });
+    expect(wire.invoke).toHaveBeenCalledWith('report_generate', {
+      account: 'work',
+      days: 7,
+    });
+  });
+
+  it('reads the latest stored document of one kind', async () => {
+    wire.invoke.mockResolvedValue({
+      kind: 'digest',
+      period_start: 1,
+      period_end: 2,
+      content: 'All quiet now.',
+      created_at: 3,
+    });
+    const latest = await latestDocument('work', 'digest');
+    expect(latest).toEqual<DocumentView>({
+      kind: 'digest',
+      period_start: 1,
+      period_end: 2,
+      content: 'All quiet now.',
+      created_at: 3,
+    });
+    expect(wire.invoke).toHaveBeenCalledWith('latest_document', {
+      account: 'work',
+      kind: 'digest',
+    });
+    wire.invoke.mockResolvedValue(null);
+    expect(await latestDocument('work', 'report')).toBeNull();
+  });
+
+  it('pulls the split map by the account alone', async () => {
+    wire.invoke.mockResolvedValue([
+      { key: 'm1', side: 'actioned' },
+      { key: 'm2', side: 'fyi' },
+    ]);
+    const entries = await splitMap('work');
+    expect(entries).toEqual<SplitEntry[]>([
+      { key: 'm1', side: 'actioned' },
+      { key: 'm2', side: 'fyi' },
+    ]);
+    expect(wire.invoke).toHaveBeenCalledWith('split_map', { account: 'work' });
+  });
+
+  it('pins the documents wire literals the Rust side serialises', () => {
+    const generated: DigestView = {
+      period_start: 1,
+      period_end: 2,
+      content: 'All quiet now.',
+      regenerated: true,
+    };
+    expect(JSON.stringify(generated)).toBe(
+      '{"period_start":1,"period_end":2,"content":"All quiet now.","regenerated":true}',
+    );
+    const latest: DocumentView = {
+      kind: 'report',
+      period_start: 1,
+      period_end: 2,
+      content: 'A launch week.',
+      created_at: 3,
+    };
+    expect(JSON.stringify(latest)).toBe(
+      '{"kind":"report","period_start":1,"period_end":2,"content":"A launch week.","created_at":3}',
+    );
+    const entry: SplitEntry = { key: 'm1', side: 'fyi' };
+    expect(JSON.stringify(entry)).toBe('{"key":"m1","side":"fyi"}');
+    const kinds: DocumentKind[] = ['digest', 'report'];
+    expect(kinds).toHaveLength(2);
+    const sides: SplitSide[] = ['actioned', 'fyi'];
+    expect(sides).toHaveLength(2);
   });
 });

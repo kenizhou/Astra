@@ -11,8 +11,9 @@
 //! ([`AiStore`], the product database's arrival, with the rules CRUD of
 //! migration 0002 beside the ledgers, the draft pool and style profiles
 //! of 0004, the summarise cache of 0005, the chips-dismissed markers of
-//! 0006, the knowledge entries of 0007, the snippet library of 0008, and
-//! the text cache of 0009), the prompt-injection
+//! 0006, the knowledge entries of 0007, the snippet library of 0008, the
+//! text cache of 0009, and the AI documents of 0010), the
+//! prompt-injection
 //! hardening wrapper ([`tag_untrusted`]), the active data loss
 //! prevention gate ([`DlpPolicy`] with its [`redact`] and [`apply`]),
 //! the structured output [`repair_json`] helper every structured caller
@@ -23,6 +24,7 @@
 //! Nothing here calls a model: the background client lives in the desktop
 //! host and consumes this crate.
 
+mod ai_documents;
 mod ai_results;
 mod chip_dismissals;
 mod correlation;
@@ -40,6 +42,8 @@ mod text_cache;
 mod tier;
 mod use_case;
 
+#[cfg(test)]
+mod ai_documents_tests;
 #[cfg(test)]
 mod ai_results_tests;
 #[cfg(test)]
@@ -69,6 +73,7 @@ mod text_cache_tests;
 #[cfg(test)]
 mod tier_tests;
 
+pub use ai_documents::{AiDocumentKind, AiDocumentRow, NewAiDocument};
 pub use ai_results::{AiResultRow, NewAiResult};
 pub use correlation::CorrelationId;
 pub use dlp::{apply, redact, DlpError, DlpOutcome, DlpPolicy};

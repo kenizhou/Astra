@@ -8,11 +8,13 @@
 //! [`Account`], and [`boot`] assembles the whole sequence over a host-provided runtime.
 //! The crate root holds the runtime's state; the command surface, the projection, the
 //! sync paths, the preferences, the AI rules model with its generation seam, the AI
-//! replies model with its draft pool service, and the AI assist services (knowledge,
-//! snippets, autocomplete, translate) each live in their own module.
+//! replies model with its draft pool service, the AI assist services (knowledge,
+//! snippets, autocomplete, translate), and the AI documents services (the digest,
+//! the report, the split) each live in their own module.
 
 mod accounts;
 mod ai_assist;
+mod ai_docs;
 mod ai_replies;
 mod ai_results;
 mod ai_rules;
@@ -82,6 +84,13 @@ pub use ai_assist::{
     KnowledgeEntry, KnowledgeKind, KnowledgeView, Snippet, TranslateLanguage, AUTOCOMPLETE_VERSION,
     KNOWLEDGE_BODY_CAP, KNOWLEDGE_CONTEXT_LIMIT, KNOWLEDGE_EXTRACT_LIMIT,
     KNOWLEDGE_EXTRACT_VERSION, SNIPPET_SEARCH_VERSION, TRANSLATE_CACHE_KIND, TRANSLATE_VERSION,
+};
+pub use ai_docs::{
+    digest_prompt, generate_digest, generate_report, report_prompt, side_for, split_map,
+    window_bounds, DigestError, DigestView, DocMessage, DocumentError, DocumentView, ReportError,
+    SplitEntry, SplitSide, StoredCategories, DIGEST_PROMPT_VERSION, DOCUMENT_BODY_CAP,
+    DOCUMENT_HEAD_LIMIT, DOCUMENT_WINDOW_DEFAULT_DAYS, DOCUMENT_WINDOW_MAX_DAYS,
+    DOCUMENT_WINDOW_READ_LIMIT, REPORT_PROMPT_VERSION, SPLIT_MAPPING, SPLIT_MAPPING_VERSION,
 };
 pub use ai_replies::{
     body_hash, chips_for, draft_prompt, generate_reply, style_profile, style_prompt, summarise,

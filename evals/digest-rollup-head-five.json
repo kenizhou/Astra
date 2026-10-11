@@ -1,0 +1,107 @@
+{
+  "id": "digest-rollup-head-five",
+  "feature": "digest",
+  "mode": "offline",
+  "prompt_version": "1",
+  "inputs": {
+    "account": "work",
+    "days": 7,
+    "messages": [
+      {
+        "key": "m0",
+        "from_name": "Ada Lovelace",
+        "from_address": "ada@example.test",
+        "subject": "Prototype timing",
+        "body": "Thanks for the update. Can we still land the prototype next Friday?",
+        "unread": true
+      },
+      {
+        "key": "m1",
+        "from_name": "Grace Hopper",
+        "from_address": "grace@example.test",
+        "subject": "Review dates",
+        "body": "The review follows the week after the prototype lands. Two dates to hold.",
+        "unread": true
+      },
+      {
+        "key": "m2",
+        "from_name": "Finance Team",
+        "from_address": "finance@example.test",
+        "subject": "Budget question",
+        "body": "The budget question waits for the finance sign-off meeting on Thursday.",
+        "unread": false
+      },
+      {
+        "key": "m3",
+        "from_name": "Astra One",
+        "from_address": "astra1@example.test",
+        "subject": "Timeline attached",
+        "body": "I attached the timeline we agreed. The milestones are unchanged.",
+        "unread": false
+      },
+      {
+        "key": "m4",
+        "from_name": "QA Lead",
+        "from_address": "qa@example.test",
+        "subject": "QA sign-off",
+        "body": "QA signs off once the regression pass is green. No blockers today.",
+        "unread": false
+      },
+      {
+        "key": "m5",
+        "from_name": "Venue Desk",
+        "from_address": "venue@example.test",
+        "subject": "Venue booking",
+        "body": "The venue hold expires Friday. Confirm the headcount by Thursday.",
+        "unread": false
+      },
+      {
+        "key": "m6",
+        "from_name": "Catering Desk",
+        "from_address": "catering@example.test",
+        "subject": "Catering count",
+        "body": "The catering count is due with the venue booking. Please reply with numbers.",
+        "unread": false
+      },
+      {
+        "key": "m7",
+        "from_name": "The Weekly Dispatch",
+        "from_address": "dispatch@example.test",
+        "subject": "The weekly dispatch",
+        "body": "This week: one launch, one review, and the budget question everyone is waiting on.",
+        "unread": false
+      },
+      {
+        "key": "m8",
+        "from_name": "Sam Beckett",
+        "from_address": "sam@example.test",
+        "subject": "Lunch on Friday",
+        "body": "Lunch on Friday after the prototype lands? The usual place at noon.",
+        "unread": false
+      }
+    ],
+    "stored": {
+      "m0": "primary",
+      "m1": "primary",
+      "m2": "primary",
+      "m3": "primary",
+      "m4": "primary",
+      "m5": "primary",
+      "m6": "primary",
+      "m7": "newsletter"
+    },
+    "completion": "{\"digest\":\"The prototype thread needs a reply and the review dates follow it; the budget question waits for finance. The newsletter rounds out the week beside one uncategorised lunch note.\"}"
+  },
+  "expected": {
+    "rollup_in_order": ["primary: 7", "newsletter: 1", "uncategorised: 1"],
+    "contains": [
+      "last 7 days",
+      "Subject: Prototype timing",
+      "Subject: QA sign-off",
+      "Subject: The weekly dispatch",
+      "Subject: Lunch on Friday"
+    ],
+    "omits": ["Subject: Venue booking", "Subject: Catering count"],
+    "digest": "The prototype thread needs a reply and the review dates follow it; the budget question waits for finance. The newsletter rounds out the week beside one uncategorised lunch note."
+  }
+}

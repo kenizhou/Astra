@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The surface_changed wiring: the host emits one event per changed surface and
 // the client pulls that surface's snapshot into its store, the loop's second
-// half. The listener registry is dispose-safe under React StrictMode's double
-// mount: a registration that resolves after its effect unmounted unlistens
-// itself instead of leaking a live duplicate handler.
+// half. The mailbox-list pull also refreshes the split inbox's map for every
+// account, so the list's toggle always filters against the categorisation
+// behind the snapshot's own rows. The listener registry is dispose-safe
+// under React StrictMode's double mount: a registration that resolves after
+// its effect unmounted unlistens itself instead of leaking a live duplicate
+// handler.
 
 import { listen } from '@tauri-apps/api/event';
 
+import { splitMap } from '@/services/ai';
 import {
   composeRequest,
   draftStatus,
@@ -22,7 +26,9 @@ import { useFolderStore } from '@/stores/folderStore';
 import { useListStore } from '@/stores/listStore';
 import { useReadingStore } from '@/stores/readingStore';
 import { useSendingStore } from '@/stores/sendingStore';
+import { useSplitStore } from '@/stores/splitStore';
 import { useUiStore } from '@/stores/uiStore';
+import type { MailboxListSnapshot } from '@/services/surfaces';
 
 /** The surfaces a change can name, as the event payload carries them. */
 export type Surface =
@@ -93,6 +99,31 @@ export function createListenerRegistry(): ListenerRegistry {
   return { safeListen, disposeAll };
 }
 
+/**
+ * Pulls every account's split map beside the mailbox-list snapshot: the
+ * map is a pure store read the host serves per account, so the list's
+ * side views follow every snapshot the same as its rows. Each pull
+ * settles alone: one account's refused read logs and steps aside, never
+ * aborting the snapshot pull it rides or the hydration behind it.
+ */
+function pullSplitMaps(snapshot: MailboxListSnapshot): Promise<void> {
+  return Promise.all(
+    snapshot.account_folders.map((account) =>
+      splitMap(account.account_id).then(
+        (entries) => {
+          useSplitStore.getState().applyMap(account.account_id, entries);
+        },
+        (err) => {
+          console.error(
+            `surface-events: the ${account.account_id} split map failed to pull`,
+            err,
+          );
+        },
+      ),
+    ),
+  ).then(() => undefined);
+}
+
 /** Pulls one surface's snapshot into the store that renders it. */
 export function pullSurface(surface: Surface): Promise<void> {
   if (surface === 'mailbox_list') {
@@ -100,6 +131,7 @@ export function pullSurface(surface: Surface): Promise<void> {
       useAccountStore.getState().applySnapshot(snapshot);
       useFolderStore.getState().applySnapshot(snapshot);
       useListStore.getState().applySnapshot(snapshot);
+      return pullSplitMaps(snapshot);
     });
   }
   if (surface === 'reading') {
@@ -161,7 +193,8 @@ export function mountSurfaceEvents(): () => void {
  * The first pull at mount: every surface, the engine marked running once they
  * land, and the account setup flow opened when there is no account to show.
  * The reading pull also carries a snapshot the host published before the
- * mount, so the pane and the list highlight start truthful.
+ * mount, so the pane and the list highlight start truthful, and the split
+ * maps land with the list's first snapshot.
  */
 export async function hydrate(): Promise<void> {
   if (!isTauri) {
@@ -171,6 +204,7 @@ export async function hydrate(): Promise<void> {
   useAccountStore.getState().applySnapshot(snapshot);
   useFolderStore.getState().applySnapshot(snapshot);
   useListStore.getState().applySnapshot(snapshot);
+  await pullSplitMaps(snapshot);
   const progress = await syncProgress();
   useUiStore.getState().applySyncProgress(progress);
   const openReading = await reading();

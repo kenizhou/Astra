@@ -118,6 +118,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "text_cache",
         sql: include_str!("migrations/0009_text_cache.sql"),
     },
+    Migration {
+        version: 10,
+        name: "ai_documents",
+        sql: include_str!("migrations/0010_ai_documents.sql"),
+    },
 ];
 
 impl AiStore {
