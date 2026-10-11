@@ -109,3 +109,4 @@ LLM 调用、工具调用与权限决定都带关联 id 落入其台账。
 - 引擎发件队列按（账户、幂等键）跨一切操作状态去重，测试助手在同一个引擎里复用幂等键会拿回已结算的操作、发送认领以 Settled 拒绝：每次编辑都铸新键。
 - trait impl 不能跨模块拆分（E0119）：当 fake 长过文件行数上限时，整个 `impl AppPort for FakeApp` 块移入子模块；根模块保留结构体、固有辅助与再导出。
 - client/web/src/services/ipc.ts 已到行数上限：新的线上类型与包装落在所属的功能服务（ai.ts、sending.ts）里，绝不落在 ipc.ts 本身。
+- engine-api 再导出 provider trait 却不导出 `ConnectionInfo`：以桌面测试替身充当 provider 时需要把 `engine-provider` 列为 dev-dependency 才能命名返回类型。
