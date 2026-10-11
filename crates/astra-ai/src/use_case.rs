@@ -73,6 +73,10 @@ pub enum LlmUseCase {
     /// The analytics report generation (default tier; A4): the one
     /// structured call over the window's computed statistics.
     Report,
+    /// The meeting brief generation (economy tier; SP2h): the one
+    /// summarising call over a civil day's meetings and their linked
+    /// invitation context.
+    MeetingBrief,
 }
 
 impl LlmUseCase {
@@ -100,6 +104,7 @@ impl LlmUseCase {
             Self::Translate => "translate",
             Self::Digest => "digest",
             Self::Report => "report",
+            Self::MeetingBrief => "meeting_brief",
         }
     }
 
@@ -107,9 +112,9 @@ impl LlmUseCase {
     /// `ASTRA_LLM_*` list the call's chain comes from, before fallback.
     /// The judge family rides nano (classification-sized) and economy
     /// (rule-match and the eval judges); the agent tool loop, the style
-    /// inference, the knowledge extraction, and the snippet search ride
-    /// economy with them; autocomplete rides chat beside the assistant
-    /// loop; none of those ride draft.
+    /// inference, the knowledge extraction, the snippet search, and the
+    /// meeting brief ride economy with them; autocomplete rides chat
+    /// beside the assistant loop; none of those ride draft.
     pub fn tier(&self) -> ModelTier {
         match self {
             Self::AssistantChat | Self::Autocomplete => ModelTier::Chat,
@@ -131,7 +136,8 @@ impl LlmUseCase {
             | Self::JudgeScenario
             | Self::StyleInfer
             | Self::KnowledgeExtract
-            | Self::SnippetSearch => ModelTier::Economy,
+            | Self::SnippetSearch
+            | Self::MeetingBrief => ModelTier::Economy,
         }
     }
 }

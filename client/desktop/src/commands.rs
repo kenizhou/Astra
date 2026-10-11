@@ -40,6 +40,10 @@ pub(crate) mod ai;
 // the latest read, and the split map), under the same split.
 pub(crate) mod ai_docs;
 
+// The calendar command surface (the snapshot pull and the meeting brief
+// generation), under the same split.
+pub(crate) mod calendar;
+
 /// A command failure, serialised to the webview as its display string: a sentence a
 /// surface can show, with the reason the host saw.
 #[derive(Debug, thiserror::Error)]

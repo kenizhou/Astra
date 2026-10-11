@@ -117,6 +117,11 @@ pub use ai_rules::{
     MATCH_CONTEXT_BODY_CAP, RULES_MATCH_VERSION, RULES_PROMPT_VERSION,
 };
 pub use boot::{boot, BootError, SpawnedTask};
+pub use calendar::{
+    generate_meeting_brief, meeting_brief_prompt, BriefDocumentError, BriefMeeting,
+    BriefMeetingRow, MeetingBriefError, MeetingBriefState, MeetingBriefView,
+    BRIEF_INVITATION_SCAN_LIMIT, MEETING_BRIEF_PROMPT_VERSION,
+};
 pub use dispatch::AppError;
 pub use drafts::{DraftResume, DRAFT_AUTOSAVE_IDLE};
 pub use preferences::{load_preferences, preferences_path, save_preferences, Preferences};

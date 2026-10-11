@@ -7,15 +7,15 @@
 
 use astra_ai::{AiDocumentKind, KnowledgeId};
 use astra_app::{
-    AppError, Chip, CompositionId, DigestView, DocumentError, DocumentView, DraftResume,
-    ExtractionSummary, Intent, KnowledgeView, Snippet, SplitEntry, SummariseMessageError,
-    TranslateLanguage,
+    AppError, BriefDocumentError, Chip, CompositionId, DigestView, DocumentError, DocumentView,
+    DraftResume, ExtractionSummary, Intent, KnowledgeView, MeetingBriefView, Snippet, SplitEntry,
+    SummariseMessageError, TranslateLanguage,
 };
 use astra_viewmodel::{
-    ComposeKind, ComposeRequestSnapshot, DraftStatusSnapshot, MailboxListSnapshot, ReadingSnapshot,
-    SendingSnapshot, SyncProgressSnapshot,
+    CalendarSnapshot, ComposeKind, ComposeRequestSnapshot, DraftStatusSnapshot,
+    MailboxListSnapshot, ReadingSnapshot, SendingSnapshot, SyncProgressSnapshot,
 };
-use engine_api::{AccountId, ProviderKey};
+use engine_api::{AccountId, CalendarDate, ProviderKey};
 
 use crate::app_state::{AppPort, HostAccount};
 
@@ -83,6 +83,32 @@ impl Default for DocsSeeds {
             latest_into: Vec::new(),
             split: Vec::new(),
             split_into: Vec::new(),
+        }
+    }
+}
+
+/// The calendar brief pull's seeds and their record: the answer (an
+/// `Err` standing in for the typed refusal a test maps onto the command
+/// error) and the (account, day) pairs the pull was asked for, the day
+/// as its wire word.
+pub(crate) struct BriefSeeds {
+    /// The brief pull's answer.
+    pub(crate) brief: Result<MeetingBriefView, BriefDocumentError>,
+    /// The (account, day word) pairs the brief pull was asked for.
+    pub(crate) brief_into: Vec<(String, String)>,
+}
+
+impl Default for BriefSeeds {
+    fn default() -> Self {
+        Self {
+            brief: Ok(MeetingBriefView {
+                account: AccountId::try_from("work").expect("an account id"),
+                day: CalendarDate::new(1970, 1, 1).expect("the epoch day"),
+                state: astra_app::MeetingBriefState::NoMeetings,
+                brief: String::new(),
+                meetings: Vec::new(),
+            }),
+            brief_into: Vec::new(),
         }
     }
 }
@@ -340,5 +366,21 @@ impl AppPort for FakeApp {
         let mut docs = self.docs.lock().unwrap();
         docs.split_into.push(account.as_str().to_owned());
         docs.split.clone()
+    }
+
+    fn calendar(&self) -> CalendarSnapshot {
+        self.calendar.lock().unwrap().clone()
+    }
+
+    async fn generate_meeting_brief(
+        &self,
+        account: &AccountId,
+        day: CalendarDate,
+    ) -> Result<MeetingBriefView, BriefDocumentError> {
+        let mut brief = self.brief.lock().unwrap();
+        brief
+            .brief_into
+            .push((account.as_str().to_owned(), day.to_string()));
+        brief.brief.clone()
     }
 }

@@ -1,0 +1,16 @@
+{
+  "id": "meeting-brief-empty-day",
+  "feature": "meeting-brief",
+  "mode": "offline",
+  "prompt_version": "1",
+  "inputs": {
+    "account": "work",
+    "day": "2026-10-26",
+    "meetings": []
+  },
+  "expected": {
+    "outcome": {
+      "state": "no_meetings"
+    }
+  }
+}

@@ -13,6 +13,8 @@
 //! the same write issued again), and the one-vs-all occurrence question the
 //! intents never guess at.
 
+mod brief;
+mod brief_drive;
 mod deposit;
 mod drag;
 mod edit;
@@ -30,6 +32,12 @@ use engine_api::{AccountId, Horizon, Provider, TimeZoneId, UtcDateTime};
 
 use crate::calendar::prompt::ReplyFallback;
 use crate::{reference::CalendarRef, App, CalendarIntent};
+
+pub use brief::{
+    generate_meeting_brief, meeting_brief_prompt, BriefDocumentError, BriefMeeting,
+    BriefMeetingRow, MeetingBriefError, MeetingBriefState, MeetingBriefView,
+    BRIEF_INVITATION_SCAN_LIMIT, MEETING_BRIEF_PROMPT_VERSION,
+};
 
 /// The visible window's default length, in days: the six weeks a month grid
 /// needs, with a week of history behind now so a cold app that has never seen

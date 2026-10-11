@@ -275,3 +275,15 @@ fn a_row_without_a_colour_or_an_occurrence_token_omits_them() {
     let back: CalendarSnapshot = serde_json::from_value(wire).expect("reads back");
     assert_eq!(back, snapshot);
 }
+
+#[test]
+fn the_shared_web_fixture_parses_as_the_snapshot() {
+    // The web service's calendar.test.ts parses this same file, so the
+    // fixture the surface mirrors and the snapshot the host publishes can
+    // never drift apart.
+    let raw = include_str!("../../../client/web/src/services/__fixtures__/calendar_snapshot.json");
+    let back: CalendarSnapshot = serde_json::from_str(raw).expect("the fixture parses");
+    let wire = serde_json::to_value(&back).expect("the snapshot serialises");
+    let raw: serde_json::Value = serde_json::from_str(raw).expect("the fixture is JSON");
+    assert_eq!(wire, raw, "the fixture round trips byte for byte");
+}

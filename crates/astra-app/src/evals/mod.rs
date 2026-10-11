@@ -31,8 +31,8 @@ use crate::ai_rules::{
 };
 use crate::{
     AUTOCOMPLETE_VERSION, DIGEST_PROMPT_VERSION, DRAFT_REPLY_PROMPT_VERSION, GATE_JUDGE_VERSION,
-    KNOWLEDGE_EXTRACT_VERSION, REPORT_PROMPT_VERSION, SNIPPET_SEARCH_VERSION,
-    SPLIT_MAPPING_VERSION, SUMMARISE_PROMPT_VERSION, TRANSLATE_VERSION,
+    KNOWLEDGE_EXTRACT_VERSION, MEETING_BRIEF_PROMPT_VERSION, REPORT_PROMPT_VERSION,
+    SNIPPET_SEARCH_VERSION, SPLIT_MAPPING_VERSION, SUMMARISE_PROMPT_VERSION, TRANSLATE_VERSION,
 };
 
 pub use drive::drive;
@@ -112,6 +112,8 @@ pub enum Feature {
     /// The split inbox's mapping, the pure derivation. No prompt text
     /// rides; the mapping table's own version is pinned.
     Split,
+    /// The meeting brief generation through the completion seam.
+    MeetingBrief,
 }
 
 impl Feature {
@@ -134,6 +136,7 @@ impl Feature {
             "digest" => Ok(Self::Digest),
             "report" => Ok(Self::Report),
             "split" => Ok(Self::Split),
+            "meeting-brief" => Ok(Self::MeetingBrief),
             _ => Err(format!("unknown feature {word:?}")),
         }
     }
@@ -163,6 +166,9 @@ impl Feature {
             Self::Digest => Some((DIGEST_PROMPT_VERSION, "DIGEST_PROMPT_VERSION")),
             Self::Report => Some((REPORT_PROMPT_VERSION, "REPORT_PROMPT_VERSION")),
             Self::Split => Some((SPLIT_MAPPING_VERSION, "SPLIT_MAPPING_VERSION")),
+            Self::MeetingBrief => {
+                Some((MEETING_BRIEF_PROMPT_VERSION, "MEETING_BRIEF_PROMPT_VERSION"))
+            }
         }
     }
 }
