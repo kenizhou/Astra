@@ -1,0 +1,22 @@
+{
+  "id": "translate-cached-second-read",
+  "feature": "translate",
+  "mode": "offline",
+  "prompt_version": "1",
+  "inputs": {
+    "mail": {
+      "account": "work",
+      "key": "m1",
+      "from_name": "Ada Lovelace",
+      "from_address": "ada@example.test",
+      "subject": "Prototyp-Termin",
+      "body": "Danke für die Rückmeldung. Können wir den Prototypen am kommenden Freitag fertigstellen?"
+    },
+    "text": "Danke für die Rückmeldung. Können wir den Prototypen am kommenden Freitag fertigstellen?",
+    "lang": "english",
+    "completion": "{\"translation\":\"Thanks for the feedback. Can we still finish the prototype next Friday?\"}"
+  },
+  "expected": {
+    "translation": "Thanks for the feedback. Can we still finish the prototype next Friday?"
+  }
+}

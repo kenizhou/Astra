@@ -12,9 +12,12 @@
 // document to the durable outbox; an accepted send clears the stored draft
 // and closes, a refused one keeps the pane open with its words and says
 // why, and neither its error nor its in-flight submit outlives its own
-// composition. The session's state itself lives in composerStore.
+// composition. The session's state itself lives in composerStore. The
+// toolbar carries the snippet picker, whose insert places the chosen body
+// at the editor's current selection.
 
 import { useEffect, useRef, useState } from 'react';
+import type { Editor as CoreEditor } from '@tiptap/core';
 
 import {
   dispatch,
@@ -28,7 +31,8 @@ import { useAccountStore } from '@/stores/accountStore';
 import { useDraftStore } from '@/stores/draftStore';
 
 import { ComposerFields } from './ComposerFields';
-import { Editor } from './Editor';
+import { Editor, insertAtSelection } from './Editor';
+import { SnippetPicker } from './SnippetPicker';
 import {
   fingerprintOf,
   mintCompositionId,
@@ -199,6 +203,9 @@ export function ComposerPane() {
   // themselves, so one left in flight when the pane moved on can neither
   // close the next composition nor stick its error under it.
   const sendEpoch = useRef(0);
+  // The live editor instance, handed over by the editor itself: the picker's
+  // insert places its snippet's body at whatever selection now stands.
+  const editorRef = useRef<CoreEditor | null>(null);
 
   const autosave = useAutosave({
     isDirty: () => {
@@ -326,6 +333,14 @@ export function ComposerPane() {
       <div className="flex h-[var(--pane-header-h)] shrink-0 items-center justify-between gap-2 border-b border-border bg-surface px-3">
         <SaveBadge composition={composition} />
         <div className="flex items-center gap-1">
+          <SnippetPicker
+            onInsert={(body) => {
+              const editor = editorRef.current;
+              if (editor !== null) {
+                insertAtSelection(editor, body);
+              }
+            }}
+          />
           <button
             type="button"
             onClick={send}
@@ -378,6 +393,9 @@ export function ComposerPane() {
         key={composition}
         initialContent={initialContent}
         onChange={(doc) => useComposerStore.getState().setEditorContent(doc.content ?? [])}
+        onReady={(editor) => {
+          editorRef.current = editor;
+        }}
       />
     </section>
   );

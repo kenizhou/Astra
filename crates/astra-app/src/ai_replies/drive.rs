@@ -8,11 +8,12 @@
 //! turn's correlation riding each arming and a fresh one minted when an
 //! arming carries none. The context collector lives here too: the original
 //! through the reading resolve, the thread's earlier members through the
-//! engine's thread read (bodies fetched per member), and the account's
-//! style note through the profile getter, whose daily cap keeps a fresh
-//! profile from spending an infer call. Beside the driver sit the host's
-//! AI pulls (the chips read, the summarise action, the style note, the
-//! chips dismissal), each routed through the one AI bundle.
+//! engine's thread read (bodies fetched per member), the account's style
+//! note through the profile getter, whose daily cap keeps a fresh profile
+//! from spending an infer call, and the account's knowledge context. Beside
+//! the driver sit the host's AI pulls (the chips read, the summarise
+//! action, the style note, the chips dismissal), each routed through the
+//! one AI bundle.
 
 use astra_ai::{AiStore, CorrelationId};
 use astra_viewmodel::MessageKey;
@@ -22,10 +23,8 @@ use super::draft::{generate_reply, DraftContext, THREAD_HISTORY_LIMIT};
 use super::gate::{chips_for, Chip};
 use super::style::{style_profile, STYLE_SAMPLE_LIMIT};
 use super::summarise::{summarise, SummariseError};
-use crate::ai_results::AiPass;
-use crate::ai_rules::MailContext;
-use crate::reference::MessageRef;
 use crate::App;
+use crate::{ai_results::AiPass, ai_rules::MailContext, knowledge_context, reference::MessageRef};
 
 /// How wide a newest-window the style collector draws its Sent samples
 /// from: the row read is cheap and the daily cap bounds how often it runs,
@@ -72,8 +71,8 @@ pub(crate) struct DraftArm {
 
 /// The collected inputs one armed draft generates against: the original's
 /// context, the thread's earlier members (newest first, exactly as the
-/// engine's thread read returns them), and the account's style note when
-/// one stands.
+/// engine's thread read returns them), the account's style note when
+/// one stands, and the account's knowledge context lines.
 struct DraftInputs {
     /// The message being answered: the thread's newest member.
     original: MailContext,
@@ -81,6 +80,9 @@ struct DraftInputs {
     history: Vec<MailContext>,
     /// The account's style note, when one was built.
     style_note: Option<String>,
+    /// The account's knowledge context lines, capped and ordered by the
+    /// assist model's read.
+    knowledge: Vec<String>,
 }
 
 impl<P: Provider> App<P> {
@@ -148,6 +150,7 @@ impl<P: Provider> App<P> {
                 original: &inputs.original,
                 history: &inputs.history,
                 style_note: inputs.style_note.as_deref(),
+                knowledge: &inputs.knowledge,
             };
             let landed =
                 generate_reply(&context, &correlation, pass.complete.as_ref(), &pass.store).await;
@@ -237,10 +240,12 @@ impl<P: Provider> App<P> {
             None => Vec::new(),
         };
         let style_note = self.style_note(&message.account, correlation, pass).await;
+        let knowledge = knowledge_context(&message.account, &pass.store);
         Some(DraftInputs {
             original: original_context,
             history,
             style_note,
+            knowledge,
         })
     }
 

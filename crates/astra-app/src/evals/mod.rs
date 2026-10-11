@@ -16,6 +16,7 @@
 //! observable-bump net the rulebook's AI rule demands.
 
 mod drive;
+mod drive_assist;
 
 #[cfg(test)]
 mod runner;
@@ -27,7 +28,10 @@ use astra_ai::JUDGE_TEMPLATES_VERSION;
 use crate::ai_rules::{
     CATEGORISE_PROMPT_VERSION, COLD_JUDGE_VERSION, RULES_MATCH_VERSION, RULES_PROMPT_VERSION,
 };
-use crate::{DRAFT_REPLY_PROMPT_VERSION, GATE_JUDGE_VERSION, SUMMARISE_PROMPT_VERSION};
+use crate::{
+    AUTOCOMPLETE_VERSION, DRAFT_REPLY_PROMPT_VERSION, GATE_JUDGE_VERSION,
+    KNOWLEDGE_EXTRACT_VERSION, SNIPPET_SEARCH_VERSION, SUMMARISE_PROMPT_VERSION, TRANSLATE_VERSION,
+};
 
 pub use drive::drive;
 
@@ -90,6 +94,15 @@ pub enum Feature {
     Summarise,
     /// The chips surfacing gate through the judge seam.
     Gate,
+    /// The batch knowledge extraction through the completion seam into
+    /// the knowledge store.
+    KnowledgeExtract,
+    /// The snippet library's ranked search through the completion seam.
+    SnippetSearch,
+    /// The compose autocomplete suggestion through the completion seam.
+    Autocomplete,
+    /// The cached translate action through the completion seam.
+    Translate,
 }
 
 impl Feature {
@@ -105,6 +118,10 @@ impl Feature {
             "draft" => Ok(Self::Draft),
             "summarise" => Ok(Self::Summarise),
             "gate" => Ok(Self::Gate),
+            "knowledge_extract" => Ok(Self::KnowledgeExtract),
+            "snippet_search" => Ok(Self::SnippetSearch),
+            "autocomplete" => Ok(Self::Autocomplete),
+            "translate" => Ok(Self::Translate),
             _ => Err(format!("unknown feature {word:?}")),
         }
     }
@@ -123,6 +140,12 @@ impl Feature {
             Self::Draft => Some((DRAFT_REPLY_PROMPT_VERSION, "DRAFT_REPLY_PROMPT_VERSION")),
             Self::Summarise => Some((SUMMARISE_PROMPT_VERSION, "SUMMARISE_PROMPT_VERSION")),
             Self::Gate => Some((GATE_JUDGE_VERSION, "GATE_JUDGE_VERSION")),
+            Self::KnowledgeExtract => {
+                Some((KNOWLEDGE_EXTRACT_VERSION, "KNOWLEDGE_EXTRACT_VERSION"))
+            }
+            Self::SnippetSearch => Some((SNIPPET_SEARCH_VERSION, "SNIPPET_SEARCH_VERSION")),
+            Self::Autocomplete => Some((AUTOCOMPLETE_VERSION, "AUTOCOMPLETE_VERSION")),
+            Self::Translate => Some((TRANSLATE_VERSION, "TRANSLATE_VERSION")),
         }
     }
 }

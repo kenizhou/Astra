@@ -48,14 +48,29 @@ pub(crate) fn record(
 /// said. Address counts and text lengths stand in for the values.
 pub(crate) fn arg_preview(verb: &Verb) -> String {
     match verb {
-        // The account-only previews and the empty ones: a folder list and
-        // the style read carry the account alone, the no-argument lists
-        // and the refused rebuild (no account resolves, no action runs)
-        // carry nothing.
-        Verb::FoldersList { account } | Verb::AiStyle { account } => {
-            format!("account={account}")
+        // The account-only previews and the empty ones: the account lists
+        // (folder, style, knowledge) carry the account alone, the
+        // no-argument lists and the refused spellings (no account
+        // resolves, no action runs) carry nothing.
+        Verb::FoldersList { account }
+        | Verb::AiStyle { account }
+        | Verb::KnowledgeList { account } => format!("account={account}"),
+        Verb::AccountsList
+        | Verb::RulesList
+        | Verb::AiStyleRebuild
+        | Verb::KnowledgeExtract
+        | Verb::SnippetsList
+        | Verb::SnippetsSearch => String::new(),
+        // Every id-carrying verb previews the id alone.
+        Verb::RulesDelete { id } | Verb::KnowledgeForget { id } | Verb::SnippetsDelete { id } => {
+            format!("id={id}")
         }
-        Verb::AccountsList | Verb::RulesList | Verb::AiStyleRebuild => String::new(),
+        Verb::SnippetsCreate { args } => format!(
+            "title_chars={} body_chars={} source={}",
+            args.title.chars().count(),
+            args.body.chars().count(),
+            args.source,
+        ),
         Verb::MessagesList {
             account,
             folder,
@@ -91,6 +106,5 @@ pub(crate) fn arg_preview(verb: &Verb) -> String {
             condition.chars().count(),
             actions.len(),
         ),
-        Verb::RulesDelete { id } => format!("id={id}"),
     }
 }

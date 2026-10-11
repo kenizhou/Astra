@@ -17,6 +17,10 @@ pub use seams::{incoming_pass, LlmAiComplete, LlmAiJudge};
 mod live_tests;
 
 #[cfg(test)]
+#[path = "live_assist_tests.rs"]
+mod live_assist_tests;
+
+#[cfg(test)]
 #[path = "live_replies_tests.rs"]
 mod live_replies_tests;
 

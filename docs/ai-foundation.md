@@ -137,12 +137,19 @@ build-time `DATABASE_URL` by construction.
 The background client (`client/desktop/src/ai/`) serves non-chat
 completions: dual protocol (openai `POST {base}/chat/completions` with
 a bearer key; anthropic `POST {base}/v1/messages` with `x-api-key` and
-`anthropic-version: 2023-06-01`, `max_tokens` 1024), one attempt per
+`anthropic-version: 2023-06-01`, `max_tokens` 1024, `thinking`
+disabled), one attempt per
 chain entry, retryable failures (connect and transport errors, 5xx,
 429, malformed 2xx envelopes) advancing to the next entry, `Retry-After`
 honoured in delta-seconds capped at two seconds, and auth (401, 403) and
 quota (402, the providers' exhausted-balance bodies) terminal for the
-call. Error strings are status-level: response bodies never flow into
+call. The thinking disable is deliberate: the verified
+anthropic-compatible endpoint reasons by default and can spend the whole
+`max_tokens` budget on its thinking block, answering a textless 2xx
+(the A1 suite's recorded endpoint behaviour, and systematic for prompts
+that invite deliberation, the A3 autocomplete ask among them); no
+surface consumes thinking, so the client asks for none, in Anthropic's
+own off spelling. Error strings are status-level: response bodies never flow into
 them. The A1 incoming pass consumes the client through its completion and
 judge seams (the `docs/ai-rules.md` contract); the chat panel's model
 rides the sidecar.

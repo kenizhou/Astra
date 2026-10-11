@@ -138,8 +138,8 @@
 
 | 功能 | 状态 | 备注 |
 |---|---|---|
-| 读动词与 --json 契约 | 🚧 | 已交付十五个动词：账户、文件夹、邮件、规则与存储的 AI 读取（cold、results、drafts、summary、style）；随 SP2+ 切片增长；cli.md |
-| 带门控的变更动词与 --preview | 🚧 | drafts save 与 discard、rules create 与 delete；模型类 `ai style rebuild` 先解析后拒绝；cli.md |
+| 读动词与 --json 契约 | 🚧 | 已交付二十二个动词：账户、文件夹、邮件、规则、存储的 AI 读取（cold、results、drafts、summary、style）与知识及片段读取；随 SP2+ 切片增长；cli.md |
+| 带门控的变更动词与 --preview | 🚧 | drafts save 与 discard、rules create 与 delete、knowledge forget、snippets create 与 delete；模型类拼写（`ai style rebuild`、`knowledge extract`、`snippets search`）先解析后拒绝；cli.md |
 | 每次调用带相关性 id 审计 | 🚧 | ai.sqlite 账本；cli.md |
 | 发送类动词先解析后拒绝 | 🚧 | 退出码 3；cli.md |
 | 虚拟权限工具映射 | ⬜ | SPA0 |
@@ -168,7 +168,10 @@
 | A2 | 智能回复条：门控浮现、接受进入回复编写器、关闭 | 🚧 | 门与回复条已交付；分类尚无徽标界面；ai-replies.md |
 | A2 | 带缓存的摘要 | 🚧 | 阅读窗格的摘要块；ai-replies.md |
 | A2 | 带工具配额的助手对话 | ⬜ |
-| A3 | 知识、人设、片段、自动补全、翻译 | ⬜ |
+| A3 | 知识：带来源的批量抽取、草稿提示词塑形、forget | 🚧 | ai-assist.md |
+| A3 | 片段库：排序搜索与编写器选择器 | 🚧 | ai-assist.md |
+| A3 | 编写自动补全：仅手势悬浮条与会话关闭 | 🚧 | ai-assist.md |
+| A3 | 阅读窗格翻译：六语言带缓存 | 🚧 | ai-assist.md |
 | A4 | 摘要报、会议简报、分析报告、分栏收件箱 | ⬜ |
 
 ## Astra：代理（边车宿主，见 SPA0 规范 D5）

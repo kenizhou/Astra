@@ -133,6 +133,13 @@ describe('the new message mint', () => {
 
     expect(screen.queryByRole('region', { name: 'Composer' })).toBeNull();
   });
+
+  it('offers the snippet picker beside the send in the toolbar', () => {
+    newMessage();
+    render(<ComposerPane />);
+
+    expect(screen.getByRole('button', { name: 'Snippets' })).toBeTruthy();
+  });
 });
 
 describe('the autosave handover', () => {

@@ -88,8 +88,8 @@ fn anthropic_success_pins_the_wire_shape_and_lands_one_ok_row() {
     assert_eq!(request.header("content-type"), "application/json");
     assert_eq!(
         request.body,
-        r#"{"model":"claude-3-5-haiku-latest","max_tokens":1024,"messages":[{"role":"user","content":"Draft: thanks"}]}"#,
-        "the anthropic wire shape is byte-exact",
+        r#"{"model":"claude-3-5-haiku-latest","max_tokens":1024,"messages":[{"role":"user","content":"Draft: thanks"}],"thinking":{"type":"disabled"}}"#,
+        "the anthropic wire shape is byte-exact, thinking disabled",
     );
     assert_eq!(fixture.request_count(), 1, "exactly one HTTP attempt");
     assert_eq!(

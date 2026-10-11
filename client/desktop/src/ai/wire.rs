@@ -126,7 +126,8 @@ pub(crate) struct OpenAiBody<'a> {
 }
 
 /// The anthropic-messages request body: the model, the mandatory
-/// `max_tokens`, and the message list (kylins' `build_body` anthropic arm).
+/// `max_tokens`, the message list, and the thinking switch (kylins'
+/// `build_body` anthropic arm grown the one field).
 #[derive(Debug, Serialize)]
 pub(crate) struct AnthropicBody<'a> {
     /// The provider's model name.
@@ -135,6 +136,23 @@ pub(crate) struct AnthropicBody<'a> {
     max_tokens: u32,
     /// The message list.
     messages: Vec<ChatMessage<'a>>,
+    /// The thinking switch: disabled on every request.
+    thinking: ThinkingDisabled,
+}
+
+/// The anthropic body's thinking switch, spelled `{"type":"disabled"}`.
+/// The verified anthropic-compatible endpoint reasons by default and can
+/// spend the whole `max_tokens` budget on its thinking block, answering a
+/// textless 2xx the client must then retry (the A1 suite's recorded
+/// endpoint behaviour, systematic for prompts that invite deliberation);
+/// no product surface consumes thinking, so every request disables it
+/// outright. The spelling is Anthropic's own off state, so a genuine
+/// Anthropic endpoint ignores it as its default.
+#[derive(Debug, Serialize)]
+struct ThinkingDisabled {
+    /// The off word.
+    #[serde(rename = "type")]
+    kind: &'static str,
 }
 
 /// One fully built wire request: the exact URL, the protocol's headers, and
@@ -198,6 +216,7 @@ pub(crate) fn build_request(
                     model,
                     max_tokens: ANTHROPIC_MAX_TOKENS,
                     messages: vec![user],
+                    thinking: ThinkingDisabled { kind: "disabled" },
                 })
                 .expect("a struct of string fields serialises"),
             }

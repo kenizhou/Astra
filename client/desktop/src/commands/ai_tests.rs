@@ -12,7 +12,9 @@ use astra_app::Chip;
 use astra_viewmodel::ComposeKind;
 
 use super::{
-    chips_dismiss_of, compose_from_draft_of, draft_chips_of, style_profile_of, summarise_of,
+    chips_dismiss_of, compose_autocomplete_of, compose_from_draft_of, draft_chips_of,
+    knowledge_extract_of, knowledge_forget_of, knowledge_list_of, snippet_list_of,
+    snippet_search_of, style_profile_of, summarise_of, translate_of,
 };
 use crate::commands::compose::compose_request_of;
 use crate::commands::CommandError;
@@ -174,5 +176,208 @@ fn the_accept_hands_the_draft_through_and_the_core_publishes_the_reply() {
         request.kind,
         ComposeKind::Reply,
         "the composition a chip opens is the reply the reader accepted"
+    );
+}
+
+#[test]
+fn the_knowledge_listing_round_trips_and_the_forget_removes_one_row() {
+    let app = FakeApp::new();
+    app.holding_knowledge("k1", "fact", "The launch lands on Friday.");
+    app.holding_knowledge("k2", "preference", "The user prefers plain text.");
+    let state = state("ai-knowledge", Arc::clone(&app), FakeStore::accepting());
+    let (account, _) = key_parts();
+
+    let listed = knowledge_list_of(&state, &account);
+    assert_eq!(
+        listed
+            .iter()
+            .map(|entry| entry.id.as_str().to_owned())
+            .collect::<Vec<_>>(),
+        vec!["k1".to_owned(), "k2".to_owned()],
+        "the listing answers the core's rows in their own order",
+    );
+    assert_eq!(
+        app.assist.lock().unwrap().knowledge_into.as_slice(),
+        ["work".to_owned()].as_slice(),
+        "the command hands the webview's account to the core",
+    );
+
+    assert!(
+        knowledge_forget_of(&state, "k1"),
+        "the forget answers the row it removed",
+    );
+    assert!(
+        !knowledge_forget_of(&state, "k1"),
+        "a second forget of the same id answers false",
+    );
+    assert_eq!(
+        app.assist.lock().unwrap().forgotten_into.as_slice(),
+        ["k1".to_owned(), "k1".to_owned()].as_slice(),
+        "the ids crossed as the strings the webview sent",
+    );
+    assert_eq!(
+        knowledge_list_of(&state, &account).len(),
+        1,
+        "only the forgotten row went",
+    );
+}
+
+#[test]
+fn the_extraction_pull_crosses_and_defaults_its_limit() {
+    let app = FakeApp::new();
+    app.assist.lock().unwrap().extraction = astra_app::ExtractionSummary {
+        extracted: 2,
+        skipped_duplicates: 1,
+        messages_considered: 3,
+    };
+    let state = state("ai-extract", Arc::clone(&app), FakeStore::accepting());
+    let (account, _) = key_parts();
+
+    let summary = state
+        .runtime
+        .block_on(|| knowledge_extract_of(&state, &account, None));
+    assert_eq!(
+        summary,
+        astra_app::ExtractionSummary {
+            extracted: 2,
+            skipped_duplicates: 1,
+            messages_considered: 3,
+        },
+        "the run's summary crosses whole",
+    );
+    let capped = state
+        .runtime
+        .block_on(|| knowledge_extract_of(&state, &account, Some(10)));
+    assert_eq!(capped.extracted, 2);
+    let over = state
+        .runtime
+        .block_on(|| knowledge_extract_of(&state, &account, Some(5_000)));
+    assert_eq!(over.extracted, 2);
+    assert_eq!(
+        app.assist.lock().unwrap().extracted_into.as_slice(),
+        [
+            ("work".to_owned(), astra_app::KNOWLEDGE_EXTRACT_LIMIT),
+            ("work".to_owned(), 10),
+            ("work".to_owned(), astra_app::KNOWLEDGE_EXTRACT_LIMIT)
+        ]
+        .as_slice(),
+        "an absent limit crosses as the thirty cap, a named one as itself \
+         while it sits under the cap, and a named one over the cap as the \
+         cap: the window would fetch bodies for messages the batch can \
+         never carry",
+    );
+}
+
+#[test]
+fn the_snippet_listing_and_search_round_trip_the_library() {
+    let app = FakeApp::new();
+    app.holding_snippet("s1", "Greeting", "Thank you for the note.");
+    app.holding_snippet("s2", "Invoice chase", "Attached is the invoice again.");
+    let state = state("ai-snippets", Arc::clone(&app), FakeStore::accepting());
+
+    let listed = snippet_list_of(&state);
+    assert_eq!(
+        listed
+            .iter()
+            .map(|snippet| snippet.title.as_str())
+            .collect::<Vec<_>>(),
+        vec!["Greeting", "Invoice chase"],
+    );
+    let found = state
+        .runtime
+        .block_on(|| snippet_search_of(&state, "the money one"));
+    assert_eq!(found.len(), 2, "the search answers the core's ranking");
+    assert_eq!(
+        app.assist.lock().unwrap().searched_into.as_slice(),
+        ["the money one".to_owned()].as_slice(),
+        "the search text crossed untouched",
+    );
+}
+
+#[test]
+fn the_autocomplete_pull_crosses_both_halves_and_an_absent_trailing_half() {
+    let app = FakeApp::new();
+    app.assist.lock().unwrap().suggestion = "shipped it.".to_owned();
+    let state = state("ai-autocomplete", Arc::clone(&app), FakeStore::accepting());
+
+    let suggestion = state
+        .runtime
+        .block_on(|| compose_autocomplete_of(&state, "Thanks for the", Some(" soon.")));
+    assert_eq!(suggestion, "shipped it.");
+    let tailless = state
+        .runtime
+        .block_on(|| compose_autocomplete_of(&state, "Thanks for the", None));
+    assert_eq!(tailless, "shipped it.");
+    assert_eq!(
+        app.assist.lock().unwrap().suggested_into.as_slice(),
+        [
+            ("Thanks for the".to_owned(), " soon.".to_owned()),
+            ("Thanks for the".to_owned(), String::new())
+        ]
+        .as_slice(),
+        "an absent trailing half crosses as the empty string",
+    );
+}
+
+#[test]
+fn the_translate_pull_crosses_the_reference_and_the_language_word() {
+    let app = FakeApp::new();
+    app.assist.lock().unwrap().translation = "Corps du message.".to_owned();
+    let state = state("ai-translate", Arc::clone(&app), FakeStore::accepting());
+    let (account, key) = key_parts();
+
+    let translation = state
+        .runtime
+        .block_on(|| translate_of(&state, &account, &key, astra_app::TranslateLanguage::French));
+    assert_eq!(translation, "Corps du message.");
+    assert_eq!(
+        app.assist.lock().unwrap().translated_into.as_slice(),
+        [(
+            "work".to_owned(),
+            "imap:v1:u42".to_owned(),
+            "french".to_owned()
+        )]
+        .as_slice(),
+        "the language crossed as its snake_case wire word",
+    );
+}
+
+#[test]
+fn the_extraction_summary_crosses_as_its_three_wire_fields() {
+    let summary = astra_app::ExtractionSummary {
+        extracted: 2,
+        skipped_duplicates: 1,
+        messages_considered: 3,
+    };
+    let wire = serde_json::to_value(summary).expect("the summary serialises");
+    assert_eq!(
+        wire,
+        serde_json::json!({
+            "extracted": 2,
+            "skipped_duplicates": 1,
+            "messages_considered": 3
+        }),
+    );
+}
+
+#[test]
+fn the_snippet_crosses_as_its_five_wire_fields() {
+    let snippet = astra_app::Snippet {
+        id: astra_ai::SnippetId::new("s1".to_owned()),
+        title: "Greeting".to_owned(),
+        body: "Thank you for the note.".to_owned(),
+        created_at: 1,
+        updated_at: 2,
+    };
+    let wire = serde_json::to_value(&snippet).expect("the snippet serialises");
+    assert_eq!(
+        wire,
+        serde_json::json!({
+            "id": "s1",
+            "title": "Greeting",
+            "body": "Thank you for the note.",
+            "created_at": 1,
+            "updated_at": 2
+        }),
     );
 }

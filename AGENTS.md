@@ -112,9 +112,13 @@ reference decision is forbidden: disagreements are escalated in the PR.
 - Node on Windows injects SYSTEMROOT, HOMEDRIVE, TEMP, and friends into every spawned child even when the spawn env omits them; env-scrub assertions must allow that fixed platform set.
 - Git Bash printf collapses backslash escapes inside single-quoted arguments on this host; write JSON fixtures containing Windows paths with node, never printf.
 - sidecar npm test runs its e2e file against dist/index.cjs; run npm run build in sidecar first or those tests fail on a fresh checkout.
+- snippet and knowledge rows stamped in the same second tie-break on id DESC (minted UUIDs), so a test cannot assert recency order across same-second inserts: seed fixed ids or compare sets.
+- the engine outbox dedups edit ops by (account, idempotency key) across every op state, so a test helper reusing its idempotency keys within one engine gets the settled op back and the send claim refuses it as Settled: mint a fresh key per edit.
 - astra-desktop bundles the sidecar as a Tauri resource and tauri-build checks sidecar/dist exists on every cargo invocation of the crate, clippy included: build the bundle (npm --prefix sidecar run build) on a fresh checkout before compiling, or the build script fails.
 - Node on Windows asserts in ncrypto::CSPRNG when a spawn omits SYSTEMROOT, and the variable usually arrives uppercase: the agent spawn's platform allowlist matches names case-insensitively or every sidecar dies at once.
 - AppState's field order is its drop order and it is load bearing: the agent relay must drop before the runtime, or the runtime's shutdown waits on a read pump that waits on the child that waits on the relay's stdin closing.
 - Pull requests merge with squash and merge, subject "PR title (#number)",
   branch deleted after; merge commits are not used.
 - xtask doc_sync self-test fixtures use pid-keyed temp dirs that are never cleaned; Windows pid reuse can pollute the stale dirs and flake concurrent runs; serial reruns are clean; a fixture-helper cleanup is the eventual fix.
+- A trait impl cannot split across modules (E0119): when a fake grows past the file cap, its whole `impl AppPort for FakeApp` block moves to the child module; the root keeps the struct, inherent helpers, and re-exports.
+- client/web/src/services/ipc.ts sits at the line cap: new wire types and wrappers land in the owning feature service (ai.ts, sending.ts), never in ipc.ts itself.
