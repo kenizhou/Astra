@@ -9,7 +9,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::reference::{FolderRef, MessageRef, RowRef};
 
-use super::{CalendarIntent, ComposeIntent, ComposerBlob, DraftsIntent, OutboxIntent};
+use super::{
+    CalendarIntent, ComposeIntent, ComposerBlob, DraftsIntent, OutboxIntent, PeopleIntent,
+};
 
 /// How the mailbox list is grouped.
 ///
@@ -246,4 +248,8 @@ pub enum Intent {
     /// ([`CalendarIntent`]): the window, the visible calendars, the event
     /// create, edit, move, and delete verbs, and the invitation answer.
     Calendar(CalendarIntent),
+    /// A change to the people view or a contact write
+    /// ([`PeopleIntent`]): the search, the person detail, and the contact
+    /// create and edit verbs.
+    People(PeopleIntent),
 }

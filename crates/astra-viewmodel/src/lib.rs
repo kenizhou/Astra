@@ -10,6 +10,7 @@ mod calendar;
 mod compose_request;
 mod drafts;
 mod folders;
+mod people;
 mod reading;
 mod rows;
 mod search;
@@ -24,6 +25,10 @@ pub use calendar::{
 pub use compose_request::{ComposeKind, ComposeRequestSnapshot};
 pub use drafts::{DraftSaveState, DraftStatusSnapshot};
 pub use folders::{folder_role, sorted_folder_rows, AccountFolderRow, FolderRole, FolderRow};
+pub use people::{
+    CreateTargetRow, EditableCardRow, Monogram, PeopleSnapshot, PeopleWriteRow, PeopleWriteState,
+    PersonDetail, PersonRow, PersonSourceRow, PersonValueKind, PersonValueRow,
+};
 pub use reading::{
     AttachmentRow, InvitationBlock, InvitationKind, MessageKey, NotAMessageRow, ReadingSnapshot,
 };

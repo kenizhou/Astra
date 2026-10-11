@@ -2,7 +2,10 @@
 //! Tests for the typed references: the single construction point validating the halves
 //! of each, and the wire form every reference crosses in.
 
-use super::{CalendarRef, EventRef, FolderRef, MessageRef, QueuedRef, RowRef, ThreadRef};
+use super::{
+    AddressBookRef, CalendarRef, CardRef, EventRef, FolderRef, MessageRef, QueuedRef, RowRef,
+    ThreadRef,
+};
 
 #[test]
 fn from_parts_needs_a_well_formed_account_half() {
@@ -140,5 +143,61 @@ fn a_queued_reference_crosses_as_its_account_and_op_number() {
     let json = serde_json::to_string(&reference).unwrap();
     assert_eq!(json, r#"{"account":"acct-1","op":3}"#);
     let back: QueuedRef = serde_json::from_str(&json).unwrap();
+    assert_eq!(back, reference);
+}
+
+#[test]
+fn an_address_book_reference_needs_both_halves_well_formed() {
+    // A book id is unique only within its account (two accounts can each hold a
+    // book keyed `default`), so both halves validate exactly as a calendar's do.
+    let reference =
+        AddressBookRef::from_parts("acct-1", "/dav/card/acct-1/default/".to_owned()).unwrap();
+    assert_eq!(reference.account.as_str(), "acct-1");
+    assert_eq!(reference.book.as_str(), "/dav/card/acct-1/default/");
+    assert!(AddressBookRef::from_parts("", "/dav/card/default/".to_owned()).is_none());
+    assert!(AddressBookRef::from_parts("acct-1", String::new()).is_none());
+}
+
+#[test]
+fn an_address_book_reference_crosses_as_its_two_halves() {
+    let reference =
+        AddressBookRef::from_parts("acct-1", "/dav/card/acct-1/default/".to_owned()).unwrap();
+    let json = serde_json::to_string(&reference).unwrap();
+    assert_eq!(
+        json,
+        r#"{"account":"acct-1","book":"/dav/card/acct-1/default/"}"#
+    );
+    let back: AddressBookRef = serde_json::from_str(&json).unwrap();
+    assert_eq!(back, reference);
+}
+
+#[test]
+fn a_card_reference_needs_all_three_halves_well_formed() {
+    // The person half is the store-assigned integer, and zero is its reserved
+    // sentinel: a zero person, a blank account, or an empty card id yields
+    // `None`, so a malformed half never rides a contact write into the core.
+    let reference =
+        CardRef::from_parts(7, "acct-1", "/dav/card/acct-1/default/ada.vcf".to_owned()).unwrap();
+    assert_eq!(reference.person.get(), 7);
+    assert_eq!(reference.account.as_str(), "acct-1");
+    assert_eq!(reference.card.as_str(), "/dav/card/acct-1/default/ada.vcf");
+    assert!(CardRef::from_parts(0, "acct-1", "/dav/ada.vcf".to_owned()).is_none());
+    assert!(CardRef::from_parts(7, "", "/dav/ada.vcf".to_owned()).is_none());
+    assert!(CardRef::from_parts(7, "acct-1", String::new()).is_none());
+}
+
+#[test]
+fn a_card_reference_crosses_as_its_three_halves() {
+    // The person half crosses as the bare number, exactly as a queued send's
+    // op half does: the store-assigned integer, with the account and card
+    // halves beside it.
+    let reference =
+        CardRef::from_parts(7, "acct-1", "/dav/card/acct-1/default/ada.vcf".to_owned()).unwrap();
+    let json = serde_json::to_string(&reference).unwrap();
+    assert_eq!(
+        json,
+        r#"{"person":7,"account":"acct-1","card":"/dav/card/acct-1/default/ada.vcf"}"#
+    );
+    let back: CardRef = serde_json::from_str(&json).unwrap();
     assert_eq!(back, reference);
 }
