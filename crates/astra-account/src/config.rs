@@ -12,7 +12,7 @@ use engine_api::AccountId;
 use provider_imap::{CredentialSource, Credentials, ImapConfig};
 use serde::{Deserialize, Serialize};
 
-use crate::{AccountError, CertificateException};
+use crate::{dav::DavAccount, AccountError, CertificateException};
 
 /// A secret string (password/token) that redacts itself in `Debug`, so a config
 /// holding it can still derive `Debug` without leaking the secret into logs.
@@ -70,6 +70,12 @@ pub struct AccountConfig {
     /// The SMTP submission endpoint, if mail-send is configured.
     #[serde(default)]
     pub smtp: Option<SmtpAccount>,
+    /// The DAV endpoints, if the account carries calendar and contact legs:
+    /// the origins both providers dial, with the credentials they present.
+    /// Absent for every mail-only account, which is what every stored
+    /// account was before this section existed.
+    #[serde(default)]
+    pub dav: Option<DavAccount>,
     /// Server certificates this account's owner accepted although they did not verify.
     /// Empty for every account that never met one, which is nearly all of them.
     #[serde(default, rename = "certificate_exception")]
@@ -169,6 +175,20 @@ impl AccountConfig {
                 "smtp".into(),
                 server_table(&smtp.addr, &smtp.server_name, smtp.security).into(),
             );
+        }
+        if let Some(dav) = &self.dav {
+            let mut section = toml::Table::new();
+            if let Some(caldav_url) = &dav.caldav_url {
+                section.insert("caldav_url".into(), caldav_url.to_owned().into());
+            }
+            if let Some(carddav_url) = &dav.carddav_url {
+                section.insert("carddav_url".into(), carddav_url.to_owned().into());
+            }
+            section.insert("username".into(), dav.username.clone().into());
+            if let Some(password) = &dav.password {
+                section.insert("password".into(), password.expose().to_owned().into());
+            }
+            root.insert("dav".into(), section.into());
         }
         if !self.certificate_exceptions.is_empty() {
             let exceptions: Vec<toml::Value> = self
@@ -318,6 +338,9 @@ pub fn load_str(text: &str) -> Result<AccountConfig, ConfigError> {
     if config.imap.is_none() {
         return Err(ConfigError::NoEndpoint);
     }
+    if let Some(dav) = &config.dav {
+        dav.validate()?;
+    }
     config.shape = AccountShape::read(text)?;
     Ok(config)
 }
@@ -337,6 +360,10 @@ pub enum ConfigError {
     /// The config names no server: an account needs an `[imap]` section.
     #[error("the account names no server: it needs an [imap] section")]
     NoEndpoint,
+    /// The `[dav]` section names no server: a dav section needs a
+    /// `caldav_url`, a `carddav_url`, or both.
+    #[error("the dav section names no server: it needs a caldav_url or a carddav_url")]
+    NoDavOrigin,
     /// The setup fields could not be serialised to TOML.
     #[error("serialising config: {0}")]
     Serialize(#[from] toml::ser::Error),

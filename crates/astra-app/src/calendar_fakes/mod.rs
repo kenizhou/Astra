@@ -87,6 +87,11 @@ pub(crate) struct CalendarFake {
     pub reply_delivery: engine_api::ReplyDelivery,
     /// Whether the transport's calendar server schedules (the capability).
     pub schedules: bool,
+    /// Whether this provider speaks the calendar domain at all: `false` is
+    /// the mail half of a split account, whose capabilities carry no
+    /// calendar leg and whose calendar passes refuse the way a mail
+    /// adapter's do.
+    pub calendar_leg: bool,
     /// Whether the RSVP verb can carry a note for the organiser (the
     /// capability): `false` is the transport that must refuse one.
     pub rsvp_comment: bool,
@@ -186,6 +191,7 @@ impl CalendarFake {
             fail_syncs: Arc::new(Mutex::new(0)),
             reply_delivery: engine_api::ReplyDelivery::NotReported,
             schedules: true,
+            calendar_leg: true,
             rsvp_comment: true,
             override_survival: engine_api::OverrideSurvival::kept(),
             fail_writes: Arc::new(Mutex::new(0)),
@@ -204,6 +210,15 @@ impl CalendarFake {
     pub(crate) fn failing_syncs(self, count: u32) -> Self {
         *self.fail_syncs.lock().unwrap() = count;
         self
+    }
+
+    /// Strips the calendar leg: the mail half of a split account, the shape
+    /// every mail provider has.
+    pub(crate) fn mail_only(self) -> Self {
+        Self {
+            calendar_leg: false,
+            ..self
+        }
     }
 
     /// Makes the server report it could not deliver an RSVP reply.

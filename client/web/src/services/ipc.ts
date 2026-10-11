@@ -19,6 +19,8 @@ import { sendingIntents } from './sending';
 import type { MailSubmission, OutboxIntent, SendingSnapshot } from './sending';
 import type { CalendarIntentBody, InvitationBlock } from './calendar';
 import { calendarIntents } from './calendar';
+import type { PeopleIntentBody } from './people';
+import { peopleIntents } from './people';
 import type { MailboxListSnapshot, RowKey, SearchScope, SyncProgressSnapshot, ViewMode } from './surfaces';
 
 // The composer document's whole type set, re-exported so this module stays the
@@ -43,6 +45,11 @@ export * from './setup';
 // constructors, the snapshot pull, and the meeting brief call), under the
 // same re-export and split.
 export * from './calendar';
+
+// The people half (the snapshot mirror, the intent family's constructors,
+// the snapshot pull, the editor's card-seed read, and the recipient
+// suggestions), under the same re-export and split.
+export * from './people';
 
 /** A folder bound to its owning account; unique only within the account. */
 export interface FolderRef {
@@ -127,6 +134,7 @@ export type Intent =
   | { outbox: OutboxIntent }
   | { drafts: DraftsIntent }
   | { calendar: CalendarIntentBody }
+  | { people: PeopleIntentBody }
   | { search: { query: string | null } }
   | { set_search_scope: { scope: SearchScope } };
 
@@ -175,6 +183,9 @@ export const intents = {
   // The calendar family, appended after the search verbs in the enum's own
   // order.
   ...calendarIntents,
+  // The people family, appended after the calendar family in the enum's
+  // own order.
+  ...peopleIntents,
   /** Store the composer's current content in the account's Drafts folder. */
   saveDraft: (draft: DraftSave): Intent => ({
     drafts: {

@@ -195,7 +195,7 @@ impl<P: Provider> App<P> {
         let Some(handle) = self.account_handle(account).await else {
             return subjects;
         };
-        let Some(provider) = handle.providers.first() else {
+        let Some(provider) = super::calendar_provider_of(&handle) else {
             return subjects;
         };
         let rows = match self

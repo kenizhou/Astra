@@ -293,6 +293,18 @@ fn a_nameless_row_carries_the_empty_signals() {
 }
 
 #[test]
+fn the_shared_web_fixture_parses_as_the_snapshot() {
+    // The web service's people.test.ts parses this same file, so the
+    // fixture the surface mirrors and the snapshot the host publishes can
+    // never drift apart.
+    let raw = include_str!("../../../client/web/src/services/__fixtures__/people_snapshot.json");
+    let back: PeopleSnapshot = serde_json::from_str(raw).expect("the fixture parses");
+    let wire = serde_json::to_value(&back).expect("the snapshot serialises");
+    let raw: serde_json::Value = serde_json::from_str(raw).expect("the fixture is JSON");
+    assert_eq!(wire, raw, "the fixture round trips value for value");
+}
+
+#[test]
 fn a_value_without_provenance_and_a_detail_without_extras_skip_their_keys() {
     // A detail of one source with no values yet still opens: the empty lists
     // cross no keys, and a value the engine could not source crosses none

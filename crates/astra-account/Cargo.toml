@@ -28,6 +28,11 @@ engine-tls.workspace = true
 # The IMAP adapter this crate builds an engine `ImapConfig` for; the credential source
 # and credentials types are the engine's.
 provider-imap.workspace = true
+# The CalDAV and CardDAV adapters the optional dav section of a stored account
+# dials: the account layer is the host's one dial path, so both legs connect
+# here (calendar reads beside the mail providers, contacts as the installed
+# leg) rather than each host dialing its own.
+provider-caldav.workspace = true
 # Implementing the engine's async `Provider` trait for the reconnecting IMAP wrapper.
 async-trait.workspace = true
 # Builds the reconnecting wrapper's retried provider streams.

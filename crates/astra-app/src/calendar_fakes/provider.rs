@@ -30,17 +30,20 @@ impl Provider for CalendarFake {
         let mut caps = Capabilities::none()
             .with_mail()
             .with_message_source()
-            .with_calendars()
-            .with_calendar_writes(WriteGuard::Enforced, self.override_survival)
-            .with_calendar_rsvp(RsvpControls {
-                comment: self.rsvp_comment,
-                suppress_notification: true,
-                guard: WriteGuard::Enforced,
-            })
             .with_submission()
             .with_scheduling_submission();
-        if self.schedules {
-            caps = caps.with_calendar_scheduling();
+        if self.calendar_leg {
+            caps = caps
+                .with_calendars()
+                .with_calendar_writes(WriteGuard::Enforced, self.override_survival)
+                .with_calendar_rsvp(RsvpControls {
+                    comment: self.rsvp_comment,
+                    suppress_notification: true,
+                    guard: WriteGuard::Enforced,
+                });
+            if self.schedules {
+                caps = caps.with_calendar_scheduling();
+            }
         }
         ConnectionInfo::new(caps)
     }
@@ -99,6 +102,11 @@ impl Provider for CalendarFake {
         _account: &AccountId,
         _cursor: Option<&SyncState>,
     ) -> ProviderResult<ScopeSync<Calendar>> {
+        if !self.calendar_leg {
+            // The mail half refuses the calendar domain the way a provider
+            // that does not override the trait's default does.
+            return Err(ProviderError::invalid_state("calendar sync"));
+        }
         let present = self
             .calendars
             .iter()

@@ -22,6 +22,7 @@ use engine_api::{AccountId, CalendarDateTime, Provider, Reconciled};
 
 use crate::{
     calendar::{
+        calendar_provider_of,
         drag::apply_drag,
         edit::{self, NewEvent},
         now_utc,
@@ -50,7 +51,7 @@ impl<P: Provider> App<P> {
             log::warn!("calendar: the calendar to create in is no longer configured");
             return;
         };
-        let Some(provider) = handle.providers.first() else {
+        let Some(provider) = calendar_provider_of(&handle) else {
             log::warn!("calendar: the account has no provider to write through");
             return;
         };
@@ -121,7 +122,7 @@ impl<P: Provider> App<P> {
         let Some((handle, base)) = self.writable_event(event).await else {
             return;
         };
-        let Some(provider) = handle.providers.first() else {
+        let Some(provider) = calendar_provider_of(&handle) else {
             log::warn!("calendar: the account has no provider to write through");
             return;
         };
@@ -157,7 +158,7 @@ impl<P: Provider> App<P> {
         let Some((handle, base)) = self.writable_event(event).await else {
             return;
         };
-        let Some(provider) = handle.providers.first() else {
+        let Some(provider) = calendar_provider_of(&handle) else {
             log::warn!("calendar: the account has no provider to write through");
             return;
         };
@@ -252,7 +253,7 @@ impl<P: Provider> App<P> {
         let Some((handle, base)) = self.writable_event(event).await else {
             return;
         };
-        let Some(provider) = handle.providers.first() else {
+        let Some(provider) = calendar_provider_of(&handle) else {
             log::warn!("calendar: the account has no provider to write through");
             return;
         };

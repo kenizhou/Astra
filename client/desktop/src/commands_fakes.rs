@@ -21,11 +21,14 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use astra_app::{Chip, ComposeIntent, DraftResume, DraftsIntent, Intent, OutboxIntent};
+use astra_app::{
+    Chip, ComposeIntent, ContactDraftInput, DraftResume, DraftsIntent, Intent, OutboxIntent,
+};
 use astra_viewmodel::{
     CalendarSnapshot, ComposeKind, ComposeRequestSnapshot, DraftSaveState, DraftStatusSnapshot,
-    MailboxListSnapshot, ReadingSnapshot, SendingSnapshot, SyncProgressSnapshot,
+    MailboxListSnapshot, PeopleSnapshot, ReadingSnapshot, SendingSnapshot, SyncProgressSnapshot,
 };
+use engine_api::RecipientSuggestion;
 
 use crate::{
     app_state::AppState,
@@ -116,6 +119,18 @@ pub(crate) struct FakeApp {
     /// The calendar brief pull's seeds and their record, under the same
     /// one-struct-one-lock discipline.
     pub(crate) brief: Mutex<BriefSeeds>,
+    /// The people snapshot the pull answers with.
+    pub(crate) people: Mutex<PeopleSnapshot>,
+    /// The card-seed read's answer.
+    pub(crate) card_seed: Mutex<Option<ContactDraftInput>>,
+    /// The (person, account, card) triples the seed read was asked for, so a
+    /// test can assert the command hands the webview's reference through to
+    /// the core.
+    pub(crate) seeded_into: Mutex<Vec<(u64, String, String)>>,
+    /// The suggestions pull's answer.
+    pub(crate) suggestions: Mutex<Vec<RecipientSuggestion>>,
+    /// The (token, limit) pairs the suggestions pull was asked for.
+    pub(crate) suggested_into: Mutex<Vec<(String, usize)>>,
 }
 
 impl FakeApp {
@@ -155,6 +170,11 @@ impl FakeApp {
             docs: Mutex::new(DocsSeeds::default()),
             calendar: Mutex::new(CalendarSnapshot::default()),
             brief: Mutex::new(BriefSeeds::default()),
+            people: Mutex::new(PeopleSnapshot::default()),
+            card_seed: Mutex::new(None),
+            seeded_into: Mutex::new(Vec::new()),
+            suggestions: Mutex::new(Vec::new()),
+            suggested_into: Mutex::new(Vec::new()),
         })
     }
 

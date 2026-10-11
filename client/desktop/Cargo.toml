@@ -82,6 +82,10 @@ engine-tls.workspace = true
 # The composer document the drafts intents carry; the command-surface fakes
 # render the saved document to the plain text a stored draft resumes as.
 astra-composer = { path = "../../crates/astra-composer" }
+# The provider-side plumbing the boot dial tests name: ConnectionInfo for the
+# stand-in providers' connection answers, which engine-api re-exports the
+# traits of but not the type itself.
+engine-provider.workspace = true
 # Reading the LLM ledger rows back in the client tests, through the test's
 # own connection into the file-backed store the client records into.
 rusqlite = { workspace = true, features = ["fallible_uint"] }

@@ -23,6 +23,7 @@
 //! [`PeopleIntent`]: crate::protocol::PeopleIntent
 
 mod cards;
+mod seed;
 mod snapshot;
 mod suggest;
 mod write;

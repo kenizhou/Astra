@@ -1,0 +1,73 @@
+{
+  "rows": [
+    {
+      "person": 7,
+      "display_name": "Ada Lovelace",
+      "monogram": { "initials": "AL", "colour": "teal" },
+      "account_count": 2,
+      "section": "A",
+      "primary_address": "ada@example.test"
+    }
+  ],
+  "detail": {
+    "person": 7,
+    "display_name": "Ada Lovelace",
+    "sources": [
+      {
+        "account": "work",
+        "card": "/dav/card/work/default/ada.vcf",
+        "writable": true
+      },
+      {
+        "account": "home",
+        "card": "/dav/card/home/default/ada.vcf",
+        "writable": false
+      }
+    ],
+    "values": [
+      {
+        "kind": "email",
+        "value": "ada@example.test",
+        "sources": [
+          {
+            "account": "work",
+            "card": "/dav/card/work/default/ada.vcf",
+            "writable": true
+          },
+          {
+            "account": "home",
+            "card": "/dav/card/home/default/ada.vcf",
+            "writable": false
+          }
+        ]
+      },
+      {
+        "kind": "phone",
+        "value": "+31 20 555 0100",
+        "sources": [
+          {
+            "account": "work",
+            "card": "/dav/card/work/default/ada.vcf",
+            "writable": true
+          }
+        ]
+      }
+    ],
+    "editable_cards": [
+      {
+        "person": 7,
+        "account": "work",
+        "card": "/dav/card/work/default/ada.vcf"
+      }
+    ]
+  },
+  "write_states": [{ "account": "work", "state": "writing" }],
+  "create_targets": [
+    {
+      "account": "work",
+      "book": "/dav/card/work/default/",
+      "name": "Contacts",
+      "is_default": true
+    }
+  ]
+}

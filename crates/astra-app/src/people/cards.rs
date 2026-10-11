@@ -243,7 +243,7 @@ fn create_name_value(name: &ContactNameInput) -> Value {
 /// because that is the field the editor seeded it into. Read through the
 /// card's own JSON, because the component kinds are engine types this
 /// facade does not re-export.
-fn base_name_parts(base: &ContactCard) -> (String, Option<String>) {
+pub(crate) fn base_name_parts(base: &ContactCard) -> (String, Option<String>) {
     let name = serde_json::to_value(&base.name).unwrap_or(Value::Null);
     let components = name.get("components").and_then(Value::as_array);
     let join = |kind: &str| -> Option<String> {
@@ -324,7 +324,7 @@ fn split_components(components: &Value) -> (Vec<Value>, Vec<Value>, Vec<Value>) 
 
 /// The first property's flat value of one card field (`"name"` inside an
 /// organisation or title, say), or `None` when the field carries nothing.
-fn base_first_flat_value(base: &ContactCard, field: &str, key: &str) -> Option<String> {
+pub(crate) fn base_first_flat_value(base: &ContactCard, field: &str, key: &str) -> Option<String> {
     serde_json::to_value(field_of(base, field))
         .unwrap_or(Value::Null)
         .as_object()

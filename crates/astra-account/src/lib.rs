@@ -13,6 +13,7 @@
 mod autodetect;
 mod config;
 mod credentials;
+mod dav;
 mod imap;
 mod pass_folders;
 mod reconnect;
@@ -26,6 +27,7 @@ pub use config::{
     Secret, SmtpAccount,
 };
 pub use credentials::imap_credential_source;
+pub use dav::{connect_dav_providers, DavAccount, DavProviders};
 pub use imap::{connect_imap_mailbox, connect_mail_providers, ImapConnections};
 pub use pass_folders::pass_syncs;
 pub use reconnect::{ReconnectingImapProvider, Redial};
@@ -47,6 +49,12 @@ pub enum AccountError {
     /// The mailbox id was not valid.
     #[error("invalid mailbox id: {0}")]
     Mailbox(String),
+    /// The CalDAV or CardDAV connection failed: the transport, the discovery,
+    /// or the login. Apart from the mail variants because a failed dav leg
+    /// leaves an otherwise working account: the caller logs it and keeps the
+    /// mail half standing.
+    #[error("dav: {0}")]
+    Dav(String),
     /// Listing the account's folders failed (the dial needs it to bind them).
     #[error("listing mailboxes: {0}")]
     MailboxList(String),

@@ -7,16 +7,16 @@ use std::sync::Arc;
 
 use astra_ai::{AiDocumentKind, KnowledgeId};
 use astra_app::{
-    Account, App, BriefDocumentError, Chip, CompositionId, DigestView, DocumentError, DocumentView,
-    DraftResume, ExtractionSummary, Intent, KnowledgeView, MeetingBriefView, Snippet, SplitEntry,
-    SummariseMessageError, TranslateLanguage,
+    Account, App, BriefDocumentError, CardRef, Chip, CompositionId, ContactDraftInput, DigestView,
+    DocumentError, DocumentView, DraftResume, ExtractionSummary, Intent, KnowledgeView,
+    MeetingBriefView, Snippet, SplitEntry, SummariseMessageError, TranslateLanguage,
 };
 use astra_viewmodel::{
     CalendarSnapshot, ComposeRequestSnapshot, DraftStatusSnapshot, MailboxListSnapshot,
-    ReadingSnapshot, SendingSnapshot, SyncProgressSnapshot,
+    PeopleSnapshot, ReadingSnapshot, SendingSnapshot, SyncProgressSnapshot,
 };
 use async_trait::async_trait;
-use engine_api::{AccountId, CalendarDate, Provider, ProviderKey};
+use engine_api::{AccountId, CalendarDate, Provider, ProviderKey, RecipientSuggestion};
 
 use crate::{AccountCredentialStore, AccountDials, AppRuntime, LlmClient, SidecarRelay};
 
@@ -194,6 +194,19 @@ pub(crate) trait AppPort: Send + Sync {
     /// calendar signal.
     fn calendar(&self) -> CalendarSnapshot;
 
+    /// The published people snapshot, for the host's pull after a
+    /// people signal.
+    fn people(&self) -> PeopleSnapshot;
+
+    /// The editor's seed for one card: the stored card the reference names,
+    /// rendered as the editor's input subset, or `None` when nobody stores
+    /// it.
+    async fn card_seed(&self, card: &CardRef) -> Option<ContactDraftInput>;
+
+    /// The ranked recipient suggestions for one completion token: the
+    /// composer's autosuggest pull, providerless.
+    async fn recipient_suggestions(&self, token: &str, limit: usize) -> Vec<RecipientSuggestion>;
+
     /// Generates the account's meeting brief over the civil day: the
     /// store re-read of the day's occurrences and one generation, the
     /// empty day answered as the no-meetings view with no call spent.
@@ -338,6 +351,18 @@ impl AppPort for App<HostProvider> {
 
     fn calendar(&self) -> CalendarSnapshot {
         App::calendar(self)
+    }
+
+    fn people(&self) -> PeopleSnapshot {
+        App::people(self)
+    }
+
+    async fn card_seed(&self, card: &CardRef) -> Option<ContactDraftInput> {
+        App::card_seed(self, card).await
+    }
+
+    async fn recipient_suggestions(&self, token: &str, limit: usize) -> Vec<RecipientSuggestion> {
+        App::recipient_suggestions(self, token, limit).await
     }
 
     async fn generate_meeting_brief(
