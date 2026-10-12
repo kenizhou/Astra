@@ -20,10 +20,11 @@ import { useUiStore } from '@/stores/uiStore';
 import type { SearchScope } from '@/services/surfaces';
 import type { ShellView } from '@/stores/uiStore';
 
-/** The shell's views the switch offers; Contacts joins this list later. */
+/** The shell's views the switch offers, in the shell's own order. */
 const SHELL_VIEWS: ReadonlyArray<{ id: ShellView; label: string }> = [
   { id: 'mail', label: 'Mail' },
   { id: 'calendar', label: 'Calendar' },
+  { id: 'people', label: 'People' },
 ];
 
 /** The shell's view switch: which feature fills the content row. */

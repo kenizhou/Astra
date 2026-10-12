@@ -9,8 +9,6 @@
 //! what actually holds (the flipped row state once queued; the taken-back state only
 //! when the server refuses the edit for good).
 
-use std::sync::atomic::AtomicU64;
-
 use engine_api::{MailEdit, Provider, ProviderKey};
 
 use crate::{
@@ -101,14 +99,9 @@ impl<P: Provider> App<P> {
     }
 }
 
-/// A unique-per-intent idempotency key for an edit, from the wall clock and a process
-/// counter. Unique per call rather than per target, so mark-read then mark-unread of one
-/// message never collapses into a single op.
+/// A unique-per-intent idempotency key for an edit, from the shared mint
+/// under the family's own prefix. Unique per call rather than per target, so
+/// mark-read then mark-unread of one message never collapses into a single op.
 fn generated_idempotency() -> String {
-    static SEQ: AtomicU64 = AtomicU64::new(0);
-    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_nanos());
-    format!("edit:{nanos}:{seq}")
+    crate::mint_idempotency("edit")
 }

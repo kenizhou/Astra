@@ -42,7 +42,17 @@
 //! cleanup, because every query it runs crosses the engine's real search surface over
 //! the corpus the seed already pinned (the three INBOX notes, plus the rich note in
 //! Projects, so the `from:` hit proves the answer crosses folders), and the harness
-//! keeps its seeded shape whatever the queries find.
+//! keeps its seeded shape whatever the queries find. The gated people tests
+//! (`people`) extend the same discipline to the CardDAV face: cards are seeded
+//! straight onto each account's default address book through a raw helper under
+//! unique run tokens, the dav dial proof runs the real `connect_dav_providers`
+//! and the boot-shaped assembly over it, every assertion reads through the
+//! product's own engine paths and snapshots, the autosuggest proof submits its
+//! own mail through the engine's send path so the history it ranks is the run's
+//! own, and every seeded card and every sent mail is withdrawn at the end. The
+//! card withdrawals ride the raw seeding helper rather than a product path
+//! because the product ships no contact delete; the mail withdrawals ride the
+//! product's own delete.
 //!
 //! The JMAP-detection test cannot dial `https://example.test/.well-known/jmap` (the
 //! harness domain resolves nowhere), so it rebases the probe onto the harness's plain
@@ -88,12 +98,12 @@ use crate::{
     Account, App, AppObserver, FolderRef, Intent, Surface,
 };
 
-// The gated reading, drafts, send, reply, forward, search, and calendar tests:
-// their own files, so this one stays under the 500-line cap the gate enforces.
-// The explicit paths because this file is loaded through `#[path]` and so owns no
-// directory a bare `mod` would resolve into. `proof` holds the fixtures the
-// three delivery proofs share (the two-account app, the composer document, the
-// cleanup sweep).
+// The gated reading, drafts, send, reply, forward, search, calendar, and
+// people tests: their own files, so this one stays under the 500-line cap the
+// gate enforces. The explicit paths because this file is loaded through `#[path]`
+// and so owns no directory a bare `mod` would resolve into. `proof` holds the
+// fixtures the three delivery proofs share (the two-account app, the composer
+// document, the cleanup sweep).
 #[path = "tests_live_harness/calendar.rs"]
 mod calendar;
 #[path = "tests_live_harness/calendar_brief.rs"]
@@ -106,6 +116,10 @@ mod calendar_proof;
 mod drafts;
 #[path = "tests_live_harness/forward.rs"]
 mod forward;
+#[path = "tests_live_harness/people.rs"]
+mod people;
+#[path = "tests_live_harness/people_proof.rs"]
+mod people_proof;
 #[path = "tests_live_harness/proof.rs"]
 mod proof;
 #[path = "tests_live_harness/reading.rs"]
@@ -172,6 +186,7 @@ fn account(
             security: ConnectionSecurity::ImplicitTls,
         }),
         certificate_exceptions: exceptions,
+        dav: None,
         shape: AccountShape::default(),
     }
 }

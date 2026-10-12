@@ -12,6 +12,7 @@
 
 use std::{
     collections::BTreeMap,
+    future::Future,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
@@ -52,6 +53,7 @@ pub(crate) fn assemble_state(
     let connections = Arc::new(AccountDials::load(data_dir)?);
 
     let accounts = runtime.block_on(|| dial_stored(&connections));
+    let (accounts, contacts_legs) = split_dialled(accounts);
     let engine_path = data_dir.join(ENGINE_STORE_FILE);
     // The AI ledgers and the agent: one store the host, the sidecar's
     // reported calls, and the CLI's audited verbs all append to, the
@@ -85,6 +87,13 @@ pub(crate) fn assemble_state(
             ai_pass,
         )
     })?;
+    // The contacts legs the dials handed back, installed beside the accounts
+    // they belong to before any people dispatch can run: the reads work over
+    // the already-synced store either way, and the writes have nowhere to go
+    // until a leg stands.
+    for (account, leg) in contacts_legs {
+        core.install_contacts(&account, leg);
+    }
     let model = llm.as_ref().and_then(|client| chat_model_config(client));
     let agent_relay = agent::build_relay(data_dir, model, agent_sink, Arc::clone(&ai_store));
 
@@ -93,6 +102,9 @@ pub(crate) fn assemble_state(
         agent: agent_relay,
         llm,
         connections,
+        photo_root: engine_path
+            .with_file_name(format!("{ENGINE_STORE_FILE}.blobs"))
+            .join("contact-photos"),
         credential_store: Arc::new(keyring),
         runtime,
     })
@@ -318,10 +330,12 @@ impl MailboxConnector<HostProvider> for DialConnector {
     }
 }
 
-/// Dials every registered account, connected config to bound providers. A dial that
-/// fails is skipped with a warning: one stale password must not block the others,
-/// and the app opens with whatever connected.
-async fn dial_stored(dials: &AccountDials) -> Vec<HostAccount> {
+/// Dials every registered account, mail half first and dav legs beside it.
+/// A mail dial that fails skips the account with a warning: one stale
+/// password must not block the others, and the app opens with whatever
+/// connected. A dav dial that fails keeps the account standing on its mail
+/// half alone, inside [`dial_dav_with`].
+async fn dial_stored(dials: &AccountDials) -> Vec<Dialled> {
     let mut accounts = Vec::new();
     for id in dials.ids() {
         let Some((config, connections)) = dials.of(&id) else {
@@ -340,17 +354,100 @@ async fn dial_stored(dials: &AccountDials) -> Vec<HostAccount> {
             .map(|imap| imap.username.clone())
             .unwrap_or_default();
         match astra_account::connect_mail_providers(&connections, &config, &account_id).await {
-            Ok(providers) => accounts.push(HostAccount {
-                id: account_id,
-                providers,
-                identity: EmailAddress::new(email),
-            }),
+            Ok(providers) => {
+                let account = HostAccount {
+                    id: account_id,
+                    providers,
+                    identity: EmailAddress::new(email),
+                };
+                let (account, contacts) = dial_dav(&config, account).await;
+                accounts.push(Dialled { account, contacts });
+            }
             Err(err) => {
                 log::warn!("boot: an account could not be connected and was skipped: {err}");
             }
         }
     }
     accounts
+}
+
+/// One dialled account as the boot holds it: the account with every dialled
+/// provider installed, and the contacts leg to install beside it once the
+/// app core exists.
+struct Dialled {
+    /// The account as the app installs it: the mail providers first, the
+    /// appended calendar provider after.
+    account: HostAccount,
+    /// The dialled contacts leg, when the account has one.
+    contacts: Option<HostContactsLeg>,
+}
+
+/// The contacts leg type the boot dials and installs: a CardDAV provider
+/// boxed behind the engine's contacts domain, the one shape the mail-generic
+/// app core can drive.
+pub(crate) type HostContactsLeg = Box<dyn engine_api::ContactsProvider>;
+
+/// Splits the dialled accounts into the list the app core boots over and the
+/// contacts legs to install after it: the legs cannot ride the accounts
+/// (their providers list is the mail-and-calendar surface), and they cannot
+/// be installed before the core exists.
+fn split_dialled(dialled: Vec<Dialled>) -> (Vec<HostAccount>, Vec<(AccountId, HostContactsLeg)>) {
+    let mut accounts = Vec::new();
+    let mut legs = Vec::new();
+    for dialled in dialled {
+        if let Some(leg) = dialled.contacts {
+            legs.push((dialled.account.id.clone(), leg));
+        }
+        accounts.push(dialled.account);
+    }
+    (accounts, legs)
+}
+
+/// Dials the account's dav legs through the real connect and folds them
+/// into `account`.
+async fn dial_dav(
+    config: &astra_account::AccountConfig,
+    account: HostAccount,
+) -> (HostAccount, Option<HostContactsLeg>) {
+    dial_dav_with(config, account, || {
+        astra_account::connect_dav_providers(config)
+    })
+    .await
+}
+
+/// Folds a dialled dav pair into `account`: the CalDAV provider appended
+/// after the mail providers (the calendar paths pick it by capability,
+/// wherever in the list it stands), the CardDAV provider handed back as the
+/// contacts leg to install. A failed dial leaves the account standing on
+/// its mail half alone, logged: a server that splits them or a section that
+/// names an unreachable origin costs the account neither its mail nor the
+/// boot. An account with no dav section dials nothing at all.
+async fn dial_dav_with<F, Fut>(
+    config: &astra_account::AccountConfig,
+    mut account: HostAccount,
+    dial: F,
+) -> (HostAccount, Option<HostContactsLeg>)
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<astra_account::DavProviders, astra_account::AccountError>>,
+{
+    if config.dav.is_none() {
+        return (account, None);
+    }
+    match dial().await {
+        Ok(dav) => {
+            if let Some(caldav) = dav.caldav {
+                account.providers.push(caldav);
+            }
+            (account, dav.carddav)
+        }
+        Err(err) => {
+            log::warn!(
+                "boot: an account's dav legs could not be connected; the mail half stands alone: {err}"
+            );
+            (account, None)
+        }
+    }
 }
 
 /// The `setup` hook: resolves the shell's data directory, assembles the host's state
@@ -382,3 +479,7 @@ pub(crate) fn setup_host(app: &mut tauri::App) -> Result<(), Box<dyn std::error:
     app.manage(state);
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "boot_tests.rs"]
+mod tests;

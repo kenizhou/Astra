@@ -158,7 +158,7 @@ impl<P: Provider> App<P> {
             log::warn!("calendar: the account the invitation belongs to is gone");
             return;
         };
-        let Some(provider) = handle.providers.first() else {
+        let Some(provider) = super::calendar_provider_of(&handle) else {
             log::warn!("calendar: the account has no provider to answer through");
             return;
         };

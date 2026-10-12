@@ -8,6 +8,7 @@ mod intent_calendar;
 mod intent_compose;
 mod intent_drafts;
 mod intent_outbox;
+mod intent_people;
 mod status;
 
 pub use intent::{FolderIntent, Intent, SearchScope, ViewMode};
@@ -18,6 +19,7 @@ pub use intent_calendar::{
 pub use intent_compose::ComposeIntent;
 pub use intent_drafts::{CompositionId, DraftsIntent};
 pub use intent_outbox::OutboxIntent;
+pub use intent_people::{ContactDraftInput, ContactNameInput, ContactPatchInput, PeopleIntent};
 
 use astra_composer::DraftBlobHandle;
 use serde::{Deserialize, Serialize};
@@ -59,6 +61,12 @@ pub enum Surface {
     /// them; a grid holding a pending write must not miss the state that
     /// follows it.
     Calendar,
+    /// The people: the unified rows the current query matched, the open
+    /// person's detail, the write states, and the create targets. Every
+    /// publish is one transition of the view (a sync landed, a write settled,
+    /// the query changed), so the host repaints on every signal rather than
+    /// debouncing them.
+    People,
 }
 
 /// Host-resolved bytes for one composer blob handle.
@@ -111,3 +119,8 @@ mod search_tests;
 #[cfg(test)]
 #[path = "protocol_calendar_tests.rs"]
 mod calendar_tests;
+
+// The people family's intents and surface word, split for the same reason.
+#[cfg(test)]
+#[path = "protocol_people_tests.rs"]
+mod people_tests;

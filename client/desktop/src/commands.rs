@@ -44,6 +44,10 @@ pub(crate) mod ai_docs;
 // generation), under the same split.
 pub(crate) mod calendar;
 
+// The people command surface (the snapshot pull, the editor's card seed,
+// and the recipient suggestions), under the same split.
+pub(crate) mod people;
+
 /// A command failure, serialised to the webview as its display string: a sentence a
 /// surface can show, with the reason the host saw.
 #[derive(Debug, thiserror::Error)]

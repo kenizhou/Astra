@@ -23,10 +23,20 @@ import {
   editorToDocument,
   type EditorDocument,
 } from './documentWire';
+import { normaliseRecipients } from './recipientTokens';
 
 /** Mints one composition's id: a UUID, unique across restarts. */
 export function mintCompositionId(): CompositionId {
   return crypto.randomUUID();
+}
+
+/**
+ * The one predicate the composer's opening caret runs on: in the body when
+ * the composer was already addressed (a reply, a forward's quoted original,
+ * a resumed draft), in To otherwise, where the work starts.
+ */
+export function opensInBody(request: CompositionRequest | null, to: string): boolean {
+  return request !== null || to.trim() !== '';
 }
 
 /** The account a composition sends from. */
@@ -120,7 +130,10 @@ export const useComposerStore = create<ComposerStoreState>((set) => ({
   hydrate: (view, account, composition) => {
     // A resumed composition is a plain one: whatever request the pane held,
     // or the store still has pending, is spent here so the resumed send
-    // rides the plain submit with the resumed fields.
+    // rides the plain submit with the resumed fields. The recipient fields
+    // normalise their opening value at seed time, so every supplied address
+    // is a finished pill, nothing sits in progress, and the fingerprint
+    // compares against the normalised value.
     useComposeRequestStore.getState().dismiss();
     set(() => {
       const editor = documentToEditor(documentFromPlainText(view.body_text));
@@ -129,9 +142,9 @@ export const useComposerStore = create<ComposerStoreState>((set) => ({
         composition,
         from: account.id,
         fromLabel: account.label,
-        to: view.to,
-        cc: view.cc,
-        bcc: view.bcc,
+        to: normaliseRecipients(view.to),
+        cc: normaliseRecipients(view.cc),
+        bcc: normaliseRecipients(view.bcc),
         subject: view.subject,
         editor,
       };
@@ -146,8 +159,8 @@ export const useComposerStore = create<ComposerStoreState>((set) => ({
       composition: mintCompositionId(),
       from: snapshot.from,
       fromLabel,
-      to: snapshot.to,
-      cc: snapshot.cc,
+      to: normaliseRecipients(snapshot.to),
+      cc: normaliseRecipients(snapshot.cc),
       subject: snapshot.subject,
       editor: documentToEditor(snapshot.document),
       request: { kind: snapshot.kind, inReplyTo: snapshot.in_reply_to ?? null },

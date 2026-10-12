@@ -42,6 +42,55 @@ apply() {
   log "$out"
 }
 
+# Raise every inbound rate limiter out of the way (`x:MtaInboundThrottle`, one of the
+# store-backed settings objects: v0.16 has no config file for them). Stalwart ships two
+# enabled by default, 5/second per sender IP and 25/hour per (sender domain, recipient),
+# and the second is the proven biter: RFC 6638 auto-scheduling mails both parties of every
+# invitation, so the calendar and invitation suites spend the 25-message budget in a few
+# runs and past it Stalwart rejects every recipient ("all recipients rejected"), which
+# reads exactly like a code regression. A deterministic fixture must not depend on how
+# many times the suite has already run. Idempotent; takes effect without a restart.
+# Ported from the engine's own harness entrypoint, where the trap was first documented.
+jmap() {
+  curl -s -u "admin:$ADMIN_PW" -H 'Content-Type: application/json' \
+    -X POST "$HTTP/jmap" \
+    -d "{\"using\":[\"urn:ietf:params:jmap:core\",\"urn:stalwart:jmap\"],\"methodCalls\":[$1]}"
+}
+
+relax_inbound_throttles() {
+  # POSIX sh has no pipefail, so a dead curl (or a JMAP error envelope) would
+  # look like an empty list and the function would no-op with the throttles
+  # still armed: the body is captured once and checked for a real answer
+  # before the ids are parsed out of it.
+  body=$(jmap '["x:MtaInboundThrottle/get",{"ids":null,"properties":["description"]},"c0"]')
+  case "$body" in
+    *'"methodResponses"'*) ;;
+    *)
+      log "FAILED to read the inbound throttles: ${body:-no answer}"
+      return 1
+      ;;
+  esac
+  case "$body" in
+    *'"error"'*)
+      log "FAILED to read the inbound throttles: $body"
+      return 1
+      ;;
+  esac
+  ids=$(printf '%s' "$body" | grep -oE '"id":"[^"]+"' | cut -d'"' -f4)
+  if [ -z "$ids" ]; then
+    log "no inbound throttles reported; nothing to relax"
+    return 0
+  fi
+  for id in $ids; do
+    if ! jmap "[\"x:MtaInboundThrottle/set\",{\"update\":{\"$id\":{\"rate\":{\"count\":1000000,\"period\":1000}}}},\"c0\"]" \
+      | grep -q '"updated"'; then
+      log "FAILED to relax inbound throttle $id"
+      return 1
+    fi
+  done
+  log "relaxed inbound rate limiters: $(printf '%s' "$ids" | wc -w | tr -d ' ') throttle(s)"
+}
+
 start_server() {
   stalwart --config "$CONFIG" &
   SRV=$!
@@ -101,6 +150,11 @@ apply <<'EOF'
 EOF
 
 restart_server "to read the accounts above"
+
+# After the restart the store-backed settings answer, so the inbound throttles
+# relax here: the calendar, invitation, and autosuggest suites all spend mail
+# budgets that a fixed 25-per-hour cap turns into run-count-dependent flakes.
+relax_inbound_throttles
 
 log "seeding the harness folders and notes"
 /bin/sh /harness/seed.sh

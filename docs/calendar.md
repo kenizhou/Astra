@@ -130,11 +130,6 @@ spends **no** call. Briefs regenerate on request; nothing is cached.
 
 ## Known gaps
 
-- **The desktop host dials no calendar leg yet.** Account connect binds the
-  mail providers; the CalDAV/JMAP calendar dial at boot lands with the
-  account model extension. The core, the intents, and the engine paths are
-  proven live against a real CalDAV server (the gated harness suite); the
-  shipped host renders the surface with no account calendar to fill it.
 - **Edit-time rule restructuring is absent.** The create path offers the
   repeat choices; the edit path degrades read-only rather than rewrite a rule
   it cannot read back in full.

@@ -8,7 +8,9 @@
 //! snapshot paths, never the raw helper. The diary proofs themselves live
 //! in `calendar`, the invitation machine's in `calendar_invite`, and the
 //! relayed meeting brief in `calendar_brief`, the same split the mail
-//! suites made for the 500-line cap.
+//! suites made for the 500-line cap. The people proofs (`people`) ride
+//! the same run token and the same raw request helper against the
+//! listener's CardDAV face.
 
 use std::{fmt::Write as _, sync::Arc, time::Duration};
 
@@ -42,16 +44,32 @@ pub(super) fn run_token() -> String {
 /// `Connection: close` so reading to EOF is the whole response. Seeding
 /// only; no product assertion ever rides this.
 pub(super) fn dav(method: &str, account: &str, uid: &str, password: &str, body: &str) -> u16 {
-    use std::io::{Read, Write};
-    let base = super::jmap_base().expect("the gated run names the harness origin");
-    let authority = base.strip_prefix("http://").unwrap_or(&base).to_owned();
     let path = format!(
         "/dav/cal/{account}/default/{}.ics",
         encode_path_segment(uid)
     );
+    dav_raw(method, &path, account, password, "text/calendar", body)
+}
+
+/// The raw DAV request under the seeding helpers: the same one-shot
+/// plaintext request against an already-encoded `path` on the harness's
+/// shared listener, with the content type the face expects. The people
+/// proofs ride this against the CardDAV face beside the calendar's CalDAV
+/// one; seeding and seeding-side cleanup only, never an assertion path.
+pub(super) fn dav_raw(
+    method: &str,
+    path: &str,
+    account: &str,
+    password: &str,
+    content_type: &str,
+    body: &str,
+) -> u16 {
+    use std::io::{Read, Write};
+    let base = super::jmap_base().expect("the gated run names the harness origin");
+    let authority = base.strip_prefix("http://").unwrap_or(&base).to_owned();
     let request = format!(
         "{method} {path} HTTP/1.0\r\nHost: {authority}\r\nAuthorization: Basic {}\r\n\
-         Content-Type: text/calendar\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+         Content-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         base64(&format!("{account}:{password}")),
         body.len(),
     );
@@ -72,7 +90,7 @@ pub(super) fn dav(method: &str, account: &str, uid: &str, password: &str, body: 
 
 /// Percent-encodes `segment` as one URI path segment (RFC 3986 §2.3): a
 /// `UID` is opaque, and nothing forbids a slash.
-fn encode_path_segment(segment: &str) -> String {
+pub(super) fn encode_path_segment(segment: &str) -> String {
     let mut out = String::with_capacity(segment.len());
     for &byte in segment.as_bytes() {
         if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {

@@ -7,7 +7,9 @@
 //! A reference is built **once**, at the IPC boundary, from the very row the host acted
 //! on; both halves travel together from there on.
 
-use engine_api::{AccountId, CalendarId, PendingOpId, ProviderKey};
+use engine_api::{
+    AccountId, AddressBookId, CalendarId, ContactId, PendingOpId, PersonId, ProviderKey,
+};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// A folder of one account, identified by its owning account and folder key **together**.
@@ -117,6 +119,70 @@ impl EventRef {
         Some(Self {
             account: AccountId::try_from(account).ok()?,
             key: ProviderKey::new(key).ok()?,
+        })
+    }
+}
+
+/// An address book of one account, identified by its owning account and book
+/// id **together**.
+///
+/// A book id is unique only *within* an account (every provider calls its
+/// default book `default`), so a create must name the two together or risk
+/// landing a contact in another account's book of the same name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AddressBookRef {
+    /// The account whose provider serves the book.
+    pub account: AccountId,
+    /// The book's provider id; unique only within `account`.
+    pub book: AddressBookId,
+}
+
+impl AddressBookRef {
+    /// Builds an address-book reference from a host's `account` id and book
+    /// id strings; the single construction point, at the IPC boundary.
+    /// Returns `None` if either half is malformed, so the caller can drop the
+    /// intent rather than create into the wrong account's book.
+    #[must_use]
+    pub fn from_parts(account: &str, book: String) -> Option<Self> {
+        Some(Self {
+            account: AccountId::try_from(account).ok()?,
+            book: AddressBookId::new(ProviderKey::new(book).ok()?),
+        })
+    }
+}
+
+/// A contact card an edit names, identified by the **person, the account, and
+/// the card together**.
+///
+/// The account and the card are what the write actually goes to; the person
+/// rides for merge survival, so a row a host is still holding after a
+/// background merge still resolves to the cards that survive it. A person
+/// alone never names a write: one person is several cards, and writing a
+/// merged person's values back would file one account's details in another's
+/// book.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CardRef {
+    /// The person the card belongs to, resolving through the engine's alias
+    /// table after a merge retires the id.
+    pub person: PersonId,
+    /// The account whose provider holds the card.
+    pub account: AccountId,
+    /// The card's provider id; unique only within `account`.
+    pub card: ContactId,
+}
+
+impl CardRef {
+    /// Builds a card reference from a host's person number, `account` id, and
+    /// card id strings; the single construction point, at the IPC boundary.
+    /// Returns `None` if any half is malformed (a zero person is the reserved
+    /// sentinel), so the caller can drop the intent rather than edit some
+    /// other account's card of the same id.
+    #[must_use]
+    pub fn from_parts(person: u64, account: &str, card: String) -> Option<Self> {
+        Some(Self {
+            person: PersonId::new(person).ok()?,
+            account: AccountId::try_from(account).ok()?,
+            card: ContactId::new(ProviderKey::new(card).ok()?),
         })
     }
 }

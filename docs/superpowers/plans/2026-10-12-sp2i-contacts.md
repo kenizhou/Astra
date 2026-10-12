@@ -12,7 +12,7 @@
 
 - House rules as every slice: SPDX, 500-line cap, deny-everything lints, gate before commit (direct exit), conventional commits, no dashes, British English, zh mirrors same-commit, additive wire only.
 - Standing: AUTO-CONTINUE the moment the PR merges; SQUASH AND MERGE; the LLM relay on request (live tests need it); the 10-minute author window.
-- The engine owns the join, ordering, matching, sections, and monograms; Astra renders and dispatches. No client-side matching on top.
+- The engine owns the join, ordering, and matching; Astra renders and dispatches, and derives the section letter and the monogram once in the rebuild (the engine has no such model at the pinned rev, the spec's recorded deviation). No client-side matching on top.
 
 ---
 

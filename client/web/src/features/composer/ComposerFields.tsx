@@ -3,8 +3,11 @@
 // account, fixed this slice), To and Subject always visible, Cc and Bcc
 // behind their toggles so the common new message stays one line tall. A
 // toggle whose field the composition cannot carry is not offered at all.
-// Every change crosses with its field name; the values themselves live in
-// the composer's store.
+// The recipient fields draw their finished recipients as pills over the one
+// comma-separated string each field remains; every change crosses with its
+// field name; the values themselves live in the composer's store.
+
+import { RecipientField } from './RecipientField';
 
 interface ComposerFieldsProps {
   /** The sending account's display name, read only. */
@@ -21,13 +24,15 @@ interface ComposerFieldsProps {
   bccOffered: boolean;
   /** Whether the Bcc field is shown. */
   bccShown: boolean;
+  /** The host ref to the To field's input, for the pane's caret placement. */
+  toInputRef?: React.RefObject<HTMLInputElement | null>;
   /** Carries one field's new value, named as the wire names it. */
   onField: (field: 'to' | 'cc' | 'bcc' | 'subject', value: string) => void;
   onToggleCc: () => void;
   onToggleBcc: () => void;
 }
 
-const fieldClass =
+const subjectClass =
   'w-full rounded-[var(--radius-xs)] border border-border bg-background px-2 py-1 text-[13px] text-foreground outline-none transition-colors focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring';
 
 export function ComposerFields({
@@ -40,6 +45,7 @@ export function ComposerFields({
   ccShown,
   bccOffered,
   bccShown,
+  toInputRef,
   onField,
   onToggleCc,
   onToggleBcc,
@@ -51,16 +57,12 @@ export function ComposerFields({
         <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">{fromLabel}</span>
       </div>
       <div className="flex items-center gap-2">
-        <label htmlFor="composer-to" className="w-12 shrink-0 text-right text-xs text-muted-foreground">
-          To
-        </label>
-        <input
-          id="composer-to"
-          type="text"
-          aria-label="To"
+        <span className="w-12 shrink-0 text-right text-xs text-muted-foreground">To</span>
+        <RecipientField
+          label="To"
           value={to}
-          onChange={(event) => onField('to', event.target.value)}
-          className={fieldClass}
+          onField={(value) => onField('to', value)}
+          inputRef={toInputRef}
         />
         {ccOffered && (
           <button
@@ -85,32 +87,14 @@ export function ComposerFields({
       </div>
       {ccShown && (
         <div className="flex items-center gap-2">
-          <label htmlFor="composer-cc" className="w-12 shrink-0 text-right text-xs text-muted-foreground">
-            Cc
-          </label>
-          <input
-            id="composer-cc"
-            type="text"
-            aria-label="Cc"
-            value={cc}
-            onChange={(event) => onField('cc', event.target.value)}
-            className={fieldClass}
-          />
+          <span className="w-12 shrink-0 text-right text-xs text-muted-foreground">Cc</span>
+          <RecipientField label="Cc" value={cc} onField={(value) => onField('cc', value)} />
         </div>
       )}
       {bccShown && (
         <div className="flex items-center gap-2">
-          <label htmlFor="composer-bcc" className="w-12 shrink-0 text-right text-xs text-muted-foreground">
-            Bcc
-          </label>
-          <input
-            id="composer-bcc"
-            type="text"
-            aria-label="Bcc"
-            value={bcc}
-            onChange={(event) => onField('bcc', event.target.value)}
-            className={fieldClass}
-          />
+          <span className="w-12 shrink-0 text-right text-xs text-muted-foreground">Bcc</span>
+          <RecipientField label="Bcc" value={bcc} onField={(value) => onField('bcc', value)} />
         </div>
       )}
       <div className="flex items-center gap-2">
@@ -123,7 +107,7 @@ export function ComposerFields({
           aria-label="Subject"
           value={subject}
           onChange={(event) => onField('subject', event.target.value)}
-          className={fieldClass}
+          className={subjectClass}
         />
       </div>
     </div>

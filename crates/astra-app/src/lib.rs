@@ -26,6 +26,7 @@ mod drafts;
 mod list_rows;
 mod mail_writes;
 mod outbox;
+mod people;
 mod preferences;
 mod protocol;
 mod reading;
@@ -61,6 +62,12 @@ mod dispatch_fakes;
 #[cfg(test)]
 #[path = "calendar_fakes/mod.rs"]
 mod calendar_fakes;
+
+// The people slice's test fixtures: the contacts-leg provider the people
+// tests drive, beside the calendar's for the same reason.
+#[cfg(test)]
+#[path = "people_fakes/mod.rs"]
+mod people_fakes;
 
 // The eval harness: the scenario fixtures under the repository's evals/
 // directory, driven through the same seams the unit tests exercise. The
@@ -124,13 +131,18 @@ pub use calendar::{
 };
 pub use dispatch::AppError;
 pub use drafts::{DraftResume, DRAFT_AUTOSAVE_IDLE};
+pub use people::avatar::AvatarView;
 pub use preferences::{load_preferences, preferences_path, save_preferences, Preferences};
 pub use protocol::{
-    AppObserver, CalendarIntent, ComposeIntent, ComposerBlob, CompositionId, DraftsIntent,
-    EventDrag, EventEdge, EventEdit, FolderIntent, Intent, OutboxIntent, RecurrenceChange,
-    RepeatEnd, RepeatRule, RsvpAnswer, SearchScope, Surface, ViewMode,
+    AppObserver, CalendarIntent, ComposeIntent, ComposerBlob, CompositionId, ContactDraftInput,
+    ContactNameInput, ContactPatchInput, DraftsIntent, EventDrag, EventEdge, EventEdit,
+    FolderIntent, Intent, OutboxIntent, PeopleIntent, RecurrenceChange, RepeatEnd, RepeatRule,
+    RsvpAnswer, SearchScope, Surface, ViewMode,
 };
-pub use reference::{CalendarRef, EventRef, FolderRef, MessageRef, QueuedRef, RowRef, ThreadRef};
+pub use reference::{
+    AddressBookRef, CalendarRef, CardRef, EventRef, FolderRef, MessageRef, QueuedRef, RowRef,
+    ThreadRef,
+};
 pub use surfaced::Surfaced;
 
 /// The app runtime: owns one [`Engine`] shared across every configured [`Account`],
@@ -211,6 +223,14 @@ pub struct App<P> {
     /// window, the visible set, the anchor, the horizon watermark, the write
     /// states, and the reply prompts. See `calendar`.
     calendar_state: Mutex<calendar::CalendarState>,
+    /// The people snapshot and its signal: the unified rows, the open
+    /// person's detail, the write states, and the create targets, as one
+    /// thing. See `people`.
+    people: Surfaced<astra_viewmodel::PeopleSnapshot>,
+    /// The people view state a rebuild projects and the intents move: the
+    /// contacts legs the host installed, the current query, the open person,
+    /// and the write states. See `people`.
+    people_state: Mutex<people::PeopleState>,
     /// The sync-progress snapshot and its signal: what every mail pass reports its
     /// per-account position through, published on change by the
     /// [`SyncObserver`](engine_api::SyncObserver) fold in `sync_progress`.
@@ -301,6 +321,8 @@ impl<P: Provider> App<P> {
             compose_source: Mutex::new(None),
             calendar: Surfaced::new(Surface::Calendar, Arc::clone(&observer)),
             calendar_state: Mutex::new(calendar::CalendarState::new()),
+            people: Surfaced::new(Surface::People, Arc::clone(&observer)),
+            people_state: Mutex::new(people::PeopleState::new()),
             sending: Surfaced::new(Surface::Sending, observer),
             outbox: Mutex::new(outbox::Outbox::default()),
             drafts: Mutex::new(Drafts::default()),
@@ -384,4 +406,17 @@ impl Scope {
     pub(crate) fn for_account(account: Option<AccountId>) -> Self {
         account.map_or(Self::AllInboxes, Self::Account)
     }
+}
+
+/// A unique-per-intent idempotency key under `prefix`, from the wall clock
+/// and a process counter: the one mint every write family shares, so no
+/// family carries its own copy of the recipe.
+pub(crate) fn mint_idempotency(prefix: &str) -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos());
+    format!("{prefix}:{nanos}:{seq}")
 }

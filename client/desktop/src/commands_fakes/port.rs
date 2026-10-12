@@ -7,15 +7,15 @@
 
 use astra_ai::{AiDocumentKind, KnowledgeId};
 use astra_app::{
-    AppError, BriefDocumentError, Chip, CompositionId, DigestView, DocumentError, DocumentView,
-    DraftResume, ExtractionSummary, Intent, KnowledgeView, MeetingBriefView, Snippet, SplitEntry,
-    SummariseMessageError, TranslateLanguage,
+    AppError, AvatarView, BriefDocumentError, CardRef, Chip, CompositionId, ContactDraftInput,
+    DigestView, DocumentError, DocumentView, DraftResume, ExtractionSummary, Intent, KnowledgeView,
+    MeetingBriefView, Snippet, SplitEntry, SummariseMessageError, TranslateLanguage,
 };
 use astra_viewmodel::{
     CalendarSnapshot, ComposeKind, ComposeRequestSnapshot, DraftStatusSnapshot,
-    MailboxListSnapshot, ReadingSnapshot, SendingSnapshot, SyncProgressSnapshot,
+    MailboxListSnapshot, PeopleSnapshot, ReadingSnapshot, SendingSnapshot, SyncProgressSnapshot,
 };
-use engine_api::{AccountId, CalendarDate, ProviderKey};
+use engine_api::{AccountId, CalendarDate, ProviderKey, RecipientSuggestion};
 
 use crate::app_state::{AppPort, HostAccount};
 
@@ -382,5 +382,31 @@ impl AppPort for FakeApp {
             .brief_into
             .push((account.as_str().to_owned(), day.to_string()));
         brief.brief.clone()
+    }
+
+    fn people(&self) -> PeopleSnapshot {
+        self.people.lock().unwrap().clone()
+    }
+
+    async fn card_seed(&self, card: &CardRef) -> Option<ContactDraftInput> {
+        self.seeded_into.lock().unwrap().push((
+            card.person.get(),
+            card.account.as_str().to_owned(),
+            card.card.as_str().to_owned(),
+        ));
+        self.card_seed.lock().unwrap().clone()
+    }
+
+    async fn recipient_suggestions(&self, token: &str, limit: usize) -> Vec<RecipientSuggestion> {
+        self.suggested_into
+            .lock()
+            .unwrap()
+            .push((token.to_owned(), limit));
+        self.suggestions.lock().unwrap().clone()
+    }
+
+    async fn avatar_by_email(&self, email: &str) -> AvatarView {
+        self.avatar_into.lock().unwrap().push(email.to_owned());
+        self.avatar.lock().unwrap().clone()
     }
 }

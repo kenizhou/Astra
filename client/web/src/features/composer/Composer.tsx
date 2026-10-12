@@ -33,12 +33,7 @@ import { useDraftStore } from '@/stores/draftStore';
 import { ComposerFields } from './ComposerFields';
 import { Editor, insertAtSelection } from './Editor';
 import { SnippetPicker } from './SnippetPicker';
-import {
-  fingerprintOf,
-  mintCompositionId,
-  useComposerStore,
-  type CompositionRequest,
-} from './composerStore';
+import { fingerprintOf, mintCompositionId, opensInBody, useComposerStore, type CompositionRequest } from './composerStore';
 import { editorToDocument, type EditorDocument } from './documentWire';
 import { useAutosave } from './useAutosave';
 
@@ -204,8 +199,12 @@ export function ComposerPane() {
   // close the next composition nor stick its error under it.
   const sendEpoch = useRef(0);
   // The live editor instance, handed over by the editor itself: the picker's
-  // insert places its snippet's body at whatever selection now stands.
+  // insert places its snippet's body at whatever selection now stands, and
+  // the opening caret lands in the body through it.
   const editorRef = useRef<CoreEditor | null>(null);
+  // The To field's input, handed over by the recipient field: the opening
+  // caret lands in it on a new message.
+  const toInputRef = useRef<HTMLInputElement | null>(null);
 
   const autosave = useAutosave({
     isDirty: () => {
@@ -251,6 +250,31 @@ export function ComposerPane() {
     setSending(false);
     setSendError(null);
   }, [composition]);
+
+  // The opening caret goes where the work starts, decided by the one
+  // predicate: in the body when the composer was already addressed, in To
+  // otherwise. Placed once per composition, after the fields and the editor
+  // have mounted with their seed, so moving the caret never reads as the
+  // user having typed; an editor instance that arrives a frame late gets
+  // its focus on that frame.
+  useEffect(() => {
+    if (!open || composition === null) {
+      return;
+    }
+    const { request, to } = useComposerStore.getState();
+    if (!opensInBody(request, to)) {
+      toInputRef.current?.focus();
+      return;
+    }
+    if (editorRef.current !== null) {
+      editorRef.current.commands.focus();
+      return;
+    }
+    const frame = requestAnimationFrame(() => {
+      editorRef.current?.commands.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [composition, open]);
 
   if (!open || composition === null) {
     return null;
@@ -376,6 +400,7 @@ export function ComposerPane() {
         </p>
       )}
       <ComposerFields
+        key={`fields-${composition}`}
         fromLabel={fromLabel}
         to={to}
         cc={cc}
@@ -385,6 +410,7 @@ export function ComposerPane() {
         ccShown={ccShown}
         bccOffered={bccOffered}
         bccShown={bccShown}
+        toInputRef={toInputRef}
         onField={(field, value) => useComposerStore.getState().setField(field, value)}
         onToggleCc={() => setCcToggled((toggled) => !toggled)}
         onToggleBcc={() => setBccToggled((toggled) => !toggled)}

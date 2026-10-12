@@ -22,6 +22,7 @@ use engine_api::{AccountId, CalendarDateTime, Provider, Reconciled};
 
 use crate::{
     calendar::{
+        calendar_provider_of,
         drag::apply_drag,
         edit::{self, NewEvent},
         now_utc,
@@ -50,7 +51,7 @@ impl<P: Provider> App<P> {
             log::warn!("calendar: the calendar to create in is no longer configured");
             return;
         };
-        let Some(provider) = handle.providers.first() else {
+        let Some(provider) = calendar_provider_of(&handle) else {
             log::warn!("calendar: the account has no provider to write through");
             return;
         };
@@ -121,7 +122,7 @@ impl<P: Provider> App<P> {
         let Some((handle, base)) = self.writable_event(event).await else {
             return;
         };
-        let Some(provider) = handle.providers.first() else {
+        let Some(provider) = calendar_provider_of(&handle) else {
             log::warn!("calendar: the account has no provider to write through");
             return;
         };
@@ -157,7 +158,7 @@ impl<P: Provider> App<P> {
         let Some((handle, base)) = self.writable_event(event).await else {
             return;
         };
-        let Some(provider) = handle.providers.first() else {
+        let Some(provider) = calendar_provider_of(&handle) else {
             log::warn!("calendar: the account has no provider to write through");
             return;
         };
@@ -252,7 +253,7 @@ impl<P: Provider> App<P> {
         let Some((handle, base)) = self.writable_event(event).await else {
             return;
         };
-        let Some(provider) = handle.providers.first() else {
+        let Some(provider) = calendar_provider_of(&handle) else {
             log::warn!("calendar: the account has no provider to write through");
             return;
         };
@@ -395,16 +396,10 @@ impl<P: Provider> App<P> {
     }
 }
 
-/// A unique-per-intent idempotency key for a calendar write, from the wall
-/// clock and a process counter, the same mint the mail edits use.
+/// A unique-per-intent idempotency key for a calendar write, from the shared
+/// mint under the family's own prefix.
 pub(crate) fn generated_idempotency() -> String {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static SEQ: AtomicU64 = AtomicU64::new(0);
-    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_nanos());
-    format!("cal:{nanos}:{seq}")
+    crate::mint_idempotency("cal")
 }
 
 /// A fresh cross-system `UID` for a created event: globally unique by the

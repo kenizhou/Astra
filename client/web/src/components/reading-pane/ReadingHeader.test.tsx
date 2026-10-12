@@ -1,11 +1,26 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The reading header: subject, sender, and the full UTC stamp the pane draws
-// from the snapshot, with the bare address standing in for an empty sender
-// name and the standard placeholder for an empty subject.
-import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+// The reading header: subject, the sender avatar beside the name, and the
+// full UTC stamp the pane draws from the snapshot, with the bare address
+// standing in for an empty sender name and the standard placeholder for an
+// empty subject.
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const ipc = vi.hoisted(() => ({ peopleAvatar: vi.fn() }));
+
+vi.mock('@/services/ipc', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  peopleAvatar: ipc.peopleAvatar,
+}));
 
 import { ReadingHeader, formatReadingDate } from './ReadingHeader';
+
+beforeEach(() => {
+  ipc.peopleAvatar.mockReset();
+  // Every header with a sender resolves an avatar; a test that cares
+  // overrides the answer.
+  ipc.peopleAvatar.mockResolvedValue({ initials: '', colour: '' });
+});
 
 afterEach(cleanup);
 
@@ -45,6 +60,36 @@ describe('the reading header', () => {
 
     expect(screen.getByText('(no subject)')).toBeTruthy();
     expect(screen.queryByText('<>')).toBeNull();
+  });
+
+  it('mounts the sender avatar beside the name, resolved by the address', async () => {
+    ipc.peopleAvatar.mockResolvedValue({ initials: 'AL', colour: '#4DB6AC' });
+    render(
+      <ReadingHeader
+        subject="Launch"
+        fromName="Ada Lovelace"
+        fromAddress="ada@example.test"
+        sentAt="2026-10-09T08:30:00Z"
+      />,
+    );
+
+    expect(ipc.peopleAvatar).toHaveBeenCalledWith('ada@example.test');
+    const avatar = await waitFor(() => {
+      const badge = screen.getByRole('img', { name: 'Avatar' });
+      expect(badge.textContent).toBe('AL');
+      return badge;
+    });
+    const sender = screen.getByText('Ada Lovelace <ada@example.test>');
+    expect(avatar.compareDocumentPosition(sender) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('draws no avatar when there is no sender', () => {
+    render(
+      <ReadingHeader subject="" fromName="" fromAddress="" sentAt="2026-10-09T08:30:00Z" />,
+    );
+
+    expect(screen.queryByRole('img', { name: 'Avatar' })).toBeNull();
+    expect(ipc.peopleAvatar).not.toHaveBeenCalled();
   });
 
   it('formats a whole-year stamp and renders nothing for an unknown one', () => {

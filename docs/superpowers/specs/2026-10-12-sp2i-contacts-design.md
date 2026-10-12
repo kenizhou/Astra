@@ -34,9 +34,12 @@ recorded gap).
   organisation) and the client renders people, never cards. A merged row
   discloses `In N accounts` (distinct accounts, core-counted, never shown for
   one); the detail names the sources under Also in. A retired person id still
-  resolves after a background merge. Ordering, matching, the section letter
-  (an accented letter is a letter; `#` otherwise), and the monogram
-  initials are the engine's.
+  resolves after a background merge. Ordering and matching are the engine's;
+  the section letter (an accented letter is a letter; `#` otherwise) and the
+  monogram initials are derived once in the app's rebuild, per the ported
+  rules, because the engine at the pinned rev carries no section or avatar
+  model (the recorded deviation; the engine's raw code-point ordering does
+  not fold, so the list lays out by the fold, not the page order).
 - **D4 (writes name a card)**: an edit carries `(person, account, card)` and
   the editor seeds from that card, never the merged detail; the client asks
   which card when there is more than one. Create shows only when a writable
@@ -62,7 +65,8 @@ recorded gap).
   CardDAV providers beside the mail ones, and the desktop boot installs every
   leg it dials. The calendar and the contact legs land together: one
   account-model extension, two gaps closed.
-- **D7 (avatars)**: the monogram's letters and colour are the engine's, so
+- **D7 (avatars)**: the monogram's letters and colour are derived once in
+  the app's rebuild (the engine has no avatar model at the pinned rev), so
   the same person cannot differ between surfaces; a photo arrives through the
   engine's cached contact-photo fetch, one resolution shared by every
   surface that shows the person (the contacts row and the reading header in

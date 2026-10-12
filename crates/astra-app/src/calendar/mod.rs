@@ -33,6 +33,18 @@ use engine_api::{AccountId, Horizon, Provider, TimeZoneId, UtcDateTime};
 use crate::calendar::prompt::ReplyFallback;
 use crate::{reference::CalendarRef, App, CalendarIntent};
 
+/// The account's calendar provider: the first of its providers whose
+/// connection advertises the calendar capability, wherever in the list it
+/// stands (a dav dial appends it after the mail providers). `None` for an
+/// account with none, whose calendar paths step aside exactly as they did
+/// before any provider could speak the domain.
+pub(crate) fn calendar_provider_of<P: Provider>(handle: &crate::Account<P>) -> Option<&P> {
+    handle
+        .providers
+        .iter()
+        .find(|provider| provider.connection_info().capabilities.calendars())
+}
+
 pub use brief::{
     generate_meeting_brief, meeting_brief_prompt, BriefDocumentError, BriefMeeting,
     BriefMeetingRow, MeetingBriefError, MeetingBriefState, MeetingBriefView,
@@ -323,7 +335,7 @@ impl<P: Provider> App<P> {
         let zone = self.calendar_inputs().zone;
         let horizon = self.sync_horizon();
         for handle in self.account_handles().await {
-            let Some(provider) = handle.providers.first() else {
+            let Some(provider) = calendar_provider_of(&handle) else {
                 continue;
             };
             let at = self.account_ordinal(&handle.id).await;
@@ -463,3 +475,7 @@ pub(crate) fn now_utc() -> Option<UtcDateTime> {
 #[cfg(test)]
 #[path = "../calendar_dispatch_tests.rs"]
 mod dispatch_tests;
+
+#[cfg(test)]
+#[path = "../calendar_select_tests.rs"]
+mod select_tests;
