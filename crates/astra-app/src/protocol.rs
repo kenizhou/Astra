@@ -69,6 +69,12 @@ pub enum Surface {
     /// the query changed), so the host repaints on every signal rather than
     /// debouncing them.
     People,
+    /// The settings: the persisted settings block, the account rows, and
+    /// the about block. Every publish is one transition of the block (a
+    /// setting landed or was refused, an account's dav section or presence
+    /// changed), so the host repaints the screen on every signal rather
+    /// than debouncing them.
+    Settings,
 }
 
 /// Host-resolved bytes for one composer blob handle.

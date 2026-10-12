@@ -116,6 +116,14 @@ fn default_horizon() -> u32 {
     42
 }
 
+/// The shortest horizon a setting may name: a window shorter than a week
+/// cannot hold the week a cold grid paints.
+pub(crate) const HORIZON_MIN_DAYS: u32 = 7;
+
+/// The longest horizon a setting may name: a year's span is the most a cold
+/// window may be asked to materialise in one go.
+pub(crate) const HORIZON_MAX_DAYS: u32 = 365;
+
 /// The shipped composer default: the quoted original below the reply.
 fn default_true() -> bool {
     true
@@ -239,6 +247,7 @@ pub fn save_preferences(path: impl AsRef<Path>, prefs: &Preferences) -> std::io:
 pub(crate) struct PreferencesState {
     prefs: Preferences,
     path: Option<PathBuf>,
+    last_save_failed: bool,
 }
 
 impl PreferencesState {
@@ -248,7 +257,11 @@ impl PreferencesState {
         let prefs = path
             .as_ref()
             .map_or_else(Preferences::default, load_preferences);
-        Self { prefs, path }
+        Self {
+            prefs,
+            path,
+            last_save_failed: false,
+        }
     }
 
     /// The persisted mailbox-list grouping.
@@ -313,6 +326,76 @@ impl PreferencesState {
         self.persist();
     }
 
+    /// Writes one settings field and persists the document: the shared tail
+    /// of every total settings arm. Returns whether the persist failed, so
+    /// the arm can answer the failure on the snapshot; the in-memory copy
+    /// moved either way, which is the honest state of a host that is running
+    /// the new setting while the disk holds the old one.
+    pub(crate) fn set_setting(&mut self, write: impl FnOnce(&mut Preferences)) -> bool {
+        write(&mut self.prefs);
+        self.persist();
+        self.last_save_failed
+    }
+
+    /// Drops every account-scoped entry the account holds (its expansion
+    /// map, and the selected folder when the selection pointed inside it)
+    /// and persists. Returns whether anything was stored for it.
+    pub(crate) fn remove_account(&mut self, account: &str) -> bool {
+        let removed = self.prefs.remove_account(account);
+        if removed {
+            self.persist();
+        }
+        removed
+    }
+
+    /// Whether the newest persist failed. A write that lands clears it, so
+    /// the flag states the newest write the way the snapshot's error channel
+    /// does.
+    pub(crate) fn last_save_failed(&self) -> bool {
+        self.last_save_failed
+    }
+
+    /// The IANA id the calendar lays its days out in, from the persisted
+    /// preference.
+    pub(crate) fn zone(&self) -> String {
+        self.prefs.zone.clone()
+    }
+
+    /// The day the week starts on, from the persisted preference.
+    pub(crate) fn first_day_of_week(&self) -> WeekdayWire {
+        self.prefs.first_day_of_week
+    }
+
+    /// The cold window's length in days, clamped into the bounds the horizon
+    /// setting enforces so a hand-edited file cannot ask the rebuild for a
+    /// window the product would itself refuse.
+    pub(crate) fn horizon_days(&self) -> u16 {
+        self.prefs
+            .horizon_days
+            .clamp(HORIZON_MIN_DAYS, HORIZON_MAX_DAYS) as u16
+    }
+
+    /// The persisted settings block, projected for the settings snapshot:
+    /// every field the screen renders, named beside the value it holds now.
+    pub(crate) fn settings_block(&self) -> astra_viewmodel::SettingsBlock {
+        let prefs = &self.prefs;
+        astra_viewmodel::SettingsBlock {
+            theme: prefs.theme,
+            twenty_four_clock: prefs.twenty_four_clock,
+            zone: prefs.zone.clone(),
+            first_day_of_week: prefs.first_day_of_week,
+            horizon_days: prefs.horizon_days,
+            quote_below: prefs.quote_below,
+            view_mode: prefs.view_mode,
+            default_calendar: prefs.default_calendar.as_ref().map(|pin| {
+                astra_viewmodel::DefaultCalendar {
+                    account: pin.account.clone(),
+                    key: pin.key.clone(),
+                }
+            }),
+        }
+    }
+
     /// Stamps the persisted expansion over one account's sorted rows, which
     /// [`sorted_folder_rows`] leaves open everywhere: the group header from the account
     /// map, each folder's own chevron from the folder map. A folder that holds no
@@ -327,8 +410,9 @@ impl PreferencesState {
 
     /// Writes the state back, read-modify-write against what is on disk right now, so
     /// a concurrent write to an unrelated preference is not clobbered by our in-memory
-    /// copy. A no-op without a path.
-    fn persist(&self) {
+    /// copy. A no-op without a path. Records whether a write was attempted and
+    /// failed, the fact the snapshot's error channel answers from.
+    fn persist(&mut self) {
         let Some(path) = &self.path else {
             return;
         };
@@ -352,7 +436,7 @@ impl PreferencesState {
         on_disk
             .default_calendar
             .clone_from(&self.prefs.default_calendar);
-        let _ = save_preferences(path, &on_disk);
+        self.last_save_failed = save_preferences(path, &on_disk).is_err();
     }
 }
 

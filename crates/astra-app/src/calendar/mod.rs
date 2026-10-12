@@ -18,6 +18,7 @@ mod brief_drive;
 mod deposit;
 mod drag;
 mod edit;
+mod horizon;
 mod imip;
 mod invite;
 mod prompt;
@@ -55,16 +56,9 @@ pub use brief::{
 // open message's body and the answer path decide through one verdict.
 pub(crate) use invite::{classify, matched_attendee, supersede, InvitationKind};
 
-/// The visible window's default length, in days: the six weeks a month grid
-/// needs, with a week of history behind now so a cold app that has never seen
-/// a `SetRange` still paints the week it is in.
-const DEFAULT_WINDOW_DAYS: u16 = 42;
-
-/// How far ahead of the window the horizon widens when it must, in days: the
-/// coarse chunk of the survey's contract. Expansion re-derives every stored
-/// event, so it moves in month-sized steps against the watermark rather than
-/// once per page.
-const HORIZON_CHUNK_DAYS: u64 = 31;
+// The visible window and the machinery that widens a store's expansion to
+// cover it, beside the preference reads that shape both.
+pub(crate) use horizon::{default_window, Window};
 
 /// The calendar view state: what a rebuild projects and the intents move. Held
 /// in one place behind one mutex because the rebuild reads all of it and every
@@ -88,11 +82,6 @@ pub(crate) struct CalendarState {
     /// Each account's write state, for the snapshot's write rows. Absent
     /// means no write is in flight and none is unconfirmed.
     writes: HashMap<AccountId, CalendarWriteState>,
-    /// The display zone's IANA id. `Etc/UTC` (the spelling the engine's zone
-    /// resolver round-trips) until a zone intent exists (the family carries
-    /// none), which every rebuild resolves floating and all-day rows through
-    /// and the horizon expands under.
-    zone: String,
     /// The answers whose reply the server reported it could not deliver.
     prompts: Vec<ReplyPrompt>,
     /// Each account's standing answer to the reply-delivery-failure prompt:
@@ -104,59 +93,11 @@ pub(crate) struct CalendarState {
 }
 
 impl CalendarState {
-    /// The state every app starts with: no window, no visible set, no anchor,
-    /// no watermark, no writes, and the UTC display zone.
+    /// The state every app starts with: no window, no visible set, no
+    /// anchor, no watermark, and no writes. The display zone and the cold
+    /// window's length are preferences, read at rebuild time.
     pub(crate) fn new() -> Self {
-        Self {
-            zone: "Etc/UTC".to_owned(),
-            ..Self::default()
-        }
-    }
-}
-
-/// The window a rebuild or a refresh falls back to before the first
-/// `SetRange`: six weeks around `now`, a week of them behind, so a cold app
-/// still paints the week it is in. One definition, because a refresh that
-/// synced a different span than the one the rebuild reads would materialize
-/// occurrences the grid never shows, and show ones it never synced.
-pub(crate) fn default_window(now: UtcDateTime) -> Window {
-    Window {
-        start: now
-            .checked_sub(core::time::Duration::from_hours(7 * 24))
-            .unwrap_or(now),
-        days: DEFAULT_WINDOW_DAYS,
-    }
-}
-
-/// The visible window the grids lay out over.
-#[derive(Clone, Copy)]
-pub(crate) struct Window {
-    /// The UTC instant the window opens at.
-    start: UtcDateTime,
-    /// How many days the window spans.
-    days: u16,
-}
-
-impl Window {
-    /// The half-open UTC span the window covers.
-    fn horizon(self) -> Horizon {
-        let span = core::time::Duration::from_secs(u64::from(self.days) * 86_400);
-        Horizon::new(
-            self.start,
-            self.start.checked_add(span).unwrap_or(self.start),
-        )
-        .unwrap_or_else(|_| {
-            // A horizon refuses an empty range; a zero-day window is the only
-            // way to ask for one, and clamping to one second keeps every read
-            // valid without inventing days the host never asked to see.
-            Horizon::new(
-                self.start,
-                self.start
-                    .checked_add(core::time::Duration::from_secs(1))
-                    .expect("one second is representable"),
-            )
-            .expect("a one-second window is never empty")
-        })
+        Self::default()
     }
 }
 
@@ -217,17 +158,20 @@ impl<P: Provider> App<P> {
     }
 
     /// The decision inputs for one rebuild, and the default window the rebuild
-    /// falls back to when no `SetRange` has landed: six weeks around the build
-    /// instant, a week of it behind now.
+    /// falls back to when no `SetRange` has landed: the horizon preference's
+    /// days around the build instant, a week of it behind now.
     fn calendar_inputs(&self) -> CalendarInputs {
         let state = self.calendar_state.lock().expect("calendar mutex poisoned");
         let now = now_utc().unwrap_or_else(|| {
             UtcDateTime::new(2026, 1, 1, 0, 0, 0).expect("a representable instant")
         });
-        let window = state.window.unwrap_or_else(|| default_window(now));
+        let horizon_days = self.horizon_days();
+        let window = state
+            .window
+            .unwrap_or_else(|| default_window(now, horizon_days));
         CalendarInputs {
             window: window.horizon(),
-            zone: TimeZoneId::iana(&state.zone).unwrap_or_else(|_| TimeZoneId::utc()),
+            zone: self.display_zone(),
             visible: state.visible.clone(),
             writes: {
                 let mut rows: Vec<CalendarWriteRow> = state
@@ -380,79 +324,6 @@ impl<P: Provider> App<P> {
                 .collect(),
         );
         self.rebuild_calendar().await;
-    }
-
-    /// Widens the store's expansion horizon to cover the current window when
-    /// it has escaped the watermark, in one coarse chunk per widening.
-    async fn ensure_horizon(&self) {
-        let window = self.calendar_inputs().window;
-        self.widen_horizon_to(window).await;
-    }
-
-    /// Widens every account's expansion horizon to cover `span` when it has
-    /// escaped the watermark, in one coarse chunk per widening, and reports
-    /// whether every store now covers it.
-    ///
-    /// The watermark is shared across accounts, so one widening expands every
-    /// account's store: a span the watermark claims but one store never
-    /// expanded to would make that account's later window inside it skip its
-    /// own expansion and render confidently empty. The watermark rolls back
-    /// to whatever stood before (nothing included) when any account's
-    /// expansion refuses (a concurrent sync holds the scope), which is the
-    /// exact failure the watermark exists to prevent: re-syncing cannot
-    /// repair it, for a delta with no changes derives no occurrences. The
-    /// stores an expansion already covered stay covered; an occurrence read
-    /// is windowed, so a store wider than the watermark costs nothing.
-    async fn widen_horizon_to(&self, span: Horizon) -> bool {
-        let (want, previous) = {
-            let mut state = self.calendar_state.lock().expect("calendar mutex poisoned");
-            let end = span
-                .end()
-                .checked_add(core::time::Duration::from_secs(HORIZON_CHUNK_DAYS * 86_400))
-                .unwrap_or_else(|| span.end());
-            let widened = match state.horizon {
-                Some((low, high)) if low <= span.start() && end <= high => return true,
-                Some((low, high)) => (low.min(span.start()), high.max(end)),
-                None => (span.start(), end),
-            };
-            (widened, state.horizon.replace(widened))
-        };
-        let horizon = Horizon::new(want.0, want.1).expect("a widened horizon is never empty");
-        let zone = self.calendar_inputs().zone;
-        let mut widened = true;
-        for handle in self.account_handles().await {
-            if let Err(err) = self.engine.expand_horizon(&handle.id, horizon, &zone).await {
-                widened = false;
-                log::warn!("calendar: the horizon could not be widened for one account: {err}");
-            }
-        }
-        if !widened {
-            self.calendar_state
-                .lock()
-                .expect("calendar mutex poisoned")
-                .horizon = previous;
-        }
-        widened
-    }
-
-    /// The horizon a refresh's sync covers: the full watermark when one stands
-    /// (so a refresh never narrows what the app has expanded), the default
-    /// window around now otherwise, matching the window a cold rebuild reads.
-    fn sync_horizon(&self) -> Horizon {
-        let state = self.calendar_state.lock().expect("calendar mutex poisoned");
-        match state.horizon {
-            Some((low, high)) => Horizon::new(low, high).unwrap_or_else(|_| {
-                Window {
-                    start: low,
-                    days: 1,
-                }
-                .horizon()
-            }),
-            None => default_window(now_utc().unwrap_or_else(|| {
-                UtcDateTime::new(2026, 1, 1, 0, 0, 0).expect("a representable instant")
-            }))
-            .horizon(),
-        }
     }
 }
 

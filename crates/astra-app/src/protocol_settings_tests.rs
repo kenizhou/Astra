@@ -4,7 +4,7 @@
 //! that each reads back identical, and that the list intent's own view-mode
 //! wire beside the family stays untouched.
 
-use super::{DavSectionInput, Intent, SettingsIntent, ThemeMode, ViewMode, WeekdayWire};
+use super::{DavSectionInput, Intent, SettingsIntent, Surface, ThemeMode, ViewMode, WeekdayWire};
 use crate::reference::CalendarRef;
 use engine_api::AccountId;
 
@@ -217,4 +217,16 @@ fn a_malformed_account_id_is_refused_on_the_wire() {
     // references follow.
     let blank = r#"{"settings":{"remove_account":{"account":""}}}"#;
     assert!(serde_json::from_str::<Intent>(blank).is_err());
+}
+
+#[test]
+fn the_settings_surface_crosses_as_its_word() {
+    assert_eq!(
+        serde_json::to_string(&Surface::Settings).unwrap(),
+        r#""settings""#
+    );
+    assert_eq!(
+        serde_json::from_str::<Surface>(r#""settings""#).unwrap(),
+        Surface::Settings
+    );
 }

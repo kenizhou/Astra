@@ -112,6 +112,18 @@ impl<P: Provider> App<P> {
             .insert(account.clone(), vec![std::sync::Arc::new(leg)]);
     }
 
+    /// Tears the account's contacts legs out: the removal a cleared dav
+    /// section and a removed account perform, so the reads stop offering an
+    /// account whose writes have nowhere to go. A no-op for an account with
+    /// no leg standing.
+    pub fn remove_contacts(&self, account: &AccountId) {
+        self.people_state
+            .lock()
+            .expect("people mutex poisoned")
+            .legs
+            .remove(account);
+    }
+
     /// The decision inputs for one rebuild.
     pub(crate) fn people_inputs(&self) -> PeopleInputs {
         let state = self.people_state.lock().expect("people mutex poisoned");

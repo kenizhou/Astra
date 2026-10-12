@@ -27,6 +27,29 @@ pub struct SettingsSnapshot {
     /// The version and the attributions, the core's answer rather than the
     /// web's guess.
     pub about: AboutBlock,
+    /// Why the newest settings write was refused or failed, when it was. The
+    /// value on screen is the one that stands; this names why a write the
+    /// user just made is not it. Absent crosses no key, the state of every
+    /// write that landed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<SettingsError>,
+}
+
+/// Why one settings write refused or failed, as the surface states it.
+/// Crosses as a snake_case word.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SettingsError {
+    /// The write landed in memory but the preferences file did not take it;
+    /// a relaunch loses the change until a later write persists.
+    PersistFailed,
+    /// The zone id names no zone the engine can resolve, so the calendar
+    /// could never lay a day out in it.
+    ZoneUnresolvable,
+    /// The horizon sits outside the bounds a cold window may span.
+    HorizonOutOfBounds,
+    /// The account's removal could not be completed; nothing went.
+    RemoveFailed,
 }
 
 /// The persisted settings the screen renders: the preferences document's
@@ -132,6 +155,11 @@ pub struct AccountSettingsRow {
     /// one is stored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dav: Option<DavSectionRow>,
+    /// Why the account's dav editor last refused or failed, when it did: the
+    /// section the editor shows is the one that stands, and this names why
+    /// the save did not change it. Absent crosses no key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dav_error: Option<String>,
 }
 
 /// An account's kind, as the row states it. Crosses as a snake_case word.

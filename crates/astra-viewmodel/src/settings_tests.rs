@@ -7,7 +7,7 @@ use engine_api::{AccountId, CalendarId};
 
 use crate::{
     AboutBlock, AccountKind, AccountLegs, AccountSettingsRow, DavSectionRow, DefaultCalendar,
-    SettingsBlock, SettingsSnapshot, ThemeMode, ViewMode, WeekdayWire,
+    SettingsBlock, SettingsError, SettingsSnapshot, ThemeMode, ViewMode, WeekdayWire,
 };
 
 /// A well-formed account id, the way every settings test names one.
@@ -50,6 +50,7 @@ fn the_snapshot_crosses_its_full_shape_and_reads_back() {
                 username: "ada@example.test".to_owned(),
                 dav_password_set: true,
             }),
+            dav_error: Some("the re-dial could not reach the origin".to_owned()),
         }],
         about: AboutBlock {
             version: "0.1.0".to_owned(),
@@ -59,6 +60,7 @@ fn the_snapshot_crosses_its_full_shape_and_reads_back() {
                 "web".to_owned(),
             ],
         },
+        error: Some(SettingsError::PersistFailed),
     };
 
     let wire = serde_json::to_value(&snapshot).expect("the snapshot serialises");
@@ -85,18 +87,40 @@ fn the_snapshot_crosses_its_full_shape_and_reads_back() {
                         "caldav_url": "https://dav.example.test",
                         "username": "ada@example.test",
                         "dav_password_set": true
-                    }
+                    },
+                    "dav_error": "the re-dial could not reach the origin"
                 }
             ],
             "about": {
                 "version": "0.1.0",
                 "attributions": ["email-calendar-sync-engine", "pi", "web"]
-            }
+            },
+            "error": "persist_failed"
         }),
     );
 
     let back: SettingsSnapshot = serde_json::from_value(wire).expect("the snapshot reads back");
     assert_eq!(back, snapshot);
+}
+
+#[test]
+fn the_error_words_cross_both_ways_and_absent_states_cross_no_key() {
+    for (error, word) in [
+        (SettingsError::PersistFailed, r#""persist_failed""#),
+        (SettingsError::ZoneUnresolvable, r#""zone_unresolvable""#),
+        (
+            SettingsError::HorizonOutOfBounds,
+            r#""horizon_out_of_bounds""#,
+        ),
+        (SettingsError::RemoveFailed, r#""remove_failed""#),
+    ] {
+        assert_eq!(serde_json::to_string(&error).unwrap(), word);
+        assert_eq!(serde_json::from_str::<SettingsError>(word).unwrap(), error);
+    }
+    let clean = SettingsSnapshot::default();
+    let wire = serde_json::to_value(&clean).expect("the clean snapshot serialises");
+    assert!(wire.get("error").is_none());
+    assert!(wire.get("accounts").is_none());
 }
 
 #[test]
@@ -167,6 +191,7 @@ fn a_row_s_dav_echo_never_carries_the_password_back() {
             username: "ada@example.test".to_owned(),
             dav_password_set: true,
         }),
+        dav_error: None,
     };
     let wire = serde_json::to_value(&row).expect("the row serialises");
     assert!(

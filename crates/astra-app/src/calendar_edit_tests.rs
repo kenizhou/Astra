@@ -2,16 +2,14 @@
 //! Tests for the CRUD mapping: the create draft, the form-preserving patch,
 //! the one-vs-all split, the series shift, and the drag maths, all against
 //! hand-built stored events (the engine's patcher, and the dispatch tests over
-//! the fakes, pin the wire side).
+//! the fakes, pin the wire side). The repeat-rule editability round trip
+//! lives in its own file beside this one.
 
 use engine_api::{
-    CalendarDate, CalendarDateTime, Frequency, RecurrenceBound, RecurrenceRule, TimeZoneId, Uid,
-    Weekday,
+    CalendarDate, CalendarDateTime, Frequency, RecurrenceBound, TimeZoneId, Uid, Weekday,
 };
 
-use super::{
-    build_deletion, build_draft, build_patch, rule_is_editable, CalendarEditError, NewEvent,
-};
+use super::{build_deletion, build_draft, build_patch, CalendarEditError, NewEvent};
 use crate::calendar_fakes::{all_day_event, local, utc, weekly_event, zoned_event};
 use crate::protocol::{EventEdit, RecurrenceChange, RepeatEnd, RepeatRule};
 
@@ -55,7 +53,7 @@ fn standup_clocks() -> (CalendarDateTime, CalendarDateTime) {
 #[test]
 fn a_create_maps_onto_the_engine_draft_with_the_minted_uid_and_stamp() {
     let (start, end) = standup_clocks();
-    let draft = build_draft(&one_off(&start, &end), uid(), stamp()).unwrap();
+    let draft = build_draft(&one_off(&start, &end), uid(), stamp(), Weekday::Mo).unwrap();
     assert_eq!(draft.uid.as_str(), "astra-1@test.local");
     assert_eq!(draft.summary, "Standup");
     assert_eq!(draft.start, zoned("2026-10-19T09:00:00"));
@@ -81,7 +79,7 @@ fn a_create_carries_its_notes_location_and_repeat_rule() {
         recurrence: Some(&rule),
         ..one_off(&start, &end)
     };
-    let draft = build_draft(&new, uid(), stamp()).unwrap();
+    let draft = build_draft(&new, uid(), stamp(), Weekday::Mo).unwrap();
     assert_eq!(draft.description.as_deref(), Some("Notes"));
     assert_eq!(draft.location.as_deref(), Some("Room 1"));
     let repeat = draft.recurrence.as_ref().unwrap();
@@ -106,7 +104,7 @@ fn an_on_date_rule_ends_at_the_last_second_of_the_named_day() {
         recurrence: Some(&rule),
         ..one_off(&start, &end)
     };
-    let draft = build_draft(&new, uid(), stamp()).unwrap();
+    let draft = build_draft(&new, uid(), stamp(), Weekday::Mo).unwrap();
     let repeat = draft.recurrence.as_ref().unwrap();
     assert_eq!(
         repeat.rule.bound,
@@ -132,7 +130,7 @@ fn an_after_count_rule_maps_onto_a_counted_bound() {
         recurrence: Some(&rule),
         ..one_off(&start, &end)
     };
-    let repeat = build_draft(&new, uid(), stamp())
+    let repeat = build_draft(&new, uid(), stamp(), Weekday::Mo)
         .unwrap()
         .recurrence
         .unwrap();
@@ -150,7 +148,7 @@ fn an_edit_patches_the_title_and_notes_in_their_three_states() {
         location: Some("Room 2".to_owned()),
         ..EventEdit::default()
     };
-    let (_, patch) = build_patch(&event, &edit, stamp()).unwrap();
+    let (_, patch) = build_patch(&event, &edit, stamp(), Weekday::Mo).unwrap();
     assert_eq!(patch.summary_edit(), Some("Renamed"));
     assert_eq!(patch.description_edit(), Some(&engine_api::TextEdit::Clear));
     assert_eq!(
@@ -171,7 +169,7 @@ fn an_edit_renders_its_clocks_in_the_stored_event_own_form() {
         end: Some(local("2026-10-20T11:30:00")),
         ..EventEdit::default()
     };
-    let (_, patch) = build_patch(&event, &edit, stamp()).unwrap();
+    let (_, patch) = build_patch(&event, &edit, stamp(), Weekday::Mo).unwrap();
     assert_eq!(
         patch.start_edit(),
         Some(&CalendarDateTime::Zoned {
@@ -186,7 +184,7 @@ fn an_edit_renders_its_clocks_in_the_stored_event_own_form() {
         end: Some(local("2026-10-22T00:00:00")),
         ..EventEdit::default()
     };
-    let (_, patch) = build_patch(&day, &edit, stamp()).unwrap();
+    let (_, patch) = build_patch(&day, &edit, stamp(), Weekday::Mo).unwrap();
     assert_eq!(
         patch.start_edit(),
         Some(&CalendarDateTime::Date(
@@ -205,7 +203,7 @@ fn an_occurrence_edit_targets_the_instance_and_carries_its_resolved_instant() {
         occurrence: Some(original),
         ..EventEdit::default()
     };
-    let (target, _) = build_patch(&event, &edit, stamp()).unwrap();
+    let (target, _) = build_patch(&event, &edit, stamp(), Weekday::Mo).unwrap();
     match target {
         engine_api::PatchTarget::Instance(occurrence) => {
             assert_eq!(
@@ -232,7 +230,7 @@ fn a_repeat_rule_belongs_to_the_series_not_to_one_occurrence() {
         ..EventEdit::default()
     };
     assert_eq!(
-        build_patch(&event, &edit, stamp()).unwrap_err(),
+        build_patch(&event, &edit, stamp(), Weekday::Mo).unwrap_err(),
         CalendarEditError::RuleOnOccurrence
     );
 }
@@ -249,7 +247,7 @@ fn an_occurrence_content_edit_carries_both_clocks_unchanged() {
         occurrence: Some(local("2026-11-09T09:00:00")),
         ..EventEdit::default()
     };
-    let (_, patch) = build_patch(&event, &edit, stamp()).unwrap();
+    let (_, patch) = build_patch(&event, &edit, stamp(), Weekday::Mo).unwrap();
     let zone = TimeZoneId::iana("Europe/Amsterdam").unwrap();
     assert_eq!(
         patch.start_edit(),
@@ -278,7 +276,7 @@ fn an_occurrence_edit_with_one_edge_only_is_refused() {
         ..EventEdit::default()
     };
     assert_eq!(
-        build_patch(&event, &edit, stamp()).unwrap_err(),
+        build_patch(&event, &edit, stamp(), Weekday::Mo).unwrap_err(),
         CalendarEditError::OccurrenceNeedsBothEdges
     );
 }
@@ -299,125 +297,13 @@ fn an_occurrence_fill_keeps_absolute_duration_across_a_dst_boundary() {
         occurrence: Some(local("2026-04-04T22:00:00")),
         ..EventEdit::default()
     };
-    let (_, patch) = build_patch(&event, &edit, stamp()).unwrap();
+    let (_, patch) = build_patch(&event, &edit, stamp(), Weekday::Mo).unwrap();
     assert_eq!(
         patch.end_edit(),
         Some(&CalendarDateTime::Zoned {
             local: local("2026-04-05T06:00:00"),
             zone: TimeZoneId::iana("Europe/Amsterdam").unwrap(),
         })
-    );
-}
-
-#[test]
-fn a_stored_rule_too_rich_for_the_editor_is_never_replaced() {
-    let mut event = weekly_event("evt-1", "Standup", "2026-10-19T09:00:00");
-    let mut rich = RecurrenceRule::new(Frequency::Monthly);
-    rich.by_month_day = vec![15];
-    event.recurrence = Some(engine_api::Recurrence::from_rule(rich));
-    // A `Set` writes the editor's partial picture back over a rule whose
-    // parts the editor never saw: refused.
-    let replacement = RepeatRule {
-        frequency: Frequency::Weekly,
-        interval: 1,
-        weekdays: Vec::new(),
-        end: RepeatEnd::Never,
-    };
-    let edit = EventEdit {
-        recurrence: Some(RecurrenceChange::Set(replacement)),
-        ..EventEdit::default()
-    };
-    assert_eq!(
-        build_patch(&event, &edit, stamp()).unwrap_err(),
-        CalendarEditError::RuleTooRich
-    );
-    // A `Clear` is total rather than partial, so it is allowed even on a rich
-    // rule: nothing it drops is something the editor misdescribes.
-    let edit = EventEdit {
-        recurrence: Some(RecurrenceChange::Clear),
-        ..EventEdit::default()
-    };
-    assert!(build_patch(&event, &edit, stamp()).is_ok());
-    // A rule the editor can describe in full is replaceable, and no rule at
-    // all (a one-off gaining one) is too.
-    assert!(rule_is_editable(None));
-    assert!(rule_is_editable(
-        weekly_event("evt-x", "Standup", "2026-10-19T09:00:00")
-            .recurrence
-            .as_ref()
-    ));
-}
-
-#[test]
-fn a_wkst_other_than_the_default_degrades_rather_than_silently_rebuilding() {
-    // The round trip is the guard itself: the projection carries no week
-    // start, so a rule that states one comes back with the default where the
-    // stored rule had Sunday, does not match, and stays read-only. A
-    // checklist of known fields would have had to name `WKST` by hand.
-    let mut event = weekly_event("evt-1", "Standup", "2026-10-19T09:00:00");
-    event.recurrence.as_mut().unwrap().rules[0].first_day_of_week = Weekday::Su;
-    assert!(
-        !rule_is_editable(event.recurrence.as_ref()),
-        "editing it would rewrite the rule with the default week start, \
-         changing which days a weekly rule produces"
-    );
-
-    // The same refusal on the write path: a `Set` over it never builds.
-    let edit = EventEdit {
-        recurrence: Some(RecurrenceChange::Set(RepeatRule {
-            frequency: Frequency::Weekly,
-            interval: 1,
-            weekdays: Vec::new(),
-            end: RepeatEnd::Never,
-        })),
-        ..EventEdit::default()
-    };
-    assert_eq!(
-        build_patch(&event, &edit, stamp()).unwrap_err(),
-        CalendarEditError::RuleTooRich
-    );
-}
-
-#[test]
-fn an_exrule_carrying_set_degrades_to_read_only() {
-    // A rule whose instances are subtracted is a set an editor built from one
-    // frequency cannot state, whatever the two rules look like alone.
-    let mut event = weekly_event("evt-1", "Standup", "2026-10-19T09:00:00");
-    event
-        .recurrence
-        .as_mut()
-        .unwrap()
-        .excluded_rules
-        .push(RecurrenceRule::new(Frequency::Daily));
-    assert!(!rule_is_editable(event.recurrence.as_ref()));
-}
-
-#[test]
-fn a_bound_the_editor_cannot_state_exactly_degrades_to_read_only() {
-    // The editor's date control states "the last day that recurs"; a stored
-    // `UNTIL` at mid-day is a finer statement than that, and rewriting it to
-    // the day's final second would silently add every occurrence that
-    // afternoon. The round trip refuses instead: the projection loses the
-    // clock, the rebuild puts the final second back, and they differ.
-    let mut event = weekly_event("evt-1", "Standup", "2026-10-19T09:00:00");
-    event.recurrence.as_mut().unwrap().rules[0].bound =
-        RecurrenceBound::Until(local("2026-11-03T12:00:00"));
-    assert!(!rule_is_editable(event.recurrence.as_ref()));
-
-    // The one bound the editor does state exactly: the final second of the
-    // named day, the same rule the create path writes.
-    event.recurrence.as_mut().unwrap().rules[0].bound =
-        RecurrenceBound::Until(local("2026-11-03T23:59:59"));
-    assert!(rule_is_editable(event.recurrence.as_ref()));
-}
-
-#[test]
-fn a_repeat_measured_in_hours_degrades_to_read_only() {
-    let mut event = weekly_event("evt-1", "Standup", "2026-10-19T09:00:00");
-    event.recurrence.as_mut().unwrap().rules[0].frequency = Frequency::Hourly;
-    assert!(
-        !rule_is_editable(event.recurrence.as_ref()),
-        "a repeat in hours is not a calendar repeat any editor offers"
     );
 }
 
@@ -434,7 +320,7 @@ fn clocks_read_from_one_occurrence_become_the_series_shift() {
         times_from_occurrence: Some(read_from),
         ..EventEdit::default()
     };
-    let (target, patch) = build_patch(&event, &edit, stamp()).unwrap();
+    let (target, patch) = build_patch(&event, &edit, stamp(), Weekday::Mo).unwrap();
     assert!(matches!(target, engine_api::PatchTarget::Series));
     assert_eq!(
         patch.start_edit(),
@@ -451,7 +337,7 @@ fn clocks_read_from_one_occurrence_become_the_series_shift() {
         ..EventEdit::default()
     };
     assert_eq!(
-        build_patch(&event, &half, stamp()).unwrap_err(),
+        build_patch(&event, &half, stamp(), Weekday::Mo).unwrap_err(),
         CalendarEditError::ShiftNeedsBothEdges
     );
 }
