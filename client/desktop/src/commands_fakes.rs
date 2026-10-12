@@ -42,7 +42,7 @@ pub(crate) use snapshots::{compose_prefill, open_snapshot};
 pub(crate) use port::{AssistSeeds, BriefSeeds, DocsSeeds};
 
 /// A scratch directory for one test's account index.
-fn scratch(name: &str) -> PathBuf {
+pub(crate) fn scratch(name: &str) -> PathBuf {
     let dir = std::env::temp_dir()
         .join("astra-desktop-tests")
         .join(format!("{name}-{}", std::process::id()));
@@ -375,6 +375,7 @@ pub(crate) fn state(name: &str, app: Arc<FakeApp>, store: Arc<FakeStore>) -> App
         agent: relay,
         llm: None,
         connections: Arc::new(AccountDials::empty(&scratch(name))),
+        photo_root: scratch(name).join("photos"),
         credential_store: store,
         runtime: crate::runtime::build_runtime().expect("the test runtime builds"),
     }

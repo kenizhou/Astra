@@ -401,6 +401,10 @@ pub(crate) struct AppState {
     /// Every registered account's config and connection pool: what a re-dial, a
     /// folder bind, and the boot's restore read.
     pub(crate) connections: Arc<AccountDials>,
+    /// The engine's contact-photo area, beside the store database: the one
+    /// directory the photo command serves, so the webview never gains a
+    /// protocol wide enough to read host files itself.
+    pub(crate) photo_root: std::path::PathBuf,
     /// The OS secure store the account-add flow persists through.
     pub(crate) credential_store: Arc<dyn AccountCredentialStore>,
     /// The app's async runtime: dispatches, first syncs and blocking dials run on it.

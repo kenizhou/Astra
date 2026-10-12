@@ -225,7 +225,11 @@ export function people(): Promise<PeopleSnapshot> {
  * stores it. The editor opens on the card, never the merged detail.
  */
 export function peopleCard(card: CardRef): Promise<ContactDraftInput | null> {
-  return invoke('people_card', card);
+  return invoke('people_card', {
+    person: card.person,
+    account: card.account,
+    card: card.card,
+  });
 }
 
 /**
@@ -251,4 +255,13 @@ export interface AvatarView {
  */
 export function peopleAvatar(email: string): Promise<AvatarView> {
   return invoke('people_avatar', { email });
+}
+
+/**
+ * Reads one cached photo as a data URI. The command serves only paths the
+ * engine's own contact-photo area minted, so the webview never gains a
+ * protocol wide enough to read host files itself.
+ */
+export function peoplePhoto(path: string): Promise<string | null> {
+  return invoke('people_photo', { path });
 }

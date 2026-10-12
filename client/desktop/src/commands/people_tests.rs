@@ -182,3 +182,44 @@ fn the_avatar_pull_threads_the_address_and_answers_the_core_s_view() {
         "the address crossed to the core verbatim",
     );
 }
+
+#[test]
+fn the_base64_coder_matches_the_rfc_vectors() {
+    assert_eq!(super::base64_standard(b""), "");
+    assert_eq!(super::base64_standard(b"f"), "Zg==");
+    assert_eq!(super::base64_standard(b"fo"), "Zm8=");
+    assert_eq!(super::base64_standard(b"foo"), "Zm9v");
+    assert_eq!(super::base64_standard(b"foob"), "Zm9vYg==");
+    assert_eq!(super::base64_standard(b"fooba"), "Zm9vYmE=");
+    assert_eq!(super::base64_standard(b"foobar"), "Zm9vYmFy");
+}
+
+#[test]
+fn a_photo_inside_the_root_serves_and_a_traveller_refuses() {
+    let dir = crate::commands_fakes::scratch("people-photo");
+    let root = dir.join("photos");
+    std::fs::create_dir_all(&root).expect("the photo root");
+    let png = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3];
+    std::fs::write(root.join("ada.blob"), png).expect("the planted photo");
+
+    let served =
+        super::photo_data_uri(&root, &root.join("ada.blob")).expect("the planted png serves");
+    let expected = format!("data:image/png;base64,{}", super::base64_standard(&png));
+    assert_eq!(served, expected, "the bytes round through whole");
+
+    // A path outside the root, however it is spelled, answers nothing.
+    let outside = dir.join("secret.txt");
+    std::fs::write(&outside, b"no bytes of yours").expect("the outsider");
+    assert!(
+        super::photo_data_uri(&root, &outside).is_none(),
+        "a file outside the photo area never serves"
+    );
+    assert!(
+        super::photo_data_uri(&root, &dir.join("photos\\..\\secret.txt")).is_none(),
+        "a traversal spelling never serves"
+    );
+
+    // Not an image: refused rather than served as the wrong type.
+    std::fs::write(root.join("note.blob"), b"plain text").expect("the non-image");
+    assert!(super::photo_data_uri(&root, &root.join("note.blob")).is_none());
+}

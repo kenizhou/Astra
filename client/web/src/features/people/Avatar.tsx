@@ -8,7 +8,7 @@
 
 import { useEffect, useState } from 'react';
 
-import { peopleAvatar, type Monogram } from '@/services/ipc';
+import { peopleAvatar, peoplePhoto, type Monogram } from '@/services/ipc';
 
 interface AvatarProps {
   /** The snapshot's own monogram, when the caller carries a row. */
@@ -17,18 +17,6 @@ interface AvatarProps {
   address?: string;
   /** The circle's pixel size. */
   size?: number;
-}
-
-/** A webview-safe source for a host file path: the asset protocol when the
- * Tauri bridge stands, an inert placeholder otherwise. */
-function assetUrl(path: string): string {
-  const internals = (
-    window as { __TAURI_INTERNALS__?: { convertFileSrc: (path: string) => string } }
-  ).__TAURI_INTERNALS__;
-  if (internals !== undefined) {
-    return internals.convertFileSrc(path);
-  }
-  return `asset://localhost/${encodeURIComponent(path)}`;
 }
 
 /** A stroke-drawn person glyph for the monogram with no initials. */
@@ -61,9 +49,18 @@ export function Avatar({ monogram, address, size = 32 }: AvatarProps) {
     }
     let standing = true;
     peopleAvatar(address)
-      .then((view) => {
+      .then(async (view) => {
+        // The photo crosses as bytes through the validated command, never
+        // through a protocol the config would have to widen for: the data
+        // URI the CSP already admits.
+        const fetched =
+          view.photo === undefined ? undefined : await peoplePhoto(view.photo);
+        const photo = fetched ?? undefined;
         if (standing) {
-          setResolved({ photo: view.photo, monogram: { initials: view.initials, colour: view.colour } });
+          setResolved({
+            photo,
+            monogram: { initials: view.initials, colour: view.colour },
+          });
         }
       })
       .catch(() => {
@@ -90,7 +87,7 @@ export function Avatar({ monogram, address, size = 32 }: AvatarProps) {
       }}
     >
       {photo !== undefined ? (
-        <img src={assetUrl(photo)} alt="" className="h-full w-full object-cover" />
+        <img src={photo} alt="" className="h-full w-full object-cover" />
       ) : initials === '' ? (
         <PersonGlyph />
       ) : (

@@ -97,6 +97,7 @@ pub fn run() {
             commands::people::people_card,
             commands::people::people_suggestions,
             commands::people::people_avatar,
+            commands::people::people_photo,
             commands::add_account,
             commands::imap_test_connection,
             commands::detect_account_settings,

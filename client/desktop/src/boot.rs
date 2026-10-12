@@ -102,6 +102,9 @@ pub(crate) fn assemble_state(
         agent: agent_relay,
         llm,
         connections,
+        photo_root: engine_path
+            .with_file_name(format!("{ENGINE_STORE_FILE}.blobs"))
+            .join("contact-photos"),
         credential_store: Arc::new(keyring),
         runtime,
     })

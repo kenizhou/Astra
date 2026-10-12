@@ -5,17 +5,19 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const ipc = vi.hoisted(() => ({ peopleAvatar: vi.fn() }));
+const ipc = vi.hoisted(() => ({ peopleAvatar: vi.fn(), peoplePhoto: vi.fn() }));
 
 vi.mock('@/services/ipc', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   peopleAvatar: ipc.peopleAvatar,
+  peoplePhoto: ipc.peoplePhoto,
 }));
 
 import { Avatar } from './Avatar';
 
 beforeEach(() => {
   ipc.peopleAvatar.mockReset();
+  ipc.peoplePhoto.mockReset();
 });
 
 afterEach(cleanup);
@@ -38,20 +40,36 @@ describe('the avatar', () => {
     expect(screen.getByRole('img', { name: 'Person' })).toBeTruthy();
   });
 
-  it('replaces the monogram with the photo the command answers', async () => {
+  it('replaces the monogram with the photo the commands answer', async () => {
     ipc.peopleAvatar.mockResolvedValue({
       initials: 'AL',
       colour: '#4DB6AC',
       photo: 'C:\\blobs\\ada.png',
     });
+    ipc.peoplePhoto.mockResolvedValue('data:image/png;base64,Zm9v');
     render(<Avatar monogram={{ initials: 'AL', colour: '#4DB6AC' }} address="ada@example.test" />);
 
     await waitFor(() => {
       expect(screen.getByRole('img', { name: 'Avatar' }).querySelector('img')).not.toBeNull();
     });
     const photo = screen.getByRole('img', { name: 'Avatar' }).querySelector('img');
-    expect(photo?.getAttribute('src')).toContain(encodeURIComponent('C:\\blobs\\ada.png'));
+    expect(photo?.getAttribute('src')).toBe('data:image/png;base64,Zm9v');
     expect(screen.getByRole('img', { name: 'Avatar' }).textContent).toBe('');
+  });
+
+  it('keeps the monogram when the photo read answers nothing', async () => {
+    ipc.peopleAvatar.mockResolvedValue({
+      initials: 'AL',
+      colour: '#4DB6AC',
+      photo: 'C:\\blobs\\gone.blob',
+    });
+    ipc.peoplePhoto.mockResolvedValue(null);
+    render(<Avatar monogram={{ initials: 'AL', colour: '#4DB6AC' }} address="ada@example.test" />);
+
+    await waitFor(() => {
+      expect(ipc.peoplePhoto).toHaveBeenCalledWith('C:\\blobs\\gone.blob');
+    });
+    expect(screen.getByRole('img', { name: 'Avatar' }).textContent).toBe('AL');
   });
 
   it('keeps the monogram when the command answers no photo', async () => {
