@@ -224,7 +224,7 @@ async fn a_section_naming_no_origin_is_refused() {
     .await;
     assert_eq!(
         row(&app).dav_error,
-        Some("the section names no origin to dial".to_owned())
+        Some("the merged section names no origin to dial".to_owned())
     );
     assert!(row(&app).dav.is_none(), "nothing was stored");
     assert_eq!(

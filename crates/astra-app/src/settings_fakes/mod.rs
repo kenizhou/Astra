@@ -46,6 +46,9 @@ pub(crate) struct FakeAccountOps {
     kind: astra_viewmodel::AccountKind,
 }
 
+/// The sentence a merged section that names no origin answers, the host's
+/// own wording so the row reads the same whichever half refused.
+const NO_ORIGIN: &str = "the merged section names no origin to dial";
 /// The stored section as the fake holds it: the merged editor input, with
 /// the password the echo answers `password_set` from.
 #[derive(Clone, Default)]
@@ -245,7 +248,13 @@ impl HostAccountOps<CalendarFake> for FakeAccountOps {
         let caldav_origin = non_blank(merged.caldav_url.as_ref());
         let carddav_origin = merged.carddav_origin();
         if caldav_origin.is_none() && carddav_origin.is_none() {
-            return Err("the section names no origin to dial".to_owned());
+            return Err(NO_ORIGIN.to_owned());
+        }
+        // The host's dial refuses a merged section with no password; the
+        // fake answers the same refusal so the suite never pins a path the
+        // shipping host cannot produce.
+        if merged.password.is_none() {
+            return Err("the merged section names no credential to dial".to_owned());
         }
         self.refresh_info(&id, &merged);
         self.stored.lock().unwrap().insert(id, merged);
