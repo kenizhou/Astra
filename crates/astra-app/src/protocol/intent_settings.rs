@@ -4,9 +4,9 @@
 //!
 //! Split from [`super::intent`] for the 500-line limit, following
 //! [`PeopleIntent`](super::PeopleIntent). One family for one surface: every
-//! set verb persists its value into the preferences document before the
-//! snapshot republishes, so a changed setting is on disk by the time the
-//! screen shows it and survives a restart by construction.
+//! set verb answers by persisting its value into the preferences document
+//! snapshot republishes by contract, so a changed setting is on disk by the
+//! before the family answers (the dispatch arm enforces it).
 //!
 //! Two rules the family encodes:
 //!
@@ -89,8 +89,8 @@ pub enum SettingsIntent {
         /// Whether the quoted original sits below the reply.
         below: bool,
     },
-    /// Set the mailbox list's grouping. The settings family's own arm; the
-    /// list intent beside it keeps its wire and delegates.
+    /// Set the mailbox list's grouping. The settings family's own arm (the
+    /// list intent beside it keeps its own wire).
     SetViewMode {
         /// The grouping.
         mode: ViewMode,

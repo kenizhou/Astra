@@ -44,7 +44,7 @@ pub struct Preferences {
     /// The collapsed ones, not the expanded ones, so an account nobody has touched
     /// opens showing its folders. Read through [`Preferences::account_expanded`], never
     /// off the field: the inversion is exactly the kind a direct reader gets backwards.
-    /// A [`BTreeSet`] so the serialized TOML order is stable across writes.
+    /// A [`BTreeSet`] so the serialised TOML order is stable across writes.
     #[serde(default)]
     pub collapsed_accounts: BTreeSet<String>,
     /// The folders whose own sub-folders are **shut**, by account id then folder key.

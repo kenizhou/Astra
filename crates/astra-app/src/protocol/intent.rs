@@ -256,7 +256,7 @@ pub enum Intent {
     /// A change to the settings or an account ([`SettingsIntent`]): the
     /// persisted preferences (theme, clock, zone, first day of the week,
     /// horizon, quote style, grouping, the default calendar), the dav
-    /// section editor, and account removal. Every set verb persists its
-    /// value before republishing.
+    /// section editor, and account removal (the dispatch arm persists).
+    ///
     Settings(SettingsIntent),
 }

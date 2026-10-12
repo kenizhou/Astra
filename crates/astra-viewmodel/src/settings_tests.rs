@@ -33,7 +33,7 @@ fn the_snapshot_crosses_its_full_shape_and_reads_back() {
             view_mode: ViewMode::Threaded,
             default_calendar: Some(DefaultCalendar {
                 account: account("work"),
-                calendar: calendar("cal-1"),
+                key: calendar("cal-1"),
             }),
         },
         accounts: vec![AccountSettingsRow {
@@ -73,7 +73,7 @@ fn the_snapshot_crosses_its_full_shape_and_reads_back() {
                 "horizon_days": 31,
                 "quote_below": false,
                 "view_mode": "threaded",
-                "default_calendar": { "account": "work", "calendar": "cal-1" }
+                "default_calendar": { "account": "work", "key": "cal-1" }
             },
             "accounts": [
                 {

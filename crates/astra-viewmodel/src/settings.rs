@@ -109,8 +109,9 @@ pub enum WeekdayWire {
 pub struct DefaultCalendar {
     /// The account whose provider serves the calendar.
     pub account: AccountId,
-    /// The calendar's key, unique within `account`.
-    pub calendar: CalendarId,
+    /// The calendar's key, unique within `account`, spelled as the
+    /// reference intent spells it.
+    pub key: CalendarId,
 }
 
 /// One configured account, as the accounts page renders it: its address,
