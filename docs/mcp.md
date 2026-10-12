@@ -1,7 +1,7 @@
 # Agent (MCP) access: the Astra Mail contract
 
 **Scope.** The SP2k Model Context Protocol surface: the stdio relay, the
-named-pipe listener behind it, the tool catalogue with its untrusted-body
+named-pipe listener behind it, the tool catalog with its untrusted-body
 fence, the account gate, the tool-call ledger, and the Advanced settings
 panel that owns the user's decisions. Binding on every surface that ships
 any of it (today the desktop host). The port source is mail-calendar's
@@ -247,11 +247,11 @@ Automated:
 - `client/desktop/src/mcp_tests.rs`: the host's run/stop seam, the
   taken-name failed state, and the allowlist seam reaching the gate on a
   live connection.
-- `crates/astra-mcp-relay/tests/e2e.rs`: the gated end-to-end and live
+- `crates/astra-mcp-relay/tests/e2e/`: the gated end-to-end and live
   proofs, over the running harness. The relay bridging stdio to the
   pipe, the server behind it over a REAL two-account app (the product's
   own certificate-acceptance dial), and through that whole stack: the
-  handshake, the ten-tool catalogue with the send cut visible as an
+  handshake, the ten-tool catalog with the send cut visible as an
   absence, the folder names the pane itself uses, the three seeded notes
   newest first with no body on any row, the fenced plain text of one
   seeded note (and the row it did not mark read, across a refresh), the
@@ -278,9 +278,10 @@ Manual, per release, on the desktop:
    unexpose every account and confirm calls report nothing; quit the app
    and confirm the client shows the server as unavailable rather than
    wedged.
-6. `scripts/dev/store.sh` or the ledger read of the release pass:
-   confirm the reads left no trace in the store, and that every call
-   left exactly one ledger row holding no content.
+6. The ledger read (`AiStore::recent_tool_calls` over the app's
+   ai.sqlite, or an sqlite read of the `tool_calls` table): confirm the
+   reads left no trace in the store, and that every call left exactly
+   one ledger row holding no content.
 
 ## Known gaps
 
