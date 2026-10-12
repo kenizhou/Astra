@@ -85,6 +85,6 @@ re-derived from the store at send time.
   carries the kind, the participation, the title, and the organiser.
 - **The invitation's own .ics part** is not yet suppressed from the attachment
   list; a genuinely attached calendar file still shows.
-- **The desktop host dials no calendar leg yet** (the calendar contract's
-  first gap), so on the shipped host the card's calendar-side state reads
-  through whatever the account's providers hold.
+- **No surface writes the dav section yet** (the contacts contract's gap
+  list), so a stored account must already carry one for the host's boot dial
+  to fill the card's calendar-side state.

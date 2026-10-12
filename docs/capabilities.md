@@ -11,7 +11,7 @@ this row ports.
 | Accounts | Auto-detect from email address (JMAP probe, SRV, autoconfig, ISPDB, MX), with results from an unencrypted hop disclosed and needing explicit approval | 🚧 | account-autodetect.md |
 | Mail | Folder pane across accounts with nested folders and persisted expansion | 🚧 | folder-pane.md |
 | Mail | Flat and threaded message list with windowed paging | 🚧 | mail-calendar capabilities |
-| Calendar | Day, work week, and month grids with drag to create, move, resize | 🚧 | grids, agenda, and drag move ship; resize is the dialog's end edit and create is the dialog, not a grid gesture; the host calendar dial is calendar.md's first gap |
+| Calendar | Day, work week, and month grids with drag to create, move, resize | 🚧 | grids, agenda, and drag move ship; resize is the dialog's end edit and create is the dialog, not a grid gesture; the host dials the calendar leg at boot when the account carries a dav section; calendar.md |
 | Core | Reactive Rust to native binding, dispatch to immutable snapshots | 🚧 | |
 | Accounts | Settings accounts page lists every account, with per-service toggles, relinking, sign-in again, server editing, and removal | ⬜ | accounts.md |
 | Accounts | Outgoing name per account, asked once at connect, editable in settings, kept in step with the provider | ⬜ | sending.md |
@@ -93,8 +93,8 @@ this row ports.
 | Invitations | An email-only invitation is put on the calendar when answered, and the reply emailed to the organiser where the server will not send it | 🚧 | invitations.md |
 | Invitations | A superseded invitation says it is out of date and stops offering an answer | 🚧 | invitations.md |
 | Invitations | When the server cannot pass your answer on, you are told and offered email instead, rememberable per account | 🚧 | invitations.md |
-| Contacts | Unified contact list across account address books (CardDAV, JMAP, Google, Microsoft), with search and detail | ⬜ | contacts.md |
-| Contacts | Add and edit a contact in a writable address book; one source card named when a person is filed twice | ⬜ | |
+| Contacts | Unified contact list across account address books (CardDAV, JMAP, Google, Microsoft), with search and detail | 🚧 | the People view ships with search matched in the engine and the fold, monogram, and section letters derived once in the rebuild; the CardDAV leg dials at boot and is proven live; the JMAP, Google, and Microsoft legs do not stand; contacts.md |
+| Contacts | Add and edit a contact in a writable address book; one source card named when a person is filed twice | 🚧 | create and edit land through the engine's contact writes and read back live; the write states settle per dispatch; no delete; contacts.md |
 | Sending | Outbox keeps a message that could not be sent and sends it later by itself | 🚧 | sending.md |
 | Sending | Outbox actions: send now, cancel, or edit a message that has not gone | 🚧 | sending.md |
 | Sending | A send interrupted by app close is kept and never sent twice; the user answers Mark as Sent or Send Again | 🚧 | sending.md |
@@ -102,9 +102,9 @@ this row ports.
 | Sending | Reply and reply all from the reading pane: prefilled recipients, subject, and quoted original, sent as a threaded reply | 🚧 | sending.md |
 | Sending | Forward from the reading pane: quoted original under a Fwd: subject, to recipients you name | 🚧 | sending.md |
 | Sending | Threading written on send: replies link by In-Reply-To with the References chain; forwards carry the chain alone | 🚧 | sending.md |
-| Contacts | Sender avatars: a coloured monogram, replaced by an address-book photo | ⬜ | avatars.md |
-| Contacts | The same person in several accounts is one row, joined on a shared address, and says so | ⬜ | |
-| Composer | Recipient autosuggest ranked from synced contacts and from people you have written to | ⬜ | |
+| Contacts | Sender avatars: a coloured monogram, replaced by an address-book photo | 🚧 | the monogram ships on the People view and the composer's suggestions, one derivation; the photo reads through the validated cached-photo command; no avatar on the mail list row yet; avatars.md, contacts.md |
+| Contacts | The same person in several accounts is one row, joined on a shared address, and says so | 🚧 | joined on the shared canonical address, names never join; In N accounts on the row, Also in and per-value provenance on the detail; proven live; contacts.md |
+| Composer | Recipient autosuggest ranked from synced contacts and from people you have written to | 🚧 | the token ranking with pills over the engine's suggestions; sent-mail history mined during sync and never hidden; contacts.md |
 | Search | from: and to: search DSL, unified across accounts, newest first, every folder but Trash | 🚧 | search.md |
 | Search | Search scope filter: narrow to the current folder and back to all mail | 🚧 | search.md |
 | Search | Search says how far back it looked, with a link to change the depth | 🚧 | search.md |
@@ -173,7 +173,7 @@ this row ports.
 | A3 | Reading-pane translate into six languages, cached | 🚧 | ai-assist.md |
 | A4 | On-demand digest and analytics report with the AI documents panel | 🚧 | ai-digest.md |
 | A4 | Split inbox (All / Actioned / FYI) from the stored categorisation | 🚧 | ai-digest.md |
-| A4 | Meeting briefs | 🚧 | core and live relayed proof ship; the host calendar dial is calendar.md's first gap; ai-digest.md |
+| A4 | Meeting briefs | 🚧 | core and live relayed proof ship; the host dials the calendar leg at boot when the account carries a dav section; ai-digest.md |
 
 ## Astra: Agent (sidecar host, per SPA0 spec D5)
 
