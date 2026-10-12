@@ -161,8 +161,8 @@ than as a blank row.
 - **`FailedWithRetry` does not mean rejected.** A write whose server call
   succeeded but whose post-write reconcile did not settle has **landed on the
   server**; only the local copy is briefly stale, and the re-read the next
-  refresh performs heals it. The surface says we could not confirm this
-  saved.
+  refresh performs heals it. The surface tells the user the save could not be
+  confirmed and that a refresh shows what stood.
 - **`Invalid` is a different sentence.** The core refused the form before
   sending anything, so there is something to correct and retrying unchanged
   would be refused the same way. A surface states it under the form the user

@@ -58,8 +58,25 @@ jmap() {
 }
 
 relax_inbound_throttles() {
-  ids=$(jmap '["x:MtaInboundThrottle/get",{"ids":null,"properties":["description"]},"c0"]' \
-    | grep -oE '"id":"[^"]+"' | cut -d'"' -f4)
+  # POSIX sh has no pipefail, so a dead curl (or a JMAP error envelope) would
+  # look like an empty list and the function would no-op with the throttles
+  # still armed: the body is captured once and checked for a real answer
+  # before the ids are parsed out of it.
+  body=$(jmap '["x:MtaInboundThrottle/get",{"ids":null,"properties":["description"]},"c0"]')
+  case "$body" in
+    *'"methodResponses"'*) ;;
+    *)
+      log "FAILED to read the inbound throttles: ${body:-no answer}"
+      return 1
+      ;;
+  esac
+  case "$body" in
+    *'"error"'*)
+      log "FAILED to read the inbound throttles: $body"
+      return 1
+      ;;
+  esac
+  ids=$(printf '%s' "$body" | grep -oE '"id":"[^"]+"' | cut -d'"' -f4)
   if [ -z "$ids" ]; then
     log "no inbound throttles reported; nothing to relax"
     return 0
