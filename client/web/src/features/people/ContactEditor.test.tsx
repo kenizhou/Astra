@@ -3,7 +3,10 @@
 // create with the chosen one, an edit asks which card when several stand
 // (naming the account) and opens straight when one does, the form seeds from
 // the card's own values (never the merged detail), an edit that changed
-// nothing offers no save, and the Invalid sentence renders under the form.
+// nothing offers no save, a create that names nothing to file it under
+// offers none either, the Invalid sentence renders under the form (only for
+// the account the form writes to), and a refused write is what keeps the
+// form open: the close waits for the write's settle.
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -173,5 +176,148 @@ describe('the contact editor', () => {
     const form = screen.getByLabelText('Given name').closest('form');
     expect(form).not.toBeNull();
     expect(form?.contains(sentence)).toBe(true);
+  });
+
+  it('renders the sentence only for the account the form writes to', async () => {
+    const { rerender } = render(
+      <ContactEditor
+        mode="edit"
+        createTargets={[]}
+        editableCards={[CARDS[0]!]}
+        writeStates={writes([{ account: 'home', state: 'invalid' }])}
+        onClose={() => undefined}
+      />,
+    );
+
+    await screen.findByLabelText('Given name');
+    expect(screen.queryByText('The contact could not be saved. Check the fields, then try again.')).toBeNull();
+
+    rerender(
+      <ContactEditor
+        mode="create"
+        createTargets={TARGETS}
+        editableCards={[]}
+        writeStates={writes([{ account: 'work', state: 'invalid' }])}
+        onClose={() => undefined}
+      />,
+    );
+
+    await screen.findByLabelText('Address book');
+    expect(screen.queryByText('The contact could not be saved. Check the fields, then try again.')).toBeNull();
+  });
+
+  it('keeps the editor open when the create is refused', async () => {
+    const onClose = vi.fn();
+    const props = {
+      mode: 'create' as const,
+      createTargets: TARGETS,
+      editableCards: [] as EditableCardRow[],
+      onClose,
+    };
+    const { rerender } = render(<ContactEditor {...props} writeStates={[]} />);
+    await screen.findByLabelText('Address book');
+    fireEvent.change(screen.getByLabelText('Given name'), { target: { value: 'Bea' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(ipc.dispatch).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+
+    rerender(
+      <ContactEditor
+        {...props}
+        writeStates={writes([{ account: 'home', state: 'invalid' }])}
+      />,
+    );
+
+    expect(screen.getByRole('dialog', { name: 'New contact' })).toBeTruthy();
+    expect(
+      screen.getByText('The contact could not be saved. Check the fields, then try again.'),
+    ).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('keeps the editor open when the edit is refused, and closes once a re-save settles', async () => {
+    const onClose = vi.fn();
+    const props = {
+      mode: 'edit' as const,
+      createTargets: [] as CreateTargetRow[],
+      editableCards: [CARDS[0]!],
+      onClose,
+    };
+    const { rerender } = render(<ContactEditor {...props} writeStates={[]} />);
+    await screen.findByLabelText('Given name');
+    fireEvent.change(screen.getByLabelText('Organisation'), { target: { value: 'Analytical Engines' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(onClose).not.toHaveBeenCalled();
+
+    rerender(
+      <ContactEditor
+        {...props}
+        writeStates={writes([{ account: 'work', state: 'invalid' }])}
+      />,
+    );
+    expect(screen.getByRole('dialog', { name: 'Edit contact' })).toBeTruthy();
+    expect(
+      screen.getByText('The contact could not be saved. Check the fields, then try again.'),
+    ).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText('Organisation'), { target: { value: 'Analytical Engines Ltd' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    rerender(
+      <ContactEditor
+        {...props}
+        writeStates={writes([{ account: 'work', state: 'writing' }])}
+      />,
+    );
+    expect(onClose).not.toHaveBeenCalled();
+
+    rerender(<ContactEditor {...props} writeStates={writes([])} />);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes once the write settles clean', async () => {
+    const onClose = vi.fn();
+    const props = {
+      mode: 'edit' as const,
+      createTargets: [] as CreateTargetRow[],
+      editableCards: [CARDS[0]!],
+      onClose,
+    };
+    const { rerender } = render(<ContactEditor {...props} writeStates={[]} />);
+    await screen.findByLabelText('Given name');
+    fireEvent.change(screen.getByLabelText('Organisation'), { target: { value: 'Analytical Engines' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(onClose).not.toHaveBeenCalled();
+
+    rerender(
+      <ContactEditor
+        {...props}
+        writeStates={writes([{ account: 'work', state: 'writing' }])}
+      />,
+    );
+    expect(onClose).not.toHaveBeenCalled();
+
+    rerender(<ContactEditor {...props} writeStates={writes([])} />);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers no save while a create names nothing to file it under', async () => {
+    render(
+      <ContactEditor mode="create" createTargets={TARGETS} editableCards={[]} writeStates={[]} onClose={() => undefined} />,
+    );
+
+    await screen.findByLabelText('Address book');
+    const save = screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+
+    fireEvent.change(screen.getByLabelText('Organisation'), { target: { value: 'Astra' } });
+    expect(save.disabled).toBe(false);
+
+    fireEvent.change(screen.getByLabelText('Organisation'), { target: { value: '' } });
+    expect(save.disabled).toBe(true);
+
+    fireEvent.change(screen.getByLabelText('Emails'), { target: { value: 'bea@example.test' } });
+    expect(save.disabled).toBe(false);
   });
 });

@@ -54,10 +54,14 @@ export function insertBareAddress(value: string, address: string): string {
   return `${[...finishedRecipients(value, false), address].join(', ')}, `;
 }
 
-/** Removes one finished recipient; a token in progress stays untouched. */
-export function removeRecipient(value: string, address: string, settled: boolean): string {
+/**
+ * Removes the finished recipient at one position: the pill's own occurrence,
+ * so a duplicated address goes one removal at a time instead of every
+ * occurrence at once. A token in progress stays untouched.
+ */
+export function removeRecipientAt(value: string, at: number, settled: boolean): string {
   const token = settled ? '' : trailingToken(value);
-  const kept = finishedRecipients(value, settled).filter((kept) => kept !== address);
+  const kept = finishedRecipients(value, settled).filter((_, index) => index !== at);
   return rebuildRecipients(kept, token);
 }
 

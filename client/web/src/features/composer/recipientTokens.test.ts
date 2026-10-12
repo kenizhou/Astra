@@ -11,7 +11,7 @@ import {
   insertBareAddress,
   normaliseRecipients,
   rebuildRecipients,
-  removeRecipient,
+  removeRecipientAt,
   trailingToken,
 } from './recipientTokens';
 
@@ -53,11 +53,12 @@ describe('the token math', () => {
     expect(rebuildRecipients(finishedRecipients(field, false), trailingToken(field))).toBe(field);
   });
 
-  it('removes one recipient, keeping any token in progress', () => {
-    expect(removeRecipient('a@x.com, b@y.com, bo', 'a@x.com', false)).toBe('b@y.com, bo');
-    expect(removeRecipient('a@x.com, b@y.com, bo', 'bo', false)).toBe('a@x.com, b@y.com, bo');
-    expect(removeRecipient('a@x.com, b@y.com', 'a@x.com', true)).toBe('b@y.com');
-    expect(removeRecipient('a@x.com', 'a@x.com', true)).toBe('');
+  it('removes by position, so a duplicated address goes one occurrence at a time', () => {
+    expect(removeRecipientAt('a@x.com, b@y.com, bo', 0, false)).toBe('b@y.com, bo');
+    expect(removeRecipientAt('a@x.com, a@x.com, b@y.com', 0, true)).toBe('a@x.com, b@y.com');
+    expect(removeRecipientAt('a@x.com, a@x.com, b@y.com', 1, true)).toBe('a@x.com, b@y.com');
+    expect(removeRecipientAt('a@x.com, a@x.com', 0, true)).toBe('a@x.com');
+    expect(removeRecipientAt('a@x.com', 0, true)).toBe('');
   });
 
   it('normalises a seeded field into its finished recipients', () => {

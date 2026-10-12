@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The recipient field: the finished recipients render as pills with
-// per-recipient removal while the DOM input's value stays the one
+// per-recipient removal (by position, so a duplicated address goes one
+// occurrence at a time) while the DOM input's value stays the one
 // comma-separated string (pills are a view, never a second source of
-// truth), completion asks on the trailing token and inserts bare addresses,
-// the suggestions float over what follows without taking focus and only
-// for the focused field, a blank token shows nothing, history-only entries
-// are marked apart but never hidden, and a seeded field renders every
-// supplied address as a pill with nothing in progress.
+// truth), completion asks on the trailing token and inserts bare addresses
+// from the mouse or the keyboard (the arrows move and wrap the active
+// suggestion, Enter accepts it, Escape closes the list), the suggestions
+// float over what follows without taking focus and only for the focused
+// field, a resolve that lands after blur is dropped and a refocus clears
+// the list, a blank token shows nothing, history-only entries are marked
+// apart but never hidden, and a seeded field renders every supplied
+// address as a pill with nothing in progress.
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -101,6 +105,22 @@ describe('the recipient field pills', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Remove a@x.com' }));
 
     const input = screen.getByRole('textbox', { name: 'To' }) as HTMLInputElement;
+    expect(input.value).toBe('b@y.com');
+  });
+
+  it('removes a duplicated address one occurrence at a time', () => {
+    render(<Harness initial="a@x.com, a@x.com, b@y.com" />);
+
+    const removes = screen.getAllByRole('button', { name: 'Remove a@x.com' });
+    expect(removes).toHaveLength(2);
+
+    fireEvent.click(removes[0]!);
+
+    const input = screen.getByRole('textbox', { name: 'To' }) as HTMLInputElement;
+    expect(input.value).toBe('a@x.com, b@y.com');
+    expect(screen.getAllByRole('button', { name: 'Remove a@x.com' })).toHaveLength(1);
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Remove a@x.com' })[0]!);
     expect(input.value).toBe('b@y.com');
   });
 });
@@ -304,5 +324,132 @@ describe('the floating suggestions list', () => {
     });
 
     expect(ipc.peopleSuggestions).not.toHaveBeenCalled();
+  });
+
+  it('drops a resolve that lands after the blur and clears the list on refocus', async () => {
+    let answer: ((rows: RecipientSuggestion[]) => void) | undefined;
+    ipc.peopleSuggestions.mockImplementation(
+      () => new Promise<RecipientSuggestion[]>((resolve) => {
+        answer = resolve;
+      }),
+    );
+    render(<RecipientField label="To" value="" onField={() => undefined} />);
+    const input = screen.getByRole('textbox', { name: 'To' });
+    fireEvent.focus(input);
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'bo' } });
+      vi.advanceTimersByTime(150);
+    });
+    expect(ipc.peopleSuggestions).toHaveBeenCalledTimes(1);
+
+    fireEvent.blur(input);
+    await act(async () => {
+      answer?.([suggestion()]);
+      await Promise.resolve();
+    });
+
+    fireEvent.focus(input);
+    await flush();
+    expect(screen.queryByRole('listbox')).toBeNull();
+  });
+});
+
+describe('the suggestions keyboard', () => {
+  it('accepts the first suggestion from the keyboard', async () => {
+    ipc.peopleSuggestions.mockResolvedValue([suggestion()]);
+    render(<Harness initial="a@x.com" />);
+    const input = screen.getByRole('textbox', { name: 'To' }) as HTMLInputElement;
+    act(() => {
+      input.focus();
+    });
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'a@x.com, bo' } });
+      vi.advanceTimersByTime(150);
+    });
+    await flush();
+
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    const active = screen.getByRole('option');
+    expect(active.getAttribute('aria-selected')).toBe('true');
+    expect(input.getAttribute('aria-activedescendant')).toBe(active.id);
+
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await act(async () => {
+      vi.advanceTimersByTime(50);
+    });
+
+    expect(input.value).toBe('a@x.com, bob@y.com, ');
+    expect(screen.queryByRole('listbox')).toBeNull();
+  });
+
+  it('closes the list on Escape, leaving the token untouched', async () => {
+    ipc.peopleSuggestions.mockResolvedValue([suggestion()]);
+    render(<Harness initial="a@x.com" />);
+    const input = screen.getByRole('textbox', { name: 'To' }) as HTMLInputElement;
+    act(() => {
+      input.focus();
+    });
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'a@x.com, bo' } });
+      vi.advanceTimersByTime(150);
+    });
+    await flush();
+    expect(screen.getByRole('listbox')).toBeTruthy();
+
+    fireEvent.keyDown(input, { key: 'Escape' });
+
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(input.value).toBe('a@x.com, bo');
+  });
+
+  it('moves and wraps the active suggestion with the arrows', async () => {
+    ipc.peopleSuggestions.mockResolvedValue([
+      suggestion({ email: 'one@y.com', display_name: 'One' }),
+      suggestion({ email: 'two@y.com', display_name: 'Two' }),
+    ]);
+    render(<RecipientField label="To" value="" onField={() => undefined} />);
+    const input = screen.getByRole('textbox', { name: 'To' });
+    fireEvent.focus(input);
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'bo' } });
+      vi.advanceTimersByTime(150);
+    });
+    await flush();
+
+    const options = screen.getAllByRole('option');
+    expect(options).toHaveLength(2);
+
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    expect(options[0]?.getAttribute('aria-selected')).toBe('true');
+    expect(options[1]?.getAttribute('aria-selected')).toBe('false');
+
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    expect(options[0]?.getAttribute('aria-selected')).toBe('false');
+    expect(options[1]?.getAttribute('aria-selected')).toBe('true');
+
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    expect(options[0]?.getAttribute('aria-selected')).toBe('true');
+
+    fireEvent.keyDown(input, { key: 'ArrowUp' });
+    expect(options[1]?.getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('leaves Enter alone while no suggestion is active', async () => {
+    ipc.peopleSuggestions.mockResolvedValue([suggestion()]);
+    render(<Harness initial="a@x.com" />);
+    const input = screen.getByRole('textbox', { name: 'To' }) as HTMLInputElement;
+    act(() => {
+      input.focus();
+    });
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'a@x.com, bo' } });
+      vi.advanceTimersByTime(150);
+    });
+    await flush();
+
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(input.value).toBe('a@x.com, bo');
+    expect(screen.getByRole('listbox')).toBeTruthy();
   });
 });

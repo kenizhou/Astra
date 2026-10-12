@@ -194,4 +194,25 @@ describe('the people command wire', () => {
     expect(invoke).toHaveBeenCalledWith('people_avatar', { email: 'ada@example.test' });
     expect(view).toEqual({ initials: 'AL', colour: '#4DB6AC' });
   });
+
+  it('answers a repeat avatar ask from the cache without crossing again', async () => {
+    invoke.mockResolvedValue({ initials: 'AL', colour: '#4DB6AC' });
+    const { peopleAvatar } = await import('./people');
+    const first = await peopleAvatar('cached-one@example.test');
+    const second = await peopleAvatar('cached-one@example.test');
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(second).toBe(first);
+  });
+
+  it('drops a refused avatar ask so a later mount retries', async () => {
+    invoke.mockRejectedValueOnce(new Error('offline'));
+    const { peopleAvatar } = await import('./people');
+    await expect(peopleAvatar('cached-two@example.test')).rejects.toBeInstanceOf(Error);
+    invoke.mockResolvedValue({ initials: 'B', colour: '#4DB6AC' });
+    await expect(peopleAvatar('cached-two@example.test')).resolves.toEqual({
+      initials: 'B',
+      colour: '#4DB6AC',
+    });
+    expect(invoke).toHaveBeenCalledTimes(2);
+  });
 });

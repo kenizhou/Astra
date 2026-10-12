@@ -3,8 +3,9 @@
 // rows with the fold order doc, the open person's detail with its sources,
 // per-value provenance, and editable cards, the write states including the
 // invalid one, and the create targets), the PeopleIntent family's
-// constructors, the snapshot pull, the editor's card-seed read, and the
-// recipient-suggestions pull. Split from ipc.ts to keep that file under
+// constructors, the snapshot pull, the editor's card-seed read, the
+// recipient-suggestions pull, and the avatar ask cached per address for the
+// session. Split from ipc.ts to keep that file under
 // the line cap, like the calendar half before it, and re-exported whole
 // through it, so ipc stays the one import point of the wire. The literals
 // are pinned in people.test.ts against the JSON astra-app's
@@ -250,11 +251,28 @@ export interface AvatarView {
 }
 
 /**
+ * The resolved avatar views, keyed by address: one ask per address per
+ * session, so a pane that remounts redraws from memory instead of crossing
+ * the wire again. The set is bounded in practice by the contact corpus, and
+ * a refused ask is dropped rather than cached, so a later mount retries.
+ */
+const avatarViews = new Map<string, Promise<AvatarView>>();
+
+/**
  * Resolves one address to its avatar: the monogram the snapshot rows carry
  * (the one derivation) and the cached photo file's path when one stands.
  */
 export function peopleAvatar(email: string): Promise<AvatarView> {
-  return invoke('people_avatar', { email });
+  const standing = avatarViews.get(email);
+  if (standing !== undefined) {
+    return standing;
+  }
+  const asked = invoke<AvatarView>('people_avatar', { email }).catch((err: unknown) => {
+    avatarViews.delete(email);
+    throw err;
+  });
+  avatarViews.set(email, asked);
+  return asked;
 }
 
 /**

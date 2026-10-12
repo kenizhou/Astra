@@ -86,6 +86,17 @@ describe('the shell composer wiring', () => {
     expect(screen.queryByRole('region', { name: 'Composer' })).toBeNull();
   });
 
+  it('keeps the new message action inert over the people view', () => {
+    render(<AppShell />);
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'People' }));
+    });
+
+    const action = screen.getByRole('button', { name: 'New message' }) as HTMLButtonElement;
+    expect(action.disabled).toBe(true);
+  });
+
   it('resumes the stored draft into the pane at app start', async () => {
     const view: ResumeView = {
       account: 'work',

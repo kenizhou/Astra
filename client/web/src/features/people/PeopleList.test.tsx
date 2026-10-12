@@ -63,7 +63,8 @@ describe('the people list', () => {
     render(<PeopleList rows={rows} onOpen={() => undefined} />);
 
     expect(screen.getByText('In 3 accounts')).toBeTruthy();
-    expect(screen.queryByText(/^In \d+ accounts$/)).not.toBeNull();
+    // The row without a count carries no disclosure of its own.
+    expect(screen.getAllByText(/^In \d+ accounts$/)).toHaveLength(1);
   });
 
   it('supplies the host placeholder words for the empty name', () => {

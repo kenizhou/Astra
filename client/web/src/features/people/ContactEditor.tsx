@@ -4,8 +4,11 @@
 // card when several stand (naming the account) and opening straight when
 // one does. The form seeds from the card's own values through the wire's
 // seed read, never the merged detail; a patch names only the fields the
-// edit changed, and an edit that changed nothing offers no save at all. The
-// Invalid sentence renders under the form the user is still looking at.
+// edit changed, and an edit that changed nothing offers no save at all. A
+// refused (Invalid) write is what keeps the form open: the close waits for
+// the write's settle through the subscribed write states, and the Invalid
+// sentence renders under the form the user is still looking at, for the
+// account the form writes to and no other.
 
 import { useEffect, useState } from 'react';
 
@@ -94,6 +97,9 @@ export function ContactEditor({
   const [pickedKey, setPickedKey] = useState('');
   const [form, setForm] = useState<EditorForm>(EMPTY_FORM);
   const [baseline, setBaseline] = useState<EditorForm>(EMPTY_FORM);
+  const [watch, setWatch] = useState<{ account: string; baseline: PeopleWriteRow[] } | null>(
+    null,
+  );
 
   useEffect(() => {
     if (mode !== 'edit' || chosenCard === null) {
@@ -117,8 +123,14 @@ export function ContactEditor({
     };
   }, [mode, chosenCard]);
 
+  const chosenTarget = createTargets.find(
+    (target) => `${target.account}:${target.book}` === bookKey,
+  );
   const choosingCard = mode === 'edit' && editableCards.length > 1 && chosenCard === null;
-  const invalid = writeStates.some((row) => row.state === 'invalid');
+  const savedAccount = mode === 'edit' ? chosenCard?.account : chosenTarget?.account;
+  const invalid =
+    savedAccount !== undefined &&
+    writeStates.some((row) => row.account === savedAccount && row.state === 'invalid');
   const changed =
     mode === 'edit' &&
     (form.given !== baseline.given ||
@@ -127,16 +139,47 @@ export function ContactEditor({
       form.role !== baseline.role ||
       form.emails !== baseline.emails ||
       form.phones !== baseline.phones);
+  // The host's findable-again rule, mirrored as the affordance: a create
+  // that names nothing (no name part, no organisation, no address) has
+  // nothing the host would file it under, so Save stays off.
+  const findable =
+    form.given.trim() !== '' ||
+    form.surname.trim() !== '' ||
+    form.organisation.trim() !== '' ||
+    listOf(form.emails).length > 0;
+
+  // The close waits for the write the dispatch started: the write states
+  // arrive through the store subscription, so the watch holds the account
+  // written to and the rows last seen, and decides only on a publish that
+  // follows the save.
+  useEffect(() => {
+    if (watch === null || writeStates === watch.baseline) {
+      return;
+    }
+    const row = writeStates.find((candidate) => candidate.account === watch.account);
+    if (row?.state === 'invalid') {
+      // The refusal sentence stands under the form the user is still
+      // looking at; only a later write can clear it.
+      setWatch(null);
+      return;
+    }
+    if (row?.state === 'writing') {
+      // The publish caught the write in flight; its settle publishes again.
+      setWatch({ account: watch.account, baseline: writeStates });
+      return;
+    }
+    // Absent (settled clean) or failed-with-retry (the write landed; the
+    // banner beside the list owns its recovery): the form's work is done.
+    setWatch(null);
+    onClose();
+  }, [writeStates, watch, onClose]);
 
   const set = (field: keyof EditorForm, value: string): void =>
     setForm((current) => ({ ...current, [field]: value }));
 
   const save = (): void => {
     if (mode === 'create') {
-      const chosen = createTargets.find(
-        (target) => `${target.account}:${target.book}` === bookKey,
-      );
-      if (chosen === undefined) {
+      if (chosenTarget === undefined) {
         return;
       }
       const name = nameOf(form);
@@ -147,8 +190,8 @@ export function ContactEditor({
         ...(listOf(form.emails).length > 0 ? { emails: listOf(form.emails) } : {}),
         ...(listOf(form.phones).length > 0 ? { phones: listOf(form.phones) } : {}),
       };
-      void dispatch(intents.createContact({ account: chosen.account, book: chosen.book }, draft));
-      onClose();
+      void dispatch(intents.createContact({ account: chosenTarget.account, book: chosenTarget.book }, draft));
+      setWatch({ account: chosenTarget.account, baseline: writeStates });
       return;
     }
     if (chosenCard === null) {
@@ -175,6 +218,8 @@ export function ContactEditor({
     }
     if (Object.keys(patch).length > 0) {
       void dispatch(intents.updateContact(chosenCard, patch));
+      setWatch({ account: chosenCard.account, baseline: writeStates });
+      return;
     }
     onClose();
   };
@@ -335,7 +380,7 @@ export function ContactEditor({
               </button>
               <button
                 type="submit"
-                disabled={mode === 'edit' && !changed}
+                disabled={mode === 'edit' ? !changed : !findable}
                 className="rounded-[var(--radius)] bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Save

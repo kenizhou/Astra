@@ -57,7 +57,9 @@ export function AppShell() {
         <MailRow />
       )}
       <StatusBar />
-      <NewMessageAction disabled={accountCount === 0 || shellView === 'calendar'} />
+      {/* The composer pane mounts only in the mail view, so the action
+          stands nowhere over the calendar or people panes. */}
+      <NewMessageAction disabled={accountCount === 0 || shellView !== 'mail'} />
       <OutboxPanel />
       <AgentPanel />
       <AiPanel />
