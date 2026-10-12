@@ -22,6 +22,7 @@ fn stub_state(name: &str, mode: &str) -> (crate::AppState, Arc<CollectingSink>) 
     let app_state = crate::AppState {
         app: FakeApp::new(),
         agent: relay,
+        mcp: crate::commands_fakes::host(&format!("{name}-agent")),
         llm: None,
         connections: Arc::new(crate::AccountDials::empty(&scratch(name))),
         photo_root: scratch(name).join("photos"),

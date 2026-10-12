@@ -18,6 +18,7 @@ use astra_viewmodel::{
 use async_trait::async_trait;
 use engine_api::{AccountId, CalendarDate, Provider, ProviderKey, RecipientSuggestion};
 
+use crate::mcp::McpHost;
 use crate::{AccountCredentialStore, AccountDials, AppRuntime, LlmClient, SidecarRelay};
 
 /// The concrete provider parameter the desktop host runs the app over:
@@ -402,6 +403,10 @@ pub(crate) struct AppState {
     /// The agent sidecar relay: prompts, approvals, and the ledger the
     /// sidecar's calls land in.
     pub(crate) agent: Arc<SidecarRelay>,
+    /// The MCP listener host: the advanced panel's run/stop seam and
+    /// account gate. It carries a runtime of its own, so its drop
+    /// carries no ordering constraint against the app runtime below.
+    pub(crate) mcp: Arc<McpHost>,
     /// The background LLM client, when a tier table resolved at boot: the
     /// use-case chains, the provider keys, and the ledger its attempts
     /// land in.

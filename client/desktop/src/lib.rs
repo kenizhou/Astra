@@ -22,6 +22,7 @@ mod detection;
 mod dial_table;
 mod exit;
 mod headless;
+mod mcp;
 mod observer;
 
 // The command-surface test fixtures: one compiled copy of the fake app, the
@@ -102,6 +103,9 @@ pub fn run() {
             commands::people::people_avatar,
             commands::people::people_photo,
             commands::settings::settings,
+            commands::mcp::mcp_status,
+            commands::mcp::mcp_set_enabled,
+            commands::mcp::mcp_set_allowed,
             commands::add_account,
             commands::imap_test_connection,
             commands::detect_account_settings,

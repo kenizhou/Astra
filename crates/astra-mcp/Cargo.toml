@@ -1,0 +1,40 @@
+[package]
+name = "astra-mcp"
+description = "The Model Context Protocol surface for Astra Mail: the tool catalog, the untrusted-body fence, the JSON-RPC server with its account gate, and the tool-call ledger."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# The tool schemas are draft-2020-12 JSON Schema literals published as JSON,
+# and the input types that must agree with them are serde-deserialised.
+serde.workspace = true
+serde_json.workspace = true
+# The server sits above the app: the reads bridge to the query layer and
+# the writes to the same intents the UI dispatches (the MC shape).
+astra-app = { path = "../astra-app" }
+# The tool-call ledger rows ride the shared AI store.
+astra-ai = { path = "../astra-ai" }
+# The folder rows the query layer answers with.
+astra-viewmodel = { path = "../astra-viewmodel" }
+# The port over App<P> is generic on the engine's provider contract.
+engine-api.workspace = true
+# The MailBackend port is an async trait.
+async-trait.workspace = true
+# The framing loop reads and writes newline-delimited JSON over one stream,
+# and the listener binds the named pipe (Windows) or the domain socket
+# (Unix) through the same runtime's net driver.
+tokio = { workspace = true, features = ["io-util", "net"] }
+# The failure enums.
+thiserror.workspace = true
+# Connection logging; counts and ids only, never content.
+log.workspace = true
+
+[dev-dependencies]
+# The tests drive the connection loop over an in-memory duplex stream, and
+# the transport tests over a real named pipe client with a bounded wait.
+tokio = { workspace = true, features = ["rt", "macros", "io-util", "net", "time"] }

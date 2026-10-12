@@ -64,7 +64,9 @@ impl<P: Provider> App<P> {
                     self.reading.publish(Some(snapshot));
                     self.request_reply_draft(message.clone(), Some(CorrelationId::generate()));
                     if self.message_unread(&message).await {
-                        self.mark_read(RowRef::Message(message), true).await;
+                        if let Err(err) = self.mark_read(RowRef::Message(message), true).await {
+                            log::warn!("open: the mark-read could not be dispatched: {err}");
+                        }
                     }
                 }
             }

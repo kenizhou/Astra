@@ -263,6 +263,7 @@ dependencies = [
  "astra-app",
  "astra-autodetect",
  "astra-composer",
+ "astra-mcp",
  "astra-viewmodel",
  "async-trait",
  "engine-api",
@@ -284,6 +285,37 @@ dependencies = [
  "tauri-plugin-single-instance",
  "thiserror 2.0.21",
  "time",
+ "tokio",
+]
+
+[[package]]
+name = "astra-mcp"
+version = "0.1.0"
+dependencies = [
+ "astra-ai",
+ "astra-app",
+ "astra-viewmodel",
+ "async-trait",
+ "engine-api",
+ "log",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+]
+
+[[package]]
+name = "astra-mcp-relay"
+version = "0.1.0"
+dependencies = [
+ "astra-account",
+ "astra-ai",
+ "astra-app",
+ "astra-mcp",
+ "astra-viewmodel",
+ "async-trait",
+ "engine-api",
+ "serde_json",
  "tokio",
 ]
 

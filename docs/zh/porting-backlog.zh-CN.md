@@ -15,7 +15,7 @@ Astra 矩阵尚未点名的功能；按奠基规则 mail-calendar 在功能契�
 
 | 切片 | 范围 | 退役 |
 |---|---|---|
-| SP2k（进行中） | MCP 服务器：查询层、工具面、管道与中继、Advanced 面板 | MCP 行 |
+| SP2k | MCP 服务器：查询层、工具面、管道与中继、Advanced 面板 | MCP 行 |
 | SP2l | OAuth 地基：浏览器 PKCE 登录、令牌存储与刷新、重连横幅、过期登录报告 | OAuth 脚手架各行 |
 | SP2m | Microsoft Graph：邮件读取与操作、发送、日历读写、目录 | Microsoft 各行 |
 | SP2n | Google 原生 API：邮件与日历 | Google 各行 |

@@ -17,7 +17,7 @@ debt.
 
 | Slice | Scope | Retires |
 |---|---|---|
-| SP2k (in flight) | The MCP server: the query layer, the tool surface, the pipe and relay, the Advanced panel | the MCP row |
+| SP2k | The MCP server: the query layer, the tool surface, the pipe and relay, the Advanced panel | the MCP row |
 | SP2l | The OAuth foundation: browser PKCE sign-in, token storage and refresh, the reconnect banner, expired-sign-in reporting | the OAuth scaffolding rows |
 | SP2m | Microsoft Graph: mail read and actions, send, calendar read and write, the directory | the Microsoft rows |
 | SP2n | Google native APIs: mail and calendar | the Google rows |

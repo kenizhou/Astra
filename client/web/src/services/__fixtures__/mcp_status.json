@@ -1,0 +1,11 @@
+{
+  "status": "failed",
+  "reason": "the endpoint name is held by another listener",
+  "endpoint": "\\\\.\\pipe\\com.kenizhou.astra.mcp",
+  "allowed": ["work"],
+  "relay_command": [
+    "C:\\Apps\\Astra Mail\\astra-mcp-relay.exe",
+    "--endpoint",
+    "\\\\.\\pipe\\com.kenizhou.astra.mcp"
+  ]
+}

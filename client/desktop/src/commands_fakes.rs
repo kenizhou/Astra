@@ -16,6 +16,13 @@ mod snapshots;
 // through the paths the tests already use.
 mod port;
 
+// The MCP host fixture (an empty backend over the in-memory ledger in a
+// per-test scratch directory), its own child for the same limit, for
+// the state builder below and any test that builds a state of its own.
+mod mcp_host;
+
+pub(crate) use mcp_host::host;
+
 use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -383,6 +390,7 @@ pub(crate) fn state(name: &str, app: Arc<FakeApp>, store: Arc<FakeStore>) -> App
     AppState {
         app,
         agent: relay,
+        mcp: mcp_host::host(name),
         llm: None,
         connections: Arc::new(AccountDials::empty(&scratch(name))),
         photo_root: scratch(name).join("photos"),

@@ -29,6 +29,7 @@ mod outbox;
 mod people;
 mod preferences;
 mod protocol;
+mod query;
 mod reading;
 mod reference;
 mod row_cache;
@@ -137,8 +138,10 @@ pub use calendar::{
     BriefMeetingRow, MeetingBriefError, MeetingBriefState, MeetingBriefView,
     BRIEF_INVITATION_SCAN_LIMIT, MEETING_BRIEF_PROMPT_VERSION,
 };
+pub use compose_request::OpenDraftError;
 pub use dispatch::AppError;
 pub use drafts::{DraftResume, DRAFT_AUTOSAVE_IDLE};
+pub use mail_writes::MailWriteError;
 pub use people::avatar::AvatarView;
 pub use preferences::{load_preferences, preferences_path, save_preferences, Preferences};
 pub use protocol::{
@@ -147,6 +150,7 @@ pub use protocol::{
     EventEdit, FolderIntent, Intent, OutboxIntent, PeopleIntent, RecurrenceChange, RepeatEnd,
     RepeatRule, RsvpAnswer, SearchScope, SettingsIntent, Surface, ThemeMode, ViewMode, WeekdayWire,
 };
+pub use query::{MessageDetail, MessagePage, QueryAccount, QueryRow, MAX_PAGE};
 pub use reference::{
     AddressBookRef, CalendarRef, CardRef, EventRef, FolderRef, MessageRef, QueuedRef, RowRef,
     ThreadRef,

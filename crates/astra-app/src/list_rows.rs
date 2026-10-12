@@ -279,13 +279,13 @@ fn latest_in_folder(members: &[Arc<MailListRow>], folder: &str) -> Option<UtcDat
 }
 
 /// The ordering comparison every sort starts from: newest instant first, undated last.
-fn newest_first(a: &MailListRow, b: &MailListRow) -> std::cmp::Ordering {
+pub(crate) fn newest_first(a: &MailListRow, b: &MailListRow) -> std::cmp::Ordering {
     Reverse(a.mail.date_utc).cmp(&Reverse(b.mail.date_utc))
 }
 
 /// The tiebreak that makes every ordering total: the identity a surface reconciles a row
 /// by.
-fn tiebreak(a: &MailListRow, b: &MailListRow) -> std::cmp::Ordering {
+pub(crate) fn tiebreak(a: &MailListRow, b: &MailListRow) -> std::cmp::Ordering {
     (a.account.as_str(), a.mail.key.as_str()).cmp(&(b.account.as_str(), b.mail.key.as_str()))
 }
 

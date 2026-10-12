@@ -101,9 +101,23 @@ pub(crate) fn assemble_state(
     let model = llm.as_ref().and_then(|client| chat_model_config(client));
     let agent_relay = agent::build_relay(data_dir, model, agent_sink, Arc::clone(&ai_store));
 
+    // The MCP listener: the server over the typed core (the AppBackend
+    // port is generic over the provider, so it takes the core before the
+    // AppPort erasure hands it to the state below), the tool-call ledger
+    // from the AI store, and the host over the data directory. Off and
+    // exposing nothing at every boot: the enable flag and the account
+    // allowlist are session state the panel owns, never a preference
+    // the document persists.
+    let mcp_server = astra_mcp::server::Server::new(
+        Arc::clone(&core) as Arc<dyn astra_mcp::backend::MailBackend>,
+        Arc::clone(&ai_store) as Arc<dyn astra_mcp::ledger::ToolLedger>,
+    );
+    let mcp = Arc::new(crate::mcp::McpHost::new(Arc::new(mcp_server), data_dir));
+
     Ok(AppState {
         app: core as Arc<dyn AppPort>,
         agent: agent_relay,
+        mcp,
         llm,
         connections,
         photo_root: engine_path

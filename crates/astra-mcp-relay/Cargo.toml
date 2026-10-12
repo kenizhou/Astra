@@ -1,0 +1,39 @@
+[package]
+name = "astra-mcp-relay"
+description = "The stdio relay an MCP client spawns to reach a running Astra Mail: a byte pipe between stdin/stdout and the app's named pipe or socket, with no protocol knowledge at all."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# One code path on both transports: tokio's named-pipe client on Windows
+# and its Unix domain socket elsewhere, over overlapped or non-blocking
+# I/O that a byte pump needs in both directions at once. `io-std` is the
+# stdin/stdout pair, `time` the busy-pipe retry. Deliberately its own
+# crate rather than a `[[bin]]` in astra-mcp: a binary target there would
+# link astra-app, the engine, and SQLite into a helper another application
+# executes on the user's behalf, and this binary stays tokio and nothing
+# else.
+tokio = { workspace = true, features = ["rt", "io-util", "io-std", "time", "net"] }
+
+[dev-dependencies]
+# The tests drive the built relay binary against a real named pipe: the
+# server end of the pipe, an async child process, and a bounded wait.
+tokio = { workspace = true, features = ["rt", "macros", "process", "io-util", "time", "net"] }
+# The round-trip test bridges the relay to a real astra-mcp server. Dev
+# only, so the shipped binary still links nothing of the mail stack; the
+# trait's parameter types arrive beside it.
+astra-mcp = { path = "../astra-mcp" }
+astra-app = { path = "../astra-app" }
+astra-viewmodel = { path = "../astra-viewmodel" }
+# The gated e2e dials the live harness through the product's own
+# certificate-acceptance walk, so the typed App the server serves is real.
+astra-account = { path = "../astra-account" }
+astra-ai = { path = "../astra-ai" }
+engine-api.workspace = true
+async-trait.workspace = true
+serde_json.workspace = true
