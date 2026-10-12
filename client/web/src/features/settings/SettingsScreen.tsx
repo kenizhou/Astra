@@ -15,6 +15,7 @@ import { useUiStore } from '@/stores/uiStore';
 
 import { AboutDetail } from './AboutDetail';
 import { AccountsDetail } from './AccountsDetail';
+import { AdvancedDetail } from './AdvancedDetail';
 import { CalendarDetail } from './CalendarDetail';
 import { ComposingDetail } from './ComposingDetail';
 import { GeneralDetail } from './GeneralDetail';
@@ -28,6 +29,7 @@ export type SettingsCategory =
   | 'reading'
   | 'composing'
   | 'accounts'
+  | 'advanced'
   | 'about';
 
 /** The categories the screen offers, in the settings taxonomy's own order. */
@@ -37,6 +39,7 @@ const CATEGORIES: ReadonlyArray<{ id: SettingsCategory; label: string }> = [
   { id: 'reading', label: 'Reading' },
   { id: 'composing', label: 'Composing' },
   { id: 'accounts', label: 'Accounts' },
+  { id: 'advanced', label: 'Advanced' },
   { id: 'about', label: 'About' },
 ];
 
@@ -129,6 +132,7 @@ export function SettingsScreen() {
             {category === 'reading' && <ReadingDetail />}
             {category === 'composing' && <ComposingDetail />}
             {category === 'accounts' && <AccountsDetail />}
+            {category === 'advanced' && <AdvancedDetail />}
             {category === 'about' && <AboutDetail />}
           </div>
         </div>

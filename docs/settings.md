@@ -27,7 +27,8 @@ row that renders nothing invites a support answer nobody can give.
 | 3 | **Reading** | Conversation grouping (flat or threaded) |
 | 4 | **Composing** | Quote style (the quoted original below or above the reply) |
 | 5 | **Accounts** | Every configured account, each opening its own page |
-| 6 | **About** | The version and the attributions, from the core, not the web's guess |
+| 6 | **Advanced** | AI assistant access (the MCP server): the on/off toggle, the per-account allowlist, the client-config snippet |
+| 7 | **About** | The version and the attributions, from the core, not the web's guess |
 
 **Every control reflects the persisted truth, never local optimism.** A
 change dispatches its intent and the control takes the value the
@@ -199,6 +200,55 @@ selection pointing inside it) go with it, and the selection returns to
 the unified view, so a later re-add starts clean rather than inheriting
 a shut tree nobody remembers shutting.
 
+## The Advanced page
+
+The Advanced category carries what the taxonomy gives it: powerful,
+expert-facing, off by default. What ships in it today is the AI
+assistant access panel (the MCP server); mail-calendar's reset local
+database stays absent, recorded under the gaps below.
+
+**The panel drives host commands, not intents.** The listener is the
+host's: the `McpHost` owns the endpoint, its own runtime, and the
+account gate, and the app core has no path back to it (the host builds
+the server over the core, never the other way round). So the toggle
+and the allowlist are host commands over the assembled host, the same
+relation the agent relay's commands stand in, and the settings family's
+intent dispatch is not involved: no mcp field enters the settings
+block, and the panel pulls its own status view rather than reading the
+snapshot.
+
+**Nothing persists.** The enable flag and the account allowlist are
+session state the host holds; nothing of them lands in the preferences
+document, and every boot starts with the server off and the allowlist
+empty. mail-calendar persists both (its preferences file carries the
+flag and the account list, a boot re-reads them, and turning the
+server off keeps the list); Astra deliberately diverges. The security
+rulebook is fail closed, and the MCP endpoint is the widest reach an
+assistant can obtain, so the door re-closes at every restart, crash,
+and update; re-granting is two clicks in the panel, and the panel says
+the rule in a sentence of its own. The substance that does port:
+turning the server on and granting an account are separate decisions;
+empty exposes nothing (an unlisted account is not even named to the
+client); the list is inert while the server is off, so toggling the
+server off keeps the session's list; and a removed account leaves the
+picker with its row, because the picker lists the snapshot's live
+account rows.
+
+- **The toggle** turns the listener on (binds the endpoint derived
+  from the app's data directory) or off (closes it). A bind that finds
+  the name taken is the failed state, never an error box: the status
+  line says the server could not start and the reason stands beneath;
+  switching off and on again retries the bind honestly.
+- **The allowlist picker** lists the settings snapshot's account
+  rows, each naming one account an assistant may reach. Granting one
+  account grants every folder the app reads for it; folder-level
+  gating is the design's recorded gap.
+- **The reach sentence** states what the gate currently allows: an
+  empty list means no tool reaches any mail.
+- **The client-config snippet** carries the relay command: the relay
+  binary beside the app, the endpoint as its argument, ready to paste
+  into an MCP client's config.
+
 ## The error channels
 
 One typed word on the snapshot's `error` names why the newest total
@@ -219,7 +269,7 @@ never the history.
 
 | Surface | Ships |
 |---|---|
-| Desktop | The settings modal from the title strip's gear: the six categories above, each control persisting before it answers; the accounts page with the dav editor and the confirmed removal; the theme and clock applying across the chrome; the zone, first day, horizon, default calendar, grouping, and quote style consumed by the diary, the create dialog, the list, and the composer |
+| Desktop | The settings modal from the title strip's gear: the categories above, each control persisting before it answers; the accounts page with the dav editor and the confirmed removal; the Advanced page with the AI assistant access panel (host-side toggle, allowlist, client-config snippet; off and empty at every boot); the theme and clock applying across the chrome; the zone, first day, horizon, default calendar, grouping, and quote style consumed by the diary, the create dialog, the list, and the composer |
 
 The live proofs: the gated harness suite drives the seam end to end over
 a scratch config document that mirrors the host store's merge rule and
@@ -239,12 +289,19 @@ seeded artefact is withdrawn at the end.
 ## Known gaps
 
 - **The categories that do not ship, by name**: the Allodia account,
-  Signatures, Notifications, Privacy, Advanced, and Diagnostics are
-  absent, and so are the entries inside shipped categories that
-  mail-calendar carries: the app language and the default mail app
-  (General), swipe actions (Reading), the default send account
-  (Composing), and a reset. Each arrives with the slice that implements
-  it, in the slot the taxonomy gives it.
+  Signatures, Notifications, Privacy, and Diagnostics are absent, and
+  so are the entries inside shipped categories that mail-calendar
+  carries: the app language and the default mail app (General), swipe
+  actions (Reading), the default send account (Composing), and the
+  reset local database (Advanced, whose MCP panel does ship). Each
+  arrives with the slice that implements it, in the slot the taxonomy
+  gives it.
+- **The client-config snippet names a relay the bundle does not yet
+  stage.** The snippet derives the relay binary beside the app, but the
+  desktop bundle carries no `astra-mcp-relay` beside the executable
+  yet; an installed build's snippet names a path nothing occupies
+  until the packaging pass lands. A dev build finds the binary where
+  cargo built it.
 - **The gear is a text button.** The title strip's entry reads Settings
   and draws no glyph; the icon set arrives with the chrome pass.
 - **The work week's first day is an explicit picker, not a locale

@@ -58,6 +58,10 @@ export * from './people';
 // split.
 export * from './settings';
 
+// The mcp half (the advanced panel's status view and its three host
+// commands), under the same re-export and split.
+export * from './mcp';
+
 /** A folder bound to its owning account; unique only within the account. */
 export interface FolderRef {
   account: string;

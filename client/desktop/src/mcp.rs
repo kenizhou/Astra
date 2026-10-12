@@ -14,7 +14,6 @@ use astra_mcp::server::Server;
 use astra_mcp::transport::{Endpoint, Listener};
 
 /// The listener's state as the settings panel reads it.
-#[allow(dead_code)] // the settings panel is the consumer
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum McpStatus {
     /// The enabled flag is off: nothing listens.
@@ -30,7 +29,6 @@ pub(crate) enum McpStatus {
 /// holds: the accept task is the listener's lifetime (aborting it drops
 /// the `Listener`, which closes the endpoint and, on Unix, unlinks the
 /// socket).
-#[allow(dead_code)] // the settings panel is the consumer
 enum Run {
     /// Nothing is listening.
     Down,
@@ -42,7 +40,6 @@ enum Run {
 }
 
 /// The listener's run/stop seam.
-#[allow(dead_code)] // the settings panel is the consumer
 pub(crate) struct McpHost {
     /// The server the accept loop serves.
     server: Arc<Server>,
@@ -59,7 +56,6 @@ pub(crate) struct McpHost {
     status: Mutex<McpStatus>,
 }
 
-#[allow(dead_code)] // the settings panel is the consumer
 impl McpHost {
     /// Builds the host over `server`, deriving the endpoint from
     /// `data_dir` and giving the listener a runtime of its own, so a slow
@@ -86,10 +82,16 @@ impl McpHost {
     }
 
     /// Sets the allowed account ids: the gate a live connection answers
-    /// through, read fresh on every call (the settings seam; the panel
-    /// owns persisting them).
+    /// through, read fresh on every call. Session state only: nothing
+    /// persists, so every boot starts with the gate empty.
     pub(crate) fn set_allowed(&self, ids: impl IntoIterator<Item = String>) {
         self.server.gate().set_allowed(ids);
+    }
+
+    /// The allowed account ids, in stable order: the picker's checked
+    /// set as the panel's pull reads it back.
+    pub(crate) fn allowed(&self) -> Vec<String> {
+        self.server.gate().allowed()
     }
 
     /// Turns the listener on or off: on binds the endpoint and serves it;

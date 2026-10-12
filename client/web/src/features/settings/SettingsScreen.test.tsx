@@ -8,12 +8,13 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const ipc = vi.hoisted(() => ({ dispatch: vi.fn(), settings: vi.fn() }));
+const ipc = vi.hoisted(() => ({ dispatch: vi.fn(), settings: vi.fn(), mcpStatus: vi.fn() }));
 
 vi.mock('@/services/ipc', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   dispatch: ipc.dispatch,
   settings: ipc.settings,
+  mcpStatus: ipc.mcpStatus,
 }));
 
 import { SettingsScreen } from './SettingsScreen';
@@ -43,6 +44,13 @@ beforeEach(() => {
   ipc.dispatch.mockResolvedValue(undefined);
   ipc.settings.mockReset();
   ipc.settings.mockResolvedValue(snapshot());
+  ipc.mcpStatus.mockReset();
+  ipc.mcpStatus.mockResolvedValue({
+    status: 'off',
+    endpoint: '\\\\.\\pipe\\com.kenizhou.astra.mcp',
+    allowed: [],
+    relay_command: [],
+  });
   useUiStore.getState().setSettingsOpen(true);
 });
 
@@ -58,11 +66,19 @@ describe('the settings screen', () => {
     expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull();
   });
 
-  it('renders the six categories that ship and no others', () => {
+  it('renders the seven categories that ship and no others', () => {
     render(<SettingsScreen />);
     const list = screen.getByLabelText('Settings categories');
     const labels = Array.from(list.querySelectorAll('button')).map((b) => b.textContent);
-    expect(labels).toEqual(['General', 'Calendar', 'Reading', 'Composing', 'Accounts', 'About']);
+    expect(labels).toEqual([
+      'General',
+      'Calendar',
+      'Reading',
+      'Composing',
+      'Accounts',
+      'Advanced',
+      'About',
+    ]);
   });
 
   it('switches the detail panel with the source list', () => {
@@ -74,6 +90,9 @@ describe('the settings screen', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'General' }));
     expect(screen.getByLabelText('Theme')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Advanced' }));
+    expect(screen.getByLabelText('AI assistant access')).toBeTruthy();
   });
 
   it('returns to the shell from Close and from Escape', () => {

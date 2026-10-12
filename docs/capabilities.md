@@ -65,7 +65,7 @@ this row ports.
 | Mail | Mail actions: read and unread, flag, archive, delete, trash | ⬜ | |
 | Mail | Select several messages and act on the lot: archive, trash, delete, read, unread, flag | ⬜ | list-selection.md |
 | Mail | Mark as spam or not spam, reported to the provider so its filter learns | ⬜ | reporting.md |
-| MCP | MCP server over a local socket, opt-in and off by default: read and act on mail from an MCP client, direct send behind its own toggle | ⬜ | mcp.md |
+| MCP | MCP server over a local socket, opt-in and off by default: read and act on mail from an MCP client, direct send behind its own toggle | 🚧 | the server, the account gate, and the Advanced settings panel ship (host-side state: off and empty at every boot, nothing persists); no send tool exists at all, the recorded cut; the relay bundle beside the app and the live proofs remain; mcp.md |
 | Mail | Configurable swipe actions per direction, with undo | ⬜ | |
 | Calendar | Agenda view with create and delete event | 🚧 | calendar.md |
 | Calendar | Write affordances gated on per-row can_write | 🚧 | calendar.md |

@@ -161,6 +161,35 @@ fn an_account_without_a_dav_section_dials_nothing() {
     assert!(contacts.is_none());
 }
 
+/// The boot assembles the MCP host off and exposing nothing: the state
+/// every boot starts from, asserted at the assembly the panel reads.
+/// Nothing of the mcp state persists, so this is not one boot's luck;
+/// it is the only state a boot can hand back.
+#[test]
+fn the_assembly_hands_back_an_mcp_host_off_and_exposing_nothing() {
+    let data_dir =
+        std::env::temp_dir().join(format!("astra-desktop-boot-mcp-{}", std::process::id()));
+    std::fs::create_dir_all(&data_dir).expect("the scratch directory creates");
+    let (_relay, agent_sink, _data) = crate::agent::testkit::stub_relay("boot-mcp", "echo", 3, 50);
+    let state = super::assemble_state(
+        &data_dir,
+        std::sync::Arc::new(QuietObserver),
+        agent_sink,
+        std::sync::Arc::new(QuietDraftSink),
+    )
+    .expect("the assembly boots over an empty store");
+
+    assert_eq!(
+        state.mcp.status(),
+        crate::mcp::McpStatus::Off,
+        "nothing listens until the panel turns the server on"
+    );
+    assert!(
+        state.mcp.allowed().is_empty(),
+        "no account is exposed until the panel names one"
+    );
+}
+
 /// The assembly's observer: surface signals go unwatched, the probe below
 /// reads the snapshot the dispatch leaves behind.
 struct QuietObserver;
