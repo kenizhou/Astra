@@ -84,10 +84,27 @@ impl<P: Provider> App<P> {
             // republished snapshot (the store shows a queued keyword change at once),
             // never through a return value.
             Intent::MarkRead { row, read } => {
-                self.mark_read(row, read).await;
+                if let Err(err) = self.mark_read(row, read).await {
+                    log::warn!("mark-read: {err}");
+                }
             }
             Intent::SetFlagged { row, flagged } => {
-                self.set_flagged(row, flagged).await;
+                if let Err(err) = self.set_flagged(row, flagged).await {
+                    log::warn!("flag: {err}");
+                }
+            }
+            // The two move writes ride the same discard-and-resync discipline:
+            // the queued edit reaches the server, the next sync moves the row,
+            // and the republished list is what tells the user.
+            Intent::ArchiveMessage { row } => {
+                if let Err(err) = self.archive_message(row).await {
+                    log::warn!("archive: {err}");
+                }
+            }
+            Intent::MoveToTrash { row } => {
+                if let Err(err) = self.move_to_trash(row).await {
+                    log::warn!("trash: {err}");
+                }
             }
             // The reading pane: one open, one close, both publishing the surface.
             Intent::OpenMessage { message } => {

@@ -41,6 +41,12 @@ use crate::{reading::resolve, reference::MessageRef, sanitise, App, ComposeInten
 // split out so each file stays under the 500-line limit.
 mod text;
 
+// The agent draft seam: the compose request an assistant's create_draft
+// opens, split out for the same limit.
+mod agent_draft;
+
+pub use agent_draft::OpenDraftError;
+
 use text::to_plain;
 
 /// The month names the attribution line's date spells out. The core has no

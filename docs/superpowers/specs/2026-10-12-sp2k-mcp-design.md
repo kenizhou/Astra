@@ -72,7 +72,7 @@ nothing.
 - Live (gated, harness): a `get_message` body over real IMAP mail; a
   `search_messages` over the seeded corpus.
 
-## 4. Known gaps (pre-recorded)
+## 4. Known gaps
 
 - The relay binary ships for Windows first (named pipes); the Unix socket
   path compiles but is unproven until a Unix host CI exists.
@@ -83,7 +83,24 @@ nothing.
 - The allowlist lists accounts, not folders: an exposed account exposes
   every folder the app reads for it (mail-calendar's row-level gating
   arrives with its folder-level ACL work).
-- `archive_message` and `move_to_trash` have no dispatch intent today (the
-  survey's finding): Task 2 adds the two write intents first, so the tools
-  genuinely ride the same door the user's own click will use, rather than a
-  private path.
+- The archive target resolves, in order: the RFC 6154 `\Archive` role, a
+  conventional folder name (the leaf of a hierarchical name,
+  case-insensitive, across the locales mail-calendar ships in), and only
+  then the account's `\All` mailbox (the Gmail shape, where archiving is
+  the absence of the Inbox label and All Mail is the archived message's
+  home). Trash resolves the same way without the All fallback. The
+  resolution is decided here and implemented once in astra-app, so the
+  intent, the agent tool, and any future swipe share one answer.
+- An agent's fresh draft opens under the compose-request snapshot's reply
+  kind with no threading header: the snapshot vocabulary predates agent
+  drafts and carries no "new" spelling, and the downstream composer keys
+  its threading off the header, which is absent. An agent draft's `bcc`
+  prefills nothing for the same reason (the snapshot has no Bcc field);
+  the composer opens showing exactly what it will send, and nothing sends
+  until the human presses send. Both narrow when the compose-request
+  contract grows its agent shape.
+- The port from the server to `App<P>` (the trait implementation in
+  astra-mcp) is delegation-thin by design: its behaviour is pinned in the
+  layers it delegates to (the query layer's and the writes' tests in
+  astra-app, the bridge and server tests over the fake port), and the
+  gated e2e of the proofs task drives it over the real pipe.

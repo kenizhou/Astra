@@ -12,7 +12,9 @@
 //! migration 0002 beside the ledgers, the draft pool and style profiles
 //! of 0004, the summarise cache of 0005, the chips-dismissed markers of
 //! 0006, the knowledge entries of 0007, the snippet library of 0008, the
-//! text cache of 0009, and the AI documents of 0010), the
+//! text cache of 0009, and the AI documents of 0010, and the MCP
+//! tool-call
+//! ledger of 0011), the
 //! prompt-injection
 //! hardening wrapper ([`tag_untrusted`]), the active data loss
 //! prevention gate ([`DlpPolicy`] with its [`redact`] and [`apply`]),
@@ -40,6 +42,7 @@ mod store;
 mod summarise_cache;
 mod text_cache;
 mod tier;
+mod tool_calls;
 mod use_case;
 
 #[cfg(test)]
@@ -92,4 +95,5 @@ pub use snippets::{NewSnippet, SnippetId, SnippetRow};
 pub use store::{AiStore, AiStoreError, AuditRow, LlmCallRow};
 pub use summarise_cache::SummariseCacheRow;
 pub use tier::{ModelEntry, ModelTier, TierError, TierTable};
+pub use tool_calls::{NewToolCall, ToolCallRow};
 pub use use_case::LlmUseCase;

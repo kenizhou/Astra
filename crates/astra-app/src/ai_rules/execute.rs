@@ -32,15 +32,34 @@ impl<P: Provider> App<P> {
         audit: &AiStore,
     ) {
         for action in actions {
-            match action {
+            // The outcome word names the dispatch: `ok` when the write went
+            // through its path, `error` when the account had vanished before
+            // it could. What the write's own discard-and-resync discipline
+            // carries (the server's eventual answer) stays in the snapshot,
+            // not here.
+            let dispatched = match action {
                 Action::MarkRead => {
-                    self.mark_read(RowRef::Message(message.clone()), true).await;
+                    match self.mark_read(RowRef::Message(message.clone()), true).await {
+                        Ok(()) => true,
+                        Err(err) => {
+                            log::warn!("rules execute: mark-read: {err}");
+                            false
+                        }
+                    }
                 }
                 Action::SetFlagged => {
-                    self.set_flagged(RowRef::Message(message.clone()), true)
-                        .await;
+                    match self
+                        .set_flagged(RowRef::Message(message.clone()), true)
+                        .await
+                    {
+                        Ok(()) => true,
+                        Err(err) => {
+                            log::warn!("rules execute: flag: {err}");
+                            false
+                        }
+                    }
                 }
-            }
+            };
             let row = AuditRow {
                 correlation: correlation.clone(),
                 verb: "ai_rules execute".to_owned(),
@@ -50,7 +69,7 @@ impl<P: Provider> App<P> {
                     message.account.as_str(),
                     message.key.as_str(),
                 ),
-                outcome: "ok".to_owned(),
+                outcome: if dispatched { "ok" } else { "error" }.to_owned(),
             };
             if let Err(err) = audit.record_audit(&row) {
                 log::warn!("ai rules: the execution audit could not be recorded: {err}");

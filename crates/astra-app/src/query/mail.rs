@@ -93,15 +93,7 @@ impl<P: Provider> App<P> {
     ) -> MessagePage {
         let limit = limit.clamp(1, MAX_PAGE);
         if query.trim().is_empty() {
-            // A query of nothing but whitespace names nobody: the honest
-            // answer is no rows, never the whole mailbox an empty engine
-            // query would match.
-            return MessagePage {
-                rows: Vec::new(),
-                total: 0,
-                offset,
-                windowed: false,
-            };
+            return empty_page(offset);
         }
         let handles = match account {
             Some(id) => self
@@ -110,10 +102,58 @@ impl<P: Provider> App<P> {
                 .map_or_else(Vec::new, |handle| vec![handle]),
             None => self.account_handles().await,
         };
+        self.search_handles(query, handles, account.is_some(), folder, offset, limit)
+            .await
+    }
+
+    /// One page of search hits over exactly `accounts`, under the
+    /// no-account scope rules: every folder except each account's own Trash.
+    ///
+    /// The set form the agent gate needs: a caller that may see only some
+    /// of the configured accounts searches exactly those, never a superset,
+    /// and the answer names no account outside the set. An empty set
+    /// searches nothing and answers an empty page.
+    pub async fn query_search_except_trash_over(
+        &self,
+        query: &str,
+        accounts: &[AccountId],
+        offset: usize,
+        limit: usize,
+    ) -> MessagePage {
+        let limit = limit.clamp(1, MAX_PAGE);
+        if query.trim().is_empty() {
+            return empty_page(offset);
+        }
+        let mut handles = Vec::with_capacity(accounts.len());
+        for account in accounts {
+            if let Some(handle) = self.account_handle(account).await {
+                handles.push(handle);
+            }
+        }
+        self.search_handles(query, handles, false, None, offset, limit)
+            .await
+    }
+
+    /// The shared search body: one ranked fetch per `handle`, the scope's
+    /// filter applied per account (its own tree decides which folder the
+    /// no-account scope excludes), then one newest-first merge and cut.
+    /// `named` is whether the caller named an account, which is what the
+    /// scope table keys on: a named account searches its whole mailbox, an
+    /// unnamed scope searches everything but each account's Trash.
+    async fn search_handles(
+        &self,
+        query: &str,
+        handles: Vec<std::sync::Arc<crate::Account<P>>>,
+        named: bool,
+        folder: Option<&str>,
+        offset: usize,
+        limit: usize,
+    ) -> MessagePage {
         let mut hits: Vec<MailListRow> = Vec::new();
         for handle in handles {
             let tree = self.engine.mailboxes(&handle.id).await.unwrap_or_default();
-            let filter = hit_filter(account, folder, &tree);
+            let named_id = named.then_some(handle.id.clone());
+            let filter = hit_filter(named_id.as_ref(), folder, &tree);
             let ranked = self
                 .engine
                 .search_mail(&handle.id, query, FETCH_LIMIT)
@@ -144,6 +184,16 @@ impl<P: Provider> App<P> {
             // limit of hits: more may exist beyond the fetch.
             windowed: hits.len() >= FETCH_LIMIT,
         }
+    }
+}
+
+/// The empty answer an unusable query returns: no rows, no cut.
+fn empty_page(offset: usize) -> MessagePage {
+    MessagePage {
+        rows: Vec::new(),
+        total: 0,
+        offset,
+        windowed: false,
     }
 }
 

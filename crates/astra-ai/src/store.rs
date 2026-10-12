@@ -123,6 +123,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "ai_documents",
         sql: include_str!("migrations/0010_ai_documents.sql"),
     },
+    Migration {
+        version: 11,
+        name: "tool_calls",
+        sql: include_str!("migrations/0011_tool_calls.sql"),
+    },
 ];
 
 impl AiStore {

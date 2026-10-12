@@ -116,6 +116,23 @@ pub enum Intent {
         /// Whether the row's mail carries the flag.
         flagged: bool,
     },
+    /// Move one row out of the inbox and into the account's archive: a message in
+    /// the flat list, or a whole conversation in the threaded list. The engine's
+    /// move edit behind it, through the same outbox discipline
+    /// [`Intent::MarkRead`] rides; the destination is the account's archive
+    /// folder, resolved by its RFC 6154 role with a conventional-name fallback.
+    ArchiveMessage {
+        /// The row to archive, bound to its owning account.
+        row: RowRef,
+    },
+    /// Move one row to the account's trash, recoverable from there: a message in
+    /// the flat list, or a whole conversation in the threaded list. The same
+    /// engine move edit as [`Intent::ArchiveMessage`], aimed at the account's
+    /// trash folder instead. Nothing is permanently deleted.
+    MoveToTrash {
+        /// The row to trash, bound to its owning account.
+        row: RowRef,
+    },
     /// Read one message in the reading pane: fetch its body, sanitise the HTML,
     /// resolve the inline images, and publish the reading snapshot. Opening also
     /// marks the message read through the same write path [`Intent::MarkRead`]

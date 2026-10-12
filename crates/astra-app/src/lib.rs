@@ -138,8 +138,10 @@ pub use calendar::{
     BriefMeetingRow, MeetingBriefError, MeetingBriefState, MeetingBriefView,
     BRIEF_INVITATION_SCAN_LIMIT, MEETING_BRIEF_PROMPT_VERSION,
 };
+pub use compose_request::OpenDraftError;
 pub use dispatch::AppError;
 pub use drafts::{DraftResume, DRAFT_AUTOSAVE_IDLE};
+pub use mail_writes::MailWriteError;
 pub use people::avatar::AvatarView;
 pub use preferences::{load_preferences, preferences_path, save_preferences, Preferences};
 pub use protocol::{

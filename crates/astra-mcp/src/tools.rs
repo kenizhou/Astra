@@ -26,6 +26,8 @@ use serde_json::Value;
 
 mod schemas;
 
+pub(crate) mod bridge;
+
 use schemas::{
     account_only_schema, draft_schema, list_messages_schema, mark_read_schema, message_schema,
     no_args_schema, search_schema, set_flagged_schema,
@@ -114,6 +116,20 @@ pub struct Tool {
     pub input_schema: Value,
     /// Its behavioural annotations.
     pub annotations: Annotations,
+}
+
+impl Tool {
+    /// This tool as the JSON object `tools/list` returns.
+    #[must_use]
+    pub fn to_json(&self) -> Value {
+        serde_json::json!({
+            "name": self.name,
+            "title": self.title,
+            "description": self.description,
+            "inputSchema": self.input_schema,
+            "annotations": self.annotations.to_json(),
+        })
+    }
 }
 
 /// Every tool the server lists, in a stable order.

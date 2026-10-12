@@ -291,8 +291,16 @@ dependencies = [
 name = "astra-mcp"
 version = "0.1.0"
 dependencies = [
+ "astra-ai",
+ "astra-app",
+ "astra-viewmodel",
+ "async-trait",
+ "engine-api",
+ "log",
  "serde",
  "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
 ]
 
 [[package]]
