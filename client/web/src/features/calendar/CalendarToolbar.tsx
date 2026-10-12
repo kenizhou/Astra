@@ -10,9 +10,10 @@ import { dispatch, intents } from '@/services/ipc';
 
 import { addDays, addMonths, zoneToday } from './calendarRange';
 import { useCalendarStore, type CalendarView } from './calendarStore';
-import { monthYearLabel } from './dayLabels';
+import { monthYearLabel, firstDayIndex } from './dayLabels';
 import { CalendarDot } from './EventMarkers';
 import { navigateTo } from './navigate';
+import { useSettingsStore } from '@/features/settings/settingsStore';
 
 /** The views the switch offers, in the toolbar's own order. */
 const VIEWS: ReadonlyArray<{ id: CalendarView; label: string }> = [
@@ -89,6 +90,7 @@ export function CalendarToolbar({ onCreate, onBriefs }: CalendarToolbarProps) {
   const nowData = useCalendarStore((s) => s.nowData);
   const setView = useCalendarStore((s) => s.setView);
   const setAnchor = useCalendarStore((s) => s.setAnchor);
+  const firstDay = firstDayIndex(useSettingsStore((s) => s.settings.first_day_of_week));
   const [managerOpen, setManagerOpen] = useState(false);
   const managerRef = useRef<HTMLDivElement>(null);
 
@@ -120,7 +122,7 @@ export function CalendarToolbar({ onCreate, onBriefs }: CalendarToolbarProps) {
     if (day !== null && day !== anchor) {
       setAnchor(day);
     }
-    navigateTo(target, nextView, zone);
+    navigateTo(target, nextView, zone, firstDay);
   };
 
   const today = (): void => {

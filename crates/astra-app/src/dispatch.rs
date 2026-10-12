@@ -7,7 +7,7 @@ use thiserror::Error;
 
 use engine_api::Provider;
 
-use crate::{App, Intent, Scope, ViewMode};
+use crate::{App, Intent, Scope};
 
 /// An error the dispatch loop reports to its caller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
@@ -70,12 +70,10 @@ impl<P: Provider> App<P> {
             }
             Intent::SetViewMode(mode) => {
                 // Persist the grouping so it survives a restart. The window resets with
-                // it: a differently grouped list is a different list, and it opens at
-                // the top.
-                self.set_view_mode(mode);
-                self.reset_window();
-                self.bump_generation();
-                self.rebuild_snapshot().await;
+                // it: a differently grouped list is a different list, and it opens at the
+                // top. The shared path answers on the settings surface beside the list,
+                // because the grouping is a persisted setting too.
+                self.set_view_mode(mode).await;
             }
             Intent::ShowMore => {
                 self.grow_window();
@@ -190,16 +188,15 @@ impl<P: Provider> App<P> {
                     self.rebuild_snapshot().await;
                 }
             }
+            // The settings family: every verb persists what it moves before
+            // the surface answers, and the outcomes (a landed setting, a
+            // refusal, an account's dav editor state) reach the user through
+            // the settings snapshot, never a return value.
+            Intent::Settings(change) => {
+                self.dispatch_settings(change).await;
+            }
         }
         Ok(())
-    }
-
-    /// Records the grouping preference, read-modify-write against the file.
-    fn set_view_mode(&self, mode: ViewMode) {
-        self.pane
-            .lock()
-            .expect("preferences mutex poisoned")
-            .set_view_mode(mode);
     }
 }
 

@@ -117,7 +117,8 @@ describe('the reading pane', () => {
 
     expect(screen.getByText('Launch')).toBeTruthy();
     expect(screen.getByText('Ada Lovelace <ada@example.test>')).toBeTruthy();
-    expect(screen.getByText('9 Oct 2026, 08:30')).toBeTruthy();
+    // The default clock setting is the core's own default: 12-hour.
+    expect(screen.getByText('9 Oct 2026, 8:30 AM')).toBeTruthy();
     expect(frameDoc()).toBe(sanitisedHtml);
     expect(frameDoc()).not.toContain(' src="http');
     expect(screen.getByText('2 remote images blocked.')).toBeTruthy();

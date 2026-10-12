@@ -28,3 +28,14 @@ describe('formatSentAt', () => {
     expect(formatSentAt('2025-12-31T23:59:00Z', NOON)).toBe('31 Dec 2025');
   });
 });
+
+describe('the clock setting', () => {
+  it('spells the day label in the 12-hour form when the setting is off', () => {
+    const stamp = '2026-10-12T12:10:00Z';
+    const now = new Date('2026-10-12T15:00:00Z');
+    expect(formatSentAt(stamp, now, true)).toBe('12:10');
+    expect(formatSentAt(stamp, now, false)).toBe('12:10 PM');
+    const evening = '2026-10-12T00:05:00Z';
+    expect(formatSentAt(evening, now, false)).toBe('12:05 AM');
+  });
+});

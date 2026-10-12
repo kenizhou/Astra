@@ -11,6 +11,7 @@ use crate::reference::{FolderRef, MessageRef, RowRef};
 
 use super::{
     CalendarIntent, ComposeIntent, ComposerBlob, DraftsIntent, OutboxIntent, PeopleIntent,
+    SettingsIntent,
 };
 
 /// How the mailbox list is grouped.
@@ -252,4 +253,10 @@ pub enum Intent {
     /// ([`PeopleIntent`]): the search, the person detail, and the contact
     /// create and edit verbs.
     People(PeopleIntent),
+    /// A change to the settings or an account ([`SettingsIntent`]): the
+    /// persisted preferences (theme, clock, zone, first day of the week,
+    /// horizon, quote style, grouping, the default calendar), the dav
+    /// section editor, and account removal (the dispatch arm persists).
+    ///
+    Settings(SettingsIntent),
 }

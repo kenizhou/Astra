@@ -34,6 +34,7 @@ mod reference;
 mod row_cache;
 mod sanitise;
 mod search;
+mod settings;
 mod snapshot;
 mod submit;
 mod surfaced;
@@ -68,6 +69,13 @@ mod calendar_fakes;
 #[cfg(test)]
 #[path = "people_fakes/mod.rs"]
 mod people_fakes;
+
+// The settings slice's test fixtures: the scripted account store the
+// settings tests drive over the account-info seam, beside the calendar's
+// and people's for the same reason.
+#[cfg(test)]
+#[path = "settings_fakes/mod.rs"]
+mod settings_fakes;
 
 // The eval harness: the scenario fixtures under the repository's evals/
 // directory, driven through the same seams the unit tests exercise. The
@@ -135,14 +143,15 @@ pub use people::avatar::AvatarView;
 pub use preferences::{load_preferences, preferences_path, save_preferences, Preferences};
 pub use protocol::{
     AppObserver, CalendarIntent, ComposeIntent, ComposerBlob, CompositionId, ContactDraftInput,
-    ContactNameInput, ContactPatchInput, DraftsIntent, EventDrag, EventEdge, EventEdit,
-    FolderIntent, Intent, OutboxIntent, PeopleIntent, RecurrenceChange, RepeatEnd, RepeatRule,
-    RsvpAnswer, SearchScope, Surface, ViewMode,
+    ContactNameInput, ContactPatchInput, DavSectionInput, DraftsIntent, EventDrag, EventEdge,
+    EventEdit, FolderIntent, Intent, OutboxIntent, PeopleIntent, RecurrenceChange, RepeatEnd,
+    RepeatRule, RsvpAnswer, SearchScope, SettingsIntent, Surface, ThemeMode, ViewMode, WeekdayWire,
 };
 pub use reference::{
     AddressBookRef, CalendarRef, CardRef, EventRef, FolderRef, MessageRef, QueuedRef, RowRef,
     ThreadRef,
 };
+pub use settings::{AccountInfo, DavLegs, HostAccountOps};
 pub use surfaced::Surfaced;
 
 /// The app runtime: owns one [`Engine`] shared across every configured [`Account`],
@@ -231,6 +240,17 @@ pub struct App<P> {
     /// contacts legs the host installed, the current query, the open person,
     /// and the write states. See `people`.
     people_state: Mutex<people::PeopleState>,
+    /// The settings snapshot and its signal: the persisted settings block,
+    /// the account rows, and the about block, as one thing. See `settings`.
+    settings: Surfaced<astra_viewmodel::SettingsSnapshot>,
+    /// The settings view state a rebuild projects and the intents move: the
+    /// per-account dav failures and the newest write's refusal. See
+    /// `settings`.
+    settings_state: Mutex<settings::SettingsState>,
+    /// The host-installed account store: the seam the settings surface reads
+    /// the account configs through and writes them back over. `None` (the
+    /// default) until the host installs one; see `settings`.
+    account_ops: Mutex<Option<Arc<dyn settings::HostAccountOps<P>>>>,
     /// The sync-progress snapshot and its signal: what every mail pass reports its
     /// per-account position through, published on change by the
     /// [`SyncObserver`](engine_api::SyncObserver) fold in `sync_progress`.
@@ -323,6 +343,9 @@ impl<P: Provider> App<P> {
             calendar_state: Mutex::new(calendar::CalendarState::new()),
             people: Surfaced::new(Surface::People, Arc::clone(&observer)),
             people_state: Mutex::new(people::PeopleState::new()),
+            settings: Surfaced::new(Surface::Settings, Arc::clone(&observer)),
+            settings_state: Mutex::new(settings::SettingsState::default()),
+            account_ops: Mutex::new(None),
             sending: Surfaced::new(Surface::Sending, observer),
             outbox: Mutex::new(outbox::Outbox::default()),
             drafts: Mutex::new(Drafts::default()),

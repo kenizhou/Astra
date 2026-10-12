@@ -15,6 +15,14 @@ vi.mock('@/services/ipc', async (importOriginal) => ({
   dispatch: ipc.dispatch,
 }));
 
+const settingsState = vi.hoisted(() => ({
+  settings: { default_calendar: undefined as { account: string; key: string } | undefined },
+}));
+
+vi.mock('@/features/settings/settingsStore', () => ({
+  useSettingsStore: (selector: (state: unknown) => unknown) => selector(settingsState),
+}));
+
 import { EventDialog } from './EventDialog';
 import { useCalendarStore } from './calendarStore';
 import type { OccurrenceRow } from '@/services/ipc';
@@ -67,12 +75,45 @@ beforeEach(() => {
   ipc.dispatch.mockReset();
   ipc.dispatch.mockResolvedValue(undefined);
   onClose.mockReset();
+  settingsState.settings.default_calendar = undefined;
   seed();
 });
 
 afterEach(cleanup);
 
 describe('the event dialog create flow', () => {
+  it('preselects the default calendar the settings block pins', () => {
+    useCalendarStore.setState({
+      calendars: [
+        { account: 'work', id: 'cal-1', name: 'Work', color: '#039be5', visible: true, can_write: true, is_default: true },
+        { account: 'home', id: 'cal-2', name: 'Home', color: '#8e24aa', visible: true, can_write: true, is_default: false },
+      ],
+    });
+    settingsState.settings.default_calendar = { account: 'home', key: 'cal-2' };
+    render(<EventDialog row={null} onClose={onClose} />);
+
+    expect((screen.getByLabelText('Calendar') as HTMLSelectElement).value).toBe('home:cal-2');
+  });
+
+  it('falls back to the diary own default when no pin stands', () => {
+    render(<EventDialog row={null} onClose={onClose} />);
+
+    expect((screen.getByLabelText('Calendar') as HTMLSelectElement).value).toBe('work:cal-1');
+  });
+
+  it('falls back to the first writable when the pin names a calendar that no longer exists', () => {
+    useCalendarStore.setState({
+      calendars: [
+        { account: 'work', id: 'cal-1', name: 'Work', color: '#039be5', visible: true, can_write: true, is_default: false },
+        { account: 'home', id: 'cal-2', name: 'Home', color: '#8e24aa', visible: true, can_write: true, is_default: false },
+      ],
+    });
+    settingsState.settings.default_calendar = { account: 'gone', key: 'cal-x' };
+    render(<EventDialog row={null} onClose={onClose} />);
+
+    expect((screen.getByLabelText('Calendar') as HTMLSelectElement).value).toBe('work:cal-1');
+  });
+
   it('creates an event over the anchor day in the snapshot zone', () => {
     render(<EventDialog row={null} onClose={onClose} />);
 

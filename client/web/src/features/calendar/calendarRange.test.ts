@@ -109,6 +109,33 @@ describe('week rows', () => {
       '2026-10-23',
     ]);
   });
+
+  it('spans the Sunday-start week when the first day moves', () => {
+    expect(weekOf('2026-10-21', 0)).toEqual([
+      '2026-10-18',
+      '2026-10-19',
+      '2026-10-20',
+      '2026-10-21',
+      '2026-10-22',
+      '2026-10-23',
+      '2026-10-24',
+    ]);
+  });
+
+  it('cuts the work week from the setting own start', () => {
+    expect(workWeekOf('2026-10-21', 0)).toEqual([
+      '2026-10-18',
+      '2026-10-19',
+      '2026-10-20',
+      '2026-10-21',
+      '2026-10-22',
+    ]);
+  });
+
+  it('keeps the week whole when the anchor sits on the first day itself', () => {
+    expect(weekOf('2026-10-18', 0)[0]).toBe('2026-10-18');
+    expect(weekOf('2026-10-19', 1)[0]).toBe('2026-10-19');
+  });
 });
 
 describe('the month grid', () => {
@@ -131,6 +158,15 @@ describe('the month grid', () => {
     const december = monthGrid('2026-12-25');
     expect(december[0]).toBe('2026-11-30');
     expect(december[41]).toBe('2027-01-10');
+  });
+
+  it('lays out from the Sunday before the first when the week starts on Sunday', () => {
+    const grid = monthGrid('2026-10-15', 0);
+    expect(grid).toHaveLength(42);
+    expect(grid[0]).toBe('2026-09-27');
+    expect(grid[41]).toBe('2026-11-07');
+    expect(weekdayOfKey(grid[0]!)).toBe(0);
+    expect(weekdayOfKey(grid[7]!)).toBe(0);
   });
 });
 

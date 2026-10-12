@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The briefs panel: the anchored day's meeting brief, asked of the host only
 // when the action opens the panel (never before), over the first calendar's
-// account, rendering the generated brief with its rows, the no-meetings
-// answer, and the failure state a refused generation leaves.
+// account, rendering the generated brief with its rows under the clock
+// setting, the no-meetings answer, and the failure state a refused
+// generation leaves.
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -83,6 +84,9 @@ describe('the briefs panel', () => {
     expect(screen.getByText('Sprint planning')).toBeTruthy();
     expect(screen.getByText('Room A')).toBeTruthy();
     expect(screen.getByText('Boss <boss@test.local>')).toBeTruthy();
+    // 12:00Z to 13:00Z is two to three in the afternoon in Amsterdam; the
+    // default clock is 12-hour.
+    expect(screen.getByText('2 PM to 3 PM')).toBeTruthy();
   });
 
   it('renders the failure state a refused generation leaves', async () => {

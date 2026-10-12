@@ -134,7 +134,7 @@ impl<P: Provider> App<P> {
 
     /// Publishes the empty reading snapshot and forgets the open message, the
     /// one path every "nothing is open" state goes through.
-    fn clear_reading(&self) {
+    pub(crate) fn clear_reading(&self) {
         *self
             .open_reading
             .lock()

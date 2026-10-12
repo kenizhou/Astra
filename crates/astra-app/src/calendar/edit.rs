@@ -94,8 +94,9 @@ pub(crate) struct NewEvent<'a> {
 }
 
 /// Builds the engine's [`EventDraft`] for one create intent, under the `uid`
-/// and `stamp` the core mints at dispatch: the host cannot mint a valid `Uid`
-/// and should not be asked to.
+/// and `stamp` the core mints at dispatch and the week start the persisted
+/// preference names: the host cannot mint a valid `Uid` and should not be
+/// asked to.
 ///
 /// # Errors
 ///
@@ -105,10 +106,11 @@ pub(crate) fn build_draft(
     new: &NewEvent<'_>,
     uid: Uid,
     stamp: UtcDateTime,
+    week_start: engine_api::Weekday,
 ) -> Result<EventDraft, CalendarEditError> {
     let recurrence = new
         .recurrence
-        .map(|rule| draft_recurrence(rule, new.start))
+        .map(|rule| draft_recurrence(rule, new.start, week_start))
         .transpose()?;
     let mut draft = EventDraft::new(
         new.calendar.clone(),
@@ -131,7 +133,7 @@ pub(crate) fn build_draft(
 }
 
 /// Builds the engine's [`DraftRecurrence`] for a series whose event starts at
-/// `start`.
+/// `start`, under the week start the editor writes its rules with.
 ///
 /// The one conversion is the [`RepeatEnd::OnDate`] rule: the named date is
 /// inclusive, so the rule's `UNTIL` wall clock is the **last second of that
@@ -142,8 +144,9 @@ pub(crate) fn build_draft(
 fn draft_recurrence(
     rule: &RepeatRule,
     start: &CalendarDateTime,
+    week_start: engine_api::Weekday,
 ) -> Result<DraftRecurrence, CalendarEditError> {
-    let engine_rule = rebuild_rule(rule)?;
+    let engine_rule = rebuild_rule(rule, week_start)?;
     let RecurrenceBound::Until(until) = &engine_rule.bound else {
         return Ok(DraftRecurrence::new(engine_rule));
     };
@@ -179,6 +182,7 @@ pub(crate) fn build_patch(
     event: &Event,
     edit: &EventEdit,
     stamp: UtcDateTime,
+    week_start: engine_api::Weekday,
 ) -> Result<(PatchTarget, EventPatch), CalendarEditError> {
     let mut patch = EventPatch::new(stamp);
     if let Some(title) = &edit.title {
@@ -242,10 +246,10 @@ pub(crate) fn build_patch(
                 // a stored rule it could not describe is a rule it must not
                 // write back; checked again here because a write must not
                 // trust its caller.
-                if !rule_is_editable(event.recurrence.as_ref()) {
+                if !rule_is_editable(event.recurrence.as_ref(), week_start) {
                     return Err(CalendarEditError::RuleTooRich);
                 }
-                patch.recurrence(draft_recurrence(rule, &event.start)?)
+                patch.recurrence(draft_recurrence(rule, &event.start, week_start)?)
             }
         };
     }
@@ -279,8 +283,8 @@ pub(crate) fn build_deletion(
 
 /// Whether the stored `Recurrence` is one this editor can describe in full
 /// through [`RepeatRule`]: no rule at all (a one-off), or exactly one rule
-/// that survives a describe/rebuild round trip. Anything else stays
-/// read-only.
+/// that survives a describe/rebuild round trip under `week_start`, the week
+/// start the editor writes its rules with. Anything else stays read-only.
 ///
 /// The fit is decided by the **round trip**, not by a checklist of the fields
 /// this version knows about: the stored rule is projected onto
@@ -292,10 +296,16 @@ pub(crate) fn build_deletion(
 /// write the rule back without it. Silently, on the user's real series. The
 /// round trip cannot make that mistake: a field this module does not carry is
 /// a field the rebuilt rule does not match on, so the rule degrades to
-/// read-only instead of being quietly rewritten. A `WKST` other than the
-/// default, an exclusion rule, a skip policy, a rule measured in hours: all
-/// of them refuse by coming back different, not by being named.
-pub(crate) fn rule_is_editable(recurrence: Option<&engine_api::Recurrence>) -> bool {
+/// read-only instead of being quietly rewritten. The week start joins the
+/// round trip the same way: a rule the editor would rebuild identically under
+/// the setting's day is editable, and one whose anchor a save would move
+/// (a `WKST` the setting does not name, an exclusion rule, a skip policy, a
+/// rule measured in hours) refuses by coming back different, not by being
+/// named.
+pub(crate) fn rule_is_editable(
+    recurrence: Option<&engine_api::Recurrence>,
+    week_start: engine_api::Weekday,
+) -> bool {
     let Some(recurrence) = recurrence else {
         return true;
     };
@@ -308,7 +318,7 @@ pub(crate) fn rule_is_editable(recurrence: Option<&engine_api::Recurrence>) -> b
         return false;
     }
     describe_rule(rule)
-        .and_then(|simple| rebuild_rule(&simple).ok())
+        .and_then(|simple| rebuild_rule(&simple, week_start).ok())
         .is_some_and(|rebuilt| rebuilt == *rule)
 }
 
@@ -344,14 +354,31 @@ fn describe_rule(rule: &RecurrenceRule) -> Option<RepeatRule> {
     })
 }
 
-/// Rebuilds the engine rule a [`RepeatRule`] stands for: the one construction
-/// shared by the create path and the editability round trip, so a rule the
-/// editor writes can never differ from a rule the editor was allowed to edit.
-fn rebuild_rule(rule: &RepeatRule) -> Result<RecurrenceRule, CalendarEditError> {
+/// Rebuilds the engine rule a [`RepeatRule`] stands for, under `week_start`:
+/// the one construction shared by the create path and the editability round
+/// trip, so a rule the editor writes can never differ from a rule the editor
+/// was allowed to edit.
+///
+/// A rule that names no weekday anchors to the week boundary rather than to
+/// a day, so it carries `week_start` as its `WKST`; a rule that names its
+/// weekdays keeps the engine's own default, because the editor's wire states
+/// no week start of its own. That default is no claim that the anchor never
+/// matters: on a weekly rule with an interval above one that names its days,
+/// the anchor decides which named days each interval holds. A stored rule so
+/// shaped stays safe through the [`rule_is_editable`] round trip, which
+/// refuses any rule this construction would rebuild differently, never
+/// through this stamp happening to match it.
+fn rebuild_rule(
+    rule: &RepeatRule,
+    week_start: engine_api::Weekday,
+) -> Result<RecurrenceRule, CalendarEditError> {
     let interval = NonZeroU32::new(rule.interval)
         .ok_or_else(|| CalendarEditError::Unrepresentable("a zero interval".to_owned()))?;
     let mut engine_rule = RecurrenceRule::new(rule.frequency);
     engine_rule.interval = interval;
+    if rule.weekdays.is_empty() {
+        engine_rule.first_day_of_week = week_start;
+    }
     engine_rule.by_day = rule
         .weekdays
         .iter()
@@ -372,6 +399,21 @@ fn rebuild_rule(rule: &RepeatRule) -> Result<RecurrenceRule, CalendarEditError> 
         RepeatEnd::OnDate(date) => RecurrenceBound::Until(day_end(date)?),
     };
     Ok(engine_rule)
+}
+
+/// The engine's own spelling of a settings weekday: the WKST mapping, one
+/// place, so a first day stated to the settings surface and a repeat rule's
+/// week start spell one day the same way.
+pub(crate) fn weekday_of(day: crate::protocol::WeekdayWire) -> engine_api::Weekday {
+    match day {
+        crate::protocol::WeekdayWire::Mo => engine_api::Weekday::Mo,
+        crate::protocol::WeekdayWire::Tu => engine_api::Weekday::Tu,
+        crate::protocol::WeekdayWire::We => engine_api::Weekday::We,
+        crate::protocol::WeekdayWire::Th => engine_api::Weekday::Th,
+        crate::protocol::WeekdayWire::Fr => engine_api::Weekday::Fr,
+        crate::protocol::WeekdayWire::Sa => engine_api::Weekday::Sa,
+        crate::protocol::WeekdayWire::Su => engine_api::Weekday::Su,
+    }
 }
 
 /// The engine's [`Occurrence`] for one original start, named the way every
@@ -424,3 +466,7 @@ pub(crate) fn instant_of(
 #[cfg(test)]
 #[path = "../calendar_edit_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "../calendar_edit_rule_tests.rs"]
+mod rule_tests;

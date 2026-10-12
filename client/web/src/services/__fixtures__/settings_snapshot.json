@@ -1,0 +1,32 @@
+{
+  "settings": {
+    "theme": "dark",
+    "twenty_four_clock": true,
+    "zone": "Europe/Amsterdam",
+    "first_day_of_week": "su",
+    "horizon_days": 31,
+    "quote_below": false,
+    "view_mode": "threaded",
+    "default_calendar": { "account": "work", "key": "cal-1" }
+  },
+  "accounts": [
+    {
+      "account": "work",
+      "address": "ada@example.test",
+      "kind": "imap_smtp",
+      "legs": { "calendar": true, "contacts": false },
+      "dav": {
+        "caldav_url": "https://dav.example.test",
+        "username": "ada@example.test",
+        "dav_password_set": true
+      },
+      "dav_error": "the re-dial could not reach the origin",
+      "refresh_error": "the diary could not be re-expanded under the new zone; set the zone again to retry"
+    }
+  ],
+  "about": {
+    "version": "0.1.0",
+    "attributions": ["email-calendar-sync-engine", "pi", "web"]
+  },
+  "error": "persist_failed"
+}

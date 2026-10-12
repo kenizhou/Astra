@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The agenda view: the snapshot's occurrences grouped by zone-local day and
-// laid out chronologically, each row carrying its clock, its calendar's
-// colour, its repeat marker, and its hold marking; the empty state when the
-// window holds nothing.
+// laid out chronologically, each row carrying its clock under the clock
+// setting, its calendar's colour, its repeat marker, and its hold marking;
+// the empty state when the window holds nothing.
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AgendaView } from './AgendaView';
 import { useCalendarStore } from './calendarStore';
-import type { OccurrenceRow } from '@/services/ipc';
+import { useSettingsStore } from '@/features/settings/settingsStore';
+import type { OccurrenceRow, SettingsSnapshot } from '@/services/ipc';
 
 /** A timed occurrence row, defaulting onto 19 October 2026. */
 function row(over: Partial<OccurrenceRow> = {}): OccurrenceRow {
@@ -31,6 +32,23 @@ function row(over: Partial<OccurrenceRow> = {}): OccurrenceRow {
 }
 
 const open = vi.fn();
+
+/** A settings snapshot over the clock word the caller names. */
+function clockSnapshot(twentyFour: boolean): SettingsSnapshot {
+  return {
+    settings: {
+      theme: 'follow_host',
+      twenty_four_clock: twentyFour,
+      zone: 'Etc/UTC',
+      first_day_of_week: 'mo',
+      horizon_days: 42,
+      quote_below: true,
+      view_mode: 'flat',
+    },
+    accounts: [],
+    about: { version: '0.1.0' },
+  };
+}
 
 beforeEach(() => {
   open.mockReset();
@@ -64,8 +82,18 @@ describe('the agenda view', () => {
 
     expect(screen.getByText('Monday 19 October')).toBeTruthy();
     expect(screen.getByText('Tuesday 20 October')).toBeTruthy();
-    // 07:00Z is 09:00 in Amsterdam.
-    expect(screen.getAllByText('09:00')).toHaveLength(2);
+    // 07:00Z is nine in the morning in Amsterdam; the default clock is
+    // 12-hour, so both rows read their meridiem form.
+    expect(screen.getAllByText('9 AM')).toHaveLength(2);
+  });
+
+  it('answers the clock setting the settings block carries', () => {
+    useCalendarStore.setState({ occurrences: [row()] });
+    useSettingsStore.getState().applySnapshot(clockSnapshot(true));
+    render(<AgendaView onOpenEvent={open} />);
+
+    expect(screen.getByText('09:00')).toBeTruthy();
+    useSettingsStore.getState().applySnapshot(clockSnapshot(false));
   });
 
   it('sorts the rows within a day by their start', () => {

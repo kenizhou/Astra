@@ -12,6 +12,14 @@ vi.mock('@/services/ipc', async (importOriginal) => ({
   dispatch: ipc.dispatch,
 }));
 
+const settingsState = vi.hoisted(() => ({
+  settings: { first_day_of_week: 'mo' },
+}));
+
+vi.mock('@/features/settings/settingsStore', () => ({
+  useSettingsStore: (selector: (state: unknown) => unknown) => selector(settingsState),
+}));
+
 import { WorkWeekGrid } from './WorkWeekGrid';
 import { useCalendarStore } from './calendarStore';
 
@@ -78,6 +86,16 @@ describe('the work-week grid', () => {
     expect(screen.getByText('Mon')).toBeTruthy();
     expect(screen.getByText('Fri')).toBeTruthy();
     expect(screen.queryByText('Sat')).toBeNull();
+  });
+
+  it('honours the first-day setting in the week layout', () => {
+    settingsState.settings.first_day_of_week = 'su';
+    render(<WorkWeekGrid onOpenEvent={() => undefined} />);
+
+    screen.getByLabelText('Work week grid, 18 October to 22 October 2026');
+    expect(screen.getByText('Sun')).toBeTruthy();
+    expect(screen.queryByText('Sat')).toBeNull();
+    settingsState.settings.first_day_of_week = 'mo';
   });
 
   it('places each row in the column of its own day', () => {

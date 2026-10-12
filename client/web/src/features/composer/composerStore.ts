@@ -4,7 +4,9 @@
 // Composer.tsx so the pane renders and the store holds, one concern each,
 // both under the line cap. A composition inherits nothing from the one
 // before it: every opening path resets the whole state, and the pane's own
-// local state moves with the composition id.
+// local state moves with the composition id. A request's quoted original
+// opens ordered by the quote-style setting, the setting's one seed into
+// the document the per-message truth then owns.
 
 import { create } from 'zustand';
 import type { JSONContent } from '@tiptap/react';
@@ -13,9 +15,11 @@ import type {
   ComposeKind,
   ComposeRequestSnapshot,
   CompositionId,
+  ComposerDocument,
   ResumeView,
 } from '@/services/ipc';
 import { useComposeRequestStore } from '@/stores/composeRequestStore';
+import { useSettingsStore } from '@/features/settings/settingsStore';
 
 import {
   documentFromPlainText,
@@ -80,6 +84,25 @@ interface ComposerStoreState {
 }
 
 const emptyEditor = (): EditorDocument => documentToEditor(documentFromPlainText(''));
+
+/**
+ * Orders a request's quote blocks per the quote-style setting: `below`
+ * leaves the document as the core built it (the reply's words above the
+ * quoted original), otherwise each quote moves to the top so the reply is
+ * typed under it. The setting seeds only the opening order: the document
+ * the composer then edits and saves is the per-message truth.
+ */
+export function quoteOrdered(document: ComposerDocument, below: boolean): ComposerDocument {
+  if (below) {
+    return document;
+  }
+  const quotes = document.blocks.filter((block) => 'Quote' in block);
+  if (quotes.length === 0) {
+    return document;
+  }
+  const rest = document.blocks.filter((block) => !('Quote' in block));
+  return { ...document, blocks: [...quotes, ...rest] };
+}
 
 /** What a handover would carry, as comparable text. */
 export function fingerprintOf(state: {
@@ -162,7 +185,9 @@ export const useComposerStore = create<ComposerStoreState>((set) => ({
       to: normaliseRecipients(snapshot.to),
       cc: normaliseRecipients(snapshot.cc),
       subject: snapshot.subject,
-      editor: documentToEditor(snapshot.document),
+      editor: documentToEditor(
+        quoteOrdered(snapshot.document, useSettingsStore.getState().settings.quote_below),
+      ),
       request: { kind: snapshot.kind, inReplyTo: snapshot.in_reply_to ?? null },
       // Nothing is stored yet, so the prefilled composition counts as dirty
       // from birth: the idle autosave gives it its first save unedited.

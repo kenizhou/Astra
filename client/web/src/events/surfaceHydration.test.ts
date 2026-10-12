@@ -21,6 +21,7 @@ const ipc = vi.hoisted(() => ({
   sending: vi.fn(),
   calendar: vi.fn(),
   people: vi.fn(),
+  settings: vi.fn(),
   addAccount: vi.fn(),
   imapTestConnection: vi.fn(),
 }));
@@ -113,6 +114,19 @@ beforeEach(() => {
   ipc.calendar.mockResolvedValue({});
   ipc.people.mockReset();
   ipc.people.mockResolvedValue({});
+  ipc.settings.mockReset();
+  ipc.settings.mockResolvedValue({
+    settings: {
+      theme: 'follow_host',
+      twenty_four_clock: false,
+      zone: 'Etc/UTC',
+      first_day_of_week: 'mo',
+      horizon_days: 42,
+      quote_below: true,
+      view_mode: 'flat',
+    },
+    about: { version: '0.1.0' },
+  });
   resetStores();
 });
 
@@ -132,6 +146,7 @@ describe('hydration', () => {
     expect(ipc.sending).toHaveBeenCalledTimes(1);
     expect(ipc.calendar).toHaveBeenCalledTimes(1);
     expect(ipc.people).toHaveBeenCalledTimes(1);
+    expect(ipc.settings).toHaveBeenCalledTimes(1);
     expect(useReadingStore.getState().snapshot).toBeNull();
     expect(useDraftStore.getState().snapshot).toBeNull();
     expect(useComposeRequestStore.getState().snapshot).toBeNull();

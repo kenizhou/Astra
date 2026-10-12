@@ -160,3 +160,89 @@ fn an_account_without_a_dav_section_dials_nothing() {
     assert_eq!(account.providers.len(), 1);
     assert!(contacts.is_none());
 }
+
+/// The assembly's observer: surface signals go unwatched, the probe below
+/// reads the snapshot the dispatch leaves behind.
+struct QuietObserver;
+
+impl astra_app::AppObserver for QuietObserver {
+    fn surface_changed(&self, _surface: astra_app::Surface) {
+        // The probe pulls; the signal itself carries nothing it needs.
+    }
+}
+
+/// The assembly's draft-pool sink: pool landings go unwatched.
+struct QuietDraftSink;
+
+impl astra_app::DraftPoolSink for QuietDraftSink {
+    fn draft_pool_landed(&self, _message: astra_viewmodel::MessageKey) {}
+}
+
+#[test]
+fn the_assembly_installs_the_host_account_store_before_the_state_hands_back() {
+    // The probe: dispatch a SetDav whose merged section names no origin.
+    // The installed seam refuses it itself, its validation running before
+    // any dial, and the sentence lands on the account's row; a build with
+    // no seam installed answers a different sentence of its own, so the
+    // row's sentence pins the install.
+    let data_dir =
+        std::env::temp_dir().join(format!("astra-desktop-boot-ops-{}", std::process::id()));
+    std::fs::create_dir_all(&data_dir).expect("the scratch directory creates");
+    let (_relay, agent_sink, _data) = crate::agent::testkit::stub_relay("boot-ops", "echo", 3, 50);
+    let state = super::assemble_state(
+        &data_dir,
+        std::sync::Arc::new(QuietObserver),
+        agent_sink,
+        std::sync::Arc::new(QuietDraftSink),
+    )
+    .expect("the assembly boots over an empty store");
+
+    let account = engine_api::AccountId::try_from("work").expect("an account id");
+    let config = astra_account::load_str(concat!(
+        "id = \"work\"\n",
+        "[imap]\n",
+        "addr = \"imap.example.net:993\"\n",
+        "server_name = \"imap.example.net\"\n",
+        "username = \"ada@example.test\"\n",
+        "password = \"mail-secret\"\n",
+    ))
+    .expect("the fixture config loads");
+    state
+        .connections
+        .register(&account, config, astra_account::ImapConnections::new())
+        .expect("the dial table registers");
+
+    state
+        .runtime
+        .block_on(|| {
+            let app = std::sync::Arc::clone(&state.app);
+            async move {
+                app.add_new_account_deferred(super::HostAccount {
+                    id: account.clone(),
+                    providers: Vec::new(),
+                    identity: engine_api::EmailAddress::new("ada@example.test"),
+                })
+                .await;
+                app.dispatch(astra_app::Intent::Settings(
+                    astra_app::SettingsIntent::SetDav {
+                        account,
+                        section: Some(astra_app::DavSectionInput::default()),
+                    },
+                ))
+                .await
+            }
+        })
+        .expect("the dispatch lands");
+
+    let snapshot = state.app.settings();
+    let row = snapshot
+        .accounts
+        .iter()
+        .find(|row| row.account.as_str() == "work")
+        .expect("the account's row stands");
+    assert_eq!(
+        row.dav_error.as_deref(),
+        Some("the merged section names no origin to dial"),
+        "the installed seam answered, not the no-seam fallback"
+    );
+}

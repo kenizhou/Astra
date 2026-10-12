@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Persisted app preferences: the mailbox-list view mode, which sidebar trees are shut,
-//! and the selected folder. Host app preferences, not synced data, so they live in a
-//! small TOML file beside the engine store rather than in the store itself.
+//! the selected folder, and the settings block (theme, clock, zone, first day of the
+//! week, horizon, quote style, default calendar). Host app preferences, not synced data,
+//! so they live in a small TOML file beside the engine store rather than in the store
+//! itself.
 //!
 //! The expansion map is stored **inverted** relative to the question every caller asks:
 //! the file holds what is collapsed, so an account or folder nobody has touched (and
@@ -18,16 +20,19 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use astra_viewmodel::FolderRow;
+use astra_viewmodel::{FolderRow, ThemeMode, WeekdayWire};
 use serde::{Deserialize, Serialize};
 
-use crate::{reference::FolderRef, ViewMode};
+use crate::{
+    reference::{CalendarRef, FolderRef},
+    ViewMode,
+};
 
 /// The preferences file's name, in the app data directory beside the engine store.
 const FILE_NAME: &str = "preferences.toml";
 
 /// App-level preferences persisted across launches.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Preferences {
     /// The persisted mailbox-list grouping (flat vs threaded). Defaults to
     /// [`ViewMode::Flat`] when the field is absent (an older preferences file, or first
@@ -39,7 +44,7 @@ pub struct Preferences {
     /// The collapsed ones, not the expanded ones, so an account nobody has touched
     /// opens showing its folders. Read through [`Preferences::account_expanded`], never
     /// off the field: the inversion is exactly the kind a direct reader gets backwards.
-    /// A [`BTreeSet`] so the serialized TOML order is stable across writes.
+    /// A [`BTreeSet`] so the serialised TOML order is stable across writes.
     #[serde(default)]
     pub collapsed_accounts: BTreeSet<String>,
     /// The folders whose own sub-folders are **shut**, by account id then folder key.
@@ -55,6 +60,73 @@ pub struct Preferences {
     /// `None` for the unified "all inboxes" view.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_folder: Option<FolderRef>,
+    /// The persisted theme: follow the host, or an explicit light or dark
+    /// override.
+    #[serde(default)]
+    pub theme: ThemeMode,
+    /// Whether the clock is 24-hour; 12-hour (the default) otherwise.
+    #[serde(default)]
+    pub twenty_four_clock: bool,
+    /// The IANA id the calendar lays its days out in.
+    #[serde(default = "default_zone")]
+    pub zone: String,
+    /// The day the week starts on, in the engine's own weekday words.
+    #[serde(default)]
+    pub first_day_of_week: WeekdayWire,
+    /// How many days the calendar's cold window covers.
+    #[serde(default = "default_horizon")]
+    pub horizon_days: u32,
+    /// Whether the composer quotes the original below the reply.
+    #[serde(default = "default_true")]
+    pub quote_below: bool,
+    /// The calendar new events land in unless the user picks another;
+    /// `None` when none is pinned, which writes no entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_calendar: Option<CalendarRef>,
+}
+
+/// The shipped defaults, which the serde field defaults and a first launch
+/// name as one set. Manual rather than derived because the zone, the
+/// horizon, and the quote style are not the std defaults of their types.
+impl Default for Preferences {
+    fn default() -> Self {
+        Self {
+            view_mode: ViewMode::default(),
+            collapsed_accounts: BTreeSet::new(),
+            collapsed_folders: BTreeMap::new(),
+            selected_folder: None,
+            theme: ThemeMode::default(),
+            twenty_four_clock: false,
+            zone: default_zone(),
+            first_day_of_week: WeekdayWire::default(),
+            horizon_days: default_horizon(),
+            quote_below: default_true(),
+            default_calendar: None,
+        }
+    }
+}
+
+/// The calendar's display zone until the user picks one.
+fn default_zone() -> String {
+    "Etc/UTC".to_owned()
+}
+
+/// The calendar's cold window, in days.
+fn default_horizon() -> u32 {
+    42
+}
+
+/// The shortest horizon a setting may name: a window shorter than a week
+/// cannot hold the week a cold grid paints.
+pub(crate) const HORIZON_MIN_DAYS: u32 = 7;
+
+/// The longest horizon a setting may name: a year's span is the most a cold
+/// window may be asked to materialise in one go.
+pub(crate) const HORIZON_MAX_DAYS: u32 = 365;
+
+/// The shipped composer default: the quoted original below the reply.
+fn default_true() -> bool {
+    true
 }
 
 impl Preferences {
@@ -175,6 +247,7 @@ pub fn save_preferences(path: impl AsRef<Path>, prefs: &Preferences) -> std::io:
 pub(crate) struct PreferencesState {
     prefs: Preferences,
     path: Option<PathBuf>,
+    last_save_failed: bool,
 }
 
 impl PreferencesState {
@@ -184,24 +257,16 @@ impl PreferencesState {
         let prefs = path
             .as_ref()
             .map_or_else(Preferences::default, load_preferences);
-        Self { prefs, path }
+        Self {
+            prefs,
+            path,
+            last_save_failed: false,
+        }
     }
 
     /// The persisted mailbox-list grouping.
     pub(crate) fn view_mode(&self) -> ViewMode {
         self.prefs.view_mode
-    }
-
-    /// Records the grouping and persists it. Returns whether anything changed, so a
-    /// host re-asserting the state it already has costs no disk write and no snapshot
-    /// rebuild.
-    pub(crate) fn set_view_mode(&mut self, mode: ViewMode) -> bool {
-        if self.prefs.view_mode == mode {
-            return false;
-        }
-        self.prefs.view_mode = mode;
-        self.persist();
-        true
     }
 
     /// Whether `account`'s folder tree is open; `true` for an account nobody has shut.
@@ -249,6 +314,76 @@ impl PreferencesState {
         self.persist();
     }
 
+    /// Writes one settings field and persists the document: the shared tail
+    /// of every total settings arm. Returns whether the persist failed, so
+    /// the arm can answer the failure on the snapshot; the in-memory copy
+    /// moved either way, which is the honest state of a host that is running
+    /// the new setting while the disk holds the old one.
+    pub(crate) fn set_setting(&mut self, write: impl FnOnce(&mut Preferences)) -> bool {
+        write(&mut self.prefs);
+        self.persist();
+        self.last_save_failed
+    }
+
+    /// Drops every account-scoped entry the account holds (its expansion
+    /// map, and the selected folder when the selection pointed inside it)
+    /// and persists. Returns whether anything was stored for it.
+    pub(crate) fn remove_account(&mut self, account: &str) -> bool {
+        let removed = self.prefs.remove_account(account);
+        if removed {
+            self.persist();
+        }
+        removed
+    }
+
+    /// Whether the newest persist failed. A write that lands clears it, so
+    /// the flag states the newest write the way the snapshot's error channel
+    /// does.
+    pub(crate) fn last_save_failed(&self) -> bool {
+        self.last_save_failed
+    }
+
+    /// The IANA id the calendar lays its days out in, from the persisted
+    /// preference.
+    pub(crate) fn zone(&self) -> String {
+        self.prefs.zone.clone()
+    }
+
+    /// The day the week starts on, from the persisted preference.
+    pub(crate) fn first_day_of_week(&self) -> WeekdayWire {
+        self.prefs.first_day_of_week
+    }
+
+    /// The cold window's length in days, clamped into the bounds the horizon
+    /// setting enforces so a hand-edited file cannot ask the rebuild for a
+    /// window the product would itself refuse.
+    pub(crate) fn horizon_days(&self) -> u16 {
+        self.prefs
+            .horizon_days
+            .clamp(HORIZON_MIN_DAYS, HORIZON_MAX_DAYS) as u16
+    }
+
+    /// The persisted settings block, projected for the settings snapshot:
+    /// every field the screen renders, named beside the value it holds now.
+    pub(crate) fn settings_block(&self) -> astra_viewmodel::SettingsBlock {
+        let prefs = &self.prefs;
+        astra_viewmodel::SettingsBlock {
+            theme: prefs.theme,
+            twenty_four_clock: prefs.twenty_four_clock,
+            zone: prefs.zone.clone(),
+            first_day_of_week: prefs.first_day_of_week,
+            horizon_days: prefs.horizon_days,
+            quote_below: prefs.quote_below,
+            view_mode: prefs.view_mode,
+            default_calendar: prefs.default_calendar.as_ref().map(|pin| {
+                astra_viewmodel::DefaultCalendar {
+                    account: pin.account.clone(),
+                    key: pin.key.clone(),
+                }
+            }),
+        }
+    }
+
     /// Stamps the persisted expansion over one account's sorted rows, which
     /// [`sorted_folder_rows`] leaves open everywhere: the group header from the account
     /// map, each folder's own chevron from the folder map. A folder that holds no
@@ -263,8 +398,9 @@ impl PreferencesState {
 
     /// Writes the state back, read-modify-write against what is on disk right now, so
     /// a concurrent write to an unrelated preference is not clobbered by our in-memory
-    /// copy. A no-op without a path.
-    fn persist(&self) {
+    /// copy. A no-op without a path. Records whether a write was attempted and
+    /// failed, the fact the snapshot's error channel answers from.
+    fn persist(&mut self) {
         let Some(path) = &self.path else {
             return;
         };
@@ -279,7 +415,16 @@ impl PreferencesState {
         on_disk
             .selected_folder
             .clone_from(&self.prefs.selected_folder);
-        let _ = save_preferences(path, &on_disk);
+        on_disk.theme = self.prefs.theme;
+        on_disk.twenty_four_clock = self.prefs.twenty_four_clock;
+        on_disk.zone.clone_from(&self.prefs.zone);
+        on_disk.first_day_of_week = self.prefs.first_day_of_week;
+        on_disk.horizon_days = self.prefs.horizon_days;
+        on_disk.quote_below = self.prefs.quote_below;
+        on_disk
+            .default_calendar
+            .clone_from(&self.prefs.default_calendar);
+        self.last_save_failed = save_preferences(path, &on_disk).is_err();
     }
 }
 

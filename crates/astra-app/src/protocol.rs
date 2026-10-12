@@ -9,6 +9,7 @@ mod intent_compose;
 mod intent_drafts;
 mod intent_outbox;
 mod intent_people;
+mod intent_settings;
 mod status;
 
 pub use intent::{FolderIntent, Intent, SearchScope, ViewMode};
@@ -20,6 +21,7 @@ pub use intent_compose::ComposeIntent;
 pub use intent_drafts::{CompositionId, DraftsIntent};
 pub use intent_outbox::OutboxIntent;
 pub use intent_people::{ContactDraftInput, ContactNameInput, ContactPatchInput, PeopleIntent};
+pub use intent_settings::{DavSectionInput, SettingsIntent, ThemeMode, WeekdayWire};
 
 use astra_composer::DraftBlobHandle;
 use serde::{Deserialize, Serialize};
@@ -67,6 +69,12 @@ pub enum Surface {
     /// the query changed), so the host repaints on every signal rather than
     /// debouncing them.
     People,
+    /// The settings: the persisted settings block, the account rows, and
+    /// the about block. Every publish is one transition of the block (a
+    /// setting landed or was refused, an account's dav section or presence
+    /// changed), so the host repaints the screen on every signal rather
+    /// than debouncing them.
+    Settings,
 }
 
 /// Host-resolved bytes for one composer blob handle.
@@ -124,3 +132,8 @@ mod calendar_tests;
 #[cfg(test)]
 #[path = "protocol_people_tests.rs"]
 mod people_tests;
+
+// The settings family's intents, split for the same reason.
+#[cfg(test)]
+#[path = "protocol_settings_tests.rs"]
+mod settings_tests;

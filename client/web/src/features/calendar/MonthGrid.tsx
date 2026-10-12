@@ -5,8 +5,9 @@
 // data.
 
 import { useCalendarStore } from './calendarStore';
+import { useSettingsStore } from '@/features/settings/settingsStore';
 import { dayKeyOf, monthGrid, parseDayKey } from './calendarRange';
-import { fullDayLabel } from './dayLabels';
+import { fullDayLabel, firstDayIndex } from './dayLabels';
 import { CalendarDot, RepeatGlyph, holdClass, isHold } from './EventMarkers';
 import { dayBlocks } from './rowLayout';
 import type { OccurrenceRow } from '@/services/ipc';
@@ -68,6 +69,7 @@ export function MonthGrid({
   const occurrences = useCalendarStore((s) => s.occurrences);
   const calendars = useCalendarStore((s) => s.calendars);
   const nowData = useCalendarStore((s) => s.nowData);
+  const firstDay = firstDayIndex(useSettingsStore((s) => s.settings.first_day_of_week));
 
   if (anchor === null) {
     return <p className="p-4 text-sm text-muted-foreground">The calendar has no clock yet.</p>;
@@ -75,7 +77,7 @@ export function MonthGrid({
   const zone = nowData?.zone ?? 'Etc/UTC';
   const today = nowData !== null ? dayKeyOf(new Date(nowData.now), zone) : null;
   const anchorMonth = parseDayKey(anchor).month;
-  const grid = monthGrid(anchor);
+  const grid = monthGrid(anchor, firstDay);
   const colorOf = (row: OccurrenceRow): string | undefined =>
     calendars.find((c) => c.account === row.account && c.id === row.calendar)?.color;
 

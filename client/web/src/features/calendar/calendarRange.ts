@@ -119,30 +119,34 @@ export function weekdayOfKey(key: string): number {
   return keyAsUtc(key).getUTCDay();
 }
 
-/** The Monday a day key's week opens at. */
-export function weekStartOfKey(key: string): string {
-  return addDays(key, -((weekdayOfKey(key) + 6) % 7));
+/**
+ * The day the week opens at, `firstDay` as a JS weekday index (Sunday 0,
+ * Monday the default): the setting decides, and the arithmetic only obeys.
+ */
+export function weekStartOfKey(key: string, firstDay: number = 1): string {
+  return addDays(key, -((weekdayOfKey(key) - firstDay + 7) % 7));
 }
 
-/** The seven civil day keys of the Monday-start week holding `anchor`. */
-export function weekOf(anchor: string): string[] {
-  const start = weekStartOfKey(anchor);
+/** The seven civil day keys of the week holding `anchor`, from its own first day. */
+export function weekOf(anchor: string, firstDay: number = 1): string[] {
+  const start = weekStartOfKey(anchor, firstDay);
   return Array.from({ length: 7 }, (_, i) => addDays(start, i));
 }
 
-/** The five weekday keys of the work week holding `anchor`. */
-export function workWeekOf(anchor: string): string[] {
-  return weekOf(anchor).slice(0, 5);
+/** The five days of the work week holding `anchor`, from its own first day. */
+export function workWeekOf(anchor: string, firstDay: number = 1): string[] {
+  return weekOf(anchor, firstDay).slice(0, 5);
 }
 
 /**
- * The fixed six-week month grid the month view lays out: the Monday before
- * the anchor month's first day, 42 civil keys.
+ * The fixed six-week month grid the month view lays out: the week start
+ * before the anchor month's first day, 42 civil keys, the first day the
+ * setting names.
  */
-export function monthGrid(anchor: string): string[] {
+export function monthGrid(anchor: string, firstDay: number = 1): string[] {
   const { year, month } = parseDayKey(anchor);
   const first = `${year}-${pad(month)}-01`;
-  const start = weekStartOfKey(first);
+  const start = weekStartOfKey(first, firstDay);
   return Array.from({ length: 42 }, (_, i) => addDays(start, i));
 }
 

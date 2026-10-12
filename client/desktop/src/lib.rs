@@ -11,6 +11,7 @@
 
 pub mod runtime;
 
+mod account_ops;
 mod agent;
 mod ai;
 mod app_state;
@@ -18,6 +19,7 @@ mod boot;
 mod commands;
 mod credential_store;
 mod detection;
+mod dial_table;
 mod exit;
 mod headless;
 mod observer;
@@ -32,14 +34,15 @@ mod commands_fakes;
 
 use tauri::{Emitter, Manager};
 
+pub(crate) use account_ops::HostAccountStore;
 pub(crate) use agent::SidecarRelay;
 pub use ai::{
     incoming_pass, repair_json, LlmAiComplete, LlmAiJudge, LlmClient, LlmEndpoint, LlmError,
 };
 pub(crate) use app_state::{AppPort, AppState, HostAccount, HostProvider};
-pub(crate) use boot::AccountDials;
 pub use credential_store::CredentialStoreError;
 pub(crate) use credential_store::{AccountCredentialStore, KeyringCredentialStore};
+pub(crate) use dial_table::AccountDials;
 pub use headless::run_headless_slice;
 pub use observer::{SurfaceChanged, SurfaceEventSink, TauriEventSink};
 pub(crate) use runtime::{build_runtime, AppRuntime};
@@ -98,6 +101,7 @@ pub fn run() {
             commands::people::people_suggestions,
             commands::people::people_avatar,
             commands::people::people_photo,
+            commands::settings::settings,
             commands::add_account,
             commands::imap_test_connection,
             commands::detect_account_settings,

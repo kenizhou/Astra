@@ -8,6 +8,7 @@ use super::{apply_drag, CalendarEditError};
 use crate::calendar::edit::build_patch;
 use crate::calendar_fakes::{all_day_event, local, utc, weekly_event, zoned_event};
 use crate::protocol::{EventDrag, EventEdge};
+use engine_api::Weekday;
 
 /// A one-off timed event, the shape every drag test starts from.
 fn standup() -> engine_api::Event {
@@ -110,7 +111,7 @@ fn a_drag_names_one_occurrence_by_its_original_start() {
     };
     let edit = apply_drag(&event, &drag).unwrap();
     assert_eq!(edit.occurrence, Some(original));
-    let (target, _) = build_patch(&event, &edit, utc("2026-10-19T10:00:00Z")).unwrap();
+    let (target, _) = build_patch(&event, &edit, utc("2026-10-19T10:00:00Z"), Weekday::Mo).unwrap();
     assert!(matches!(target, engine_api::PatchTarget::Instance(_)));
 }
 

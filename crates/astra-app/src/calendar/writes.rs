@@ -79,6 +79,7 @@ impl<P: Provider> App<P> {
             &new,
             engine_api::Uid::new(mint_event_uid()).expect("a minted uid"),
             stamp,
+            self.calendar_week_start(),
         ) {
             Ok(draft) => draft,
             Err(err) => {
@@ -137,13 +138,14 @@ impl<P: Provider> App<P> {
             log::warn!("calendar: the wall clock is not representable; the edit was refused");
             return;
         };
-        let (target, patch) = match edit::build_patch(&base, edit, stamp) {
-            Ok(built) => built,
-            Err(err) => {
-                log::info!("calendar: the edit could not be built: {err}");
-                return;
-            }
-        };
+        let (target, patch) =
+            match edit::build_patch(&base, edit, stamp, self.calendar_week_start()) {
+                Ok(built) => built,
+                Err(err) => {
+                    log::info!("calendar: the edit could not be built: {err}");
+                    return;
+                }
+            };
         self.patch_calendar(provider, &event.account, &base, target, patch)
             .await;
     }
@@ -180,13 +182,14 @@ impl<P: Provider> App<P> {
             log::warn!("calendar: the wall clock is not representable; the move was refused");
             return;
         };
-        let (target, patch) = match edit::build_patch(&base, &drag_edit, stamp) {
-            Ok(built) => built,
-            Err(err) => {
-                log::info!("calendar: the moved edit could not be built: {err}");
-                return;
-            }
-        };
+        let (target, patch) =
+            match edit::build_patch(&base, &drag_edit, stamp, self.calendar_week_start()) {
+                Ok(built) => built,
+                Err(err) => {
+                    log::info!("calendar: the moved edit could not be built: {err}");
+                    return;
+                }
+            };
         self.patch_calendar(provider, &event.account, &base, target, patch)
             .await;
     }
@@ -355,6 +358,19 @@ impl<P: Provider> App<P> {
             .expect("calendar mutex poisoned")
             .writes
             .insert(account.clone(), state);
+    }
+
+    /// Drops the account's per-account calendar view state: its write rows,
+    /// its reply fallbacks, and its rows in the visible set. The teardown a
+    /// removed account and a cleared dav leg perform, so a re-added account
+    /// inherits no stale state.
+    pub(crate) fn clear_account_calendar_state(&self, account: &AccountId) {
+        let mut state = self.calendar_state.lock().expect("calendar mutex poisoned");
+        state.writes.remove(account);
+        state.reply_fallbacks.remove(account);
+        if let Some(visible) = &mut state.visible {
+            visible.retain(|(held, _)| held != account);
+        }
     }
 
     /// Clears `account`'s write state: the recovery a successful re-read or a

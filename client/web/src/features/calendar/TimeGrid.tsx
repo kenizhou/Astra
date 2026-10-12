@@ -11,6 +11,7 @@ import { useMemo } from 'react';
 import type { OccurrenceRow } from '@/services/ipc';
 
 import { useCalendarStore } from './calendarStore';
+import { useSettingsStore } from '@/features/settings/settingsStore';
 import { dayKeyOf, instantAfterDrag, minutesInZone } from './calendarRange';
 import {
   DAY_H,
@@ -35,7 +36,7 @@ import { useEventDrag } from './useEventDrag';
 import { useZonedNow } from './useZonedNow';
 
 interface TimeGridProps {
-  /** The civil day keys the grid lays out, Monday-first for multi-day sets. */
+  /** The civil day keys the grid lays out, from the week's own first day. */
   days: string[];
   /** The grid's accessible name, naming the span it shows. */
   ariaLabel: string;
@@ -58,6 +59,7 @@ function Block({
   onClick: () => void;
 }) {
   const hold = isHold(block.row);
+  const twentyFour = useSettingsStore((s) => s.settings.twenty_four_clock);
   const width = 100 / block.columns;
   return (
     <div
@@ -100,7 +102,7 @@ function Block({
       </span>
       {(block.endMinute - block.startMinute >= 45 || block.continuesBefore || block.continuesAfter) && (
         <span className="block truncate text-[10px] text-muted-foreground">
-          {clockLabel(block.startMinute)} to {clockLabel(block.endMinute)}
+          {clockLabel(block.startMinute, twentyFour)} to {clockLabel(block.endMinute, twentyFour)}
         </span>
       )}
     </div>
@@ -188,6 +190,7 @@ export function TimeGrid({ days, ariaLabel, onOpenEvent }: TimeGridProps) {
   const occurrences = useCalendarStore((s) => s.occurrences);
   const calendars = useCalendarStore((s) => s.calendars);
   const nowData = useCalendarStore((s) => s.nowData);
+  const twentyFour = useSettingsStore((s) => s.settings.twenty_four_clock);
   const zone = nowData?.zone ?? 'Etc/UTC';
   const now = useZonedNow(nowData);
   const nowDay = now !== null ? dayKeyOf(now, zone) : null;
@@ -286,7 +289,7 @@ export function TimeGrid({ days, ariaLabel, onOpenEvent }: TimeGridProps) {
               style={{ height: HOUR_H }}
               className="relative border-b border-border/40 text-right text-[10px] text-muted-foreground"
             >
-              <span className="absolute -top-1.5 right-1">{clockLabel(hour * 60)}</span>
+              <span className="absolute -top-1.5 right-1">{clockLabel(hour * 60, twentyFour)}</span>
             </div>
           ))}
         </div>

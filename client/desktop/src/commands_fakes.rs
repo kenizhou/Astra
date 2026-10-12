@@ -27,7 +27,8 @@ use astra_app::{
 };
 use astra_viewmodel::{
     CalendarSnapshot, ComposeKind, ComposeRequestSnapshot, DraftSaveState, DraftStatusSnapshot,
-    MailboxListSnapshot, PeopleSnapshot, ReadingSnapshot, SendingSnapshot, SyncProgressSnapshot,
+    MailboxListSnapshot, PeopleSnapshot, ReadingSnapshot, SendingSnapshot, SettingsSnapshot,
+    SyncProgressSnapshot,
 };
 use engine_api::RecipientSuggestion;
 
@@ -136,6 +137,8 @@ pub(crate) struct FakeApp {
     pub(crate) avatar: Mutex<AvatarView>,
     /// The addresses the avatar read was asked about.
     pub(crate) avatar_into: Mutex<Vec<String>>,
+    /// The settings snapshot the pull answers with.
+    pub(crate) settings: Mutex<SettingsSnapshot>,
 }
 
 impl FakeApp {
@@ -182,6 +185,7 @@ impl FakeApp {
             suggested_into: Mutex::new(Vec::new()),
             avatar: Mutex::new(AvatarView::default()),
             avatar_into: Mutex::new(Vec::new()),
+            settings: Mutex::new(SettingsSnapshot::default()),
         })
     }
 
@@ -310,7 +314,8 @@ impl FakeApp {
     }
 }
 
-/// An in-memory credential store whose persist can be told to refuse.
+/// An in-memory credential store whose persist and delete can be told to
+/// refuse.
 pub(crate) struct FakeStore {
     pub(crate) refuse: bool,
     pub(crate) entries: Mutex<Vec<(String, String)>>,
@@ -356,6 +361,11 @@ impl AccountCredentialStore for FakeStore {
     }
 
     fn delete(&self, account_id: &str) -> Result<(), CredentialStoreError> {
+        if self.refuse {
+            return Err(CredentialStoreError(
+                "the platform store refused the delete".to_owned(),
+            ));
+        }
         self.entries
             .lock()
             .unwrap()

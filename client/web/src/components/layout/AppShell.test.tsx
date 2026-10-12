@@ -3,16 +3,19 @@
 // composer pane with the first account as its From, stays inert without an
 // account, the app start resume pulls the stored draft into the pane when the
 // host has one, a landed compose request opens the pane hydrated, and the
-// status bar's outbox toggle opens the outbox panel.
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+// status bar's outbox toggle opens the outbox panel. The settings screen
+// rides above the shell from the title bar's gear, through the categories,
+// down to the accounts page and About.
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const ipc = vi.hoisted(() => ({ dispatch: vi.fn(), draftResume: vi.fn() }));
+const ipc = vi.hoisted(() => ({ dispatch: vi.fn(), draftResume: vi.fn(), settings: vi.fn() }));
 
 vi.mock('@/services/ipc', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   dispatch: ipc.dispatch,
   draftResume: ipc.draftResume,
+  settings: ipc.settings,
 }));
 
 vi.mock('@/events/surfaceEvents', async (importOriginal) => ({
@@ -35,7 +38,22 @@ beforeEach(() => {
   ipc.dispatch.mockResolvedValue(undefined);
   ipc.draftResume.mockReset();
   ipc.draftResume.mockResolvedValue(null);
+  ipc.settings.mockReset();
+  ipc.settings.mockResolvedValue({
+    settings: {
+      theme: 'follow_host',
+      twenty_four_clock: false,
+      zone: 'Etc/UTC',
+      first_day_of_week: 'mo',
+      horizon_days: 42,
+      quote_below: true,
+      view_mode: 'flat',
+    },
+    accounts: [],
+    about: { version: '0.1.0' },
+  });
   useUiStore.getState().setShellView('mail');
+  useUiStore.getState().setSettingsOpen(false);
   useAccountStore.setState({ accounts: [{ accountId: 'work', displayName: 'Work' }] });
   useComposerStore.setState({
     open: false,
@@ -159,6 +177,90 @@ describe('the shell outbox wiring', () => {
 
     expect(screen.getByRole('region', { name: 'Outbox' })).toBeTruthy();
     expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe('{"outbox":"show"}');
+  });
+});
+
+describe('the shell settings screen', () => {
+  it('opens the modal from the gear and returns to the shell on Close', async () => {
+    render(<AppShell />);
+    expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull();
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    });
+
+    await waitFor(() => expect(screen.getByRole('dialog', { name: 'Settings' })).toBeTruthy());
+    expect(screen.getByRole('button', { name: 'General' })).toBeTruthy();
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Close settings' }));
+    });
+    expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull();
+  });
+
+  it('reaches the About detail through the source list', async () => {
+    render(<AppShell />);
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    });
+    await waitFor(() => expect(ipc.settings).toHaveBeenCalledTimes(1));
+    await waitFor(() => screen.getByRole('button', { name: 'About' }));
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'About' }));
+    });
+
+    expect(await screen.findByText('Version 0.1.0')).toBeTruthy();
+  });
+
+  it('reaches an account page with the dav editor from the accounts rows', async () => {
+    ipc.settings.mockResolvedValue({
+      settings: {
+        theme: 'follow_host',
+        twenty_four_clock: false,
+        zone: 'Etc/UTC',
+        first_day_of_week: 'mo',
+        horizon_days: 42,
+        quote_below: true,
+        view_mode: 'flat',
+      },
+      accounts: [
+        {
+          account: 'work',
+          address: 'ada@example.test',
+          kind: 'imap_smtp',
+          legs: { calendar: true, contacts: false },
+          dav: {
+            caldav_url: 'https://dav.example.test',
+            username: 'ada@example.test',
+            dav_password_set: true,
+          },
+        },
+      ],
+      about: { version: '0.1.0' },
+    });
+    render(<AppShell />);
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    });
+    await waitFor(() => screen.getByRole('button', { name: 'Accounts' }));
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Accounts' }));
+    });
+    const row = await screen.findByRole('button', { name: 'Open ada@example.test' });
+    expect(row.textContent).toContain('IMAP + SMTP');
+
+    act(() => {
+      fireEvent.click(row);
+    });
+
+    expect(await screen.findByLabelText('Username')).toBeTruthy();
+    expect((screen.getByLabelText('Username') as HTMLInputElement).value).toBe(
+      'ada@example.test',
+    );
   });
 });
 

@@ -4,7 +4,9 @@
 // handler lives on the regions alone and a control can never net an extra
 // toggle. The search box itself: typing debounces the query across, Escape
 // clears it at once, the scope dropdown narrows the live search, and the
-// field echoes the query the snapshot's search state carries.
+// field echoes the query the snapshot's search state carries. The settings
+// entry opens the modal, and the theme button cycles the override through
+// the intent, so the persisted block stays the one truth.
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -58,6 +60,7 @@ describe('the title bar double-click maximise', () => {
     render(<TitleBar />);
     fireEvent.doubleClick(screen.getByRole('button', { name: 'Add account' }));
     fireEvent.doubleClick(screen.getByRole('button', { name: 'Toggle theme' }));
+    fireEvent.doubleClick(screen.getByRole('button', { name: 'Settings' }));
     fireEvent.doubleClick(screen.getByRole('button', { name: 'Minimise' }));
     fireEvent.doubleClick(screen.getByRole('button', { name: 'Maximise' }));
     fireEvent.doubleClick(screen.getByRole('button', { name: 'Close window' }));
@@ -78,6 +81,56 @@ describe('the title bar double-click maximise', () => {
     fireEvent.doubleClick(regions[0] as HTMLElement);
     fireEvent.doubleClick(regions[1] as HTMLElement);
     await waitFor(() => expect(windowApi.toggleMaximize).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe('the title bar settings entry', () => {
+  it('opens the settings modal from the gear', () => {
+    useUiStore.getState().setSettingsOpen(false);
+    render(<TitleBar />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+
+    expect(useUiStore.getState().settingsOpen).toBe(true);
+  });
+});
+
+describe('the title bar theme override cycle', () => {
+  it('cycles light to dark through the settings intent', () => {
+    useUiStore.setState({ themeMode: 'light' });
+    render(<TitleBar />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle theme' }));
+
+    expect(ipc.dispatch).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
+      '{"settings":{"set_theme":{"mode":"dark"}}}',
+    );
+    // The override lands only through the republished block, never locally.
+    expect(useUiStore.getState().themeMode).toBe('light');
+  });
+
+  it('cycles dark back to following the host', () => {
+    useUiStore.setState({ themeMode: 'dark' });
+    render(<TitleBar />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle theme' }));
+
+    expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
+      '{"settings":{"set_theme":{"mode":"follow_host"}}}',
+    );
+  });
+
+  it('cycles follow host to the light override and says where it stands', () => {
+    useUiStore.setState({ themeMode: 'follow_host' });
+    render(<TitleBar />);
+
+    expect(screen.getByRole('button', { name: 'Toggle theme' }).textContent).toBe('Light');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle theme' }));
+    expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
+      '{"settings":{"set_theme":{"mode":"light"}}}',
+    );
   });
 });
 

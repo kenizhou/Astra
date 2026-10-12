@@ -10,16 +10,10 @@
 //! the data dir holds the ids, because no platform store can enumerate its entries.
 //! The index names what to read; the keyring answers what it holds.
 
-use std::{
-    collections::BTreeMap,
-    future::Future,
-    path::{Path, PathBuf},
-    sync::{Arc, Mutex},
-};
+use std::{future::Future, path::Path, sync::Arc};
 
 use async_trait::async_trait;
 use engine_api::{AccountId, EmailAddress};
-use serde::{Deserialize, Serialize};
 use tauri::Manager;
 
 use astra_app::{MailboxConnector, SpawnedTask};
@@ -28,7 +22,8 @@ use crate::{
     agent::{self, chat_model_config, AgentEventSink},
     build_runtime,
     observer::{DebouncedObserver, ObserverBridge},
-    AppPort, AppState, HostAccount, HostProvider, KeyringCredentialStore, TauriEventSink,
+    AccountDials, AppPort, AppState, HostAccount, HostAccountStore, HostProvider,
+    KeyringCredentialStore, TauriEventSink,
 };
 
 /// Assembles the host's state over `data_dir`: the same pieces in the same order for
@@ -49,7 +44,8 @@ pub(crate) fn assemble_state(
 ) -> Result<AppState, Box<dyn std::error::Error>> {
     std::fs::create_dir_all(data_dir)?;
     let runtime = build_runtime()?;
-    let keyring = KeyringCredentialStore::new();
+    let credentials: Arc<dyn crate::credential_store::AccountCredentialStore> =
+        Arc::new(KeyringCredentialStore::new());
     let connections = Arc::new(AccountDials::load(data_dir)?);
 
     let accounts = runtime.block_on(|| dial_stored(&connections));
@@ -87,6 +83,14 @@ pub(crate) fn assemble_state(
             ai_pass,
         )
     })?;
+    // The settings seam: the account store the settings surface reads the
+    // dial table through and writes it back over, installed before the
+    // state hands anything to a command, so every settings dispatch from
+    // the first finds it standing.
+    core.install_account_ops(Arc::new(HostAccountStore::new(
+        Arc::clone(&connections),
+        Arc::clone(&credentials),
+    )));
     // The contacts legs the dials handed back, installed beside the accounts
     // they belong to before any people dispatch can run: the reads work over
     // the already-synced store either way, and the writes have nowhere to go
@@ -105,7 +109,7 @@ pub(crate) fn assemble_state(
         photo_root: engine_path
             .with_file_name(format!("{ENGINE_STORE_FILE}.blobs"))
             .join("contact-photos"),
-        credential_store: Arc::new(keyring),
+        credential_store: credentials,
         runtime,
     })
 }
@@ -156,162 +160,6 @@ fn build_llm_client(store: &Arc<astra_ai::AiStore>) -> Option<Arc<crate::LlmClie
 
 /// The engine store's file name, under the data directory.
 const ENGINE_STORE_FILE: &str = "astra.sqlite";
-
-/// The account index's file name, under the data directory.
-const ACCOUNT_INDEX_FILE: &str = "accounts.json";
-
-/// The index's on-disk shape: the ids whose configs the keyring holds.
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct AccountIndex {
-    /// The stored accounts' ids, in the order they were added.
-    #[serde(default)]
-    accounts: Vec<String>,
-}
-
-/// One registered account's dial table entry: its parsed config and its connection
-/// pool, the two things every later bind and re-dial needs.
-struct RegisteredDial {
-    /// The account's stored config (endpoints, credentials, accepted certificates).
-    config: astra_account::AccountConfig,
-    /// The account's connections: the engine account every folder provider of it is
-    /// bound through, connected on first use after a restart.
-    connections: Arc<astra_account::ImapConnections>,
-}
-
-/// Every registered account's dial table, and the index file that names them: what
-/// the boot restores, the folder-binder reads, and the account-add extends.
-///
-/// Shared behind an `Arc` between the managed state and the app's connector, so a
-/// folder bound later draws on the same pool the account's dial did.
-pub(crate) struct AccountDials {
-    /// The index file, rewritten whole on every registration.
-    index_path: PathBuf,
-    /// The registered accounts, keyed by id so the order is stable.
-    entries: Mutex<BTreeMap<String, RegisteredDial>>,
-}
-
-impl core::fmt::Debug for AccountDials {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        // The configs carry credentials; the count is the whole safe description.
-        f.debug_struct("AccountDials")
-            .field("accounts", &self.ids().len())
-            .finish_non_exhaustive()
-    }
-}
-
-impl AccountDials {
-    /// An empty table whose index lives in `data_dir`.
-    #[cfg(test)]
-    pub(crate) fn empty(data_dir: &Path) -> Self {
-        Self {
-            index_path: data_dir.join(ACCOUNT_INDEX_FILE),
-            entries: Mutex::new(BTreeMap::new()),
-        }
-    }
-
-    /// Reads the index in `data_dir` and loads each named account's config from the
-    /// keyring. An id whose entry is gone is skipped with a warning rather than
-    /// failing the boot: the index is what the boot trusts, and one missing secret
-    /// must not take the other accounts down.
-    pub(crate) fn load(data_dir: &Path) -> Result<Self, std::io::Error> {
-        let index_path = data_dir.join(ACCOUNT_INDEX_FILE);
-        let index: AccountIndex = match std::fs::read_to_string(&index_path) {
-            Ok(text) => serde_json::from_str(&text).map_err(|err| {
-                std::io::Error::other(format!("the account index could not be read: {err}"))
-            })?,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => AccountIndex::default(),
-            Err(err) => return Err(err),
-        };
-        let mut entries = BTreeMap::new();
-        for id in index.accounts {
-            let Some(config_toml) = KeyringCredentialStore::load(&id).map_err(|err| {
-                std::io::Error::other(format!("an account could not be read: {err}"))
-            })?
-            else {
-                log::warn!(
-                    "boot: an account named by the index has no stored credential; skipping it"
-                );
-                continue;
-            };
-            let config = astra_account::load_str(&config_toml).map_err(|err| {
-                std::io::Error::other(format!("an account config could not be read: {err}"))
-            })?;
-            entries.insert(
-                id,
-                RegisteredDial {
-                    config,
-                    connections: astra_account::ImapConnections::new(),
-                },
-            );
-        }
-        Ok(Self {
-            index_path,
-            entries: Mutex::new(entries),
-        })
-    }
-
-    /// Every registered account's id, in order.
-    pub(crate) fn ids(&self) -> Vec<String> {
-        self.entries
-            .lock()
-            .expect("dial-table mutex poisoned")
-            .keys()
-            .cloned()
-            .collect()
-    }
-
-    /// The ids the index file lists, read back from disk: what a rolled-back add
-    /// must have left untouched.
-    #[cfg(test)]
-    pub(crate) fn indexed_ids(&self) -> Vec<String> {
-        std::fs::read_to_string(&self.index_path)
-            .ok()
-            .and_then(|text| serde_json::from_str::<AccountIndex>(&text).ok())
-            .map(|index| index.accounts)
-            .unwrap_or_default()
-    }
-
-    /// One account's config and connections, for a folder bind; `None` for an id
-    /// that is not registered.
-    fn of(
-        &self,
-        id: &str,
-    ) -> Option<(
-        astra_account::AccountConfig,
-        Arc<astra_account::ImapConnections>,
-    )> {
-        self.entries
-            .lock()
-            .expect("dial-table mutex poisoned")
-            .get(id)
-            .map(|entry| (entry.config.clone(), Arc::clone(&entry.connections)))
-    }
-
-    /// Registers `id` with its config and pool, rewriting the whole index: a
-    /// half-written list of ids is exactly the bug the whole-file write avoids.
-    pub(crate) fn register(
-        &self,
-        id: &AccountId,
-        config: astra_account::AccountConfig,
-        connections: Arc<astra_account::ImapConnections>,
-    ) -> Result<(), std::io::Error> {
-        let mut entries = self.entries.lock().expect("dial-table mutex poisoned");
-        entries.insert(
-            id.as_str().to_owned(),
-            RegisteredDial {
-                config,
-                connections,
-            },
-        );
-        let index = AccountIndex {
-            accounts: entries.keys().cloned().collect(),
-        };
-        let text = serde_json::to_string_pretty(&index).map_err(|err| {
-            std::io::Error::other(format!("the account index could not be written: {err}"))
-        })?;
-        std::fs::write(&self.index_path, text)
-    }
-}
 
 /// Binds a folder of a registered account on demand: the host's implementation of
 /// the app's [`MailboxConnector`] seam, over the dial table.
