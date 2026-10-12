@@ -255,3 +255,15 @@ fn an_unpinned_default_calendar_and_empty_attributions_cross_no_key() {
     let back: AboutBlock = serde_json::from_value(wire).expect("the about block reads back");
     assert_eq!(back, about);
 }
+
+#[test]
+fn the_shared_web_fixture_parses_as_the_snapshot() {
+    // The web service's settings.test.ts parses this same file, so the
+    // fixture the surface mirrors and the snapshot the host publishes can
+    // never drift apart.
+    let raw = include_str!("../../../client/web/src/services/__fixtures__/settings_snapshot.json");
+    let back: SettingsSnapshot = serde_json::from_str(raw).expect("the fixture parses");
+    let wire = serde_json::to_value(&back).expect("the snapshot serialises");
+    let raw: serde_json::Value = serde_json::from_str(raw).expect("the fixture is JSON");
+    assert_eq!(wire, raw, "the fixture round trips value for value");
+}

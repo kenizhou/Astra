@@ -48,6 +48,9 @@ pub(crate) mod calendar;
 // and the recipient suggestions), under the same split.
 pub(crate) mod people;
 
+// The settings command surface (the snapshot pull), under the same split.
+pub(crate) mod settings;
+
 /// A command failure, serialised to the webview as its display string: a sentence a
 /// surface can show, with the reason the host saw.
 #[derive(Debug, thiserror::Error)]

@@ -13,7 +13,8 @@ use astra_app::{
 };
 use astra_viewmodel::{
     CalendarSnapshot, ComposeKind, ComposeRequestSnapshot, DraftStatusSnapshot,
-    MailboxListSnapshot, PeopleSnapshot, ReadingSnapshot, SendingSnapshot, SyncProgressSnapshot,
+    MailboxListSnapshot, PeopleSnapshot, ReadingSnapshot, SendingSnapshot, SettingsSnapshot,
+    SyncProgressSnapshot,
 };
 use engine_api::{AccountId, CalendarDate, ProviderKey, RecipientSuggestion};
 
@@ -386,6 +387,10 @@ impl AppPort for FakeApp {
 
     fn people(&self) -> PeopleSnapshot {
         self.people.lock().unwrap().clone()
+    }
+
+    fn settings(&self) -> SettingsSnapshot {
+        self.settings.lock().unwrap().clone()
     }
 
     async fn card_seed(&self, card: &CardRef) -> Option<ContactDraftInput> {

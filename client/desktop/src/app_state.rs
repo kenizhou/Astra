@@ -13,7 +13,7 @@ use astra_app::{
 };
 use astra_viewmodel::{
     CalendarSnapshot, ComposeRequestSnapshot, DraftStatusSnapshot, MailboxListSnapshot,
-    PeopleSnapshot, ReadingSnapshot, SendingSnapshot, SyncProgressSnapshot,
+    PeopleSnapshot, ReadingSnapshot, SendingSnapshot, SettingsSnapshot, SyncProgressSnapshot,
 };
 use async_trait::async_trait;
 use engine_api::{AccountId, CalendarDate, Provider, ProviderKey, RecipientSuggestion};
@@ -198,6 +198,10 @@ pub(crate) trait AppPort: Send + Sync {
     /// people signal.
     fn people(&self) -> PeopleSnapshot;
 
+    /// The published settings snapshot, for the host's pull after a
+    /// settings signal.
+    fn settings(&self) -> SettingsSnapshot;
+
     /// The editor's seed for one card: the stored card the reference names,
     /// rendered as the editor's input subset, or `None` when nobody stores
     /// it.
@@ -359,6 +363,10 @@ impl AppPort for App<HostProvider> {
 
     fn people(&self) -> PeopleSnapshot {
         App::people(self)
+    }
+
+    fn settings(&self) -> SettingsSnapshot {
+        App::settings(self)
     }
 
     async fn card_seed(&self, card: &CardRef) -> Option<ContactDraftInput> {
