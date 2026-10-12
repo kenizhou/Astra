@@ -117,7 +117,9 @@ describe('the message list', () => {
     // The first two rows are present: sender, subject, and stamp each way.
     expect(screen.getByText('Ada Lovelace')).toBeTruthy();
     expect(screen.getByText('Quarterly report')).toBeTruthy();
-    expect(screen.getByText('08:30')).toBeTruthy();
+    // The stamp honours the clock setting's 12-hour default, the same
+    // spelling the reading pane renders.
+    expect(screen.getByText('8:30 AM')).toBeTruthy();
     // A row with no sender name shows the bare address, and an earlier day
     // of the same year renders as day and month.
     expect(screen.getByText('notifications@example.test')).toBeTruthy();
