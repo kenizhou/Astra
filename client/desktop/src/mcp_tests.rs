@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#![cfg(windows)]
 //! McpHost tests: the run/stop seam over a real pipe. Enabling binds and
 //! serves; disabling closes the endpoint; a taken name lands in the
 //! failed state the panel reads rather than a crash; the allowlist seam
@@ -170,8 +171,15 @@ fn enabling_binds_and_serves_the_endpoint() {
         use tokio::io::AsyncWriteExt;
         use tokio::net::windows::named_pipe::ClientOptions;
 
-        // Ride out the window where the first instance is being replaced.
+        let mut attempts = 200_u32;
+        // Ride out the window where the first instance is being replaced,
+        // bounded so a wedged host fails the test rather than hanging it.
         let stream = loop {
+            assert!(
+                attempts != 0,
+                "the pipe never answered: a wedged host fails the test"
+            );
+            attempts -= 1;
             match ClientOptions::new().open(endpoint.as_str()) {
                 Ok(stream) => break stream,
                 Err(_) => tokio::time::sleep(Duration::from_millis(5)).await,
@@ -289,7 +297,16 @@ fn the_allowlist_seam_reaches_the_gate_on_a_live_connection() {
             use tokio::io::AsyncWriteExt;
             use tokio::net::windows::named_pipe::ClientOptions;
 
+            let mut attempts = 200_u32;
+
+            // Bounded, like its sibling: a wedged host fails the test
+            // rather than hanging it.
             let stream = loop {
+                assert!(
+                    attempts != 0,
+                    "the pipe never answered: a wedged host fails the test"
+                );
+                attempts -= 1;
                 match ClientOptions::new().open(endpoint.as_str()) {
                     Ok(stream) => break stream,
                     Err(_) => tokio::time::sleep(Duration::from_millis(5)).await,

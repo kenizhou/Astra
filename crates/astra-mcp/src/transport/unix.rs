@@ -83,21 +83,32 @@ impl Drop for OwnedSocket {
     }
 }
 
-/// Creates the socket's parent directory and restricts it to this user.
+/// Creates the socket's parent directory and, when the bind itself made
+/// it, restricts it to this user. A directory that already stood (the
+/// app's data directory) is never rewritten: what the app or the
+/// container set there is theirs, and the bind only requires that it
+/// already keeps others out, failing loudly when it does not.
 fn prepare_directory(path: &Path) -> io::Result<()> {
     let Some(parent) = path.parent() else {
         return Ok(());
     };
-    std::fs::create_dir_all(parent)?;
-    if let Err(err) = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700)) {
-        // A directory the system owns refuses the chmod and does not need
-        // it (a sandbox container arrives owner-only); what decides is
-        // the property the chmod exists to establish.
-        if !keeps_others_out(parent) {
-            return Err(err);
+    match std::fs::create_dir(parent) {
+        Ok(()) => {
+            std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))?;
+            Ok(())
         }
+        Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {
+            if keeps_others_out(parent) {
+                Ok(())
+            } else {
+                Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "the socket's directory lets other users in; refusing to listen",
+                ))
+            }
+        }
+        Err(err) => Err(err),
     }
-    Ok(())
 }
 
 /// Whether `dir` lets no user but its owner traverse it. A directory

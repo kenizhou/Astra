@@ -143,7 +143,10 @@ impl Endpoint {
     }
 
     /// The endpoint for the app's data directory; see the module docs for
-    /// the derivation and its collision rules.
+    /// the derivation and its collision rules. The derived value routes
+    /// through [`parse`](Self::parse), so a degenerate leaf or an
+    /// over-long socket path answers the validation error rather than a
+    /// bind error nobody connects back to the name that produced it.
     #[must_use]
     pub fn for_data_dir(data_dir: &std::path::Path) -> Self {
         if cfg!(windows) {
@@ -151,9 +154,11 @@ impl Endpoint {
                 .file_name()
                 .map(|leaf| leaf.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            return Self::Pipe(format!(r"\\.\pipe\{leaf}.mcp"));
+            return Self::parse(&format!(r"\\.\pipe\{leaf}.mcp"))
+                .expect("a pipe name with a data-dir leaf validates");
         }
-        Self::Unix(data_dir.join("mcp.sock").to_string_lossy().into_owned())
+        Self::parse(&data_dir.join("mcp.sock").to_string_lossy())
+            .expect("a data-dir socket path fits the sun_path bound")
     }
 }
 

@@ -97,7 +97,6 @@ where
 /// Deterministic binary garbage: every byte value over its length, so the
 /// payload carries newlines mid-stream, NULs, and high bytes, and the
 /// caller picks a length whose last byte is not a newline.
-/// The caller picks a length whose last byte is not a newline.
 #[allow(clippy::cast_possible_truncation)]
 // The mask makes the truncation the point: every byte value is possible,
 // including the hostile ones.

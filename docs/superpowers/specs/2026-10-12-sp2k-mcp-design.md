@@ -104,3 +104,12 @@ nothing.
   layers it delegates to (the query layer's and the writes' tests in
   astra-app, the bridge and server tests over the fake port), and the
   gated e2e of the proofs task drives it over the real pipe.
+- The relay exits non-zero with a stderr diagnostic when the app is not
+  reachable, instead of answering the JSON-RPC "unavailable" frame
+  mail-calendar's shim answers: the frame needs the request id, and
+  reading it is protocol knowledge this relay refuses to hold. The client
+  reports a failed server; opening the app is the fix.
+- The Unix transport half (the 0700/0600 permissions, the stale-socket
+  claim, the peer-uid refusal) is implemented but pinned nowhere that
+  runs: this host is Windows, and the `cfg(unix)` tests land with the
+  first Unix CI.
