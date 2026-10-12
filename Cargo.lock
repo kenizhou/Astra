@@ -324,6 +324,7 @@ name = "astra-oauth"
 version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
+ "engine-tls",
  "reqwest",
  "ring",
  "rustls",

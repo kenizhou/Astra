@@ -1,6 +1,6 @@
 [package]
 name = "astra-oauth"
-description = "The pre-registered half of Astra Mail's OAuth 2.0 Authorization-Code-with-PKCE client: the PKCE pair and CSRF state, the token exchanges over an injected HTTP transport, the Microsoft and Google provider configs, and the grant-refusal vocabulary."
+description = "Astra Mail's OAuth 2.0 Authorization-Code-with-PKCE client: the PKCE pair and CSRF state, the token exchanges, the Microsoft and Google provider configs, the grant-refusal vocabulary, and the RFC 9728/8414/7591 discovery and registration for servers with no pre-registered client."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,6 +12,10 @@ workspace = true
 [dependencies]
 # base64url, unpadded: the PKCE verifier and challenge, and the CSRF state.
 base64 = { workspace = true }
+# The shared TLS trust policy behind the discovery client and OAuthClient's
+# HTTP client: the same policy every other network path in the product uses,
+# so OAuth trusts exactly what sync trusts.
+engine-tls = { workspace = true, features = ["reqwest"] }
 # The HTTP client the token exchanges ride on. The caller injects it (and so
 # owns the TLS policy); the unit tests drive it against scripted responses.
 reqwest = { workspace = true }
