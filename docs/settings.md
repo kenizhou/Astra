@@ -208,7 +208,7 @@ never the history.
 
 | Channel | Says | Where it renders |
 |---|---|---|
-| `persist_failed` | The write landed in memory but the preferences file did not take it | Under the controls of the category the write belongs to |
+| `persist_failed` | The write landed in memory but the preferences file did not take it | One sentence on the screen, following the newest write: every category renders it until the next write answers |
 | `zone_unresolvable` | The typed id names no zone the engine can resolve; the standing zone keeps | Under the zone picker |
 | `horizon_out_of_bounds` | The named horizon sits outside the seven to three hundred and sixty-five day bounds; the standing horizon keeps | Under the horizon field |
 | `remove_failed` | The account's removal could not be completed; nothing went | On the account's page, under the confirmation |

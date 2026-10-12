@@ -11,6 +11,7 @@ import { dispatch, intents } from '@/services/ipc';
 import type { RowKey, MessageRowView } from '@/services/surfaces';
 import { Monogram } from './Monogram';
 import { formatSentAt } from './sentAt';
+import { useSettingsStore } from '@/features/settings/settingsStore';
 
 /** A stroke-drawn flag glyph, coloured by the text it sits in. */
 function FlagGlyph() {
@@ -99,7 +100,7 @@ export function MessageRow({ row, selected, now, onSelect }: MessageRowProps) {
         <div className="flex items-baseline justify-between gap-2">
           <span className={`min-w-0 truncate text-xs text-foreground ${bold}`}>{sender}</span>
           <span className="shrink-0 text-[11px] text-muted-foreground">
-            {formatSentAt(row.sent_at, now)}
+            {formatSentAt(row.sent_at, now, useSettingsStore.getState().settings.twenty_four_clock)}
           </span>
         </div>
         <div className="flex items-center justify-between gap-2">
