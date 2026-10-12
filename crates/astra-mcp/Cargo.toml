@@ -1,0 +1,16 @@
+[package]
+name = "astra-mcp"
+description = "The Model Context Protocol surface for Astra Mail: the tool schemas and the untrusted-body fence, the contracts the server and its relay build on."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# The tool schemas are draft-2020-12 JSON Schema literals published as JSON,
+# and the input types that must agree with them are serde-deserialised.
+serde.workspace = true
+serde_json.workspace = true

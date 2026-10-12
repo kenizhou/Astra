@@ -29,6 +29,7 @@ mod outbox;
 mod people;
 mod preferences;
 mod protocol;
+mod query;
 mod reading;
 mod reference;
 mod row_cache;
@@ -147,6 +148,7 @@ pub use protocol::{
     EventEdit, FolderIntent, Intent, OutboxIntent, PeopleIntent, RecurrenceChange, RepeatEnd,
     RepeatRule, RsvpAnswer, SearchScope, SettingsIntent, Surface, ThemeMode, ViewMode, WeekdayWire,
 };
+pub use query::{MessageDetail, MessagePage, QueryAccount, QueryRow, MAX_PAGE};
 pub use reference::{
     AddressBookRef, CalendarRef, CardRef, EventRef, FolderRef, MessageRef, QueuedRef, RowRef,
     ThreadRef,

@@ -26,7 +26,7 @@ use crate::{
 /// each account's hits by relevance and caps them; this reads that as a
 /// candidate set to re-order by date, so the cap bounds the store read, not
 /// the answer's order.
-const FETCH_LIMIT: usize = 500;
+pub(crate) const FETCH_LIMIT: usize = 500;
 
 /// How many rows one search shows. Results stop here with no show-more,
 /// matching the ported contract: a query matching thousands shows the newest
@@ -460,7 +460,7 @@ impl HitFilter {
 
 /// The provider key of the folder `tree` tags with `role`, or `None`; resolved
 /// from the cached folder trees rather than any per-role key cache.
-fn role_key(tree: &[Mailbox], role: &MailboxRole) -> Option<String> {
+pub(crate) fn role_key(tree: &[Mailbox], role: &MailboxRole) -> Option<String> {
     tree.iter()
         .find(|mailbox| mailbox.role.as_ref() == Some(role))
         .map(|mailbox| mailbox.id.key().as_str().to_owned())

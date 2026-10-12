@@ -40,7 +40,7 @@ mod mail;
 // The AI pass fixtures, its own child for the same limit, pathed `fakes::ai::…`.
 pub(crate) mod ai;
 pub(super) use mail::{
-    delivered_at, folder_keys, mail, pane_rows, read, row, row_keys, row_keys_from,
+    delivered_at, flagged, folder_keys, mail, pane_rows, read, row, row_keys, row_keys_from,
     sending_signals, sent, sent_copy, threaded, trash,
 };
 

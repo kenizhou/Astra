@@ -345,6 +345,16 @@ impl<P: Provider> App<P> {
             .is_some()
     }
 
+    /// Whether the shown folder's message rows are currently held in memory;
+    /// the second half of the query layer's cache guarantee.
+    #[cfg(test)]
+    pub(crate) fn mail_row_cache_is_loaded(&self) -> bool {
+        self.mail_row_cache
+            .lock()
+            .expect("mail-row-cache mutex poisoned")
+            .is_some()
+    }
+
     /// The list generation: bumped by every intent that changes what the list shows,
     /// so an in-flight rebuild for the older list cannot win by finishing last.
     pub(crate) fn bump_generation(&self) {
