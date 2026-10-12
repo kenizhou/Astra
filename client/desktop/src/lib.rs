@@ -22,6 +22,7 @@ mod detection;
 mod dial_table;
 mod exit;
 mod headless;
+mod mcp;
 mod observer;
 
 // The command-surface test fixtures: one compiled copy of the fake app, the

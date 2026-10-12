@@ -43,6 +43,10 @@ astra-viewmodel = { path = "../../crates/astra-viewmodel" }
 # The AI foundation the background LLM client rides: the tier registry, the
 # correlation id, and the ledger store its per-attempt rows land in.
 astra-ai = { path = "../../crates/astra-ai" }
+# The MCP server the advanced-settings listener hosts: the server with its
+# gate and tool-call ledger, and the endpoint and listener derived from
+# the app's data directory.
+astra-mcp = { path = "../../crates/astra-mcp" }
 # The engine facade: the `Provider` trait the host's boxed provider type names.
 engine-api.workspace = true
 # The OS secure store the account credentials live in (Credential Manager,

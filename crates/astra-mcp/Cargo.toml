@@ -25,13 +25,16 @@ astra-viewmodel = { path = "../astra-viewmodel" }
 engine-api.workspace = true
 # The MailBackend port is an async trait.
 async-trait.workspace = true
-# The framing loop reads and writes newline-delimited JSON over one stream.
-tokio = { workspace = true, features = ["io-util"] }
+# The framing loop reads and writes newline-delimited JSON over one stream,
+# and the listener binds the named pipe (Windows) or the domain socket
+# (Unix) through the same runtime's net driver.
+tokio = { workspace = true, features = ["io-util", "net"] }
 # The failure enums.
 thiserror.workspace = true
 # Connection logging; counts and ids only, never content.
 log.workspace = true
 
 [dev-dependencies]
-# The tests drive the connection loop over an in-memory duplex stream.
-tokio = { workspace = true, features = ["rt", "macros", "io-util"] }
+# The tests drive the connection loop over an in-memory duplex stream, and
+# the transport tests over a real named pipe client with a bounded wait.
+tokio = { workspace = true, features = ["rt", "macros", "io-util", "net", "time"] }

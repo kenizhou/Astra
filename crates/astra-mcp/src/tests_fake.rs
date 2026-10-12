@@ -175,7 +175,23 @@ impl MailBackend for FakeBackend {
         offset: usize,
         _limit: usize,
     ) -> MessagePage {
-        let account = account.unwrap_or("work");
+        // The port's contract, as the `App` implementation spells it: a
+        // malformed id answers the empty page, never the unscoped search
+        // over accounts the gate never exposed.
+        let account = match account {
+            None => "work",
+            Some(id) => match AccountId::try_from(id) {
+                Ok(_) => id,
+                Err(_) => {
+                    return MessagePage {
+                        rows: Vec::new(),
+                        total: 0,
+                        offset,
+                        windowed: false,
+                    };
+                }
+            },
+        };
         MessagePage {
             rows: vec![row(&AccountId::try_from(account).unwrap(), "m1")],
             total: 1,
@@ -196,12 +212,17 @@ impl MailBackend for FakeBackend {
             .unwrap()
             .set_searches
             .push(accounts.join(","));
+        // The port's contract, as the `App` implementation spells it: an
+        // unparsable id in the set is dropped, never answered over.
+        let rows: Vec<QueryRow> = accounts
+            .iter()
+            .filter_map(|account| AccountId::try_from(account.as_str()).ok())
+            .map(|account| row(&account, "m1"))
+            .collect();
+        let total = rows.len();
         MessagePage {
-            rows: accounts
-                .iter()
-                .map(|account| row(&AccountId::try_from(account.as_str()).unwrap(), "m1"))
-                .collect(),
-            total: accounts.len(),
+            rows,
+            total,
             offset,
             windowed: false,
         }
@@ -239,6 +260,14 @@ impl MailBackend for FakeBackend {
     }
 
     async fn open_composer(&self, draft: AgentDraft) -> Result<(), astra_app::OpenDraftError> {
+        // The port's contract, as the `App` implementation spells it: a
+        // malformed from-id refuses NoAccount rather than folding to the
+        // app's default account.
+        if let Some(id) = draft.account.as_deref() {
+            if AccountId::try_from(id).is_err() {
+                return Err(astra_app::OpenDraftError::NoAccount);
+            }
+        }
         self.recorder.lock().unwrap().drafts.push(draft);
         Ok(())
     }

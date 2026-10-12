@@ -22,6 +22,7 @@ pub mod fence;
 pub mod ledger;
 pub mod server;
 pub mod tools;
+pub mod transport;
 
 #[cfg(test)]
 #[path = "tests_fake.rs"]
