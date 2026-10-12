@@ -1,6 +1,6 @@
 [package]
 name = "astra-mcp"
-description = "The Model Context Protocol surface for Astra Mail: the tool catalogue, the untrusted-body fence, the JSON-RPC server with its account gate, and the tool-call ledger."
+description = "The Model Context Protocol surface for Astra Mail: the tool catalog, the untrusted-body fence, the JSON-RPC server with its account gate, and the tool-call ledger."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -161,20 +161,23 @@ impl Server {
             // used.
             Err(error) => return Some(Response::err(Value::Null, error)),
         };
+        // Parse itself refuses a message with no method, so the method
+        // stands present here.
+        let method = request.method.as_deref().unwrap_or_default();
         if request.is_notification() {
-            log::debug!("mcp: notification {}", request.method);
+            log::debug!("mcp: notification {method}");
             return None;
         }
         let id = request.id.clone().unwrap_or(Value::Null);
-        Some(match self.dispatch(&request).await {
+        Some(match self.dispatch(&request, method).await {
             Ok(result) => Response::ok(id, result),
             Err(error) => Response::err(id, error),
         })
     }
 
     /// Routes one request to its method.
-    async fn dispatch(&self, request: &Request) -> Result<Value, RpcError> {
-        match request.method.as_str() {
+    async fn dispatch(&self, request: &Request, method: &str) -> Result<Value, RpcError> {
+        match method {
             "initialize" => initialize(request.params.as_ref()),
             "ping" => Ok(json!({})),
             "tools/list" => Ok(json!({

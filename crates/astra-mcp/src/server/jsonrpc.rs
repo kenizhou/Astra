@@ -36,8 +36,11 @@ pub(crate) struct Request {
     /// spec allows a string or a number and a client may use either.
     #[serde(default)]
     pub(crate) id: Option<Value>,
-    /// The method name.
-    pub(crate) method: String,
+    /// The method name. Absent on JSON that parses but is not a
+    /// request object, which is an invalid request rather than a parse
+    /// error (the spec separates the two, and so does the answer).
+    #[serde(default)]
+    pub(crate) method: Option<String>,
     /// The parameters, absent for a parameterless method.
     #[serde(default)]
     pub(crate) params: Option<Value>,
@@ -156,6 +159,12 @@ pub(crate) fn parse(line: &str) -> Result<Request, RpcError> {
         return Err(RpcError::new(
             INVALID_REQUEST,
             "jsonrpc must be exactly \"2.0\"",
+        ));
+    }
+    if request.method.is_none() {
+        return Err(RpcError::new(
+            INVALID_REQUEST,
+            "a request must carry a method",
         ));
     }
     Ok(request)

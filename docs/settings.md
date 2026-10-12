@@ -230,8 +230,8 @@ the rule in a sentence of its own. The substance that does port:
 turning the server on and granting an account are separate decisions;
 empty exposes nothing (an unlisted account is not even named to the
 client); the list is inert while the server is off, so toggling the
-server off keeps the session's list; and a removed account leaves the
-picker with its row, because the picker lists the snapshot's live
+server off keeps the session's list; and a removed account departs the
+picker, row and all, because the picker lists the snapshot's live
 account rows.
 
 - **The toggle** turns the listener on (binds the endpoint derived

@@ -12,7 +12,7 @@ fn a_well_formed_request_parses_with_its_id_and_params() {
         r#"{"jsonrpc":"2.0","id":41,"method":"tools/call","params":{"name":"ping"}}"#,
     )
     .expect("the request parses");
-    assert_eq!(request.method, "tools/call");
+    assert_eq!(request.method.as_deref(), Some("tools/call"));
     assert_eq!(request.id, Some(json!(41)));
     assert!(!request.is_notification());
 }
@@ -59,4 +59,15 @@ fn a_request_round_trips_through_the_wire_shape() {
     let line = r#"{"jsonrpc":"2.0","id":"s-1","method":"ping"}"#;
     let request: Request = serde_json::from_str(line).unwrap();
     assert_eq!(request.id, Some(json!("s-1")), "a string id is legal");
+}
+
+#[test]
+fn json_without_a_method_is_an_invalid_request_not_a_parse_error() {
+    // The spec separates the two: malformed JSON is -32700, JSON that
+    // parses but is not a request object is -32600. The absent method is
+    // the second, and the answer names it.
+    let error = jsonrpc::parse(r#"{"jsonrpc":"2.0","id":1}"#)
+        .expect_err("a message without a method is not a request");
+    assert_eq!(error.code, INVALID_REQUEST);
+    assert!(error.message.contains("method"));
 }

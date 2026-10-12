@@ -38,7 +38,7 @@ use fixtures::{
 };
 
 /// The full round trip over real mail through the relay: the handshake, the
-/// catalogue (with the send cut visible as an absence), the folders and the
+/// catalog (with the send cut visible as an absence), the folders and the
 /// corpus listing, the fenced body of one seeded note (and the row it did
 /// not mark read), the engine's real search through the gate's set form, a
 /// write whose effect shows in the app's own list and survives a refresh,
@@ -81,7 +81,7 @@ async fn a_stdio_client_reads_and_writes_real_mail_through_the_relay() {
     );
     client.initialized().await;
 
-    // The catalogue: ten tools, and the recorded cuts visible as absences
+    // The catalog: ten tools, and the recorded cuts visible as absences
     // on the live wire.
     let tools = client.request(2, "tools/list", json!({})).await;
     let names: Vec<&str> = tools["result"]["tools"]
@@ -90,7 +90,7 @@ async fn a_stdio_client_reads_and_writes_real_mail_through_the_relay() {
         .iter()
         .map(|tool| tool["name"].as_str().expect("every tool is named"))
         .collect();
-    assert_eq!(names.len(), 10, "the ten-tool catalogue: {tools}");
+    assert_eq!(names.len(), 10, "the ten-tool catalog: {tools}");
     assert!(
         !names.contains(&"send_message"),
         "no send verb exists on this wire, the recorded cut: {tools}"

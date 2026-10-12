@@ -92,7 +92,7 @@ Windows the pipe name is the app data directory's final component plus
 `.mcp`, so the standard directory yields `\\.\pipe\com.kenizhou.astra.mcp`
 and a dev data directory beside it yields a different pipe: two builds on
 one machine never steal each other's clients. On Unix the socket is
-`mcp.sock` inside the data directory, its parent `0700` and the socket
+`mcp.sock` inside the data directory, its parent its owner's alone (created `0700`, or already so) and the socket
 itself `0600`. The client's config snippet carries the exact value the
 host derived, and the relay takes it as an argument, verbatim, so the two
 can never disagree about where to meet.
