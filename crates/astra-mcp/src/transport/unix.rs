@@ -29,7 +29,10 @@ pub(super) struct SocketListener {
     listener: UnixListener,
     /// The socket file, unlinked when the listener drops or its accept
     /// future is aborted, so a client dialling a stopped listener is
-    /// refused rather than left hanging.
+    /// refused rather than left hanging. Never read: holding it is the
+    /// whole job (the drop closes the socket), which is why the dead-code
+    /// lint is answered here rather than by reading it pointlessly.
+    #[allow(dead_code)]
     file: OwnedSocket,
     /// The uid the socket's owner runs as, which is this process's.
     uid: u32,
