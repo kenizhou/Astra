@@ -1,0 +1,85 @@
+# SP2k MCP Server Design
+
+Date: 2026-10-12
+Status: proposed
+Parent spec: `docs/superpowers/specs/2026-08-...-workflow-design` (sections 5, 15)
+Port contracts: mail-calendar `docs/mcp.md` in substance, reconciled with Astra's
+own security rulebook (the recorded deviations below).
+
+## 1. Purpose
+
+Letting an AI assistant on the user's own machine read and act on their mail
+over the Model Context Protocol: desktop only, off by default, reaching
+nothing until the user names the accounts it may touch, with writes going
+through the same door the user does and reads through a door that changes
+nothing.
+
+## 2. Decisions
+
+- **D1 (the transport)**: the two-process shape. An MCP client spawns a
+  stdio relay (JSON-RPC 2.0, newline-delimited; a byte pipe with no
+  protocol knowledge) that bridges to the app over a named pipe on Windows
+  (a Unix domain socket on the other desktops, same code path); the app's
+  listener owns the store, the live connections, and the credentials, so
+  there is never a second writer.
+- **D2 (the gate)**: off by default, in Settings, Advanced. The account
+  allow list is empty by default and empty exposes nothing: an unlisted
+  account is not even named to the client. The endpoint is reachable only
+  by the signed-in OS user, with the peer verified. Turning the server on
+  and granting an account are separate decisions.
+- **D3 (the tool set)**: `list_accounts`, `list_folders`, `list_messages`,
+  `search_messages`, `get_message`, `mark_read`, `set_flagged`,
+  `archive_message`, `move_to_trash`, `create_draft`. snake_case,
+  draft-2020-12 schemas, `additionalProperties: false`, annotations set
+  honestly; `account` and `key` always travel together (the
+  wrong-account-routing class stays unrepresentable at the boundary).
+  **Two cuts against mail-calendar's contract, both recorded**: no
+  `send_message` at all, not even behind a toggle, because Astra's
+  rulebook refuses send-class verbs to the agent and humans decide and
+  send (the escalation note lives in the PR); no `mark_as_spam` because
+  Astra's dispatch carries no spam verb. `add_account`,
+  `open_account_setup`, and `permanently_delete` stay cut for
+  mail-calendar's own reasons.
+- **D4 (the two doors)**: writes dispatch the same `Intent`s the UI
+  dispatches (an assistant's archive happens in the user's own list,
+  visibly). Reads go through a query layer that changes nothing: no
+  snapshot republish, no selection move, no query rewrite, and
+  `OpenMessage`'s server-side mark-read never fires. Guarantee tests pin
+  the split so a later change cannot collapse it.
+- **D5 (the body rules)**: bodies come only from `get_message`, one at a
+  time; plain text by construction; fenced in `<untrusted-message-content>`
+  with a one-line preamble and a self-closing fence neutralized; no
+  attachment bytes cross (names only); no irreversible primitive exists.
+- **D6 (the ledger)**: every tool call lands in the audit ledger with a
+  correlation id, as counts, ids, and durations: a tool name, an outcome, a
+  duration, a query's character count. Never a query, an address, a
+  subject, or a body.
+- **D7 (create_draft)**: the draft opens in the app's own composer for the
+  human, the agent-sidecar's approval-card seam reused; nothing sends.
+
+## 3. Testing
+
+- Unit (astra-app over the engine fakes): the query layer's guarantees (a
+  read republishes nothing, marks nothing, moves nothing; paired with its
+  contrast test stating why); the fence and the plain-text construction;
+  the allowlist's empty-exposes-nothing (list_accounts answers nothing,
+  not even a count); the tool schema literals.
+- The server (in-process): the JSON-RPC framing, the tool dispatch, the
+  error envelopes, the peer check, the ledger rows.
+- E2E (gated): the relay binary bridged to the listener over the real
+  pipe; a client's `initialize`/`tools/list`/`tools/call` round trip; the
+  allowlist gate live; a write visible in the app's own list.
+- Live (gated, harness): a `get_message` body over real IMAP mail; a
+  `search_messages` over the seeded corpus.
+
+## 4. Known gaps (pre-recorded)
+
+- The relay binary ships for Windows first (named pipes); the Unix socket
+  path compiles but is unproven until a Unix host CI exists.
+- No `send_message`, no spam tool (the recorded deviations above).
+- The composer's draft hand-off reuses the agent-sidecar's seam; a draft
+  created while the composer is closed opens it on the next focus, not
+  immediately (the panel's own timing).
+- The allowlist lists accounts, not folders: an exposed account exposes
+  every folder the app reads for it (mail-calendar's row-level gating
+  arrives with its folder-level ACL work).
