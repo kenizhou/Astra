@@ -13,7 +13,7 @@ this row ports.
 | Mail | Flat and threaded message list with windowed paging | 🚧 | mail-calendar capabilities |
 | Calendar | Day, work week, and month grids with drag to create, move, resize | 🚧 | grids, agenda, and drag move ship; resize is the dialog's end edit and create is the dialog, not a grid gesture; the host dials the calendar leg at boot when the account carries a dav section; calendar.md |
 | Core | Reactive Rust to native binding, dispatch to immutable snapshots | 🚧 | |
-| Accounts | Settings accounts page lists every account, with per-service toggles, relinking, sign-in again, server editing, and removal | ⬜ | accounts.md |
+| Accounts | Settings accounts page lists every account, with per-service toggles, relinking, sign-in again, server editing, and removal | 🚧 | the page lists every account with its dialled legs, the dav section editor, and a confirmed removal; no per-service toggles, relinking, sign-in again, or server editing; settings.md |
 | Accounts | Outgoing name per account, asked once at connect, editable in settings, kept in step with the provider | ⬜ | sending.md |
 | Accounts | Untrusted server certificates shown with a fingerprint and accepted once per server; verification is never switched off | 🚧 | certificate-exceptions.md |
 | Accounts | Microsoft 365 accounts: browser OAuth sign-in (PKCE), mail read and actions, send, calendar read and write | ⬜ | |
@@ -26,7 +26,7 @@ this row ports.
 | Accounts | JMAP sign-in renewed in place, keeping mail, folders, and settings | ⬜ | jmap.md |
 | Accounts | Multi-account with unified inbox and account switcher | ⬜ | |
 | Mail | Unified mail as an All Accounts group in the folder pane, remembered across launches | ⬜ | folder-pane.md |
-| Accounts | Per-account credential storage with in-app account removal | ⬜ | |
+| Accounts | Per-account credential storage with in-app account removal | 🚧 | each account's config document sits in the host's credential store; the accounts page's confirmed removal deletes it; settings.md |
 | Accounts | Account list offered on the next device from a vendor account: address and servers, never a password | ⬜ | onboarding.md |
 | Accounts | Vendor account sign-in, creation, management, and deletion in its own settings category | ⬜ | allodia_license/entitlement.md |
 | Accounts | Subscription view: charges, renewal, retried payment, multiple-biller warning, cancel and restart under direct billing | ⬜ | allodia_license/purchasing.md |
@@ -72,7 +72,7 @@ this row ports.
 | Calendar | Write-status feedback: spinner while saving, warning on unconfirmed, retry | 🚧 | writing and failed-with-retry states settle per dispatch; calendar.md |
 | Calendar | All-day and multi-day banners with a per-day overflow count that expands | ⬜ | the all-day lane ships; the banner shape does not |
 | Calendar | Calendar manager: per-calendar visibility and colour override, persisted | 🚧 | visibility toggles ship; no colour override, nothing persisted; calendar.md |
-| Settings | Display settings: first day of week, 12 or 24-hour clock, light or dark appearance, calendar horizon | ⬜ | |
+| Settings | Display settings: first day of week, 12 or 24-hour clock, light or dark appearance, calendar horizon | 🚧 | all four ship in the settings screen; the time zone carries via the calendar's display zone; settings.md |
 | Calendar | The shape and horizon you left the calendar in, restored on launch | ⬜ | |
 | Calendar | The diary on screen from the store at launch, filled without opening it, there offline | ⬜ | |
 | Calendar | Calendar refreshes periodically while the app stays open | ⬜ | |
@@ -111,7 +111,7 @@ this row ports.
 | Search | Search results follow the list's conversation grouping | 🚧 | search.md |
 | Sync | Per-account fetch depth and message size, with every folder synced within the depth | ⬜ | |
 | Sync | Sync progress: a bar under the list for a started download, a status line for background passes, Sync paused when throttled | 🚧 | sync-progress.md |
-| Settings | Unified settings screen: language, appearance, time zone, conversation grouping, swipe actions, per-account fetch, quote style, default send account, reset, About | ⬜ | |
+| Settings | Unified settings screen: language, appearance, time zone, conversation grouping, swipe actions, per-account fetch, quote style, default send account, reset, About | 🚧 | six categories ship: General (appearance, clock), Calendar (zone, first day, horizon, default calendar), Reading (grouping), Composing (quote style), Accounts, About; language, swipe actions, per-account fetch, default send account, and reset stay absent; settings.md |
 | Sync | Per-mailbox sync behaviour: IMAP IDLE push where capable, otherwise 15 to 120 minute polling | ⬜ | |
 | Sync | Background mail delivery while the app is not in the foreground | ⬜ | background-sync.md |
 | Sync | New-mail notifications from the background sync: who it is from, what it is about, how it begins | ⬜ | |

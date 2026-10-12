@@ -52,7 +52,13 @@
 //! own, and every seeded card and every sent mail is withdrawn at the end. The
 //! card withdrawals ride the raw seeding helper rather than a product path
 //! because the product ships no contact delete; the mail withdrawals ride the
-//! product's own delete.
+//! product's own delete. The gated settings tests (`settings`) prove the
+//! settings editor's account seam live over the same discipline: the dav
+//! editor's save dials through the real `connect_dav_providers` over a
+//! scratch config document that mirrors the desktop store's merge rule and
+//! dial-before-persist ordering, installs both legs end to end, keeps
+//! everything that stood when a re-dial fails, and tears both legs down on
+//! the clear; the zone proof pins the now line's republished zone id.
 //!
 //! The JMAP-detection test cannot dial `https://example.test/.well-known/jmap` (the
 //! harness domain resolves nowhere), so it rebases the probe onto the harness's plain
@@ -130,6 +136,10 @@ mod reply;
 mod search;
 #[path = "tests_live_harness/send.rs"]
 mod send;
+#[path = "tests_live_harness/settings.rs"]
+mod settings;
+#[path = "tests_live_harness/settings_proof.rs"]
+mod settings_proof;
 
 /// The harness connection details from the environment, or `None` to skip.
 fn harness() -> Option<(String, String, String, String)> {
