@@ -13,6 +13,14 @@ vi.mock('@/services/ipc', async (importOriginal) => ({
   dispatch: ipc.dispatch,
 }));
 
+const settingsState = vi.hoisted(() => ({
+  settings: { twenty_four_clock: true },
+}));
+
+vi.mock('@/features/settings/settingsStore', () => ({
+  useSettingsStore: (selector: (state: unknown) => unknown) => selector(settingsState),
+}));
+
 import { DayGrid } from './DayGrid';
 import { useCalendarStore } from './calendarStore';
 import type { OccurrenceRow } from '@/services/ipc';
@@ -74,6 +82,16 @@ describe('the day grid', () => {
     expect(block).not.toBeNull();
     expect(block!.getAttribute('style')).toContain('top: 396px');
     expect(block!.getAttribute('style')).toContain('height: 22px');
+  });
+
+  it('renders the hour gutter in 12 hour form per the clock setting', () => {
+    settingsState.settings.twenty_four_clock = false;
+    seedStore([]);
+    render(<DayGrid onOpenEvent={() => undefined} />);
+
+    expect(screen.getByText('1 PM')).toBeTruthy();
+    expect(screen.queryByText('13:00')).toBeNull();
+    settingsState.settings.twenty_four_clock = true;
   });
 
   it('rides an all-day row in its own lane above the grid', () => {

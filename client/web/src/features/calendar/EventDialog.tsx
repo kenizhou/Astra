@@ -20,6 +20,7 @@ import type {
 
 import { addDays, dayKeyOf, minutesInZone } from './calendarRange';
 import { useCalendarStore } from './calendarStore';
+import { useSettingsStore } from '@/features/settings/settingsStore';
 import { DeleteChoice, SeriesWarning } from './EventDialogSteps';
 
 /** The repeat choices a create offers. */
@@ -78,13 +79,27 @@ export function EventDialog({ row, onClose }: EventDialogProps) {
   const calendars = useCalendarStore((s) => s.calendars);
   const anchor = useCalendarStore((s) => s.anchor);
   const nowData = useCalendarStore((s) => s.nowData);
+  const pinned = useSettingsStore((s) => s.settings.default_calendar);
   const zone = nowData?.zone ?? 'Etc/UTC';
 
   const writable = useMemo(
     () => calendars.filter((calendar) => calendar.can_write),
     [calendars],
   );
-  const defaultCalendar = writable.find((calendar) => calendar.is_default) ?? writable[0];
+  // The settings block's pin decides where a create lands by default, the
+  // diary's own flag standing in only while nothing is pinned or the pin
+  // names a calendar that no longer exists.
+  const defaultCalendar = useMemo(() => {
+    if (pinned !== undefined) {
+      const hit = writable.find(
+        (calendar) => calendar.account === pinned.account && calendar.id === pinned.key,
+      );
+      if (hit !== undefined) {
+        return hit;
+      }
+    }
+    return writable.find((calendar) => calendar.is_default) ?? writable[0];
+  }, [writable, pinned]);
 
   const editing = row !== null;
   const scopeable = editing && row.recurring && row.occurrence_start !== undefined;

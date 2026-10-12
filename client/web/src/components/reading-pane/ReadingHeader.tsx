@@ -3,9 +3,11 @@
 // full UTC stamp, all straight from the snapshot. The avatar resolves
 // through the people command on the sender's address, the one resolution
 // every surface shares. The stamp derives from the UTC parts the same way
-// the list's does, with the year always shown and the time of day appended.
+// the list's does, with the year always shown and the time of day appended
+// in the form the clock setting names.
 
 import { Avatar } from '@/features/people/Avatar';
+import { useSettingsStore } from '@/features/settings/settingsStore';
 
 /** The month abbreviations the stamp uses, in UTC order. */
 const MONTHS = [
@@ -23,8 +25,11 @@ const MONTHS = [
   'Dec',
 ] as const;
 
-/** Formats the open message's sent_at as `9 Oct 2026, 08:30`; empty when unknown. */
-export function formatReadingDate(sentAt: string): string {
+/**
+ * Formats the open message's sent_at as `9 Oct 2026, 08:30`, or the 12-hour
+ * form with its meridiem when the clock setting says so; empty when unknown.
+ */
+export function formatReadingDate(sentAt: string, twentyFour = true): string {
   if (sentAt === '') {
     return '';
   }
@@ -34,7 +39,13 @@ export function formatReadingDate(sentAt: string): string {
   }
   const two = (value: number): string => String(value).padStart(2, '0');
   const month = MONTHS[stamp.getUTCMonth()] ?? '';
-  return `${stamp.getUTCDate()} ${month} ${stamp.getUTCFullYear()}, ${two(stamp.getUTCHours())}:${two(stamp.getUTCMinutes())}`;
+  if (twentyFour) {
+    return `${stamp.getUTCDate()} ${month} ${stamp.getUTCFullYear()}, ${two(stamp.getUTCHours())}:${two(stamp.getUTCMinutes())}`;
+  }
+  const hour = stamp.getUTCHours();
+  const meridiem = hour < 12 ? 'AM' : 'PM';
+  const twelve = hour % 12 === 0 ? 12 : hour % 12;
+  return `${stamp.getUTCDate()} ${month} ${stamp.getUTCFullYear()}, ${twelve}:${two(stamp.getUTCMinutes())} ${meridiem}`;
 }
 
 interface ReadingHeaderProps {
@@ -49,9 +60,10 @@ interface ReadingHeaderProps {
 }
 
 export function ReadingHeader({ subject, fromName, fromAddress, sentAt }: ReadingHeaderProps) {
+  const twentyFour = useSettingsStore((s) => s.settings.twenty_four_clock);
   const from =
     fromName === '' ? fromAddress : fromAddress === '' ? fromName : `${fromName} <${fromAddress}>`;
-  const date = formatReadingDate(sentAt);
+  const date = formatReadingDate(sentAt, twentyFour);
   return (
     <div className="shrink-0 border-b border-border px-4 py-3">
       <h2 className="truncate text-sm font-semibold text-foreground">

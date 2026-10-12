@@ -13,6 +13,14 @@ vi.mock('@/services/ipc', async (importOriginal) => ({
   peopleAvatar: ipc.peopleAvatar,
 }));
 
+const settingsState = vi.hoisted(() => ({
+  settings: { twenty_four_clock: true },
+}));
+
+vi.mock('@/features/settings/settingsStore', () => ({
+  useSettingsStore: (selector: (state: unknown) => unknown) => selector(settingsState),
+}));
+
 import { ReadingHeader, formatReadingDate } from './ReadingHeader';
 
 beforeEach(() => {
@@ -97,5 +105,26 @@ describe('the reading header', () => {
     expect(formatReadingDate('2021-01-02T03:04:00Z')).toBe('2 Jan 2021, 03:04');
     expect(formatReadingDate('')).toBe('');
     expect(formatReadingDate('not a date')).toBe('');
+  });
+
+  it('renders the stamp in 12 hour form when the clock setting says so', () => {
+    settingsState.settings.twenty_four_clock = false;
+    render(
+      <ReadingHeader
+        subject="Launch"
+        fromName="Ada Lovelace"
+        fromAddress="ada@example.test"
+        sentAt="2026-10-09T13:05:00Z"
+      />,
+    );
+
+    expect(screen.getByText('9 Oct 2026, 1:05 PM')).toBeTruthy();
+    expect(screen.queryByText('9 Oct 2026, 13:05')).toBeNull();
+    settingsState.settings.twenty_four_clock = true;
+  });
+
+  it('formats noon and midnight on the 12 hour clock', () => {
+    expect(formatReadingDate('2026-10-09T00:05:00Z', false)).toBe('9 Oct 2026, 12:05 AM');
+    expect(formatReadingDate('2026-10-09T12:05:00Z', false)).toBe('9 Oct 2026, 12:05 PM');
   });
 });

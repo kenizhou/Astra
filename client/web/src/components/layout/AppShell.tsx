@@ -7,9 +7,10 @@
 // panes' corner, the app start resume opens the stored draft into the
 // composer, a landed compose request opens the composer hydrated from it,
 // the outbox, agent, and AI documents panels ride above the status bar's
-// corner when the status bar's toggles open them, and the send-result toast
-// says when a queued send has gone out. The account setup flow rides above
-// everything when it is open.
+// corner when the status bar's toggles open them, the send-result toast
+// says when a queued send has gone out, the settings screen rides above
+// the shell when the title bar's gear opens it, and the account setup flow
+// rides above everything when it is open.
 
 import { AccountSetupFlow } from '@/features/account-setup/AccountSetupFlow';
 import { AiPanel } from '@/features/ai-panel/AiPanel';
@@ -20,6 +21,7 @@ import { useComposeRequestHydration } from '@/features/composer/useComposeReques
 import { OutboxPanel } from '@/features/outbox/OutboxPanel';
 import { SendResultToast } from '@/features/outbox/SendResultToast';
 import { PeoplePane } from '@/features/people/PeoplePane';
+import { SettingsScreen } from '@/features/settings/SettingsScreen';
 import { FolderPane } from '@/components/folder-pane/FolderPane';
 import { useAccountStore } from '@/stores/accountStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -64,6 +66,7 @@ export function AppShell() {
       <AgentPanel />
       <AiPanel />
       <SendResultToast />
+      <SettingsScreen />
       <AccountSetupFlow />
     </div>
   );

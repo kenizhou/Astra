@@ -19,6 +19,7 @@ import {
   people,
   reading,
   sending,
+  settings,
   syncProgress,
 } from '@/services/ipc';
 import { useAccountStore } from '@/stores/accountStore';
@@ -30,6 +31,7 @@ import { useListStore } from '@/stores/listStore';
 import { usePeopleStore } from '@/features/people/peopleStore';
 import { useReadingStore } from '@/stores/readingStore';
 import { useSendingStore } from '@/stores/sendingStore';
+import { useSettingsStore } from '@/features/settings/settingsStore';
 import { useSplitStore } from '@/stores/splitStore';
 import { useUiStore } from '@/stores/uiStore';
 import type { MailboxListSnapshot } from '@/services/surfaces';
@@ -43,7 +45,8 @@ export type Surface =
   | 'sending'
   | 'compose_request'
   | 'calendar'
-  | 'people';
+  | 'people'
+  | 'settings';
 
 /**
  * Tauri presence guard, evaluated at module load so jsdom tests that install
@@ -170,6 +173,11 @@ export function pullSurface(surface: Surface): Promise<void> {
       usePeopleStore.getState().applySnapshot(snapshot);
     });
   }
+  if (surface === 'settings') {
+    return settings().then((snapshot) => {
+      useSettingsStore.getState().applySnapshot(snapshot);
+    });
+  }
   return syncProgress().then((snapshot) => {
     useUiStore.getState().applySyncProgress(snapshot);
   });
@@ -197,7 +205,8 @@ export function mountSurfaceEvents(): () => void {
         surface === 'sending' ||
         surface === 'compose_request' ||
         surface === 'calendar' ||
-        surface === 'people'
+        surface === 'people' ||
+        surface === 'settings'
       ) {
         void pullSurface(surface);
       }
@@ -237,6 +246,8 @@ export async function hydrate(): Promise<void> {
   useCalendarStore.getState().applySnapshot(diary);
   const directory = await people();
   usePeopleStore.getState().applySnapshot(directory);
+  const preferences = await settings();
+  useSettingsStore.getState().applySnapshot(preferences);
   useUiStore.getState().markRunning();
   if (snapshot.account_folders.length === 0) {
     useUiStore.getState().setAccountSetupOpen(true);

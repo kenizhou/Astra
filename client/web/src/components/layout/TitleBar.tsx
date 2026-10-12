@@ -4,10 +4,11 @@
 // lives on the regions alone, never on the header: a double click on a button
 // bubbles to the header, and an answer there would net the control an extra
 // toggle on top of its own clicks. The product name, the shell's view
-// switch, the search box, the theme toggle, and the account setup entry sit
-// on the strip as their own no-drag targets by virtue of being the event's
-// target rather than the region itself. The search box holds the strip's
-// centre between two drag regions, the scope dropdown riding inside it.
+// switch, the search box, the theme override cycle, the account setup
+// entry, and the settings gear sit on the strip as their own no-drag
+// targets by virtue of being the event's target rather than the region
+// itself. The search box holds the strip's centre between two drag
+// regions, the scope dropdown riding inside it.
 
 import { useEffect, useRef, useState } from 'react';
 
@@ -16,7 +17,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { WindowTitleControls } from '@/components/ui/WindowTitleControls';
 import { dispatch, intents } from '@/services/ipc';
 import { useListStore } from '@/stores/listStore';
-import { useUiStore } from '@/stores/uiStore';
+import { nextThemeMode, useUiStore } from '@/stores/uiStore';
 import type { SearchScope } from '@/services/surfaces';
 import type { ShellView } from '@/stores/uiStore';
 
@@ -160,8 +161,14 @@ export function SearchBox() {
 
 export function TitleBar() {
   const themeMode = useUiStore((s) => s.themeMode);
-  const toggleTheme = useUiStore((s) => s.toggleTheme);
   const openSetup = () => useUiStore.getState().setAccountSetupOpen(true);
+  const openSettings = () => useUiStore.getState().setSettingsOpen(true);
+  const cycleTheme = () => {
+    // The override lands only through the republished settings block, so
+    // the click dispatches and the snapshot repaints; nothing applies here.
+    void dispatch(intents.setTheme(nextThemeMode(themeMode)));
+  };
+  const next = nextThemeMode(themeMode);
 
   const toggleMaximise = async () => {
     try {
@@ -210,12 +217,25 @@ export function TitleBar() {
       </button>
       <button
         type="button"
-        onClick={toggleTheme}
-        title={themeMode === 'light' ? 'Switch to dark' : 'Switch to light'}
+        onClick={openSettings}
+        title="Settings"
+        aria-label="Settings"
+        className="mr-1 rounded-[var(--radius-xs)] px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        Settings
+      </button>
+      <button
+        type="button"
+        onClick={cycleTheme}
+        title={
+          themeMode === 'follow_host'
+            ? 'Following the host; switch to light'
+            : `Switch to ${next === 'follow_host' ? 'following the host' : next}`
+        }
         aria-label="Toggle theme"
         className="mr-1 rounded-[var(--radius-xs)] px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        {themeMode === 'light' ? 'Dark' : 'Light'}
+        {next === 'follow_host' ? 'Follow host' : next === 'light' ? 'Light' : 'Dark'}
       </button>
 
       <WindowTitleControls />

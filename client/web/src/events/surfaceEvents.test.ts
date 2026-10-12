@@ -34,6 +34,7 @@ const ipc = vi.hoisted(() => ({
   sending: vi.fn(),
   calendar: vi.fn(),
   people: vi.fn(),
+  settings: vi.fn(),
   addAccount: vi.fn(),
   imapTestConnection: vi.fn(),
 }));
@@ -142,6 +143,8 @@ beforeEach(() => {
   ipc.calendar.mockResolvedValue({});
   ipc.people.mockReset();
   ipc.people.mockResolvedValue({});
+  ipc.settings.mockReset();
+  ipc.settings.mockResolvedValue({});
   resetStores();
 });
 
@@ -416,6 +419,29 @@ describe('the surface_changed listener', () => {
     expect(ipc.calendar).not.toHaveBeenCalled();
   });
 
+  it('a settings change pulls the settings snapshot', async () => {
+    ipc.settings.mockResolvedValue({
+      settings: {
+        theme: 'dark',
+        twenty_four_clock: true,
+        zone: 'Europe/Amsterdam',
+        first_day_of_week: 'su',
+        horizon_days: 31,
+        quote_below: false,
+        view_mode: 'threaded',
+      },
+      about: { version: '0.1.0' },
+    });
+    mountSurfaceEvents();
+    await vi.waitFor(() => expect(wire.handlers).toHaveLength(1));
+
+    emit('settings');
+
+    await vi.waitFor(() => expect(ipc.settings).toHaveBeenCalledTimes(1));
+    expect(ipc.mailboxList).not.toHaveBeenCalled();
+    expect(ipc.calendar).not.toHaveBeenCalled();
+  });
+
   it('an unknown surface name is ignored without a pull', async () => {
     mountSurfaceEvents();
     await vi.waitFor(() => expect(wire.handlers).toHaveLength(1));
@@ -428,6 +454,7 @@ describe('the surface_changed listener', () => {
     expect(ipc.draftStatus).not.toHaveBeenCalled();
     expect(ipc.composeRequest).not.toHaveBeenCalled();
     expect(ipc.sending).not.toHaveBeenCalled();
+    expect(ipc.settings).not.toHaveBeenCalled();
   });
 
   it('disposing before the registration resolves still tears it down', async () => {
