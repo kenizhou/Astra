@@ -27,7 +27,13 @@ pub(super) fn account_only_schema() -> Value {
 
 /// The schema of `list_messages`.
 pub(super) fn list_messages_schema() -> Value {
-    let mut properties = message_properties();
+    // Built from the account property alone, not `message_properties()`: a
+    // listing carries no message key, and the input type refuses one.
+    let mut properties =
+        json!({"account": account_property("The account id, from `list_accounts`.")});
+    let properties = properties
+        .as_object_mut()
+        .expect("the literal is an object");
     properties.insert(
         "folder".to_owned(),
         json!({
@@ -53,17 +59,15 @@ pub(super) fn list_messages_schema() -> Value {
 
 /// The schema of `search_messages`.
 pub(super) fn search_schema() -> Value {
-    let mut properties = message_properties();
-    properties.insert(
-        "query".to_owned(),
-        json!({
-            "type": "string", "description": "What to search for.",
-        }),
-    );
-    properties.insert(
-        "account".to_owned(),
-        account_property("Narrow to one account. Omit to search every exposed account."),
-    );
+    // Built from the query property alone, not `message_properties()`: a
+    // search carries no message key, and the input type refuses one.
+    let mut properties = json!({
+        "query": json!({"type": "string", "description": "What to search for."}),
+        "account": account_property("Narrow to one account. Omit to search every exposed account."),
+    });
+    let properties = properties
+        .as_object_mut()
+        .expect("the literal is an object");
     properties.insert(
         "folder".to_owned(),
         json!({

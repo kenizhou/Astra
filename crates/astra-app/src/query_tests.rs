@@ -453,3 +453,7 @@ async fn query_message_answers_nothing_for_a_message_the_store_does_not_hold() {
 fn subjects(page: &MessagePage) -> Vec<String> {
     page.rows.iter().map(|row| row.subject.clone()).collect()
 }
+
+#[cfg(test)]
+#[path = "query_paging_tests.rs"]
+mod paging;

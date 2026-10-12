@@ -246,7 +246,8 @@ pub struct ListMessagesArgs {
     /// How many messages to skip, for paging.
     #[serde(default)]
     pub offset: usize,
-    /// How many messages to return (1 to 50, default 20).
+    /// How many messages to return (1 to 50). `None` means the schema's
+    /// own default of 20, which the bridge passes down as the page size.
     #[serde(default)]
     pub limit: Option<usize>,
 }

@@ -87,6 +87,11 @@ pub struct MessagePage {
     /// The offset this page starts at, echoed back so a caller can page
     /// without bookkeeping.
     pub offset: usize,
+    /// Whether the listing was cut by the store's load window rather than
+    /// by the folder running out: `true` means older mail exists that this
+    /// page's window cannot reach, which a caller must not read as "the
+    /// folder is empty" when `total` is zero.
+    pub windowed: bool,
 }
 
 /// One message in full: headers, flags, and the body as plain text.

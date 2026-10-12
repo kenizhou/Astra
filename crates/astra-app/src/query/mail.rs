@@ -64,6 +64,9 @@ impl<P: Provider> App<P> {
             rows,
             total,
             offset,
+            // The listing window was the cut when the engine handed back a
+            // full window of rows: older mail exists beyond it.
+            windowed: base.len() >= window,
         }
     }
 
@@ -97,6 +100,7 @@ impl<P: Provider> App<P> {
                 rows: Vec::new(),
                 total: 0,
                 offset,
+                windowed: false,
             };
         }
         let handles = match account {
@@ -136,6 +140,9 @@ impl<P: Provider> App<P> {
             rows,
             total,
             offset,
+            // The search fetch was the cut when the engine answered a full
+            // limit of hits: more may exist beyond the fetch.
+            windowed: hits.len() >= FETCH_LIMIT,
         }
     }
 }

@@ -176,6 +176,11 @@ fn the_schemas_and_the_input_types_agree() {
     let rejected: Vec<(&str, Value)> = vec![
         ("list_accounts", json!({"account": "work"})),
         ("list_folders", json!({"account": "work", "key": "m1"})),
+        // A listing and a search carry no message key: the input types
+        // refuse one, and the schemas must never advertise what the types
+        // reject (a client sending the documented shape would fail).
+        ("list_messages", json!({"account": "work", "key": "m1"})),
+        ("search_messages", json!({"query": "x", "key": "m1"})),
         ("get_message", json!({"account": "work"})),
         (
             "mark_read",
@@ -191,6 +196,8 @@ fn the_schemas_and_the_input_types_agree() {
         let parsed = match name {
             "list_accounts" => parse::<NoArgs>(value),
             "list_folders" => parse::<AccountArgs>(value),
+            "list_messages" => parse::<ListMessagesArgs>(value),
+            "search_messages" => parse::<SearchArgs>(value),
             "get_message" => parse::<MessageArgs>(value),
             "mark_read" => parse::<MarkReadArgs>(value),
             "create_draft" => parse::<DraftArgs>(value),
@@ -281,5 +288,20 @@ impl SnakeCase for str {
             }
         }
         out
+    }
+}
+
+#[test]
+fn the_listing_and_search_schemas_advertise_no_key() {
+    for name in ["list_messages", "search_messages"] {
+        let tool = tools::tools()
+            .into_iter()
+            .find(|tool| tool.name == name)
+            .unwrap_or_else(|| panic!("the {name} tool stands in the catalogue"));
+        let properties = tool.input_schema["properties"].as_object().unwrap();
+        assert!(
+            !properties.contains_key("key"),
+            "{name}: a listing carries no message key, so the schema must not offer one"
+        );
     }
 }

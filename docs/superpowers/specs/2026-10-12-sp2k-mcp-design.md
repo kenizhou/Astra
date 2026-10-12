@@ -83,3 +83,7 @@ nothing.
 - The allowlist lists accounts, not folders: an exposed account exposes
   every folder the app reads for it (mail-calendar's row-level gating
   arrives with its folder-level ACL work).
+- `archive_message` and `move_to_trash` have no dispatch intent today (the
+  survey's finding): Task 2 adds the two write intents first, so the tools
+  genuinely ride the same door the user's own click will use, rather than a
+  private path.
