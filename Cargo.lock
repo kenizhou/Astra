@@ -308,6 +308,7 @@ dependencies = [
 name = "astra-mcp-relay"
 version = "0.1.0"
 dependencies = [
+ "astra-account",
  "astra-ai",
  "astra-app",
  "astra-mcp",

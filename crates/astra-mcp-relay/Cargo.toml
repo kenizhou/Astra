@@ -30,6 +30,9 @@ tokio = { workspace = true, features = ["rt", "macros", "process", "io-util", "t
 astra-mcp = { path = "../astra-mcp" }
 astra-app = { path = "../astra-app" }
 astra-viewmodel = { path = "../astra-viewmodel" }
+# The gated e2e dials the live harness through the product's own
+# certificate-acceptance walk, so the typed App the server serves is real.
+astra-account = { path = "../astra-account" }
 astra-ai = { path = "../astra-ai" }
 engine-api.workspace = true
 async-trait.workspace = true
