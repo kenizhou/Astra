@@ -30,9 +30,9 @@ row that renders nothing invites a support answer nobody can give.
 | 6 | **Advanced** | AI assistant access (the MCP server): the on/off toggle, the per-account allowlist, the client-config snippet |
 | 7 | **About** | The version and the attributions, from the core, not the web's guess |
 
-**Every control reflects the persisted truth, never local optimism.** A
-change dispatches its intent and the control takes the value the
-republished block carries, so a refused or failed write leaves the
+**Every control that dispatches an intent reflects the persisted truth,
+never local optimism.** A change dispatches its intent and the control
+takes the value the republished block carries, so a refused or failed write leaves the
 control showing what stands and the sentence saying why. The screen
 pulls the snapshot every time it opens, so the first paint is the
 persisted state, not a stale store's memory of it.

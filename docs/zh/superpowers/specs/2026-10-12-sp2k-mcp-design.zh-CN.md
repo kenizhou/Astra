@@ -28,12 +28,14 @@
   `archive_message`、`move_to_trash`、`create_draft`。snake_case、
   draft-2020-12 schema、`additionalProperties: false`、注解如实；
   `account` 与 `key` 始终同行（错账户路由类在边界上不可表达）。
-  **对 mail-calendar 契价的两处裁剪，均已记录**：完全没有
+  **对 mail-calendar 契约的三处偏差，均已记录**：完全没有
   `send_message`，连开关都没有，因为 Astra 的规则手册拒绝向代理开放
   发送类动词而由人决定并发送（升级说明随 PR）；没有 `mark_as_spam`，
   因为 Astra 的分发不携带垃圾邮件动词。`add_account`、
   `open_account_setup` 与 `permanently_delete` 因 mail-calendar 自身的
-  理由保持裁剪。
+  理由保持裁剪。第三：mail-calendar 跨重启持久化启用标志与账户允许
+清单；Astra 每次启动都重新关门（关且空），因为规则手册 fail
+closed 而此端点是助手能获得的最广触达（升级说明随 PR）。
 - **D4（两扇门）**：写入分发 UI 所分发的同一批 `Intent`（助手的归档发生
   在用户自己的列表里，可见）。读取经一条什么也不改的查询层：不重发布
   快照、不移动选择、不改写查询，`OpenMessage` 的服务端已读标记绝不触

@@ -165,7 +165,7 @@ describe('the Advanced detail', () => {
     render(<AdvancedDetail />);
 
     await waitFor(() => {
-      const snippet = screen.getByLabelText('Client configuration');
+      const snippet = screen.getByText(/astra-mcp-relay/);
       expect(snippet.textContent).toContain('astra-mcp-relay.exe');
       expect(snippet.textContent).toContain('--endpoint');
       expect(snippet.textContent).toContain('\\\\.\\pipe\\com.kenizhou.astra.mcp');
@@ -190,4 +190,35 @@ describe('the Advanced detail', () => {
       expect(screen.getByText('No account is configured.')).toBeTruthy(),
     );
   });
+
+  it('stands the picker still while a write is in flight', async () => {
+    ipc.mcpStatus.mockResolvedValue(view({ status: 'listening' }));
+    let release: (() => void) | undefined;
+    ipc.mcpSetAllowed.mockReturnValue(
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+    );
+    render(<AdvancedDetail />);
+
+    const first = await screen.findByRole('checkbox', {
+      name: 'Expose ada@example.test',
+    });
+    fireEvent.click(first);
+    expect(ipc.mcpSetAllowed).toHaveBeenCalledWith(['work']);
+    // The in-flight write holds the picker: a second click inside the
+    // round trip cannot compute from the stale set and drop the first.
+    expect(
+      screen.getByRole('checkbox', { name: 'Expose ada@example.test' }),
+    ).toHaveProperty('disabled', true);
+    release?.();
+    await waitFor(() =>
+      expect(
+        (screen.getByRole('checkbox', {
+          name: 'Expose ada@example.test',
+        }) as HTMLInputElement).disabled,
+      ).toBe(false),
+    );
+  });
 });
+

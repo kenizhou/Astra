@@ -53,6 +53,10 @@ function statusSentence(status: McpStatusView['status']): string {
 export function AdvancedDetail() {
   const accounts = useSettingsStore((s) => s.accounts);
   const [view, setView] = useState<McpStatusView>(OFF_VIEW);
+  // A second click inside one round trip would compute from the stale
+  // pulled set and drop the first change; the picker stands still until
+  // the write lands and the pull answers.
+  const [writing, setWriting] = useState(false);
 
   const pull = useCallback((): void => {
     mcpStatus()
@@ -72,7 +76,12 @@ export function AdvancedDetail() {
     const next = expose
       ? [...view.allowed, account]
       : view.allowed.filter((id) => id !== account);
-    void mcpSetAllowed(next).then(pull);
+    setWriting(true);
+    void mcpSetAllowed(next)
+      .then(pull)
+      .finally(() => {
+        setWriting(false);
+      });
   };
 
   return (
@@ -109,6 +118,7 @@ export function AdvancedDetail() {
                 type="checkbox"
                 aria-label={`Expose ${account.address}`}
                 checked={view.allowed.includes(account.account)}
+                disabled={writing}
                 onChange={(event) => setAllowed(account.account, event.target.checked)}
               />
               {account.address}
@@ -121,12 +131,12 @@ export function AdvancedDetail() {
         <p className="text-xs text-muted-foreground">{RESTART_SENTENCE}</p>
       </div>
       <div className="flex flex-col gap-1">
-        <p className="text-xs text-muted-foreground">
+        <p id="mcp-client-config-caption" className="text-xs text-muted-foreground">
           Paste this command into your MCP client&apos;s config.
         </p>
         {view.relay_command.length > 0 && (
           <code
-            aria-label="Client configuration"
+            aria-labelledby="mcp-client-config-caption"
             className="max-w-full overflow-x-auto rounded-[var(--radius-xs)] border border-border bg-background px-2 py-1.5 text-xs text-foreground"
           >
             {view.relay_command.join(' ')}

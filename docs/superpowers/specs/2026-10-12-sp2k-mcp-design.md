@@ -33,13 +33,17 @@ nothing.
   draft-2020-12 schemas, `additionalProperties: false`, annotations set
   honestly; `account` and `key` always travel together (the
   wrong-account-routing class stays unrepresentable at the boundary).
-  **Two cuts against mail-calendar's contract, both recorded**: no
+  **Three deviations against mail-calendar's contract, all recorded**: no
   `send_message` at all, not even behind a toggle, because Astra's
   rulebook refuses send-class verbs to the agent and humans decide and
   send (the escalation note lives in the PR); no `mark_as_spam` because
   Astra's dispatch carries no spam verb. `add_account`,
   `open_account_setup`, and `permanently_delete` stay cut for
-  mail-calendar's own reasons.
+  mail-calendar's own reasons. Third: mail-calendar persists the enable
+  flag and the account allowlist across restarts; Astra re-closes the
+  door at every boot (off and empty), because the rulebook is fail
+  closed and this endpoint is the widest reach an assistant can obtain
+  (the escalation notes live in the PR).
 - **D4 (the two doors)**: writes dispatch the same `Intent`s the UI
   dispatches (an assistant's archive happens in the user's own list,
   visibly). Reads go through a query layer that changes nothing: no
