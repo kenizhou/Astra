@@ -1,0 +1,356 @@
+// SPDX-License-Identifier: GPL-3.0-only
+//! The per-provider OAuth endpoints and client registration, and the
+//! authorization-URL builder.
+//!
+//! [`OAuthProviderConfig`] is provider-agnostic: a URL pair, a public-client
+//! id, a redirect URI, and the requested scopes, with a
+//! [`OAuthProviderConfig::microsoft`] constructor for the Microsoft identity
+//! platform (v2.0 endpoints) and a [`OAuthProviderConfig::google`] one for
+//! Google. Any other Authorization-Code-with-PKCE provider is just different
+//! endpoint and scope values, so it reuses everything here.
+
+/// The Microsoft identity-platform authority host (worldwide public cloud).
+const MS_AUTHORITY: &str = "https://login.microsoftonline.com";
+
+/// The delegated Graph scopes a Microsoft account used for everything
+/// requests; an account used for less requests its uses' groups from
+/// [`crate::scopes::MICROSOFT`]. Each one has a call site, which is what an
+/// administrator approving the app reads: `offline_access` (a refresh token
+/// at all), `User.Read` (`GET /me`, the account's own address),
+/// `Mail.ReadWrite` (mail sync and every mail write), `Mail.Send`
+/// (`POST /me/sendMail`; `Mail.ReadWrite` does NOT grant send),
+/// `Calendars.ReadWrite`, `Contacts.ReadWrite` (the account's own cards) and
+/// `User.ReadBasic.All` (the tenant directory, and the permission a
+/// colleague's photo is read through).
+///
+/// No OpenID Connect scope: nothing reads an ID token, and Microsoft issues
+/// a refresh token for `offline_access` alone, so `openid`, `profile` and
+/// `email` would each be a line on the consent screen with no feature behind
+/// them.
+///
+/// A widened set reaches an existing account only when it signs in again: a
+/// refresh re-uses the original grant. Each scope must also be a delegated
+/// permission on the app registration, or consent fails.
+///
+/// A scope the account cannot grant fails at connect, not at use: Microsoft
+/// answers `access_denied` during consent, so an unregistered or admin-gated
+/// scope does not cost one capability, it stops the account being added at
+/// all. That is why this set stays to permissions a user can consent to for
+/// themselves, and why `ProfilePhoto.Read.All` (which grants nothing
+/// `User.ReadBasic.All` does not) and `OrgContact.Read.All` (a source the
+/// product does not read) are absent.
+///
+/// Contacts are requested read AND write because the app adds and edits
+/// them. It never deletes one; that promise is kept by the privacy contract
+/// and the code, not by the narrowness of the scope.
+pub const MICROSOFT_GRAPH_SCOPES: &[&str] = &[
+    "offline_access",
+    "https://graph.microsoft.com/Mail.ReadWrite",
+    "https://graph.microsoft.com/Mail.Send",
+    "https://graph.microsoft.com/Calendars.ReadWrite",
+    "https://graph.microsoft.com/User.Read",
+    "https://graph.microsoft.com/Contacts.ReadWrite",
+    "https://graph.microsoft.com/User.ReadBasic.All",
+];
+
+/// The Google identity-platform OAuth 2.0 endpoints; fixed (Google has no
+/// per-tenant authority), shared by Gmail and Google Calendar.
+const GOOGLE_AUTHORIZE_ENDPOINT: &str = "https://accounts.google.com/o/oauth2/v2/auth";
+const GOOGLE_TOKEN_ENDPOINT: &str = "https://oauth2.googleapis.com/token";
+
+/// The delegated scopes a Google account used for everything requests: full
+/// Gmail (`mail.google.com`), Gmail's basic settings, read/write Google
+/// Calendar, the three People sources, and the account's own address. An
+/// account used for less requests its uses' groups from
+/// [`crate::scopes::GOOGLE`], and the address always.
+///
+/// The Gmail provider does the full range of mail writes:
+/// `messages.modify` and `messages.trash` AND permanent `messages.delete`,
+/// plus `messages.send`; permanent delete is only granted by the broad
+/// `https://mail.google.com/` scope, so that is what is requested rather
+/// than composing narrower `gmail.*` scopes.
+///
+/// `userinfo.email` names the account whatever it is used for. The Gmail
+/// profile would name it too, but only for an account that was granted
+/// mail, so a person who keeps the calendar and unticks Gmail on the
+/// consent screen would leave nothing to name the account with. It is
+/// non-sensitive, and Google adds `openid` to a grant that asks for it.
+///
+/// `gmail.settings.basic` is a separate scope because `mail.google.com` does
+/// not reach the settings collection's writes. It grants
+/// `users.settings.sendAs.list` but not `patch`, so an account whose sender
+/// name the user changes would read its send-as aliases and then fail to
+/// update the one it found. `gmail.settings.sharing` is deliberately NOT
+/// requested: it covers delegation and send-as-another-address, neither of
+/// which this app offers.
+///
+/// The three contact scopes cover the same ground Microsoft's do: `contacts`
+/// for the user's own address book, `contacts.other.readonly` for the
+/// addresses Google collects from mail on their behalf, and
+/// `directory.readonly` for colleagues on a Workspace domain. `contacts` is
+/// requested read AND write because contact editing ships; the other two are
+/// read-only both in the scope and in what the app offers, because neither
+/// source accepts a write.
+///
+/// Unlike Microsoft's `offline_access`, Google issues a refresh token from
+/// the request parameters `access_type=offline` + `prompt=consent` (see
+/// [`AuthStyle::Google`]), not a scope.
+///
+/// Every scope here but the contact three and `userinfo.email` is
+/// restricted, so all of them are covered by the one security assessment the
+/// app must clear. That is why `gmail.settings.basic` is requested now
+/// rather than when a second settings feature wants it: a restricted scope
+/// added after verification is a new assessment, not an amendment.
+pub const GOOGLE_SCOPES: &[&str] = &[
+    "https://mail.google.com/",
+    "https://www.googleapis.com/auth/gmail.settings.basic",
+    "https://www.googleapis.com/auth/calendar",
+    "https://www.googleapis.com/auth/contacts",
+    "https://www.googleapis.com/auth/contacts.other.readonly",
+    "https://www.googleapis.com/auth/directory.readonly",
+    "https://www.googleapis.com/auth/userinfo.email",
+];
+
+/// How a provider wants its authorization request shaped, beyond the shared
+/// PKCE, state, scope and redirect parameters: the two integrated providers
+/// differ in how a refresh token is issued and how a known account is
+/// targeted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthStyle {
+    /// Microsoft identity platform: `response_mode=query`; a `login_hint`
+    /// targets the account and suppresses the picker, and with NO hint
+    /// `prompt=select_account` shows it. A refresh token comes from the
+    /// `offline_access` scope.
+    Microsoft,
+    /// Google: `access_type=offline` AND `prompt=consent` on EVERY request,
+    /// so Google issues a refresh token even on a repeat authorization (it
+    /// omits one otherwise, which would break the account an hour later); a
+    /// `login_hint` pre-fills the account.
+    Google,
+    /// A server read from its own metadata (RFC 8414) rather than integrated
+    /// by hand: today a JMAP provider. Sends ONLY the parameters RFC 6749
+    /// and RFC 7636 define, plus a `login_hint` when the address is known.
+    /// Nothing vendor-specific: this server's documentation is unread, so
+    /// extensions it may not accept are not guessed at. A refresh token
+    /// comes from the `offline_access` scope, which the request always
+    /// carries.
+    Discovered,
+}
+
+/// One OAuth provider's endpoints and this app's client registration.
+///
+/// Always a public client: PKCE (the S256 code verifier) is what actually
+/// protects the token exchange, and an installed desktop app cannot keep a
+/// real secret. Most client types integrated here therefore send NO
+/// `client_secret` at all (Microsoft; Google's mobile clients). The one
+/// exception is a Google Desktop client (the Windows loopback flow):
+/// Google's token endpoint rejects even a valid PKCE exchange with
+/// `invalid_request; client_secret is missing` unless the embedded,
+/// non-confidential Desktop secret is present. That value rides in
+/// [`OAuthProviderConfig::client_secret`]; Google documents it as not
+/// treated as a secret. See
+/// <https://developers.google.com/identity/protocols/oauth2#installed>.
+#[derive(Debug, Clone)]
+pub struct OAuthProviderConfig {
+    /// The authorization endpoint (front channel; opened in the system
+    /// browser).
+    pub authorize_endpoint: String,
+    /// The token endpoint (back channel: the code-to-token and refresh
+    /// POSTs).
+    pub token_endpoint: String,
+    /// The registered application (client) id. Not a secret.
+    pub client_id: String,
+    /// An optional, non-confidential client secret sent on the token
+    /// exchange (both the code exchange and the refresh).
+    ///
+    /// `None` for every true public client (Microsoft, and Google's mobile
+    /// clients) whose token endpoint needs no secret and where PKCE stands
+    /// alone. `Some` ONLY for a Google Desktop client (the Windows loopback
+    /// flow): Google's token endpoint rejects the PKCE exchange with
+    /// `invalid_request; client_secret is missing` without it, even though
+    /// the client is public. Google documents this secret as not
+    /// confidential; it is embedded in the app's source and PKCE remains the
+    /// real protection.
+    pub client_secret: Option<String>,
+    /// The registered redirect URI the browser returns to (a custom scheme,
+    /// for example `com.kenizhou.astra://oauth`, captured by the deep-link
+    /// plugin, or a `http://127.0.0.1:<port>/...` loopback for the Google
+    /// Desktop flow).
+    pub redirect_uri: String,
+    /// The delegated scopes to request (space-joined into the request).
+    pub scopes: Vec<String>,
+    /// The RFC 8707 `resource`: the canonical URI of the protected resource
+    /// this token is for, read from the resource's own RFC 9728 metadata.
+    ///
+    /// `None` for the integrated providers, which scope tokens by scope
+    /// alone. `Some` for a discovered JMAP server, where it is required: a
+    /// server that issues resource-scoped tokens rejects a request that does
+    /// not name its target (`invalid_target`). It must ride on the
+    /// authorization request, the code exchange, and every refresh; omitting
+    /// it from the refresh alone would break the account about an hour after
+    /// setup.
+    pub resource: Option<String>,
+    /// The issuer the authorization response's `iss` parameter must name
+    /// (RFC 9207), when the server advertises that it sends one.
+    ///
+    /// This is the mix-up defence, and it only bites where a user has
+    /// accounts at more than one provider: a malicious authorization server
+    /// relays the request to an honest one, the honest one's code comes back
+    /// to the client, and without `iss` the client cannot tell which server
+    /// issued it and posts the code to the attacker's token endpoint.
+    ///
+    /// `None` for the integrated providers, whose issuer is fixed at build
+    /// time and cannot be substituted, and for any server that does not
+    /// advertise the parameter: there is then nothing to compare, which is
+    /// the pre-RFC-9207 status quo rather than a fault.
+    pub expected_issuer: Option<String>,
+    /// How to shape the authorization request (provider-specific parameters
+    /// and account targeting).
+    pub style: AuthStyle,
+}
+
+impl OAuthProviderConfig {
+    /// Builds a Microsoft identity-platform (v2.0) config for `tenant`;
+    /// typically `common` (both work and personal accounts), or
+    /// `organizations` / `consumers` / a specific tenant id. The host passes
+    /// the `client_id` and `redirect_uri` from its registered Azure app;
+    /// `scopes` is usually [`MICROSOFT_GRAPH_SCOPES`].
+    #[must_use]
+    pub fn microsoft(
+        client_id: impl Into<String>,
+        tenant: &str,
+        redirect_uri: impl Into<String>,
+        scopes: &[&str],
+    ) -> Self {
+        let tenant = if tenant.trim().is_empty() {
+            "common"
+        } else {
+            tenant.trim()
+        };
+        Self {
+            authorize_endpoint: format!("{MS_AUTHORITY}/{tenant}/oauth2/v2.0/authorize"),
+            token_endpoint: format!("{MS_AUTHORITY}/{tenant}/oauth2/v2.0/token"),
+            client_id: client_id.into(),
+            // Microsoft is a true public client: no secret, PKCE alone.
+            client_secret: None,
+            redirect_uri: redirect_uri.into(),
+            scopes: scopes.iter().map(|s| (*s).to_owned()).collect(),
+            // Microsoft scopes tokens by scope, not by RFC 8707 resource
+            // indicator.
+            resource: None,
+            // Microsoft's issuer is fixed at build time; there is no
+            // substitution to detect.
+            expected_issuer: None,
+            style: AuthStyle::Microsoft,
+        }
+    }
+
+    /// Builds a Google OAuth 2.0 config. The host passes the `client_id` and
+    /// `redirect_uri` from its registered Google Cloud OAuth client, and
+    /// `scopes` is usually [`GOOGLE_SCOPES`].
+    ///
+    /// Every Google client type used here is a public client; PKCE secures
+    /// the exchange. Pass `client_secret = None` for the mobile clients
+    /// (their token endpoint needs no secret). Pass `Some(secret)` ONLY for
+    /// a Google Desktop client (the Windows loopback flow), whose token
+    /// endpoint requires the embedded, non-confidential Desktop secret even
+    /// under PKCE; see [`OAuthProviderConfig::client_secret`].
+    #[must_use]
+    pub fn google(
+        client_id: impl Into<String>,
+        client_secret: Option<String>,
+        redirect_uri: impl Into<String>,
+        scopes: &[&str],
+    ) -> Self {
+        Self {
+            authorize_endpoint: GOOGLE_AUTHORIZE_ENDPOINT.to_owned(),
+            token_endpoint: GOOGLE_TOKEN_ENDPOINT.to_owned(),
+            client_id: client_id.into(),
+            client_secret,
+            redirect_uri: redirect_uri.into(),
+            scopes: scopes.iter().map(|s| (*s).to_owned()).collect(),
+            // Google likewise uses scopes alone.
+            resource: None,
+            // As for Microsoft: a fixed, integrated issuer.
+            expected_issuer: None,
+            style: AuthStyle::Google,
+        }
+    }
+
+    /// Builds the front-channel authorization URL to open in the system
+    /// browser: an Authorization-Code request carrying the PKCE `challenge`
+    /// (S256) and the CSRF `state`. When a `login_hint` (the address being
+    /// connected) is given, it is passed through so the provider pre-fills
+    /// and targets that account: the app knows which account this flow is
+    /// for, so it does not make the user pick.
+    ///
+    /// The remaining, provider-specific parameters come from [`AuthStyle`]:
+    /// Microsoft adds `response_mode=query` and, with no hint,
+    /// `prompt=select_account`; Google always adds `access_type=offline` +
+    /// `prompt=consent` so a refresh token is issued every time.
+    #[must_use]
+    pub fn authorization_url(
+        &self,
+        state: &str,
+        code_challenge: &str,
+        login_hint: Option<&str>,
+    ) -> String {
+        let mut url =
+            url::Url::parse(&self.authorize_endpoint).expect("authorize endpoint is a valid URL");
+        let hint = login_hint.map(str::trim).filter(|hint| !hint.is_empty());
+        {
+            let mut pairs = url.query_pairs_mut();
+            pairs
+                .append_pair("client_id", &self.client_id)
+                .append_pair("response_type", "code")
+                .append_pair("redirect_uri", &self.redirect_uri)
+                .append_pair("scope", &self.scopes.join(" "))
+                .append_pair("state", state)
+                .append_pair("code_challenge", code_challenge)
+                .append_pair("code_challenge_method", "S256");
+            // RFC 8707: name the resource the token is for. Sent on the
+            // authorization request as well as the exchange, because a
+            // server may bind the issued code to the target.
+            if let Some(resource) = &self.resource {
+                pairs.append_pair("resource", resource);
+            }
+            match self.style {
+                AuthStyle::Microsoft => {
+                    pairs.append_pair("response_mode", "query");
+                    match hint {
+                        Some(hint) => {
+                            pairs.append_pair("login_hint", hint);
+                        }
+                        None => {
+                            pairs.append_pair("prompt", "select_account");
+                        }
+                    }
+                }
+                AuthStyle::Discovered => {
+                    if let Some(hint) = hint {
+                        pairs.append_pair("login_hint", hint);
+                    }
+                }
+                AuthStyle::Google => {
+                    // `access_type=offline` + `prompt=consent` guarantee a
+                    // refresh token on every authorization; Google returns
+                    // one only on the first grant otherwise, and a
+                    // re-consent (for example after a revoked grant) would
+                    // then get no refresh token and the account would break
+                    // an hour later.
+                    pairs
+                        .append_pair("access_type", "offline")
+                        .append_pair("prompt", "consent");
+                    if let Some(hint) = hint {
+                        pairs.append_pair("login_hint", hint);
+                    }
+                }
+            }
+        }
+        url.into()
+    }
+}
+
+#[cfg(test)]
+#[path = "provider_tests.rs"]
+mod tests;

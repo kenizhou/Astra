@@ -126,6 +126,11 @@ reqwest = { version = "0.13.4", default-features = false, features = ["json", "f
 # URL construction for the autodetect lookup endpoints; the email address never
 # appears in one, and the trust decision reads each hop's scheme.
 url = "2"
+# base64url without padding: the OAuth PKCE verifier, challenge, and CSRF state.
+base64 = "0.23"
+# The PKCE S256 digest and the system CSPRNG behind the verifier and state
+# (astra-oauth); the same ring line the workspace's rustls already links.
+ring = "0.17"
 # The CLI's default data dir beside the product store, when ASTRA_DATA_DIR is
 # unset: the platform's per-user data location (the same directory family the
 # desktop host resolves through Tauri's app_data_dir).
