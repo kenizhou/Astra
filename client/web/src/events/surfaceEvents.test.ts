@@ -33,6 +33,7 @@ const ipc = vi.hoisted(() => ({
   composeRequest: vi.fn(),
   sending: vi.fn(),
   calendar: vi.fn(),
+  people: vi.fn(),
   addAccount: vi.fn(),
   imapTestConnection: vi.fn(),
 }));
@@ -43,9 +44,10 @@ const ai = vi.hoisted(() => ({ splitMap: vi.fn() }));
 
 vi.mock('@/services/ai', () => ai);
 
-import { hydrate, mountSurfaceEvents } from './surfaceEvents';
+import { mountSurfaceEvents } from './surfaceEvents';
 import { useAccountStore } from '@/stores/accountStore';
 import { useCalendarStore } from '@/features/calendar/calendarStore';
+import { usePeopleStore } from '@/features/people/peopleStore';
 import { useComposeRequestStore } from '@/stores/composeRequestStore';
 import { useDraftStore } from '@/stores/draftStore';
 import { useFolderStore } from '@/stores/folderStore';
@@ -112,6 +114,12 @@ function resetStores() {
     view: 'month',
     anchor: null,
   });
+  usePeopleStore.setState({
+    rows: [],
+    detail: null,
+    writeStates: [],
+    createTargets: [],
+  });
   useSplitStore.setState({ entries: {}, filter: 'all' });
 }
 
@@ -132,6 +140,8 @@ beforeEach(() => {
   ipc.sending.mockResolvedValue({ rows: [] });
   ipc.calendar.mockReset();
   ipc.calendar.mockResolvedValue({});
+  ipc.people.mockReset();
+  ipc.people.mockResolvedValue({});
   resetStores();
 });
 
@@ -380,6 +390,32 @@ describe('the surface_changed listener', () => {
     expect(ipc.mailboxList).not.toHaveBeenCalled();
   });
 
+  it('a people change pulls the snapshot into the people store', async () => {
+    ipc.people.mockResolvedValue({
+      rows: [
+        {
+          person: 7,
+          display_name: 'Ada Lovelace',
+          monogram: { initials: 'AL', colour: '#4DB6AC' },
+          account_count: 2,
+          section: 'A',
+          primary_address: 'ada@example.test',
+        },
+      ],
+      write_states: [{ account: 'work', state: 'writing' }],
+    });
+    mountSurfaceEvents();
+    await vi.waitFor(() => expect(wire.handlers).toHaveLength(1));
+
+    emit('people');
+
+    await vi.waitFor(() => expect(usePeopleStore.getState().rows).toHaveLength(1));
+    expect(usePeopleStore.getState().rows[0]?.display_name).toBe('Ada Lovelace');
+    expect(usePeopleStore.getState().writeStates).toEqual([{ account: 'work', state: 'writing' }]);
+    expect(ipc.mailboxList).not.toHaveBeenCalled();
+    expect(ipc.calendar).not.toHaveBeenCalled();
+  });
+
   it('an unknown surface name is ignored without a pull', async () => {
     mountSurfaceEvents();
     await vi.waitFor(() => expect(wire.handlers).toHaveLength(1));
@@ -400,80 +436,5 @@ describe('the surface_changed listener', () => {
     // The listen promise resolved only now, after disposeAll: the late
     // registration must unlisten itself rather than leak a live handler.
     await vi.waitFor(() => expect(wire.unlistens).toBe(1));
-  });
-});
-
-describe('hydration', () => {
-  it('pulls every surface, marks the engine running, and opens setup when there is no account', async () => {
-    ipc.mailboxList.mockResolvedValue({ account_folders: [] });
-    ipc.syncProgress.mockResolvedValue({ accounts: [] });
-    ipc.calendar.mockResolvedValue({});
-
-    await hydrate();
-
-    expect(ipc.mailboxList).toHaveBeenCalledTimes(1);
-    expect(ipc.syncProgress).toHaveBeenCalledTimes(1);
-    expect(ipc.reading).toHaveBeenCalledTimes(1);
-    expect(ipc.draftStatus).toHaveBeenCalledTimes(1);
-    expect(ipc.composeRequest).toHaveBeenCalledTimes(1);
-    expect(ipc.sending).toHaveBeenCalledTimes(1);
-    expect(ipc.calendar).toHaveBeenCalledTimes(1);
-    expect(useReadingStore.getState().snapshot).toBeNull();
-    expect(useDraftStore.getState().snapshot).toBeNull();
-    expect(useComposeRequestStore.getState().snapshot).toBeNull();
-    expect(useSendingStore.getState().snapshot.rows).toHaveLength(0);
-    expect(useCalendarStore.getState().calendars).toEqual([]);
-    expect(useUiStore.getState().engineState).toBe('running');
-    expect(useUiStore.getState().accountSetupOpen).toBe(true);
-  });
-
-  it('leaves setup closed when an account already exists', async () => {
-    ipc.mailboxList.mockResolvedValue(mailboxFixture);
-    ipc.syncProgress.mockResolvedValue({ accounts: [] });
-
-    await hydrate();
-
-    expect(useAccountStore.getState().accounts).toHaveLength(2);
-    expect(useUiStore.getState().accountSetupOpen).toBe(false);
-  });
-
-  it('pulls the split map for every account beside the mailbox list', async () => {
-    ipc.mailboxList.mockResolvedValue(mailboxFixture);
-    ipc.syncProgress.mockResolvedValue({ accounts: [] });
-    ai.splitMap.mockImplementation(async (account: string) =>
-      account === 'home' ? [{ key: 'imap:v1:u9', side: 'actioned' }] : [],
-    );
-
-    await hydrate();
-
-    expect(ai.splitMap).toHaveBeenCalledWith('work');
-    expect(ai.splitMap).toHaveBeenCalledWith('home');
-    expect(useSplitStore.getState().entries['home']?.get('imap:v1:u9')).toBe('actioned');
-  });
-
-  it('continues hydration when a split map rejects', async () => {
-    ipc.mailboxList.mockResolvedValue(mailboxFixture);
-    ipc.syncProgress.mockResolvedValue({ accounts: [] });
-    ai.splitMap.mockRejectedValue(new Error('the split read refused'));
-    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-
-    await hydrate();
-
-    // The mail surfaces hydrated and the engine reached running despite
-    // the split read's refusal.
-    expect(useListStore.getState().rows).toHaveLength(2);
-    expect(useUiStore.getState().engineState).toBe('running');
-    expect(useUiStore.getState().accountSetupOpen).toBe(false);
-    errorLog.mockRestore();
-  });
-
-  it('seeds an open reading the host published before the mount', async () => {
-    ipc.mailboxList.mockResolvedValue(mailboxFixture);
-    ipc.syncProgress.mockResolvedValue({ accounts: [] });
-    ipc.reading.mockResolvedValue(readingSnapshot);
-
-    await hydrate();
-
-    expect(useReadingStore.getState().snapshot?.message.key).toBe('imap:v1:u42');
   });
 });

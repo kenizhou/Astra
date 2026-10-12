@@ -15,9 +15,10 @@ export type EngineState = 'starting' | 'running';
 
 /**
  * The shell's main view: which feature fills the content row. Mail is the
- * default; the list is the one place a view is added, so Contacts extends it.
+ * default; the list is the one place a view is added, so People joins Mail
+ * and Calendar here.
  */
-export type ShellView = 'mail' | 'calendar';
+export type ShellView = 'mail' | 'calendar' | 'people';
 
 interface UiStoreState {
   themeMode: ThemeMode;

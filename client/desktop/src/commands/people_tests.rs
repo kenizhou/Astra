@@ -6,14 +6,14 @@
 
 use std::{collections::BTreeSet, sync::Arc};
 
-use astra_app::{ContactDraftInput, ContactNameInput};
+use astra_app::{AvatarView, ContactDraftInput, ContactNameInput};
 use astra_viewmodel::{
     CreateTargetRow, EditableCardRow, Monogram, PeopleSnapshot, PeopleWriteRow, PeopleWriteState,
     PersonDetail, PersonRow, PersonSourceRow, PersonValueKind, PersonValueRow,
 };
 use engine_api::{AccountId, AddressBookId, ContactId, PersonId, RecipientSuggestion};
 
-use super::{people_card_of, people_of, people_suggestions_of, SUGGESTION_LIMIT};
+use super::{people_avatar_of, people_card_of, people_of, people_suggestions_of, SUGGESTION_LIMIT};
 use crate::commands_fakes::{state, FakeApp, FakeStore};
 
 /// The fixture account the people commands name.
@@ -153,5 +153,32 @@ fn the_suggestions_pull_hands_the_token_down_with_the_limit() {
         app.suggested_into.lock().unwrap().as_slice(),
         [("ad".to_owned(), SUGGESTION_LIMIT)],
         "the token crossed verbatim with the pull's own limit",
+    );
+}
+
+#[test]
+fn the_avatar_pull_threads_the_address_and_answers_the_core_s_view() {
+    let app = FakeApp::new();
+    *app.avatar.lock().unwrap() = AvatarView {
+        initials: "AL".to_owned(),
+        colour: "#4DB6AC".to_owned(),
+        photo: Some(r"C:\blobs\ada.png".to_owned()),
+    };
+    let state = state("people-avatar", Arc::clone(&app), FakeStore::accepting());
+
+    let view = state
+        .runtime
+        .block_on(|| people_avatar_of(&state, "ada@example.test"));
+    assert_eq!(view.initials, "AL");
+    assert_eq!(view.colour, "#4DB6AC");
+    assert_eq!(
+        view.photo.as_deref(),
+        Some(r"C:\blobs\ada.png"),
+        "the cached file's path crosses whole",
+    );
+    assert_eq!(
+        app.avatar_into.lock().unwrap().as_slice(),
+        ["ada@example.test".to_owned()],
+        "the address crossed to the core verbatim",
     );
 }

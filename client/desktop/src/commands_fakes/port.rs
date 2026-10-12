@@ -7,8 +7,8 @@
 
 use astra_ai::{AiDocumentKind, KnowledgeId};
 use astra_app::{
-    AppError, BriefDocumentError, CardRef, Chip, CompositionId, ContactDraftInput, DigestView,
-    DocumentError, DocumentView, DraftResume, ExtractionSummary, Intent, KnowledgeView,
+    AppError, AvatarView, BriefDocumentError, CardRef, Chip, CompositionId, ContactDraftInput,
+    DigestView, DocumentError, DocumentView, DraftResume, ExtractionSummary, Intent, KnowledgeView,
     MeetingBriefView, Snippet, SplitEntry, SummariseMessageError, TranslateLanguage,
 };
 use astra_viewmodel::{
@@ -403,5 +403,10 @@ impl AppPort for FakeApp {
             .unwrap()
             .push((token.to_owned(), limit));
         self.suggestions.lock().unwrap().clone()
+    }
+
+    async fn avatar_by_email(&self, email: &str) -> AvatarView {
+        self.avatar_into.lock().unwrap().push(email.to_owned());
+        self.avatar.lock().unwrap().clone()
     }
 }

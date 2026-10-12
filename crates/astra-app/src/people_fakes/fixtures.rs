@@ -6,8 +6,8 @@
 
 use engine_api::{AddressBook, AddressBookId, ContactId};
 use engine_core::contact::{
-    ContactCard, ContactEmail, ContactName, ContactProperty, NameComponent, NameComponentKind,
-    Organization, PropertyId, Title,
+    ContactCard, ContactEmail, ContactName, ContactProperty, ContactResource, NameComponent,
+    NameComponentKind, Organization, PropertyId, Title,
 };
 use engine_core::membership::Memberships;
 
@@ -99,6 +99,23 @@ pub(crate) fn with_organisation(
         ContactProperty::new(Title {
             name: role.to_owned(),
             ..Title::default()
+        }),
+    );
+    card
+}
+
+/// Adds a photo media resource to a card, revisioned by `fingerprint`: the
+/// shape whose cached file the avatar read answers with once a fetch fills
+/// the store.
+pub(crate) fn with_photo(mut card: ContactCard, fingerprint: &str) -> ContactCard {
+    card.media.insert(
+        PropertyId::new("m1").unwrap(),
+        ContactProperty::new(ContactResource {
+            uri: format!("https://photos.test/{}", card.id.key()),
+            kind: Some("photo".to_owned()),
+            media_type: Some("image/png".to_owned()),
+            title: None,
+            fingerprint: Some(fingerprint.to_owned()),
         }),
     );
     card

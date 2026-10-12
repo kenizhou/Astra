@@ -22,6 +22,7 @@
 //! [`App::install_contacts`]: crate::App::install_contacts
 //! [`PeopleIntent`]: crate::protocol::PeopleIntent
 
+pub(crate) mod avatar;
 mod cards;
 mod seed;
 mod snapshot;

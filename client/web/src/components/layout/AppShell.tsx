@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The desktop shell: the frameless title bar over the content row the view
 // switch picks (the mail trio of the folder pane, the message list, the
-// reading pane, and the composer pane when a composition is open, or the
-// calendar pane), with the status bar under them, all coloured through the
-// theme tokens. The New message action floats over the panes' corner, the
-// app start resume opens the stored draft into the composer, a landed
-// compose request opens the composer hydrated from it, the outbox, agent,
-// and AI documents panels ride above the status bar's corner when the
-// status bar's toggles open them, and the send-result toast says when a
-// queued send has gone out. The account setup flow rides above everything
-// when it is open.
+// reading pane, and the composer pane when a composition is open, the
+// calendar pane, or the people pane), with the status bar under them, all
+// coloured through the theme tokens. The New message action floats over the
+// panes' corner, the app start resume opens the stored draft into the
+// composer, a landed compose request opens the composer hydrated from it,
+// the outbox, agent, and AI documents panels ride above the status bar's
+// corner when the status bar's toggles open them, and the send-result toast
+// says when a queued send has gone out. The account setup flow rides above
+// everything when it is open.
 
 import { AccountSetupFlow } from '@/features/account-setup/AccountSetupFlow';
 import { AiPanel } from '@/features/ai-panel/AiPanel';
@@ -19,6 +19,7 @@ import { ComposerPane, NewMessageAction, useDraftResumeAtStart } from '@/feature
 import { useComposeRequestHydration } from '@/features/composer/useComposeRequest';
 import { OutboxPanel } from '@/features/outbox/OutboxPanel';
 import { SendResultToast } from '@/features/outbox/SendResultToast';
+import { PeoplePane } from '@/features/people/PeoplePane';
 import { FolderPane } from '@/components/folder-pane/FolderPane';
 import { useAccountStore } from '@/stores/accountStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -48,7 +49,13 @@ export function AppShell() {
   return (
     <div className="relative flex h-full flex-col overflow-hidden bg-background font-ui text-foreground">
       <TitleBar />
-      {shellView === 'calendar' ? <CalendarPane /> : <MailRow />}
+      {shellView === 'people' ? (
+        <PeoplePane />
+      ) : shellView === 'calendar' ? (
+        <CalendarPane />
+      ) : (
+        <MailRow />
+      )}
       <StatusBar />
       <NewMessageAction disabled={accountCount === 0 || shellView === 'calendar'} />
       <OutboxPanel />

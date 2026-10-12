@@ -22,7 +22,8 @@ use std::{
 };
 
 use astra_app::{
-    Chip, ComposeIntent, ContactDraftInput, DraftResume, DraftsIntent, Intent, OutboxIntent,
+    AvatarView, Chip, ComposeIntent, ContactDraftInput, DraftResume, DraftsIntent, Intent,
+    OutboxIntent,
 };
 use astra_viewmodel::{
     CalendarSnapshot, ComposeKind, ComposeRequestSnapshot, DraftSaveState, DraftStatusSnapshot,
@@ -131,6 +132,10 @@ pub(crate) struct FakeApp {
     pub(crate) suggestions: Mutex<Vec<RecipientSuggestion>>,
     /// The (token, limit) pairs the suggestions pull was asked for.
     pub(crate) suggested_into: Mutex<Vec<(String, usize)>>,
+    /// The avatar read's answer.
+    pub(crate) avatar: Mutex<AvatarView>,
+    /// The addresses the avatar read was asked about.
+    pub(crate) avatar_into: Mutex<Vec<String>>,
 }
 
 impl FakeApp {
@@ -175,6 +180,8 @@ impl FakeApp {
             seeded_into: Mutex::new(Vec::new()),
             suggestions: Mutex::new(Vec::new()),
             suggested_into: Mutex::new(Vec::new()),
+            avatar: Mutex::new(AvatarView::default()),
+            avatar_into: Mutex::new(Vec::new()),
         })
     }
 

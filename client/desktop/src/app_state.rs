@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use astra_ai::{AiDocumentKind, KnowledgeId};
 use astra_app::{
-    Account, App, BriefDocumentError, CardRef, Chip, CompositionId, ContactDraftInput, DigestView,
-    DocumentError, DocumentView, DraftResume, ExtractionSummary, Intent, KnowledgeView,
+    Account, App, AvatarView, BriefDocumentError, CardRef, Chip, CompositionId, ContactDraftInput,
+    DigestView, DocumentError, DocumentView, DraftResume, ExtractionSummary, Intent, KnowledgeView,
     MeetingBriefView, Snippet, SplitEntry, SummariseMessageError, TranslateLanguage,
 };
 use astra_viewmodel::{
@@ -207,6 +207,10 @@ pub(crate) trait AppPort: Send + Sync {
     /// composer's autosuggest pull, providerless.
     async fn recipient_suggestions(&self, token: &str, limit: usize) -> Vec<RecipientSuggestion>;
 
+    /// The avatar one address resolves to: the row's own monogram
+    /// derivation and the cached photo file's path.
+    async fn avatar_by_email(&self, email: &str) -> AvatarView;
+
     /// Generates the account's meeting brief over the civil day: the
     /// store re-read of the day's occurrences and one generation, the
     /// empty day answered as the no-meetings view with no call spent.
@@ -363,6 +367,10 @@ impl AppPort for App<HostProvider> {
 
     async fn recipient_suggestions(&self, token: &str, limit: usize) -> Vec<RecipientSuggestion> {
         App::recipient_suggestions(self, token, limit).await
+    }
+
+    async fn avatar_by_email(&self, email: &str) -> AvatarView {
+        App::avatar_by_email(self, email).await
     }
 
     async fn generate_meeting_brief(

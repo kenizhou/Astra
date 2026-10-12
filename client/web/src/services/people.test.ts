@@ -186,4 +186,12 @@ describe('the people command wire', () => {
     await peopleSuggestions('ad');
     expect(invoke).toHaveBeenCalledWith('people_suggestions', { token: 'ad' });
   });
+
+  it('asks for the avatar by its address and answers the core-shaped view', async () => {
+    invoke.mockResolvedValue({ initials: 'AL', colour: '#4DB6AC' });
+    const { peopleAvatar } = await import('./people');
+    const view = await peopleAvatar('ada@example.test');
+    expect(invoke).toHaveBeenCalledWith('people_avatar', { email: 'ada@example.test' });
+    expect(view).toEqual({ initials: 'AL', colour: '#4DB6AC' });
+  });
 });

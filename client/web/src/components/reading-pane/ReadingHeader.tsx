@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The reading header: subject, sender, and the full UTC stamp, all straight
-// from the snapshot. The stamp derives from the UTC parts the same way the
-// list's does, with the year always shown and the time of day appended.
+// The reading header: subject, the sender avatar beside the name, and the
+// full UTC stamp, all straight from the snapshot. The avatar resolves
+// through the people command on the sender's address, the one resolution
+// every surface shares. The stamp derives from the UTC parts the same way
+// the list's does, with the year always shown and the time of day appended.
+
+import { Avatar } from '@/features/people/Avatar';
 
 /** The month abbreviations the stamp uses, in UTC order. */
 const MONTHS = [
@@ -53,7 +57,10 @@ export function ReadingHeader({ subject, fromName, fromAddress, sentAt }: Readin
       <h2 className="truncate text-sm font-semibold text-foreground">
         {subject === '' ? '(no subject)' : subject}
       </h2>
-      {from !== '' && <p className="mt-1 truncate text-xs text-muted-foreground">{from}</p>}
+      <div className="mt-1 flex items-center gap-2">
+        {fromAddress !== '' && <Avatar address={fromAddress} size={28} />}
+        {from !== '' && <p className="min-w-0 truncate text-xs text-muted-foreground">{from}</p>}
+      </div>
       {date !== '' && <p className="mt-0.5 text-xs text-muted-foreground">{date}</p>}
     </div>
   );

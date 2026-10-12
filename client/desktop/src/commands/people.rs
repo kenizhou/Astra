@@ -9,7 +9,7 @@
 //! suggestions pull needs no leg and no provider, so it rides the same
 //! driver-thread shape as the seed for one round trip per keystroke batch.
 
-use astra_app::{CardRef, ContactDraftInput};
+use astra_app::{AvatarView, CardRef, ContactDraftInput};
 use astra_viewmodel::PeopleSnapshot;
 use engine_api::{AccountId, ContactId, PersonId, RecipientSuggestion};
 use tauri::State;
@@ -43,6 +43,12 @@ pub(crate) async fn people_suggestions_of(
         .app
         .recipient_suggestions(token, SUGGESTION_LIMIT)
         .await
+}
+
+/// The avatar one address resolves to: the core's one monogram derivation
+/// and the cached photo file's path, so no surface ever derives its own.
+pub(crate) async fn people_avatar_of(state: &AppState, email: &str) -> AvatarView {
+    state.app.avatar_by_email(email).await
 }
 
 /// Pulls the people snapshot.
@@ -88,6 +94,17 @@ pub(crate) fn people_suggestions(
     state
         .runtime
         .block_on(|| people_suggestions_of(&state, &token))
+}
+
+/// Resolves one address to its avatar: the monogram every surface shares
+/// with the snapshot rows and the cached photo file's path when one stands.
+/// The read is store work only, so it rides the driver thread like the seed
+/// read beside it.
+// Tauri's command macro hands `State` by value; the wrapper reads through it.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) fn people_avatar(state: State<'_, AppState>, email: String) -> AvatarView {
+    state.runtime.block_on(|| people_avatar_of(&state, &email))
 }
 
 #[cfg(test)]

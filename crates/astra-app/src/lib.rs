@@ -131,6 +131,7 @@ pub use calendar::{
 };
 pub use dispatch::AppError;
 pub use drafts::{DraftResume, DRAFT_AUTOSAVE_IDLE};
+pub use people::avatar::AvatarView;
 pub use preferences::{load_preferences, preferences_path, save_preferences, Preferences};
 pub use protocol::{
     AppObserver, CalendarIntent, ComposeIntent, ComposerBlob, CompositionId, ContactDraftInput,

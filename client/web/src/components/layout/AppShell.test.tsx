@@ -161,6 +161,9 @@ describe('the shell view switch', () => {
     expect(screen.getByRole('button', { name: 'Calendar' }).getAttribute('aria-pressed')).toBe(
       'false',
     );
+    expect(screen.getByRole('button', { name: 'People' }).getAttribute('aria-pressed')).toBe(
+      'false',
+    );
   });
 
   it('switches to the calendar and back', () => {
@@ -181,5 +184,21 @@ describe('the shell view switch', () => {
     expect(useUiStore.getState().shellView).toBe('mail');
     expect(screen.getByRole('region', { name: 'Message list' })).toBeTruthy();
     expect(screen.queryByRole('region', { name: 'Calendar' })).toBeNull();
+  });
+
+  it('switches to the people view beside mail and calendar', () => {
+    render(<AppShell />);
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'People' }));
+    });
+
+    expect(useUiStore.getState().shellView).toBe('people');
+    expect(screen.getByRole('region', { name: 'People' })).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'Message list' })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Calendar' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'People' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    );
   });
 });

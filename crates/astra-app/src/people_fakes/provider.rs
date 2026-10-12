@@ -136,6 +136,21 @@ impl ContactsProvider for PeopleFake {
         }
         Ok(ContactWriteReceipt::new(base.id.clone()))
     }
+
+    async fn fetch_contact_photo(
+        &self,
+        _account: &AccountId,
+        _card: &ContactCard,
+        _media: &engine_core::contact::ContactResource,
+    ) -> ProviderResult<Option<engine_provider::ContactPhoto>> {
+        // One honest PNG byte: the tests exercise the cache walk, not the
+        // image itself.
+        Ok(Some(engine_provider::ContactPhoto::new(
+            vec![0x89, b'P', b'N', b'G'],
+            Some("image/png".to_owned()),
+            "photo-1",
+        )))
+    }
 }
 
 /// Applies the patch's fields to the served copy, the subset this fake's

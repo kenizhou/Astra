@@ -213,6 +213,17 @@ fn person_row(person: &Person, section: &str) -> PersonRow {
     }
 }
 
+/// The monogram one person's avatar draws: the row's own derivation, shared
+/// by every surface that shows the person so the two cannot disagree.
+pub(crate) fn person_monogram(person: &Person) -> astra_viewmodel::Monogram {
+    let display_name = row_display_name(person);
+    let primary_address = person
+        .emails
+        .first()
+        .map(|email| email.value.as_str().to_owned());
+    monogram_of(&display_name, primary_address.as_deref(), person.id)
+}
+
 /// The row's display name: the engine's pick when the sources carry a name,
 /// empty when they do not (the host supplies the words; the engine's
 /// address fallback never leaks into the name field).

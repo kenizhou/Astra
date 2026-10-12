@@ -15,7 +15,9 @@
 mod fixtures;
 mod provider;
 
-pub(crate) use fixtures::{bare_card, book, named_card, structured_card, with_organisation};
+pub(crate) use fixtures::{
+    bare_card, book, named_card, structured_card, with_organisation, with_photo,
+};
 
 use std::sync::{Arc, Mutex};
 
@@ -127,8 +129,32 @@ pub(crate) fn people_app(
     accounts: Vec<Account<PeopleFake>>,
     surfaces: &Arc<Mutex<Vec<Surface>>>,
 ) -> App<PeopleFake> {
-    App::new(
+    people_app_over(
         Arc::new(engine_api::Engine::open_in_memory().unwrap()),
+        accounts,
+        surfaces,
+    )
+}
+
+/// The same app beside the engine it runs over, so a test can drive an
+/// engine read the app does not wrap (the photo cache's filler).
+pub(crate) fn people_app_with_engine(
+    accounts: Vec<Account<PeopleFake>>,
+    surfaces: &Arc<Mutex<Vec<Surface>>>,
+) -> (App<PeopleFake>, Arc<engine_api::Engine>) {
+    let engine = Arc::new(engine_api::Engine::open_in_memory().unwrap());
+    let app = people_app_over(Arc::clone(&engine), accounts, surfaces);
+    (app, engine)
+}
+
+/// The shared assembly behind both builders.
+fn people_app_over(
+    engine: Arc<engine_api::Engine>,
+    accounts: Vec<Account<PeopleFake>>,
+    surfaces: &Arc<Mutex<Vec<Surface>>>,
+) -> App<PeopleFake> {
+    App::new(
+        engine,
         accounts,
         None,
         Arc::new(RecordingObserver {

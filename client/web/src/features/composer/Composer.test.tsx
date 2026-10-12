@@ -26,6 +26,7 @@ vi.mock('./Editor', () => ({
   Editor: (_props: { initialContent: JSONContent[]; onChange: (doc: JSONContent) => void }) => {
     return <div data-testid="editor-stub" />;
   },
+  insertAtSelection: () => undefined,
 }));
 
 import type { ComposerDocument, ComposeRequestSnapshot, ResumeView } from '@/services/ipc';

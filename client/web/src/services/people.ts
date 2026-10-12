@@ -236,3 +236,19 @@ export function peopleCard(card: CardRef): Promise<ContactDraftInput | null> {
 export function peopleSuggestions(token: string): Promise<RecipientSuggestion[]> {
   return invoke('people_suggestions', { token });
 }
+
+/** What one address's avatar draws: the shared monogram and any cached photo. */
+export interface AvatarView {
+  initials: string;
+  colour: string;
+  /** The cached photo file's path; absent when none stands. */
+  photo?: string;
+}
+
+/**
+ * Resolves one address to its avatar: the monogram the snapshot rows carry
+ * (the one derivation) and the cached photo file's path when one stands.
+ */
+export function peopleAvatar(email: string): Promise<AvatarView> {
+  return invoke('people_avatar', { email });
+}
