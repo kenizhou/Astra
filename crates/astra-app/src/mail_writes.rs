@@ -64,7 +64,7 @@ impl<P: Provider> App<P> {
 
     /// Moves one row out of the inbox and into the account's archive: a message,
     /// or a whole conversation's every member. The archive destination is
-    /// resolved per [`resolve_move_target`]; a move the store learns of at the
+    /// resolved per the shared target resolver; a move the store learns of at the
     /// next sync, so the republished list tells the user when it lands.
     ///
     /// # Errors
