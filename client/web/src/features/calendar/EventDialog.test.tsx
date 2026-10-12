@@ -101,6 +101,19 @@ describe('the event dialog create flow', () => {
     expect((screen.getByLabelText('Calendar') as HTMLSelectElement).value).toBe('work:cal-1');
   });
 
+  it('falls back to the first writable when the pin names a calendar that no longer exists', () => {
+    useCalendarStore.setState({
+      calendars: [
+        { account: 'work', id: 'cal-1', name: 'Work', color: '#039be5', visible: true, can_write: true, is_default: false },
+        { account: 'home', id: 'cal-2', name: 'Home', color: '#8e24aa', visible: true, can_write: true, is_default: false },
+      ],
+    });
+    settingsState.settings.default_calendar = { account: 'gone', key: 'cal-x' };
+    render(<EventDialog row={null} onClose={onClose} />);
+
+    expect((screen.getByLabelText('Calendar') as HTMLSelectElement).value).toBe('work:cal-1');
+  });
+
   it('creates an event over the anchor day in the snapshot zone', () => {
     render(<EventDialog row={null} onClose={onClose} />);
 

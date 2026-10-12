@@ -2,10 +2,12 @@
 // The Calendar detail: the display zone picker over the browser's own IANA
 // list (the app refuses typedly an id it cannot resolve, and the field
 // keeps its prior value when it does), the first-day picker, the horizon
-// picker bounded to the core's own 7 to 365, and the default calendar over
-// the writable calendars the diary holds, pinned or unpinned.
+// picker whose typed draft commits on blur or Enter inside the core's own
+// 7 to 365 (a refused commit keeps the prior value and says so; the core's
+// own refusal says the same), and the default calendar over the writable
+// calendars the diary holds, pinned or unpinned.
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { dispatch, intents } from '@/services/ipc';
 import type { WeekdayWire } from '@/services/ipc';
@@ -17,6 +19,9 @@ import { useSettingsStore } from './settingsStore';
 /** The core's own horizon bound: fewer or more days never crosses. */
 const HORIZON_MIN_DAYS = 7;
 const HORIZON_MAX_DAYS = 365;
+
+/** The sentence an out-of-bounds horizon draws, typed here or refused there. */
+const HORIZON_SENTENCE = 'The horizon stands between 7 and 365 days.';
 
 /** The zone choices: the browser's own list, the persisted zone kept on it. */
 function zoneOptions(zone: string): string[] {
@@ -47,6 +52,30 @@ export function CalendarDetail() {
   const settings = useSettingsStore((s) => s.settings);
   const error = useSettingsStore((s) => s.error);
   const calendars = useCalendarStore((s) => s.calendars);
+
+  const horizon = String(settings.horizon_days);
+  const [horizonDraft, setHorizonDraft] = useState(horizon);
+  const [horizonRefused, setHorizonRefused] = useState(false);
+  // The draft follows the persisted block when the block moves elsewhere;
+  // between a dispatch and its republish the typed value stands.
+  useEffect(() => {
+    setHorizonDraft(horizon);
+  }, [horizon]);
+  // The bound answers at the commit, never per keystroke: a controlled
+  // input that refuses each keystroke restores its prop mid-word and
+  // leaves most horizons untypeable.
+  const commitHorizon = (): void => {
+    const days = Number(horizonDraft);
+    if (Number.isInteger(days) && days >= HORIZON_MIN_DAYS && days <= HORIZON_MAX_DAYS) {
+      setHorizonRefused(false);
+      if (days !== settings.horizon_days) {
+        void dispatch(intents.setHorizon(days));
+      }
+      return;
+    }
+    setHorizonRefused(true);
+    setHorizonDraft(horizon);
+  };
 
   const writable = useMemo(
     () => calendars.filter((calendar) => calendar.can_write),
@@ -107,16 +136,25 @@ export function CalendarDetail() {
           type="number"
           min={HORIZON_MIN_DAYS}
           max={HORIZON_MAX_DAYS}
-          value={settings.horizon_days}
+          value={horizonDraft}
           onChange={(event) => {
-            const days = Number(event.target.value);
-            if (days >= HORIZON_MIN_DAYS && days <= HORIZON_MAX_DAYS) {
-              void dispatch(intents.setHorizon(days));
+            setHorizonDraft(event.target.value);
+            setHorizonRefused(false);
+          }}
+          onBlur={commitHorizon}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              commitHorizon();
             }
           }}
           className={fieldClass}
         />
       </label>
+      {(horizonRefused || error === 'horizon_out_of_bounds') && (
+        <p role="alert" className="max-w-[280px] text-xs text-[var(--warning)]">
+          {HORIZON_SENTENCE}
+        </p>
+      )}
       <label className="flex max-w-[280px] flex-col gap-1 text-xs text-muted-foreground">
         Default calendar
         <select

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The settings screen: the modal over the shell with the category source
 // list beside the detail panel, the desktop pattern; the categories render
-// exactly what ships, Escape and the Close return to the shell, the detail
+// exactly what ships, Escape and the Close return to the shell wherever
+// the focus stands (the gear that opened it included), the dialog is
+// caged (the focus moves in on open, the modal names itself), the detail
 // switches with the source list, and the surface pull hydrates on open.
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -85,6 +87,30 @@ describe('the settings screen', () => {
     });
     fireEvent.keyDown(screen.getByRole('dialog', { name: 'Settings' }), { key: 'Escape' });
     expect(useUiStore.getState().settingsOpen).toBe(false);
+  });
+
+  it('closes on Escape when the focus never entered the dialog', () => {
+    // The gear opens the screen and keeps the focus itself: the Escape a
+    // moment later stands outside the dialog and must still close it.
+    const gear = document.createElement('button');
+    gear.type = 'button';
+    gear.textContent = 'Settings';
+    document.body.appendChild(gear);
+    gear.focus();
+    render(<SettingsScreen />);
+
+    fireEvent.keyDown(gear, { key: 'Escape' });
+
+    expect(useUiStore.getState().settingsOpen).toBe(false);
+    gear.remove();
+  });
+
+  it('moves the focus into the dialog on open and names itself a modal', () => {
+    render(<SettingsScreen />);
+    const dialog = screen.getByRole('dialog', { name: 'Settings' });
+
+    expect(document.activeElement).toBe(dialog);
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
   });
 
   it('hydrates from the surface pull when it opens', async () => {

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The agenda view: the snapshot's occurrences grouped under their zone-local
 // day headers and laid out chronologically, one row per occurrence with its
-// clock, its calendar's colour, and its markers; a hold draws dotted the same
-// as every other view.
+// clock under the clock setting, its calendar's colour, and its markers; a
+// hold draws dotted the same as every other view.
 
 import { useMemo } from 'react';
 
@@ -14,6 +14,7 @@ import { agendaDayLabel, clockLabel } from './dayLabels';
 import { CalendarDot, RepeatGlyph, holdClass, isHold } from './EventMarkers';
 import { minutesInZone } from './calendarRange';
 import { useZonedNow } from './useZonedNow';
+import { useSettingsStore } from '@/features/settings/settingsStore';
 
 /** One agenda row. */
 function Row({
@@ -27,6 +28,7 @@ function Row({
   color: string | undefined;
   onOpenEvent: (row: OccurrenceRow) => void;
 }) {
+  const twentyFour = useSettingsStore((s) => s.settings.twenty_four_clock);
   const hold = isHold(row);
   const title = row.title === '' ? '(no title)' : row.title;
   return (
@@ -41,7 +43,7 @@ function Row({
             All day
           </span>
         ) : (
-          clockLabel(minutesInZone(new Date(row.start), zone))
+          clockLabel(minutesInZone(new Date(row.start), zone), twentyFour)
         )}
       </span>
       <CalendarDot color={color} />

@@ -2,8 +2,9 @@
 // The briefs panel: the anchored day's meeting brief over the first
 // calendar's account, asked of the host only when the action opens the
 // panel (the brief is a paid call; nothing generates before the user asks),
-// rendering the generated brief with its meeting rows, the no-meetings
-// answer, and the failure state a refused generation leaves.
+// rendering the generated brief with its meeting rows under the clock
+// setting, the no-meetings answer, and the failure state a refused
+// generation leaves.
 
 import { useCallback, useEffect, useState } from 'react';
 
@@ -13,6 +14,7 @@ import type { MeetingBriefView } from '@/services/ipc';
 import { useCalendarStore } from './calendarStore';
 import { dayKeyOf, minutesInZone } from './calendarRange';
 import { clockLabel } from './dayLabels';
+import { useSettingsStore } from '@/features/settings/settingsStore';
 
 type BriefState =
   | { kind: 'asking' }
@@ -28,14 +30,16 @@ interface BriefsPanelProps {
 
 /** One meeting row of the brief. */
 function MeetingRow({ row, zone }: { row: NonNullable<MeetingBriefView['meetings']>[number]; zone: string }) {
+  const twentyFour = useSettingsStore((s) => s.settings.twenty_four_clock);
   return (
     <li className="flex flex-col gap-0.5 rounded-[var(--radius-xs)] border border-border px-2 py-1.5">
       <span className="flex items-center gap-2 text-xs font-medium text-foreground">
         <span className="tabular-nums text-muted-foreground">
           {row.all_day
             ? 'All day'
-            : `${clockLabel(minutesInZone(new Date(row.start), zone))} to ${clockLabel(
+            : `${clockLabel(minutesInZone(new Date(row.start), zone), twentyFour)} to ${clockLabel(
                 minutesInZone(new Date(row.end), zone),
+                twentyFour,
               )}`}
         </span>
         <span className="min-w-0 flex-1 truncate">{row.title}</span>

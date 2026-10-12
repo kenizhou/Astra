@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The Reading detail: the conversation grouping, moved into settings and
-// crossing through the settings family's own view-mode arm. The list
-// itself still renders whatever the mailbox-list snapshot carries; this
-// control is the one place the grouping is asked for.
+// The Reading detail: the conversation grouping, crossing through the
+// settings family's own view-mode arm. The list toolbar still ships its
+// sibling control through the delegating arm; both controls ask, and this
+// one persists the answer through the settings family. The list itself
+// still renders whatever the mailbox-list snapshot carries.
 
 import { dispatch, intents } from '@/services/ipc';
 import type { ViewMode } from '@/services/ipc';

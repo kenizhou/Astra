@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The Calendar detail: the zone picker over the browser's own IANA list
 // with the app's typed refusal sentence and the field's prior value kept,
-// the first-day picker, the horizon picker bounded 7 to 365, and the
+// the first-day picker, the horizon picker whose typed draft commits on
+// blur or Enter inside the 7 to 365 bound (a refused commit keeps the
+// prior value and says so, the core own refusal saying the same), and the
 // default calendar over the writable calendars the diary holds.
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -115,9 +117,29 @@ describe('the first-day picker', () => {
 });
 
 describe('the horizon picker', () => {
-  it('dispatches the horizon intent inside the 7 to 365 bound', () => {
+  it('reaches a horizon typed character by character', () => {
     render(<CalendarDetail />);
-    fireEvent.change(screen.getByLabelText('Horizon days'), { target: { value: '365' } });
+    const input = screen.getByLabelText('Horizon days') as HTMLInputElement;
+
+    fireEvent.change(input, { target: { value: '3' } });
+    expect(input.value).toBe('3');
+    fireEvent.change(input, { target: { value: '30' } });
+    expect(input.value).toBe('30');
+    fireEvent.blur(input);
+
+    expect(ipc.dispatch).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
+      '{"settings":{"set_horizon":{"days":30}}}',
+    );
+  });
+
+  it('commits the draft on Enter as blur commits it', () => {
+    render(<CalendarDetail />);
+    const input = screen.getByLabelText('Horizon days') as HTMLInputElement;
+
+    fireEvent.change(input, { target: { value: '365' } });
+    expect(ipc.dispatch).not.toHaveBeenCalled();
+    fireEvent.keyDown(input, { key: 'Enter' });
 
     expect(ipc.dispatch).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
@@ -125,13 +147,33 @@ describe('the horizon picker', () => {
     );
   });
 
-  it('never dispatches outside the bound', () => {
+  it('keeps the prior horizon and says so when the commit stands outside the bound', () => {
     render(<CalendarDetail />);
-    fireEvent.change(screen.getByLabelText('Horizon days'), { target: { value: '5' } });
-    fireEvent.change(screen.getByLabelText('Horizon days'), { target: { value: '400' } });
+    const input = screen.getByLabelText('Horizon days') as HTMLInputElement;
 
+    fireEvent.change(input, { target: { value: '3' } });
+    fireEvent.blur(input);
+    expect(input.value).toBe('42');
     expect(ipc.dispatch).not.toHaveBeenCalled();
-    expect((screen.getByLabelText('Horizon days') as HTMLInputElement).value).toBe('42');
+
+    fireEvent.change(input, { target: { value: '400' } });
+    fireEvent.blur(input);
+    expect(input.value).toBe('42');
+    expect(ipc.dispatch).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert').textContent).toContain('between 7 and 365');
+  });
+
+  it('renders the core own refusal sentence when the horizon error lands', () => {
+    render(<CalendarDetail />);
+
+    act(() => {
+      useSettingsStore.getState().applySnapshot({
+        ...snapshot(),
+        error: 'horizon_out_of_bounds',
+      });
+    });
+
+    expect(screen.getByRole('alert').textContent).toContain('between 7 and 365');
   });
 });
 

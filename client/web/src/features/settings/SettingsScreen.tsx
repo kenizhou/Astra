@@ -2,11 +2,13 @@
 // The settings screen: the modal over the shell carrying the desktop
 // pattern, a category source list beside the detail panel. The categories
 // render exactly what ships and nothing else, Escape and the Close return
-// to the shell, and the surface pull hydrates the store every time the
-// screen opens, so the controls reflect the persisted truth from the
-// first paint.
+// to the shell wherever the focus stands (the gear that opened the screen
+// keeps the focus itself), the dialog is caged (the focus moves in on
+// open, the modal names itself), and the surface pull hydrates the store
+// every time the screen opens, so the controls reflect the persisted
+// truth from the first paint.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { settings } from '@/services/ipc';
 import { useUiStore } from '@/stores/uiStore';
@@ -42,6 +44,7 @@ const CATEGORIES: ReadonlyArray<{ id: SettingsCategory; label: string }> = [
 export function SettingsScreen() {
   const open = useUiStore((s) => s.settingsOpen);
   const [category, setCategory] = useState<SettingsCategory>('general');
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) {
@@ -57,8 +60,19 @@ export function SettingsScreen() {
       .catch((err: unknown) => {
         console.error('settings: the open pull failed', err);
       });
+    // The Escape answers at the document level: the gear that opened the
+    // screen keeps the focus itself, so a listener inside the dialog alone
+    // never sees the key. The focus moves into the caged dialog on open.
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        useUiStore.getState().setSettingsOpen(false);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    dialogRef.current?.focus();
     return () => {
       standing = false;
+      document.removeEventListener('keydown', onKey);
     };
   }, [open]);
 
@@ -71,14 +85,12 @@ export function SettingsScreen() {
   return (
     <div className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--backdrop)] p-4">
       <div
+        ref={dialogRef}
         role="dialog"
         aria-label="Settings"
-        onKeyDown={(event) => {
-          if (event.key === 'Escape') {
-            close();
-          }
-        }}
-        className="flex h-[560px] max-h-full w-[760px] max-w-full overflow-hidden rounded-[var(--radius)] border border-border bg-surface-floating shadow-[var(--shadow-lg)]"
+        aria-modal="true"
+        tabIndex={-1}
+        className="flex h-[560px] max-h-full w-[760px] max-w-full overflow-hidden rounded-[var(--radius)] border border-border bg-surface-floating shadow-[var(--shadow-lg)] outline-none"
       >
         <nav
           aria-label="Settings categories"

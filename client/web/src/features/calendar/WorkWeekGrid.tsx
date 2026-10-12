@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The work-week view: the shared time grid over the anchor week's first
-// five days, the week opening on the day the settings block names.
+// five days, the week opening on the day the settings block names. A
+// Sunday-first week lays out Sunday to Thursday, and a Wednesday or
+// Friday first day crosses the weekend: the locale's own week edge
+// decides the window, never a hardcoded Monday start.
 
 import type { OccurrenceRow } from '@/services/ipc';
 
