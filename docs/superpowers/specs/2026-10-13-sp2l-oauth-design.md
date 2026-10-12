@@ -31,6 +31,9 @@ SP2n) wire the providers over this floor; what ships now is the floor.
   pre-registered client ids (a build given none still connects mail: the
   routes that need a registration are not offered); `reach` (the token
   request's transport classification); the `Secret` whose Debug redacts.
+  The crate takes `engine-tls` (the shared TLS policy builder, reqwest
+  feature) the way astra-account and astra-autodetect do: an extension
+  of SP1's design decision 4 list, recorded here.
   The refresh names NO scope (the not-negotiable rule); the granted-set
   cache follows the token response's word.
 - **D2 (the browser session)**: the system browser over a Tauri shell

@@ -116,7 +116,7 @@ pub enum OAuthError {
     /// replacement was in the body just lost. Presenting the old token
     /// again is then a replay, and a server that ratchets refresh tokens
     /// treats a replay as theft and revokes the grant: the caller must
-    /// not retry.
+    /// not retry. See [`reach`](Self::reach) for the classification.
     #[error("oauth response lost after the server answered: {0}")]
     ResponseLost(#[source] reqwest::Error),
     /// The provider returned an OAuth error (RFC 6749 section 5.2).
@@ -340,4 +340,4 @@ fn check_issuer(expected: &str, received: Option<&str>) -> Result<(), OAuthError
 
 #[cfg(test)]
 #[path = "lib_tests.rs"]
-mod tests;
+mod lib_tests;

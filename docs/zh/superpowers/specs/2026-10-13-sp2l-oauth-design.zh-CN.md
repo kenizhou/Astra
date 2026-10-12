@@ -29,7 +29,9 @@
   `register_client`（RFC 9728 -> 8414 -> 7591）；`credentials.rs` 作
   为预注册客户端 id 的唯一持有处（未给的构建仍能连邮件：需要注册的路
   由即不提供）；`reach`（令牌请求的传输分类）；Debug 自行脱敏的
-  `Secret`。refresh 绝不携带作用域（不可协商的规则）；已授予集合的缓
+  `Secret`。crate 取 `engine-tls`（共享的 TLS 策略构建器，
+  reqwest feature），与 astra-account、astra-autodetect 同款：这是
+  SP1 设计决策 4 清单的扩展，在此记录。refresh 绝不携带作用域（不可协商的规则）；已授予集合的缓
   存跟随令牌响应的原话。
 - **D2（浏览器会话）**：经 Tauri shell 打开系统浏览器，重定向由
   `tauri-plugin-deep-link` 在自定义 scheme 上捕获；绝不用内嵌
