@@ -53,12 +53,16 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 /// `ERROR_PIPE_BUSY`: every instance of the pipe is connected and the
 /// server has not finished creating the next one. A self-clearing window,
 /// worth riding out rather than reporting the app as unreachable.
+#[cfg(windows)]
 const ERROR_PIPE_BUSY: i32 = 231;
 
 /// How many times, and how long apart, to retry a busy pipe. Bounded: the
 /// point is to ride out an instance being replaced, never to sit waiting
-/// for an app that is not running.
+/// for an app that is not running. Windows only: the busy window is a
+/// named-pipe behaviour, and the Unix dial has no such state.
+#[cfg(windows)]
 const BUSY_RETRIES: u32 = 10;
+#[cfg(windows)]
 const BUSY_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(50);
 
 fn main() -> ExitCode {
