@@ -43,4 +43,4 @@
 
 - Spec coverage: D1 (T1 types/T4 UI), D2 (T1/T2), D3 (T2), D4 (T2/T4), D5 (T1/T3/T4), D6 (T2/T4), live + docs (T5).
 - Interface chain: types + persistence (T1) -> dispatch/consumption (T2) -> host (T3) -> UI (T4) -> live + docs (T5).
-- Risks: the preferences file format (additive with defaults; an old file must load clean — pin it); the dav re-dial touching live account state (the failed-keep-old contract must not tear down working legs); the view_mode consolidation (the existing list arm and its wire must not break — additive delegation); remove account's teardown breadth (the store, the legs, the preferences' account entries, the credential store).
+- Risks: the preferences file format (additive with defaults; an old file must load clean: pin it); the dav re-dial touching live account state (the failed-keep-old contract must not tear down working legs); the view_mode consolidation (the existing list arm and its wire must not break: additive delegation); remove account's teardown breadth (the store, the legs, the preferences' account entries, the credential store).
