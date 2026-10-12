@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! The draft-2020-12 input schemas of the tool catalogue, as literals.
+//! The draft-2020-12 input schemas of the tool catalog, as literals.
 //!
 //! Every schema is a closed object (`additionalProperties: false`) so a
 //! typo'd argument is refused loudly rather than silently dropped, and the

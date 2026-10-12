@@ -40,7 +40,6 @@ pub(crate) struct Request {
     pub(crate) method: String,
     /// The parameters, absent for a parameterless method.
     #[serde(default)]
-    #[allow(dead_code)]
     pub(crate) params: Option<Value>,
 }
 
@@ -139,7 +138,6 @@ impl RpcError {
 
     /// The parameters did not match what the method's schema documents.
     #[must_use]
-    #[allow(dead_code)]
     pub(crate) fn invalid_params(detail: impl Into<String>) -> Self {
         Self::new(INVALID_PARAMS, detail)
     }

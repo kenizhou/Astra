@@ -2,7 +2,7 @@
 //! The Model Context Protocol surface for Astra Mail.
 //!
 //! This crate holds the contracts and the server the MCP surface is built
-//! from: the tool catalogue with its draft-2020-12 input schemas as
+//! from: the tool catalog with its draft-2020-12 input schemas as
 //! literals, the serde input types those schemas must agree with (so a
 //! client cannot send exactly what a tool documented and get a parse
 //! error), the `<untrusted-message-content>` fence every message body is

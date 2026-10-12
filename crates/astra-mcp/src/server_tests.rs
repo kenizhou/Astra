@@ -167,7 +167,7 @@ async fn initialize_counter_offers_its_own_version_on_an_unknown_one() {
 }
 
 #[tokio::test]
-async fn tools_list_answers_the_catalogue_with_schemas_and_annotations() {
+async fn tools_list_answers_the_catalog_with_schemas_and_annotations() {
     let (server, _) = server(&["work"]);
     let mut client = connect(&server);
     let answer = round_trip(
@@ -178,7 +178,7 @@ async fn tools_list_answers_the_catalogue_with_schemas_and_annotations() {
     let tools = answer["result"]["tools"]
         .as_array()
         .expect("the tools list");
-    assert_eq!(tools.len(), 10, "the ten tools of the catalogue");
+    assert_eq!(tools.len(), 10, "the ten tools of the catalog");
     for tool in tools {
         assert!(tool["inputSchema"].is_object(), "each entry has a schema");
         assert!(tool["annotations"].is_object(), "each entry is annotated");
@@ -432,5 +432,4 @@ async fn the_outcome_vocabulary_is_spelled_in_full() {
     assert_eq!(Outcome::Refused.as_str(), "refused");
     assert_eq!(Outcome::InvalidParams.as_str(), "invalid_params");
     assert_eq!(Outcome::UnknownTool.as_str(), "unknown_tool");
-    assert_eq!(Outcome::Internal.as_str(), "internal");
 }

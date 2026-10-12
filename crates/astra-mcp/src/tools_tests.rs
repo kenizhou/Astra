@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Tests for the tool schemas: the catalogue's shape (the ten tools, the two
+//! Tests for the tool schemas: the catalog's shape (the ten tools, the two
 //! recorded cuts pinned as absences), every schema's draft-2020-12
 //! discipline, the account/key pairing at the boundary, the schema-to-type
 //! agreement that keeps a client from sending exactly what a tool documented
@@ -13,9 +13,9 @@ use crate::tools::{
     SearchArgs, SetFlaggedArgs,
 };
 
-/// The catalogue's names, in order: the stable answer to `tools/list`.
+/// The catalog's names, in order: the stable answer to `tools/list`.
 #[test]
-fn the_catalogue_lists_the_ten_tools_in_a_stable_order() {
+fn the_catalog_lists_the_ten_tools_in_a_stable_order() {
     let names: Vec<&str> = tools::tools().iter().map(|tool| tool.name).collect();
     assert_eq!(
         names,
@@ -253,7 +253,7 @@ fn the_annotations_are_set_honestly() {
         let tool = tools::tools()
             .into_iter()
             .find(|tool| tool.name == name)
-            .expect("the catalogue holds the tool");
+            .expect("the catalog holds the tool");
         assert_eq!(tool.annotations, annotations, "{name}");
     }
 }
@@ -297,7 +297,7 @@ fn the_listing_and_search_schemas_advertise_no_key() {
         let tool = tools::tools()
             .into_iter()
             .find(|tool| tool.name == name)
-            .unwrap_or_else(|| panic!("the {name} tool stands in the catalogue"));
+            .unwrap_or_else(|| panic!("the {name} tool stands in the catalog"));
         let properties = tool.input_schema["properties"].as_object().unwrap();
         assert!(
             !properties.contains_key("key"),

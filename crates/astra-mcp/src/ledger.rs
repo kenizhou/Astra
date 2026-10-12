@@ -22,10 +22,8 @@ pub enum Outcome {
     Refused,
     /// The arguments did not match the tool's schema.
     InvalidParams,
-    /// The tool name is not in the catalogue.
+    /// The tool name is not in the catalog.
     UnknownTool,
-    /// Something inside the server failed, the ledger included.
-    Internal,
 }
 
 impl Outcome {
@@ -37,7 +35,6 @@ impl Outcome {
             Self::Refused => "refused",
             Self::InvalidParams => "invalid_params",
             Self::UnknownTool => "unknown_tool",
-            Self::Internal => "internal",
         }
     }
 }

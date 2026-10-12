@@ -171,8 +171,13 @@ impl<P: Provider + 'static> MailBackend for App<P> {
         offset: usize,
         limit: usize,
     ) -> MessagePage {
-        let id = account.and_then(account_id);
-        self.query_search(query, id.as_ref(), folder, offset, limit)
+        // A malformed id fails CLOSED, like every sibling: folding it to
+        // `None` would run the unscoped search and leak accounts the gate
+        // never exposed.
+        let Some(id) = account.and_then(account_id) else {
+            return MessagePage::default();
+        };
+        self.query_search(query, Some(&id), folder, offset, limit)
             .await
     }
 
@@ -219,7 +224,13 @@ impl<P: Provider + 'static> MailBackend for App<P> {
     }
 
     async fn open_composer(&self, draft: AgentDraft) -> Result<(), OpenDraftError> {
-        let from = draft.account.as_deref().and_then(account_id);
+        // A malformed from-id refuses rather than folding to `None`, which
+        // would silently compose from whatever account the app happens to
+        // hold first.
+        let from = match draft.account.as_deref() {
+            None => None,
+            Some(id) => Some(account_id(id).ok_or(OpenDraftError::NoAccount)?),
+        };
         let reply_to = match (draft.reply_to_account.as_deref(), draft.reply_to_key) {
             (Some(account), Some(key)) => astra_app::MessageRef::from_parts(account, key),
             _ => None,

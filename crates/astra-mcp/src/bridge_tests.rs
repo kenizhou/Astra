@@ -312,7 +312,7 @@ async fn create_draft_without_an_account_resolves_the_first_allowed_one() {
 }
 
 #[tokio::test]
-async fn a_tool_outside_the_catalogue_is_unknown() {
+async fn a_tool_outside_the_catalog_is_unknown() {
     let backend = backend();
     let failure = bridge::call(&*backend, &gate(&["work"]), "send_message", json!({}))
         .await

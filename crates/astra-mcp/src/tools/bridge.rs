@@ -50,7 +50,7 @@ pub(crate) async fn call(
     name: &str,
     args: Value,
 ) -> Result<Value, ToolFailure> {
-    // A tool that is not in the catalogue is not callable, even by a client
+    // A tool that is not in the catalog is not callable, even by a client
     // that remembers its name.
     if !crate::tools::tools().iter().any(|tool| tool.name == name) {
         return Err(ToolFailure::Unknown(name.to_owned()));

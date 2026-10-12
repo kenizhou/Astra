@@ -123,3 +123,46 @@ async fn an_empty_action_list_writes_and_audits_nothing() {
         "no action, no audit row",
     );
 }
+
+#[tokio::test]
+async fn a_vanished_account_audits_the_error_outcome() {
+    // The outcome word's other half: a dispatch that could not go through
+    // (the account gone before the write reached it) audits `error`, the
+    // same row shape, never silently skipping.
+    let provider = fakes::FakeProvider::with_sources(
+        vec![fakes::inbox()],
+        vec![fakes::delivered_at(
+            fakes::mail("m1", "inbox", "Launch"),
+            8,
+            0,
+        )],
+        vec![(
+            "m1".to_owned(),
+            b"From: ada@example.test\r\nSubject: Launch\r\n\r\nWeekly notes.\r\n".to_vec(),
+        )],
+    );
+    let surfaces = Arc::new(Mutex::new(Vec::new()));
+    let app = app_with_ai(
+        vec![fakes::account("work", provider)],
+        &surfaces,
+        fakes::ai::FixtureJudge::scripted(&[]),
+        fakes::ai::FixtureComplete::scripted(&[]),
+        Arc::new(AiStore::open_in_memory().unwrap()),
+        astra_ai::DlpPolicy::Allow,
+    );
+    app.dispatch(Intent::RefreshMail).await.unwrap();
+
+    let audit = AiStore::open_in_memory().unwrap();
+    let correlation = CorrelationId::generate();
+    // A message row naming an account the app does not hold: the dispatch
+    // cannot route it, which is the vanished-account shape.
+    let stranger = crate::MessageRef::from_parts("gone", "m1".to_owned()).unwrap();
+    app.execute_actions(&stranger, &[Action::MarkRead], &correlation, &audit)
+        .await;
+
+    let audits = audit
+        .audit_rows_for_correlation(&correlation)
+        .expect("the audit rows read");
+    assert_eq!(audits.len(), 1, "the failed dispatch is still audited");
+    assert_eq!(audits[0].outcome, "error");
+}
