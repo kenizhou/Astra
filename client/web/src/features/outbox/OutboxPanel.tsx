@@ -7,10 +7,12 @@
 // verbs mark their row so the send-result toast never reads the user's own
 // hand as a delivery, with the mark taken back when the host refuses the
 // action and judged by the snapshot that follows when the engine answers.
-// The status bar's toggle carries the outstanding count.
+// The tool rail's toggle carries the outstanding count.
 
 import { useEffect } from 'react';
 
+import { OutboxIcon } from '@/components/icons';
+import { RAIL_BUTTON_CLASS, railButtonColours } from '@/components/layout/railButton';
 import { dispatch, intents, type Intent, type QueuedKey, type QueuedRow } from '@/services/ipc';
 import { useSendingStore } from '@/stores/sendingStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -146,7 +148,7 @@ export function OutboxPanel() {
   );
 }
 
-/** The status bar's outbox toggle, carrying the outstanding send count. */
+/** The tool rail's outbox toggle, carrying the outstanding send count. */
 export function OutboxStatus() {
   const open = useUiStore((s) => s.outboxOpen);
   const count = useSendingStore((s) => s.snapshot.rows.length);
@@ -154,10 +156,21 @@ export function OutboxStatus() {
   return (
     <button
       type="button"
+      aria-label={count > 0 ? `Outbox ${count}` : 'Outbox'}
+      aria-pressed={open}
+      title={count > 0 ? `Outbox, ${count} waiting` : 'Outbox'}
       onClick={() => useUiStore.getState().setOutboxOpen(!open)}
-      className="rounded-[var(--radius-xs)] px-1.5 py-0.5 transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className={`${RAIL_BUTTON_CLASS} ${railButtonColours(open)}`}
     >
-      {count > 0 ? `Outbox ${count}` : 'Outbox'}
+      <OutboxIcon size={22} />
+      {count > 0 && (
+        <span
+          aria-hidden="true"
+          className="absolute right-1 top-1 grid h-4 min-w-4 place-items-center rounded-full bg-primary px-1 text-[10px] font-medium text-primary-foreground"
+        >
+          {count}
+        </span>
+      )}
     </button>
   );
 }

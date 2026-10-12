@@ -80,9 +80,19 @@
   --surface-floating: var(--card);
   --backdrop: color-mix(in srgb, var(--series-950) 40%, transparent);
 
+  /* Tinted variants; chrome-tint sits one tonal step above chrome. */
+  --chrome-tint: color-mix(in srgb, var(--primary) 8%, var(--chrome));
+  --primary-muted: color-mix(in srgb, var(--primary) 15%, transparent);
+  --border-subtle: color-mix(in srgb, var(--border) 60%, transparent);
+
+  /* Glass chrome stays flat and opaque in light mode; dark adds the sheen. */
+  --chrome-glass: var(--chrome);
+
   /* Layout sizing. */
   --header-h: 44px;
+  --tool-w: 64px;
   --status-h: 36px;
+  --drawer-w: 260px;
   --pane-header-h: 32px;
   --row-h: 28px;
 
@@ -184,6 +194,13 @@
   --surface-elevated: color-mix(in srgb, var(--background) 94%, var(--foreground));
   --surface-floating: var(--card);
   --backdrop: color-mix(in srgb, oklch(0.1 0.012 258) 55%, transparent);
+
+  --chrome-tint: color-mix(in srgb, var(--primary) 5%, var(--chrome));
+  --primary-muted: color-mix(in srgb, var(--primary) 18%, transparent);
+  --border-subtle: color-mix(in srgb, var(--border) 50%, transparent);
+
+  /* Translucent chrome for the glass utility; the bars keep the panel family. */
+  --chrome-glass: color-mix(in srgb, var(--chrome) 70%, transparent);
 
   --shadow-color: oklch(0.1 0.012 258);
   --shadow-sm: 0 1px 2px 0 color-mix(in srgb, var(--shadow-color) 30%, transparent);

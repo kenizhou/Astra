@@ -352,7 +352,7 @@ export function ComposerPane() {
   return (
     <section
       aria-label="Composer"
-      className="flex w-[520px] shrink-0 flex-col overflow-hidden border-l border-border bg-background"
+      className="flex h-full w-full flex-col overflow-hidden bg-background"
     >
       <div className="flex h-[var(--pane-header-h)] shrink-0 items-center justify-between gap-2 border-b border-border bg-surface px-3">
         <SaveBadge composition={composition} />

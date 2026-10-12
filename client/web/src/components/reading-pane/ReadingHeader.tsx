@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The reading header: subject, the sender avatar beside the name, and the
-// full UTC stamp, all straight from the snapshot. The avatar resolves
-// through the people command on the sender's address, the one resolution
-// every surface shares. The stamp derives from the UTC parts the same way
-// the list's does, with the year always shown and the time of day appended
-// in the form the clock setting names.
+// The reading header: the subject at the subject type scale, then the sender
+// block with the avatar beside a semibold name over the bare address, and the
+// full UTC stamp right-aligned on that row. The avatar resolves through the
+// people command on the sender's address, the one resolution every surface
+// shares. The stamp derives from the UTC parts the same way the list's does,
+// with the year always shown and the time of day appended in the form the
+// clock setting names.
 
 import { Avatar } from '@/features/people/Avatar';
 import { useSettingsStore } from '@/features/settings/settingsStore';
@@ -61,19 +62,32 @@ interface ReadingHeaderProps {
 
 export function ReadingHeader({ subject, fromName, fromAddress, sentAt }: ReadingHeaderProps) {
   const twentyFour = useSettingsStore((s) => s.settings.twenty_four_clock);
-  const from =
-    fromName === '' ? fromAddress : fromAddress === '' ? fromName : `${fromName} <${fromAddress}>`;
+  const hasSender = fromName !== '' || fromAddress !== '';
+  const displayName = fromName === '' ? fromAddress : fromName;
   const date = formatReadingDate(sentAt, twentyFour);
   return (
-    <div className="shrink-0 border-b border-border px-4 py-3">
-      <h2 className="truncate text-sm font-semibold text-foreground">
+    <div className="shrink-0 border-b border-border-subtle px-4 pb-3 pt-4">
+      <h2 className="truncate [font:var(--text-subject)] text-foreground">
         {subject === '' ? '(no subject)' : subject}
       </h2>
-      <div className="mt-1 flex items-center gap-2">
-        {fromAddress !== '' && <Avatar address={fromAddress} size={28} />}
-        {from !== '' && <p className="min-w-0 truncate text-xs text-muted-foreground">{from}</p>}
-      </div>
-      {date !== '' && <p className="mt-0.5 text-xs text-muted-foreground">{date}</p>}
+      {hasSender ? (
+        <div className="mt-2.5 flex items-center gap-3">
+          {fromAddress !== '' && <Avatar address={fromAddress} size={36} />}
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[13px] font-semibold text-foreground">{displayName}</p>
+            {fromName !== '' && fromAddress !== '' && (
+              <p className="truncate text-xs text-muted-text">{fromAddress}</p>
+            )}
+          </div>
+          {date !== '' && (
+            <span className="shrink-0 self-start text-xs tabular-nums text-muted-text">
+              {date}
+            </span>
+          )}
+        </div>
+      ) : (
+        date !== '' && <p className="mt-1 text-xs tabular-nums text-muted-text">{date}</p>
+      )}
     </div>
   );
 }

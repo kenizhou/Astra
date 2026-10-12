@@ -9,6 +9,8 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { useAgentStore, type AgentMessage } from './agentStore';
+import { AgentIcon } from '@/components/icons';
+import { RAIL_BUTTON_CLASS, railButtonColours } from '@/components/layout/railButton';
 import { useUiStore } from '@/stores/uiStore';
 import type { PendingApproval } from '@/services/agent';
 
@@ -186,7 +188,7 @@ export function AgentPanel() {
   );
 }
 
-/** The status bar's agent toggle, carrying the count of pending approvals. */
+/** The tool rail's agent toggle, carrying the approvals awaiting a decision. */
 export function AgentStatus() {
   const open = useUiStore((s) => s.agentOpen);
   const count = useAgentStore((s) => s.approvals.length);
@@ -194,10 +196,21 @@ export function AgentStatus() {
   return (
     <button
       type="button"
+      aria-label={count > 0 ? `Agent ${count}` : 'Agent'}
+      aria-pressed={open}
+      title={count > 0 ? `Agent, ${count} awaiting a decision` : 'Agent'}
       onClick={() => useUiStore.getState().setAgentOpen(!open)}
-      className="rounded-[var(--radius-xs)] px-1.5 py-0.5 transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className={`${RAIL_BUTTON_CLASS} ${railButtonColours(open)}`}
     >
-      {count > 0 ? `Agent ${count}` : 'Agent'}
+      <AgentIcon size={22} />
+      {count > 0 && (
+        <span
+          aria-hidden="true"
+          className="absolute right-1 top-1 grid h-4 min-w-4 place-items-center rounded-full bg-primary px-1 text-[10px] font-medium text-primary-foreground"
+        >
+          {count}
+        </span>
+      )}
     </button>
   );
 }

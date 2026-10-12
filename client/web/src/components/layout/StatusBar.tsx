@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The status bar: one line per account saying where its sync stands, beside
-// the folder the list is showing and the outbox toggle with its outstanding
-// count, the agent toggle, and the AI documents toggle. The engine's own
-// startup shows first; until the first pull lands nothing else can be true
-// yet.
+// the folder the list is showing. The engine's own startup shows first;
+// until the first pull lands nothing else can be true yet. The outbox,
+// agent, and AI documents toggles live on the tool rail.
 
-import { AiStatus } from '@/features/ai-panel/AiPanel';
-import { AgentStatus } from '@/features/agent/AgentPanel';
-import { OutboxStatus } from '@/features/outbox/OutboxPanel';
 import { useAccountStore } from '@/stores/accountStore';
 import { useFolderStore } from '@/stores/folderStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -53,9 +49,6 @@ export function StatusBar() {
         )}
       </div>
       <div className="flex min-w-0 items-center gap-2">
-        <OutboxStatus />
-        <AgentStatus />
-        <AiStatus />
         <span className="truncate">{selected === null ? 'No folder selected' : selected.key}</span>
       </div>
     </footer>

@@ -125,7 +125,10 @@ describe('the title bar theme override cycle', () => {
     useUiStore.setState({ themeMode: 'follow_host' });
     render(<TitleBar />);
 
-    expect(screen.getByRole('button', { name: 'Toggle theme' }).textContent).toBe('Light');
+    // The follow-host state reads as Auto; the title names the next step.
+    const button = screen.getByRole('button', { name: 'Toggle theme' });
+    expect(button.textContent).toBe('Auto');
+    expect(button.title).toBe('Following the host; switch to light');
 
     fireEvent.click(screen.getByRole('button', { name: 'Toggle theme' }));
     expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(

@@ -40,7 +40,7 @@ this row ports.
 | Mail | Message laid out against the reading pane's own width, so a newsletter's own mobile rules apply | ⬜ | reading-zoom.md |
 | Mail | Fixed-width messages reflowed to fit at every pane width, live during resize | ⬜ | reading-zoom.md |
 | Mail | Offline-first bodies: synced bodies auto-download after every sync under a per-account cap, so opens are instant | ⬜ | |
-| Mail | Three-pane desktop layout: sidebar, list, reading pane | 🚧 | |
+| Mail | Three-pane desktop layout: resizable folder, list, and reading pane cards, app navigation on a left icon rail | 🚧 | |
 | Mail | Reading actions: reply, reply all, forward, archive, delete | 🚧 | sending.md |
 | Mail | Overflow menu with Save as .eml, writing the message exactly as delivered | ⬜ | reading-actions.md |
 | Mail | Print a message with subject and header lines through the platform print dialog | ⬜ | reading-actions.md |

@@ -3,11 +3,19 @@
 // composer pane with the first account as its From, stays inert without an
 // account, the app start resume pulls the stored draft into the pane when the
 // host has one, a landed compose request opens the pane hydrated, and the
-// status bar's outbox toggle opens the outbox panel. The settings screen
+// tool rail's outbox toggle opens the outbox panel. The settings screen
 // rides above the shell from the title bar's gear, through the categories,
 // down to the accounts page and About.
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// jsdom has no ResizeObserver; the resizable panel row measures through one.
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+vi.stubGlobal('ResizeObserver', ResizeObserverStub);
 
 const ipc = vi.hoisted(() => ({ dispatch: vi.fn(), draftResume: vi.fn(), settings: vi.fn() }));
 
@@ -72,6 +80,7 @@ beforeEach(() => {
   useComposeRequestStore.setState({ snapshot: null });
   useSendingStore.getState().applySnapshot({ rows: [] });
   useUiStore.getState().setOutboxOpen(false);
+  useUiStore.getState().setFolderDrawerOpen(false);
   useSendResultStore.getState().dismiss();
   useSendResultStore.setState({ settled: [], answered: [] });
 });
@@ -166,7 +175,7 @@ describe('the shell composer wiring', () => {
 });
 
 describe('the shell outbox wiring', () => {
-  it('opens the outbox panel from the status bar and asks the host for the queue', () => {
+  it('opens the outbox panel from the tool rail and asks the host for the queue', () => {
     render(<AppShell />);
 
     expect(screen.queryByRole('region', { name: 'Outbox' })).toBeNull();

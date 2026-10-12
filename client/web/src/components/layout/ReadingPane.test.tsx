@@ -116,7 +116,8 @@ describe('the reading pane', () => {
     render(<ReadingPane />);
 
     expect(screen.getByText('Launch')).toBeTruthy();
-    expect(screen.getByText('Ada Lovelace <ada@example.test>')).toBeTruthy();
+    expect(screen.getByText('Ada Lovelace')).toBeTruthy();
+    expect(screen.getByText('ada@example.test')).toBeTruthy();
     // The default clock setting is the core's own default: 12-hour.
     expect(screen.getByText('9 Oct 2026, 8:30 AM')).toBeTruthy();
     expect(frameDoc()).toBe(sanitisedHtml);
