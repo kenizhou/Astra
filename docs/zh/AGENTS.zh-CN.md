@@ -110,3 +110,4 @@ LLM 调用、工具调用与权限决定都带关联 id 落入其台账。
 - trait impl 不能跨模块拆分（E0119）：当 fake 长过文件行数上限时，整个 `impl AppPort for FakeApp` 块移入子模块；根模块保留结构体、固有辅助与再导出。
 - client/web/src/services/ipc.ts 已到行数上限：新的线上类型与包装落在所属的功能服务（ai.ts、sending.ts）里，绝不落在 ipc.ts 本身。
 - engine-api 再导出 provider trait 却不导出 `ConnectionInfo`：以桌面测试替身充当 provider 时需要把 `engine-provider` 列为 dev-dependency 才能命名返回类型。
+- Windows 宿主从不编译 cfg(unix) 半边：仅 Linux 触发的 clippy lint（unix 侧死字段、未加门的 Windows 专属常量）只在 CI 浮现，推送前给平台专属条目加 cfg 门，并想象着另一半跑一遍工作区 clippy。

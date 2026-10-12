@@ -123,3 +123,4 @@ reference decision is forbidden: disagreements are escalated in the PR.
 - A trait impl cannot split across modules (E0119): when a fake grows past the file cap, its whole `impl AppPort for FakeApp` block moves to the child module; the root keeps the struct, inherent helpers, and re-exports.
 - client/web/src/services/ipc.ts sits at the line cap: new wire types and wrappers land in the owning feature service (ai.ts, sending.ts), never in ipc.ts itself.
 - engine-api re-exports the provider traits but not `ConnectionInfo`: a desktop test standing in for a provider needs `engine-provider` as a dev-dependency to name the return type.
+- the windows host never compiles the cfg(unix) half: linux-only clippy lints (dead unix fields, ungated windows-only constants) surface only in CI, so gate platform-only items and run the workspace clippy imagining the other half before pushing.
