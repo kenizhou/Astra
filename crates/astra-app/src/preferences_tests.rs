@@ -6,8 +6,9 @@
 use std::path::PathBuf;
 
 use crate::{
-    load_preferences, preferences_path, reference::FolderRef, save_preferences, Preferences,
-    ViewMode,
+    load_preferences, preferences_path,
+    reference::{CalendarRef, FolderRef},
+    save_preferences, Preferences, ThemeMode, ViewMode, WeekdayWire,
 };
 
 /// A fresh scratch directory of its own, so one test's writes cannot reach another's.
@@ -28,6 +29,13 @@ fn a_first_launch_starts_from_the_defaults() {
     );
     assert!(prefs.folder_expanded("acct-1", "archive"));
     assert!(prefs.selected_folder.is_none());
+    assert_eq!(prefs.theme, ThemeMode::FollowHost);
+    assert!(!prefs.twenty_four_clock);
+    assert_eq!(prefs.zone, "Etc/UTC");
+    assert_eq!(prefs.first_day_of_week, WeekdayWire::Mo);
+    assert_eq!(prefs.horizon_days, 42);
+    assert!(prefs.quote_below);
+    assert!(prefs.default_calendar.is_none());
 }
 
 #[test]
@@ -84,6 +92,7 @@ fn saving_creates_the_parent_directories_it_needs() {
 fn an_older_file_without_the_newer_fields_loads_with_defaults_for_them() {
     let dir = scratch("older-file");
     let path = preferences_path(&dir);
+    // A document exactly as the build before the settings fields wrote it.
     std::fs::write(&path, "view_mode = \"threaded\"\n").unwrap();
 
     let prefs = load_preferences(&path);
@@ -92,6 +101,83 @@ fn an_older_file_without_the_newer_fields_loads_with_defaults_for_them() {
     assert!(prefs.collapsed_accounts.is_empty());
     assert!(prefs.collapsed_folders.is_empty());
     assert!(prefs.selected_folder.is_none());
+    assert_eq!(prefs.theme, ThemeMode::FollowHost);
+    assert!(!prefs.twenty_four_clock);
+    assert_eq!(prefs.zone, "Etc/UTC");
+    assert_eq!(prefs.first_day_of_week, WeekdayWire::Mo);
+    assert_eq!(prefs.horizon_days, 42);
+    assert!(prefs.quote_below);
+    assert!(prefs.default_calendar.is_none());
+}
+
+#[test]
+fn the_settings_fields_round_trip_through_the_file() {
+    let dir = scratch("settings-round-trip");
+    let path = preferences_path(&dir);
+
+    let prefs = Preferences {
+        theme: ThemeMode::Dark,
+        twenty_four_clock: true,
+        zone: "Europe/Amsterdam".to_owned(),
+        first_day_of_week: WeekdayWire::Su,
+        horizon_days: 31,
+        quote_below: false,
+        default_calendar: Some(CalendarRef::from_parts("work", "cal-1".to_owned()).unwrap()),
+        ..Preferences::default()
+    };
+    save_preferences(&path, &prefs).unwrap();
+
+    let back = load_preferences(&path);
+    assert_eq!(back, prefs);
+    assert_eq!(back.theme, ThemeMode::Dark);
+    assert!(back.twenty_four_clock);
+    assert_eq!(back.zone, "Europe/Amsterdam");
+    assert_eq!(back.first_day_of_week, WeekdayWire::Su);
+    assert_eq!(back.horizon_days, 31);
+    assert!(!back.quote_below);
+    let default_calendar = back.default_calendar.expect("the pin persisted");
+    assert_eq!(default_calendar.account.as_str(), "work");
+    assert_eq!(default_calendar.key.as_str(), "cal-1");
+}
+
+#[test]
+fn a_fresh_file_carries_every_default_but_no_default_calendar() {
+    let dir = scratch("fresh-defaults");
+    let path = preferences_path(&dir);
+
+    save_preferences(&path, &Preferences::default()).unwrap();
+
+    let body = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        !body.contains("default_calendar"),
+        "an absent pin writes no entry: {body}"
+    );
+    assert!(body.contains("theme = \"follow_host\""));
+    assert!(body.contains("twenty_four_clock = false"));
+    assert!(body.contains("zone = \"Etc/UTC\""));
+    assert!(body.contains("first_day_of_week = \"mo\""));
+    assert!(body.contains("horizon_days = 42"));
+    assert!(body.contains("quote_below = true"));
+}
+
+#[test]
+fn view_mode_stays_a_key_of_its_own_on_disk() {
+    // The grouping moves into the settings block on the wire alone; on disk it
+    // stays the top-level key it always was, so the build that adds the
+    // settings fields writes a file the build before it still reads.
+    let dir = scratch("view-mode-home");
+    let path = preferences_path(&dir);
+
+    let prefs = Preferences {
+        view_mode: ViewMode::Threaded,
+        theme: ThemeMode::Dark,
+        ..Preferences::default()
+    };
+    save_preferences(&path, &prefs).unwrap();
+
+    let body = std::fs::read_to_string(&path).unwrap();
+    assert!(body.contains("view_mode = \"threaded\""));
+    assert_eq!(load_preferences(&path), prefs);
 }
 
 #[test]

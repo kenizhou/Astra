@@ -9,6 +9,7 @@ mod intent_compose;
 mod intent_drafts;
 mod intent_outbox;
 mod intent_people;
+mod intent_settings;
 mod status;
 
 pub use intent::{FolderIntent, Intent, SearchScope, ViewMode};
@@ -20,6 +21,7 @@ pub use intent_compose::ComposeIntent;
 pub use intent_drafts::{CompositionId, DraftsIntent};
 pub use intent_outbox::OutboxIntent;
 pub use intent_people::{ContactDraftInput, ContactNameInput, ContactPatchInput, PeopleIntent};
+pub use intent_settings::{DavSectionInput, SettingsIntent, ThemeMode, WeekdayWire};
 
 use astra_composer::DraftBlobHandle;
 use serde::{Deserialize, Serialize};
@@ -124,3 +126,8 @@ mod calendar_tests;
 #[cfg(test)]
 #[path = "protocol_people_tests.rs"]
 mod people_tests;
+
+// The settings family's intents, split for the same reason.
+#[cfg(test)]
+#[path = "protocol_settings_tests.rs"]
+mod settings_tests;

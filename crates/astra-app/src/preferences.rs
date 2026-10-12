@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Persisted app preferences: the mailbox-list view mode, which sidebar trees are shut,
-//! and the selected folder. Host app preferences, not synced data, so they live in a
-//! small TOML file beside the engine store rather than in the store itself.
+//! the selected folder, and the settings block (theme, clock, zone, first day of the
+//! week, horizon, quote style, default calendar). Host app preferences, not synced data,
+//! so they live in a small TOML file beside the engine store rather than in the store
+//! itself.
 //!
 //! The expansion map is stored **inverted** relative to the question every caller asks:
 //! the file holds what is collapsed, so an account or folder nobody has touched (and
@@ -18,16 +20,19 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use astra_viewmodel::FolderRow;
+use astra_viewmodel::{FolderRow, ThemeMode, WeekdayWire};
 use serde::{Deserialize, Serialize};
 
-use crate::{reference::FolderRef, ViewMode};
+use crate::{
+    reference::{CalendarRef, FolderRef},
+    ViewMode,
+};
 
 /// The preferences file's name, in the app data directory beside the engine store.
 const FILE_NAME: &str = "preferences.toml";
 
 /// App-level preferences persisted across launches.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Preferences {
     /// The persisted mailbox-list grouping (flat vs threaded). Defaults to
     /// [`ViewMode::Flat`] when the field is absent (an older preferences file, or first
@@ -55,6 +60,65 @@ pub struct Preferences {
     /// `None` for the unified "all inboxes" view.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_folder: Option<FolderRef>,
+    /// The persisted theme: follow the host, or an explicit light or dark
+    /// override.
+    #[serde(default)]
+    pub theme: ThemeMode,
+    /// Whether the clock is 24-hour; 12-hour (the default) otherwise.
+    #[serde(default)]
+    pub twenty_four_clock: bool,
+    /// The IANA id the calendar lays its days out in.
+    #[serde(default = "default_zone")]
+    pub zone: String,
+    /// The day the week starts on, in the engine's own weekday words.
+    #[serde(default)]
+    pub first_day_of_week: WeekdayWire,
+    /// How many days the calendar's cold window covers.
+    #[serde(default = "default_horizon")]
+    pub horizon_days: u32,
+    /// Whether the composer quotes the original below the reply.
+    #[serde(default = "default_true")]
+    pub quote_below: bool,
+    /// The calendar new events land in unless the user picks another;
+    /// `None` when none is pinned, which writes no entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_calendar: Option<CalendarRef>,
+}
+
+/// The shipped defaults, which the serde field defaults and a first launch
+/// name as one set. Manual rather than derived because the zone, the
+/// horizon, and the quote style are not the std defaults of their types.
+impl Default for Preferences {
+    fn default() -> Self {
+        Self {
+            view_mode: ViewMode::default(),
+            collapsed_accounts: BTreeSet::new(),
+            collapsed_folders: BTreeMap::new(),
+            selected_folder: None,
+            theme: ThemeMode::default(),
+            twenty_four_clock: false,
+            zone: default_zone(),
+            first_day_of_week: WeekdayWire::default(),
+            horizon_days: default_horizon(),
+            quote_below: default_true(),
+            default_calendar: None,
+        }
+    }
+}
+
+/// The calendar's display zone until the user picks one.
+fn default_zone() -> String {
+    "Etc/UTC".to_owned()
+}
+
+/// The calendar's cold window, in days.
+fn default_horizon() -> u32 {
+    42
+}
+
+/// The shipped composer default: the quoted original below the reply.
+fn default_true() -> bool {
+    true
 }
 
 impl Preferences {
@@ -279,6 +343,15 @@ impl PreferencesState {
         on_disk
             .selected_folder
             .clone_from(&self.prefs.selected_folder);
+        on_disk.theme = self.prefs.theme;
+        on_disk.twenty_four_clock = self.prefs.twenty_four_clock;
+        on_disk.zone.clone_from(&self.prefs.zone);
+        on_disk.first_day_of_week = self.prefs.first_day_of_week;
+        on_disk.horizon_days = self.prefs.horizon_days;
+        on_disk.quote_below = self.prefs.quote_below;
+        on_disk
+            .default_calendar
+            .clone_from(&self.prefs.default_calendar);
         let _ = save_preferences(path, &on_disk);
     }
 }

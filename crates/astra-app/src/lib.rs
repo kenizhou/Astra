@@ -135,9 +135,9 @@ pub use people::avatar::AvatarView;
 pub use preferences::{load_preferences, preferences_path, save_preferences, Preferences};
 pub use protocol::{
     AppObserver, CalendarIntent, ComposeIntent, ComposerBlob, CompositionId, ContactDraftInput,
-    ContactNameInput, ContactPatchInput, DraftsIntent, EventDrag, EventEdge, EventEdit,
-    FolderIntent, Intent, OutboxIntent, PeopleIntent, RecurrenceChange, RepeatEnd, RepeatRule,
-    RsvpAnswer, SearchScope, Surface, ViewMode,
+    ContactNameInput, ContactPatchInput, DavSectionInput, DraftsIntent, EventDrag, EventEdge,
+    EventEdit, FolderIntent, Intent, OutboxIntent, PeopleIntent, RecurrenceChange, RepeatEnd,
+    RepeatRule, RsvpAnswer, SearchScope, SettingsIntent, Surface, ThemeMode, ViewMode, WeekdayWire,
 };
 pub use reference::{
     AddressBookRef, CalendarRef, CardRef, EventRef, FolderRef, MessageRef, QueuedRef, RowRef,

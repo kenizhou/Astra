@@ -190,6 +190,7 @@ impl<P: Provider> App<P> {
                     self.rebuild_snapshot().await;
                 }
             }
+            Intent::Settings(_change) => return Err(AppError::NotYet),
         }
         Ok(())
     }
