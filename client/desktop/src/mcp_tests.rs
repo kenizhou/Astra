@@ -144,7 +144,9 @@ fn host(name: &str, ids: &[&str]) -> (crate::runtime::AppRuntime, Arc<McpHost>) 
 }
 
 /// Reads one newline-terminated response frame, bounded so a wedged host
-/// fails the test rather than hanging it.
+/// fails the test rather than hanging it. A fresh reader per call: no
+/// test pipelines frames, and a buffered-ahead second frame would be
+/// dropped by the reader this drops.
 async fn read_frame(reader: &mut (impl tokio::io::AsyncRead + Unpin)) -> serde_json::Value {
     use tokio::io::AsyncBufReadExt;
     let mut line = Vec::new();
