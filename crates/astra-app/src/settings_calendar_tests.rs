@@ -6,9 +6,9 @@
 
 use std::sync::{Arc, Mutex};
 
-use engine_api::{to_local, CalendarDateTime, Frequency, TimeZoneId};
+use engine_api::{to_local, CalendarDateTime, Frequency, Horizon, TimeZoneId};
 
-use crate::calendar_fakes::{local, utc, weekly_event, zoned_event, CalendarFake};
+use crate::calendar_fakes::{local, utc, weekly_event, zoned_event, CalendarFake, EventGate};
 use crate::protocol::{CalendarIntent, RepeatEnd, RepeatRule, SettingsIntent, WeekdayWire};
 use crate::reference::CalendarRef;
 use crate::settings_fakes::{settings_app, FakeAccountOps};
@@ -54,6 +54,14 @@ fn scratch(name: &str) -> std::path::PathBuf {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir
+}
+
+/// One `SetRange` intent, the window the watermark tests move.
+fn range(start: &str, days: u16) -> Intent {
+    Intent::Calendar(CalendarIntent::SetRange {
+        start: utc(start),
+        days,
+    })
 }
 
 #[tokio::test]
@@ -107,6 +115,142 @@ async fn a_set_zone_flows_into_the_now_line_and_the_floating_resolution() {
     assert!(
         surfaces.lock().unwrap().contains(&Surface::Calendar),
         "the zone change republished the calendar surface"
+    );
+}
+
+#[tokio::test]
+async fn a_zone_change_reexpands_the_whole_watermark_not_only_the_window() {
+    // Two disjoint windows: once the second range widens over the first, the
+    // watermark spans both. The engine's expansion removes every event's
+    // occurrence rows and rewrites only the span asked for, so a zone change
+    // that re-expanded over the current window alone would strand the other
+    // window while the watermark still claimed it: a later range inside the
+    // watermark skips its own widening and renders confidently empty.
+    let (app, _surfaces) = over(floating_weekly(), None);
+    app.dispatch(range("2026-10-12T00:00:00Z", 14))
+        .await
+        .unwrap();
+    app.dispatch(Intent::Calendar(CalendarIntent::Refresh))
+        .await
+        .unwrap();
+    assert!(
+        app.calendar()
+            .occurrences
+            .iter()
+            .any(|row| row.title == "Standup"),
+        "the first window renders before the change"
+    );
+    // A second, later window widens the watermark across both.
+    app.dispatch(range("2026-11-02T00:00:00Z", 14))
+        .await
+        .unwrap();
+
+    app.dispatch(Intent::Settings(SettingsIntent::SetZone {
+        zone: "Europe/Berlin".to_owned(),
+    }))
+    .await
+    .unwrap();
+
+    // Scroll back into the first window with nothing but the range itself:
+    // the occurrences must render under the new zone, which they only do if
+    // the re-expansion covered the watermark rather than the window.
+    app.dispatch(range("2026-10-12T00:00:00Z", 14))
+        .await
+        .unwrap();
+    let berlin = TimeZoneId::iana("Europe/Berlin").unwrap();
+    let row = app
+        .calendar()
+        .occurrences
+        .into_iter()
+        .find(|row| row.title == "Standup")
+        .expect("the first window still renders after the zone change");
+    assert_eq!(
+        to_local(row.start, &berlin).unwrap(),
+        local("2026-10-19T09:00:00"),
+        "the floating start resolves to the Berlin wall clock"
+    );
+}
+
+#[tokio::test]
+async fn a_zone_change_whose_reexpansion_is_busy_surfaces_the_row() {
+    // A sync gated inside the provider keeps the account's event scope
+    // leased, so the zone change's re-expansion answers Busy for it: the
+    // zone itself stands (it persisted) and the account's row says its
+    // stored occurrences still resolve through the old one.
+    let gate = EventGate::new();
+    let mut fake = floating_weekly();
+    fake.event_gate = Some(Arc::clone(&gate));
+    let (app, _surfaces) = over(fake, None);
+    app.dispatch(range("2026-10-12T00:00:00Z", 14))
+        .await
+        .unwrap();
+    app.dispatch(Intent::Calendar(CalendarIntent::Refresh))
+        .await
+        .unwrap();
+
+    gate.close();
+    let engine = Arc::clone(&app.engine);
+    let work = engine_api::AccountId::try_from("work").unwrap();
+    let handle = app.account_handle(&work).await.expect("work rides");
+    let sync = tokio::spawn(async move {
+        let provider = &handle.providers[0];
+        let horizon =
+            Horizon::new(utc("2026-10-12T00:00:00Z"), utc("2026-11-26T00:00:00Z")).unwrap();
+        let _ = engine
+            .sync_calendar(provider, &work, horizon, &TimeZoneId::utc())
+            .await;
+    });
+    gate.until_held().await;
+
+    app.dispatch(Intent::Settings(SettingsIntent::SetZone {
+        zone: "Europe/Berlin".to_owned(),
+    }))
+    .await
+    .unwrap();
+
+    assert_eq!(
+        app.settings().settings.zone,
+        "Europe/Berlin",
+        "the zone stands: it persisted"
+    );
+    assert_eq!(
+        app.settings().error,
+        None,
+        "the total write landed; the stranding belongs to the account's row"
+    );
+    let stranded_row = app
+        .settings()
+        .accounts
+        .into_iter()
+        .find(|row| row.account.as_str() == "work")
+        .expect("the work account has a row");
+    assert_eq!(
+        stranded_row.refresh_error,
+        Some(
+            "the diary could not be re-expanded under the new zone; set the zone again to retry"
+                .to_owned()
+        ),
+        "the row names the account whose refresh is owed"
+    );
+
+    // The state states the newest zone change: once the account settles, a
+    // zone change that re-expands clears it.
+    gate.release();
+    sync.await.unwrap();
+    app.dispatch(Intent::Settings(SettingsIntent::SetZone {
+        zone: "Europe/Berlin".to_owned(),
+    }))
+    .await
+    .unwrap();
+    let settled_row = app
+        .settings()
+        .accounts
+        .into_iter()
+        .find(|row| row.account.as_str() == "work")
+        .expect("the work account has a row");
+    assert_eq!(
+        settled_row.refresh_error, None,
+        "a re-expansion that lands clears it"
     );
 }
 

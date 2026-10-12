@@ -172,6 +172,44 @@ async fn a_failed_re_dial_keeps_the_old_legs_and_answers_on_the_row() {
 }
 
 #[tokio::test]
+async fn a_busy_account_saves_nothing_host_side() {
+    let (app, _surfaces, ops) = app();
+    // Hold the account's handle the way a mid-flight dispatch does: the
+    // strong count stays above one for as long as the test holds it.
+    let held = app
+        .account_handle(&AccountId::try_from("work").unwrap())
+        .await
+        .expect("the account stands");
+
+    save(&app, Some(both_origins())).await;
+
+    assert_eq!(
+        ops.stored_section("work"),
+        None,
+        "the refusal comes before the host's store moves"
+    );
+    assert!(
+        row(&app).dav.is_none(),
+        "the row echoes no section the host never stored"
+    );
+    assert_eq!(
+        row(&app).dav_error,
+        Some("the account is mid-flight; save it again once it settles".to_owned()),
+        "the row says why the save did not land"
+    );
+    drop(held);
+
+    // The save made again, settled, lands.
+    save(&app, Some(both_origins())).await;
+    assert_eq!(
+        ops.stored_section("work"),
+        Some("ada".to_owned()),
+        "the settled save lands"
+    );
+    assert_eq!(row(&app).dav_error, None);
+}
+
+#[tokio::test]
 async fn a_section_naming_no_origin_is_refused() {
     let (app, _surfaces, _ops) = app();
     save(

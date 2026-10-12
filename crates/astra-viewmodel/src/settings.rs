@@ -160,6 +160,12 @@ pub struct AccountSettingsRow {
     /// the save did not change it. Absent crosses no key.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dav_error: Option<String>,
+    /// Why the account's last zone change could not rewrite its stored
+    /// occurrences, when it could not: the zone stands, but this account's
+    /// diary still resolves through the one it was expanded under, and a
+    /// later zone change re-expands and clears it. Absent crosses no key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refresh_error: Option<String>,
 }
 
 /// An account's kind, as the row states it. Crosses as a snake_case word.

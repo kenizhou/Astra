@@ -12,7 +12,7 @@ use astra_viewmodel::SettingsError;
 use crate::calendar_fakes::CalendarFake;
 use crate::preferences::load_preferences;
 use crate::protocol::{DavSectionInput, SettingsIntent};
-use crate::reference::FolderRef;
+use crate::reference::{FolderRef, MessageRef};
 use crate::settings_fakes::{mail_half, settings_app, FakeAccountOps};
 use crate::{App, Intent, Surface};
 use engine_api::AccountId;
@@ -143,6 +143,44 @@ async fn remove_account_tears_down_every_named_half() {
     assert!(persisted.account_expanded("work"), "no shut tree remains");
     assert_eq!(persisted.selected_folder, None);
     assert_eq!(app.scope_for_test(), None, "the unified view stands");
+}
+
+#[tokio::test]
+async fn removing_the_account_clears_its_open_reading_and_row_sentences() {
+    let dir = scratch("open-reading");
+    let (app, _surfaces, ops) = two_accounts(&dir).await;
+    // The account holds a row sentence: a save the store refused.
+    ops.failing_dial("work", "the origin could not be reached");
+    app.dispatch(Intent::Settings(SettingsIntent::SetDav {
+        account: AccountId::try_from("work").unwrap(),
+        section: Some(section()),
+    }))
+    .await
+    .unwrap();
+    assert!(
+        !app.dav_errors_for_test().is_empty(),
+        "the row holds the refusal first"
+    );
+    // And an open message inside the account, once the mail half syncs its
+    // one invitation message.
+    app.dispatch(Intent::RefreshMail).await.unwrap();
+    app.dispatch(Intent::OpenMessage {
+        message: MessageRef::from_parts("work", "invite-1".to_owned()).unwrap(),
+    })
+    .await
+    .unwrap();
+    assert!(app.reading().is_some(), "the message is open");
+
+    remove_work(&app).await;
+
+    assert!(
+        app.reading().is_none(),
+        "the pane no longer names a message of a purged account"
+    );
+    assert!(
+        app.dav_errors_for_test().is_empty(),
+        "the row's sentence went with the row"
+    );
 }
 
 #[tokio::test]

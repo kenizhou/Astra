@@ -51,6 +51,10 @@ fn the_snapshot_crosses_its_full_shape_and_reads_back() {
                 dav_password_set: true,
             }),
             dav_error: Some("the re-dial could not reach the origin".to_owned()),
+            refresh_error: Some(
+                "the diary could not be re-expanded under the new zone; set the zone again to retry"
+                    .to_owned(),
+            ),
         }],
         about: AboutBlock {
             version: "0.1.0".to_owned(),
@@ -88,7 +92,8 @@ fn the_snapshot_crosses_its_full_shape_and_reads_back() {
                         "username": "ada@example.test",
                         "dav_password_set": true
                     },
-                    "dav_error": "the re-dial could not reach the origin"
+                    "dav_error": "the re-dial could not reach the origin",
+                    "refresh_error": "the diary could not be re-expanded under the new zone; set the zone again to retry"
                 }
             ],
             "about": {
@@ -192,6 +197,7 @@ fn a_row_s_dav_echo_never_carries_the_password_back() {
             dav_password_set: true,
         }),
         dav_error: None,
+        refresh_error: None,
     };
     let wire = serde_json::to_value(&row).expect("the row serialises");
     assert!(

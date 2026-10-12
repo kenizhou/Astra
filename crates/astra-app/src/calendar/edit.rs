@@ -359,10 +359,15 @@ fn describe_rule(rule: &RecurrenceRule) -> Option<RepeatRule> {
 /// trip, so a rule the editor writes can never differ from a rule the editor
 /// was allowed to edit.
 ///
-/// A rule that names no weekday anchors to the week boundary rather than to a
-/// day, so it carries `week_start` as its `WKST`; a rule that names its
-/// weekdays keeps the engine's own default, because its occurrences follow
-/// the named days and a week start would state nothing about them.
+/// A rule that names no weekday anchors to the week boundary rather than to
+/// a day, so it carries `week_start` as its `WKST`; a rule that names its
+/// weekdays keeps the engine's own default, because the editor's wire states
+/// no week start of its own. That default is no claim that the anchor never
+/// matters: on a weekly rule with an interval above one that names its days,
+/// the anchor decides which named days each interval holds. A stored rule so
+/// shaped stays safe through the [`rule_is_editable`] round trip, which
+/// refuses any rule this construction would rebuild differently, never
+/// through this stamp happening to match it.
 fn rebuild_rule(
     rule: &RepeatRule,
     week_start: engine_api::Weekday,

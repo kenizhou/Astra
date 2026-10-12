@@ -269,18 +269,6 @@ impl PreferencesState {
         self.prefs.view_mode
     }
 
-    /// Records the grouping and persists it. Returns whether anything changed, so a
-    /// host re-asserting the state it already has costs no disk write and no snapshot
-    /// rebuild.
-    pub(crate) fn set_view_mode(&mut self, mode: ViewMode) -> bool {
-        if self.prefs.view_mode == mode {
-            return false;
-        }
-        self.prefs.view_mode = mode;
-        self.persist();
-        true
-    }
-
     /// Whether `account`'s folder tree is open; `true` for an account nobody has shut.
     pub(crate) fn account_expanded(&self, account: &str) -> bool {
         self.prefs.account_expanded(account)

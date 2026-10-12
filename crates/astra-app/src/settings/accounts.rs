@@ -15,12 +15,15 @@
 //!   capability stay, the dialled leg appends after them, the append-after
 //!   rule the boot dials), and the contacts leg installs through
 //!   [`install_contacts`].
-//! - **The swap runs under the account set's write lock, and a busy handle
-//!   answers busy.** The lock excludes new readers, so the strong count of
-//!   an entry is stable under it: a count above one means a dispatch still
-//!   holds the old account across an engine call, the swap refuses with a
-//!   sentence on the row, and the old legs keep standing until the save is
-//!   made again.
+//! - **A busy handle answers busy, probed before the host's store moves.**
+//!   The account set's write lock excludes new readers, so the strong count
+//!   of an entry is stable under it: a count above one means a dispatch
+//!   still holds the old account across an engine call. The save probes
+//!   that liveness before the seam stores anything, so a mid-flight account
+//!   refuses with nothing host-side moved; a dispatch that starts after the
+//!   probe can still meet the swap's own gate under the write lock, where
+//!   the stored config already stands and the old legs keep standing until
+//!   the save is made again.
 //! - **A failed write keeps everything that stood.** The seam's `Err` lands
 //!   on the account's row as `dav_error` (or on the snapshot's error channel
 //!   for a removal); nothing installed, stored, or torn down moves.
@@ -41,6 +44,10 @@ use std::sync::Arc;
 
 use crate::protocol::DavSectionInput;
 use crate::{App, Scope};
+
+/// The sentence both busy gates answer with: the save's pre-check before
+/// the host's store moves, and the swap's own gate under the write lock.
+const MID_FLIGHT: &str = "the account is mid-flight; save it again once it settles";
 
 /// One configured account as the host's dial table describes it: the facts
 /// the settings rows render that the app's own account set cannot see.
@@ -137,6 +144,13 @@ impl<P: Provider> App<P> {
             self.rebuild_settings().await;
             return;
         }
+        // The liveness probe runs before the host's store moves, so a
+        // mid-flight account costs nothing host-side. The swap's own gate
+        // below stays for a dispatch that starts after this probe.
+        if self.account_mid_flight(&account).await {
+            self.answer_dav_failure(&account, MID_FLIGHT).await;
+            return;
+        }
         let clearing = section.is_none();
         match ops.store_dav(&account, section).await {
             Err(sentence) => {
@@ -165,6 +179,16 @@ impl<P: Provider> App<P> {
         }
     }
 
+    /// Whether a dispatch still holds the account across an engine call,
+    /// probed under the account set's write lock so the strong count is
+    /// stable the same way the swap's own gate reads it.
+    async fn account_mid_flight(&self, account: &AccountId) -> bool {
+        let accounts = self.accounts.write().await;
+        accounts
+            .iter()
+            .any(|held| held.id == *account && Arc::strong_count(held) > 1)
+    }
+
     /// Installs dialled `legs` on `account`: the calendar provider replaces
     /// the account's calendar leg, the contacts leg installs beside the mail
     /// providers. `Err` is the busy sentence the row shows; whatever stood,
@@ -179,7 +203,7 @@ impl<P: Provider> App<P> {
         // account across an engine call: the swap would tear a provider out
         // from under a live read, so it refuses and the save is made again.
         if Arc::strong_count(&accounts[at]) > 1 {
-            return Err("the account is mid-flight; save it again once it settles".to_owned());
+            return Err(MID_FLIGHT.to_owned());
         }
         let held = accounts.remove(at);
         let mut owned =
@@ -217,6 +241,25 @@ impl<P: Provider> App<P> {
         self.remove_contacts(&account);
         self.clear_people_write(&account);
         self.clear_account_calendar_state(&account);
+        // The open message pointed inside the account: the pane cannot
+        // render a message whose account is gone, so the reading clears
+        // with it.
+        if self
+            .open_reading
+            .lock()
+            .expect("open-reading mutex poisoned")
+            .as_ref()
+            .is_some_and(|open| open.account == account)
+        {
+            self.clear_reading();
+        }
+        // The account's row sentences go with the row, so a later re-add of
+        // the same account starts clean.
+        {
+            let mut state = self.settings_state.lock().expect("settings mutex poisoned");
+            state.dav_errors.remove(&account);
+            state.refresh_errors.remove(&account);
+        }
         self.forget_domains(
             &account,
             &[

@@ -26,8 +26,11 @@
 //!   newest total write refused or failed
 //!   ([`SettingsError`](astra_viewmodel::SettingsError)); the per-account
 //!   `dav_error` on a row names why that account's dav editor last refused
-//!   or failed, the one failure that belongs to an account rather than the
-//!   block. Both state the newest write, never the history.
+//!   or failed, and the per-account `refresh_error` names why that
+//!   account's last zone change could not rewrite its stored occurrences
+//!   (the zone stands; a later zone change retries and clears it), the two
+//!   failures that belong to an account rather than the block. All state
+//!   the newest write, never the history.
 //! - **The first day of the week lives web-side, carried by the settings
 //!   block.** The grids lay their weeks out in the host's renderer, and the
 //!   rows the calendar snapshot carries are the same either way, so the
@@ -65,6 +68,10 @@ pub(crate) struct SettingsState {
     /// failed re-dial, shown on the account's row. Absent for an account
     /// whose last dav write landed.
     pub(crate) dav_errors: BTreeMap<AccountId, String>,
+    /// The per-account re-expansion failures: the accounts whose last zone
+    /// change could not rewrite their stored occurrences, shown on the
+    /// account's row. Absent for an account whose re-expansion landed.
+    pub(crate) refresh_errors: BTreeMap<AccountId, String>,
     /// Why the newest settings write was refused or failed, when it was.
     /// `None` is the state of every write that landed.
     pub(crate) error: Option<SettingsError>,
@@ -93,6 +100,18 @@ impl<P: Provider> App<P> {
             .lock()
             .expect("account-ops mutex poisoned")
             .clone()
+    }
+
+    /// The accounts whose dav editor last refused, for the removal's test.
+    #[cfg(test)]
+    pub(crate) fn dav_errors_for_test(&self) -> Vec<AccountId> {
+        self.settings_state
+            .lock()
+            .expect("settings mutex poisoned")
+            .dav_errors
+            .keys()
+            .cloned()
+            .collect()
     }
 
     /// Routes one [`SettingsIntent`] to its handler. Every arm publishes the
@@ -163,9 +182,33 @@ impl<P: Provider> App<P> {
         // The calendar resolves through the zone, so it republishes beside
         // the settings block: the same change is a change to both surfaces.
         // The re-expansion comes first, because a floating event's stored
-        // instant is only correct for the zone it was expanded under.
-        self.reexpand_calendar().await;
+        // instant is only correct for the zone it was expanded under; the
+        // accounts whose re-expansion refused keep old-zone instants, so
+        // their rows say a retry is owed while the zone itself stands.
+        let stranded = self.reexpand_calendar().await;
+        self.answer_zone_reexpansion(&stranded).await;
         self.rebuild_calendar().await;
+    }
+
+    /// Records the zone change's per-account re-expansion outcomes and
+    /// republishes: the accounts whose re-expansion refused carry the
+    /// sentence, the rest clear, so the channel states the newest zone
+    /// change the way the others do. The zone itself stands, because it
+    /// persisted; this names the accounts whose stored occurrences still
+    /// resolve through the old one.
+    async fn answer_zone_reexpansion(&self, stranded: &[AccountId]) {
+        {
+            let mut state = self.settings_state.lock().expect("settings mutex poisoned");
+            state.refresh_errors.clear();
+            for account in stranded {
+                state.refresh_errors.insert(
+                    account.clone(),
+                    "the diary could not be re-expanded under the new zone; set the zone again to retry"
+                        .to_owned(),
+                );
+            }
+        }
+        self.rebuild_settings().await;
     }
 
     /// The horizon arm: the cold window may span a week to a year, the
@@ -181,15 +224,17 @@ impl<P: Provider> App<P> {
     }
 
     /// The view-mode path both intents share: the grouping is a persisted
-    /// setting and the mailbox list's own state, so one write resets the
-    /// list's window, rebuilds the list, and answers on the settings surface
-    /// beside it. The list intent's own arm delegates here.
+    /// setting and the mailbox list's own state, so one write rides the
+    /// shared settings tail (persist, then answer the persist's failure on
+    /// the snapshot), resets the list's window, rebuilds the list, and
+    /// answers on the settings surface beside it. The list intent's own arm
+    /// delegates here.
     pub(crate) async fn set_view_mode(&self, mode: ViewMode) {
         let save_failed = self
             .pane
             .lock()
             .expect("preferences mutex poisoned")
-            .set_view_mode(mode);
+            .set_setting(|prefs| prefs.view_mode = mode);
         self.reset_window();
         self.bump_generation();
         self.rebuild_snapshot().await;
@@ -226,6 +271,12 @@ impl<P: Provider> App<P> {
             .expect("settings mutex poisoned")
             .dav_errors
             .clone();
+        let refresh_errors = self
+            .settings_state
+            .lock()
+            .expect("settings mutex poisoned")
+            .refresh_errors
+            .clone();
         let accounts =
             self.account_handles()
                 .await
@@ -244,6 +295,7 @@ impl<P: Provider> App<P> {
                         kind: info.map_or(astra_viewmodel::AccountKind::ImapSmtp, |info| info.kind),
                         dav: info.and_then(|info| info.dav.clone()),
                         dav_error: dav_errors.get(&handle.id).cloned(),
+                        refresh_error: refresh_errors.get(&handle.id).cloned(),
                     }
                 })
                 .collect();

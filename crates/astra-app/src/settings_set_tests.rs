@@ -220,6 +220,11 @@ async fn the_settings_view_mode_publishes_the_settings_surface_and_the_list() {
     );
     assert_eq!(app.settings().settings.view_mode, ViewMode::Threaded);
     assert_eq!(app.mailbox_list().view_mode, ViewMode::Threaded);
+    assert_eq!(
+        app.settings().error,
+        None,
+        "a grouping change that landed answers no error"
+    );
 }
 
 #[tokio::test]
@@ -246,6 +251,11 @@ async fn the_list_s_view_mode_arm_delegates_to_the_same_path() {
     // settings surface beside them: one path serves both intents.
     assert_eq!(app.mailbox_list().view_mode, ViewMode::Threaded);
     assert_eq!(app.settings().settings.view_mode, ViewMode::Threaded);
+    assert_eq!(
+        app.settings().error,
+        None,
+        "the shared path answers the persist's failure, not the fact it changed"
+    );
     let signalled = surfaces.lock().unwrap().clone();
     assert!(signalled.contains(&Surface::MailboxList));
     assert!(signalled.contains(&Surface::Settings));

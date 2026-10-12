@@ -13,7 +13,7 @@ this row ports.
 | Mail | Flat and threaded message list with windowed paging | 🚧 | mail-calendar capabilities |
 | Calendar | Day, work week, and month grids with drag to create, move, resize | 🚧 | grids, agenda, and drag move ship; resize is the dialog's end edit and create is the dialog, not a grid gesture; the host dials the calendar leg at boot when the account carries a dav section; calendar.md |
 | Core | Reactive Rust to native binding, dispatch to immutable snapshots | 🚧 | |
-| Accounts | Settings accounts page lists every account, with per-service toggles, relinking, sign-in again, server editing, and removal | 🚧 | core side ships: rows with kinds and dialled legs, the dav section editor that re-dials and installs without a restart, and remove account; the toggles, relinking, and sign-in-again verbs stay absent; accounts.md |
+| Accounts | Settings accounts page lists every account, with per-service toggles, relinking, sign-in again, server editing, and removal | ⬜ | accounts.md |
 | Accounts | Outgoing name per account, asked once at connect, editable in settings, kept in step with the provider | ⬜ | sending.md |
 | Accounts | Untrusted server certificates shown with a fingerprint and accepted once per server; verification is never switched off | 🚧 | certificate-exceptions.md |
 | Accounts | Microsoft 365 accounts: browser OAuth sign-in (PKCE), mail read and actions, send, calendar read and write | ⬜ | |
@@ -26,7 +26,7 @@ this row ports.
 | Accounts | JMAP sign-in renewed in place, keeping mail, folders, and settings | ⬜ | jmap.md |
 | Accounts | Multi-account with unified inbox and account switcher | ⬜ | |
 | Mail | Unified mail as an All Accounts group in the folder pane, remembered across launches | ⬜ | folder-pane.md |
-| Accounts | Per-account credential storage with in-app account removal | 🚧 | storage ships with the host account store; removal lands over the same seam, taking the stored config, the legs, and the account-scoped state |
+| Accounts | Per-account credential storage with in-app account removal | ⬜ | |
 | Accounts | Account list offered on the next device from a vendor account: address and servers, never a password | ⬜ | onboarding.md |
 | Accounts | Vendor account sign-in, creation, management, and deletion in its own settings category | ⬜ | allodia_license/entitlement.md |
 | Accounts | Subscription view: charges, renewal, retried payment, multiple-biller warning, cancel and restart under direct billing | ⬜ | allodia_license/purchasing.md |
@@ -72,7 +72,7 @@ this row ports.
 | Calendar | Write-status feedback: spinner while saving, warning on unconfirmed, retry | 🚧 | writing and failed-with-retry states settle per dispatch; calendar.md |
 | Calendar | All-day and multi-day banners with a per-day overflow count that expands | ⬜ | the all-day lane ships; the banner shape does not |
 | Calendar | Calendar manager: per-calendar visibility and colour override, persisted | 🚧 | visibility toggles ship; no colour override, nothing persisted; calendar.md |
-| Settings | Display settings: first day of week, 12 or 24-hour clock, light or dark appearance, calendar horizon | 🚧 | the core persists every field and the calendar consumes the zone (with re-expansion), the horizon, and the create path week start; the display zone round trip and the web pickers land with this slice screen |
+| Settings | Display settings: first day of week, 12 or 24-hour clock, light or dark appearance, calendar horizon | ⬜ | |
 | Calendar | The shape and horizon you left the calendar in, restored on launch | ⬜ | |
 | Calendar | The diary on screen from the store at launch, filled without opening it, there offline | ⬜ | |
 | Calendar | Calendar refreshes periodically while the app stays open | ⬜ | |

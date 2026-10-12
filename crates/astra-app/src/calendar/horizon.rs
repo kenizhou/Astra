@@ -14,7 +14,7 @@
 //! setting the user changes moves the calendar with no restart and no code
 //! path of its own: the reads here are the whole consumption.
 
-use engine_api::{Horizon, Provider, TimeZoneId, UtcDateTime};
+use engine_api::{AccountId, Horizon, Provider, TimeZoneId, UtcDateTime};
 
 use crate::calendar::now_utc;
 use crate::App;
@@ -126,23 +126,35 @@ impl<P: Provider> App<P> {
         widened
     }
 
-    /// Re-expands every account's stored events over the current window
-    /// under the standing display zone: the recovery a zone change performs,
-    /// because a floating event's stored instant is only correct for the
-    /// zone it was expanded under and a zone change without a re-expansion
-    /// silently shifts every floating event by the offset between the two.
-    /// Expansion re-derives every stored event on every call, which is
-    /// exactly what the change wants and why nothing else calls it this
-    /// eagerly.
-    pub(crate) async fn reexpand_calendar(&self) {
-        let window = self.calendar_inputs().window;
+    /// Re-expands every account's stored events over the full span the app
+    /// has expanded under the standing display zone, answering the accounts
+    /// whose re-expansion refused or failed: the recovery a zone change
+    /// performs, because a floating event's stored instant is only correct
+    /// for the zone it was expanded under and a zone change without a
+    /// re-expansion silently shifts every floating event by the offset
+    /// between the two.
+    ///
+    /// The span is the watermark (or the default window when none stands),
+    /// the same span a refresh syncs, never the current window alone: the
+    /// engine's expansion removes every event's occurrence rows and
+    /// rewrites only the span asked for, so a re-expansion over the window
+    /// would strand every other span the watermark covers while the
+    /// watermark still claimed it, and a later range inside it skips its
+    /// own widening and renders confidently empty. Expansion re-derives
+    /// every stored event on every call, which is exactly what the change
+    /// wants and why nothing else calls it this eagerly.
+    pub(crate) async fn reexpand_calendar(&self) -> Vec<AccountId> {
+        let span = self.sync_horizon();
         let zone = self.display_zone();
+        let mut stranded = Vec::new();
         for handle in self.account_handles().await {
-            if let Err(err) = self.engine.expand_horizon(&handle.id, window, &zone).await {
+            if let Err(err) = self.engine.expand_horizon(&handle.id, span, &zone).await {
                 let at = self.account_ordinal(&handle.id).await;
                 log::warn!("calendar[a{at}]: the zone change could not re-expand: {err}");
+                stranded.push(handle.id.clone());
             }
         }
+        stranded
     }
 
     /// The horizon a refresh's sync covers: the full watermark when one stands
