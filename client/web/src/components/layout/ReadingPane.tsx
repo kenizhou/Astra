@@ -1,18 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The reading pane: the right-hand column of the shell. Nothing open draws
-// the empty state with the compose actions standing disabled; a pulled
-// snapshot draws its header, the invitation card when the message is a
-// scheduling one, its AI replies surfaces (the smart replies strip, the
-// summarise block, and the translate block, all keyed to the open message
-// and standing absent with nothing to show), its body (the sandboxed HTML,
-// the plain fallback, or a no-body note), and its attachment rows, with the
-// compose actions dispatching the family for the open message and the close
-// button crossing back as close_reading.
+// the empty state; a pulled snapshot draws its header, the invitation card
+// when the message is a scheduling one, its AI replies surfaces (the smart
+// replies strip, the summarise block, and the translate block, all keyed to
+// the open message and standing absent with nothing to show), its body (the
+// sandboxed HTML, the plain fallback, or a no-body note), and its
+// attachment rows, with the close button crossing back as close_reading.
+// The compose actions live on the command ribbon, their single home.
 
 import { AttachmentList } from '@/components/reading-pane/AttachmentList';
 import { InvitationCard } from '@/components/reading-pane/InvitationCard';
 import { MessageHtml } from '@/components/reading-pane/MessageHtml';
-import { ReadingActions } from '@/components/reading-pane/ReadingActions';
 import { ReadingHeader } from '@/components/reading-pane/ReadingHeader';
 import { SmartReplies } from '@/components/reading-pane/SmartReplies';
 import { SummaryBlock } from '@/components/reading-pane/SummaryBlock';
@@ -32,9 +30,6 @@ export function ReadingPane() {
         aria-label="Reading pane"
         className="flex h-full w-full flex-col bg-background"
       >
-        <div className="flex h-[var(--pane-header-h)] shrink-0 items-center border-b border-border-subtle bg-surface px-3">
-          <ReadingActions message={null} />
-        </div>
         <div className="flex flex-1 flex-col items-center justify-center gap-3 p-4">
           <span className="flex h-12 w-12 items-center justify-center rounded-full bg-primary-muted text-primary">
             <MailIcon size={24} />
@@ -50,8 +45,7 @@ export function ReadingPane() {
       aria-label="Reading pane"
       className="flex h-full w-full flex-col overflow-hidden bg-background"
     >
-      <div className="flex h-[var(--pane-header-h)] shrink-0 items-center justify-between gap-2 border-b border-border-subtle bg-surface px-3">
-        <ReadingActions message={snapshot.message} />
+      <div className="flex h-[var(--pane-header-h)] shrink-0 items-center justify-end gap-2 border-b border-border-subtle bg-surface px-3">
         <button
           type="button"
           aria-label="Close reading pane"

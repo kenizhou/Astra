@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The shell's composer and outbox wiring: the New message action opens the
 // composer pane with the first account as its From, stays inert without an
-// account, the app start resume pulls the stored draft into the pane when the
-// host has one, a landed compose request opens the pane hydrated, and the
-// tool rail's outbox toggle opens the outbox panel. The settings screen
-// rides above the shell from the title bar's gear, through the categories,
-// down to the accounts page and About.
+// account, the app start resume pulls the stored draft into the pane when
+// the host has one, a landed compose request opens the pane hydrated, and
+// the tool rail's outbox toggle opens the outbox panel. The rail's agent
+// toggle docks the agent panel as the mail row's right column, gone off the
+// mail view. The settings screen rides above the shell from the title
+// bar's gear, through the categories, down to the accounts page and About.
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -31,12 +32,25 @@ vi.mock('@/events/surfaceEvents', async (importOriginal) => ({
   isTauri: true,
 }));
 
+const agent = vi.hoisted(() => ({
+  agentStatus: vi.fn(),
+  agentPrompt: vi.fn(),
+  agentAbort: vi.fn(),
+  permissionResponse: vi.fn(),
+}));
+
+vi.mock('@/services/agent', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  ...agent,
+}));
+
 import { AppShell } from './AppShell';
 import type { ComposeRequestSnapshot, ResumeView } from '@/services/ipc';
 import { useAccountStore } from '@/stores/accountStore';
 import { useComposeRequestStore } from '@/stores/composeRequestStore';
 import { useSendingStore } from '@/stores/sendingStore';
 import { useUiStore } from '@/stores/uiStore';
+import { useAgentStore } from '@/features/agent/agentStore';
 import { useComposerStore } from '@/features/composer/composerStore';
 import { documentToEditor } from '@/features/composer/documentWire';
 import { useSendResultStore } from '@/features/outbox/sendResult';
@@ -80,9 +94,16 @@ beforeEach(() => {
   useComposeRequestStore.setState({ snapshot: null });
   useSendingStore.getState().applySnapshot({ rows: [] });
   useUiStore.getState().setOutboxOpen(false);
+  useUiStore.getState().setAgentOpen(false);
   useUiStore.getState().setFolderDrawerOpen(false);
   useSendResultStore.getState().dismiss();
   useSendResultStore.setState({ settled: [], answered: [] });
+  agent.agentStatus.mockReset();
+  agent.agentStatus.mockResolvedValue({ state: 'down', model: null });
+  agent.agentPrompt.mockReset();
+  agent.agentAbort.mockReset();
+  agent.permissionResponse.mockReset();
+  useAgentStore.getState().reset();
 });
 
 afterEach(cleanup);
@@ -270,6 +291,45 @@ describe('the shell settings screen', () => {
     expect((screen.getByLabelText('Username') as HTMLInputElement).value).toBe(
       'ada@example.test',
     );
+  });
+});
+
+describe('the shell agent dock', () => {
+  it('docks the agent panel in the mail row from the rail toggle', () => {
+    render(<AppShell />);
+
+    expect(screen.queryByRole('region', { name: 'Agent' })).toBeNull();
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Agent' }));
+    });
+
+    expect(screen.getByRole('region', { name: 'Agent' })).toBeTruthy();
+    expect(agent.agentStatus).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Close agent' }));
+    });
+    expect(screen.queryByRole('region', { name: 'Agent' })).toBeNull();
+  });
+
+  it('leaves the dock behind off the mail view', () => {
+    render(<AppShell />);
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Agent' }));
+    });
+    expect(screen.getByRole('region', { name: 'Agent' })).toBeTruthy();
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Calendar' }));
+    });
+    expect(screen.queryByRole('region', { name: 'Agent' })).toBeNull();
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Mail' }));
+    });
+    expect(screen.getByRole('region', { name: 'Agent' })).toBeTruthy();
   });
 });
 

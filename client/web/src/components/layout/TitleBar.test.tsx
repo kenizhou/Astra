@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The double-click maximise is scoped to the drag regions: a double click on
-// the buttons or the search box rides the bubble to the header, so the
-// handler lives on the regions alone and a control can never net an extra
-// toggle. The search box itself: typing debounces the query across, Escape
-// clears it at once, the scope dropdown narrows the live search, and the
-// field echoes the query the snapshot's search state carries. The settings
-// entry opens the modal, and the theme button cycles the override through
-// the intent, so the persisted block stays the one truth.
+// the buttons or the island rides the bubble to the header, so the handler
+// lives on the regions alone and a control can never net an extra toggle.
+// The island itself: a click or Ctrl+K opens it into the search box, typing
+// debounces the query across, Escape clears a typed query at once and folds
+// an empty one, Enter submits without the pause and keeps the query in the
+// session's history, a history pick runs it again, and the scope dropdown
+// narrows the live search. The trailing dot is the agent's presence and
+// opens the agent panel. The settings entry opens the modal, and the theme
+// button cycles the override through the intent, so the persisted block
+// stays the one truth.
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -34,15 +37,27 @@ vi.mock('@/services/ipc', async (importOriginal) => ({
 }));
 
 import { TitleBar } from './TitleBar';
+import { useAgentStore } from '@/features/agent/agentStore';
 import { useListStore } from '@/stores/listStore';
+import { useSearchHistoryStore } from '@/stores/searchHistoryStore';
 import { useUiStore } from '@/stores/uiStore';
 import type { SearchState } from '@/services/surfaces';
+
+/** Opens the island so its search field and scope dropdown stand. */
+function expandIsland(): void {
+  const pill = screen.queryByRole('button', { name: 'Search mail' });
+  if (pill !== null) {
+    fireEvent.click(pill);
+  }
+}
 
 beforeEach(() => {
   windowApi.toggleMaximize.mockClear();
   ipc.dispatch.mockReset();
-  useUiStore.setState({ themeMode: 'light' });
+  useUiStore.setState({ themeMode: 'light', agentOpen: false });
   useListStore.setState({ search: null });
+  useAgentStore.getState().reset();
+  useSearchHistoryStore.getState().clear();
 });
 
 afterEach(() => {
@@ -64,6 +79,11 @@ describe('the title bar double-click maximise', () => {
     fireEvent.doubleClick(screen.getByRole('button', { name: 'Minimise' }));
     fireEvent.doubleClick(screen.getByRole('button', { name: 'Maximise' }));
     fireEvent.doubleClick(screen.getByRole('button', { name: 'Close window' }));
+    fireEvent.doubleClick(screen.getByRole('button', { name: 'Open agent panel' }));
+    fireEvent.doubleClick(screen.getByRole('button', { name: 'File' }));
+    fireEvent.doubleClick(screen.getByLabelText('Search mail'));
+
+    expandIsland();
     fireEvent.doubleClick(screen.getByLabelText('Search mail'));
     fireEvent.doubleClick(screen.getByLabelText('Search scope'));
 
@@ -72,10 +92,10 @@ describe('the title bar double-click maximise', () => {
     expect(windowApi.toggleMaximize).not.toHaveBeenCalled();
   });
 
-  it('keeps toggling maximise from the drag regions beside the search box', async () => {
+  it('keeps toggling maximise from the drag regions beside the island', async () => {
     const { container } = render(<TitleBar />);
 
-    // The box sits between two drag regions; both still answer for it.
+    // The island sits between two drag regions; both still answer for it.
     const regions = container.querySelectorAll('div[data-tauri-drag-region]');
     expect(regions).toHaveLength(2);
     fireEvent.doubleClick(regions[0] as HTMLElement);
@@ -137,7 +157,93 @@ describe('the title bar theme override cycle', () => {
   });
 });
 
-describe('the title bar search box', () => {
+describe('the ambient island', () => {
+  it('opens on Ctrl+K and hands the field the focus', () => {
+    render(<TitleBar />);
+
+    fireEvent.keyDown(document, { key: 'k', ctrlKey: true });
+
+    expect(document.activeElement).toBe(screen.getByLabelText('Search mail'));
+  });
+
+  it('ignores a Ctrl+K another handler already claimed', () => {
+    render(<TitleBar />);
+
+    const event = new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, cancelable: true });
+    event.preventDefault();
+    document.dispatchEvent(event);
+
+    expect(screen.queryByLabelText('Search scope')).toBeNull();
+  });
+
+  it('folds back to the pill on Escape over an empty field', () => {
+    render(<TitleBar />);
+    expandIsland();
+
+    fireEvent.keyDown(screen.getByLabelText('Search mail'), { key: 'Escape' });
+
+    expect(screen.queryByLabelText('Search scope')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Search mail' })).toBeTruthy();
+  });
+
+  it('keeps a submitted query in the session history and runs a pick again', () => {
+    render(<TitleBar />);
+    expandIsland();
+
+    fireEvent.change(screen.getByLabelText('Search mail'), { target: { value: 'from:ada' } });
+    fireEvent.keyDown(screen.getByLabelText('Search mail'), { key: 'Enter' });
+
+    expect(ipc.dispatch).toHaveBeenCalledWith({ search: { query: 'from:ada' } });
+    expect(useSearchHistoryStore.getState().queries).toEqual(['from:ada']);
+
+    // Clearing the field drops the history down; a pick re-runs the search.
+    fireEvent.keyDown(screen.getByLabelText('Search mail'), { key: 'Escape' });
+    ipc.dispatch.mockClear();
+    fireEvent.click(screen.getByRole('option', { name: 'from:ada' }));
+
+    expect(ipc.dispatch).toHaveBeenCalledWith({ search: { query: 'from:ada' } });
+    expect((screen.getByLabelText('Search mail') as HTMLInputElement).value).toBe('from:ada');
+  });
+
+  it('shows no history dropdown until a query has been submitted', () => {
+    render(<TitleBar />);
+    expandIsland();
+
+    expect(screen.queryByRole('listbox')).toBeNull();
+  });
+
+  it('maps the agent state to the presence dot in rising attention', () => {
+    render(<TitleBar />);
+    expect(screen.getByRole('button', { name: 'Open agent panel' })).toBeTruthy();
+
+    act(() => {
+      useAgentStore.setState({ turn: 'turn-1' });
+    });
+    expect(screen.getByRole('button', { name: 'Agent working; open agent panel' })).toBeTruthy();
+
+    act(() => {
+      useAgentStore.getState().addApproval({
+        id: 'ap-1',
+        tool_call_id: 'tc-1',
+        tool: 'mail.send',
+        level: 'send',
+        args: {},
+      });
+    });
+    expect(screen.getByRole('button', { name: 'Approval pending; open agent panel' })).toBeTruthy();
+  });
+
+  it('opens the agent panel from the dot without opening the search', () => {
+    render(<TitleBar />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open agent panel' }));
+
+    expect(useUiStore.getState().agentOpen).toBe(true);
+    expect(screen.queryByLabelText('Search scope')).toBeNull();
+  });
+});
+
+describe('the island search box', () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });
@@ -148,6 +254,7 @@ describe('the title bar search box', () => {
 
   it('dispatches the typed query once 500 ms of quiet have passed', () => {
     render(<TitleBar />);
+    expandIsland();
 
     fireEvent.change(screen.getByLabelText('Search mail'), {
       target: { value: 'from:ada monitor' },
@@ -163,6 +270,7 @@ describe('the title bar search box', () => {
 
   it('restarts the quiet window on every keystroke', () => {
     render(<TitleBar />);
+    expandIsland();
 
     fireEvent.change(screen.getByLabelText('Search mail'), { target: { value: 'm' } });
     vi.advanceTimersByTime(300);
@@ -177,6 +285,7 @@ describe('the title bar search box', () => {
 
   it('clears the search at once on Escape and cancels the pending query', () => {
     render(<TitleBar />);
+    expandIsland();
 
     fireEvent.change(screen.getByLabelText('Search mail'), { target: { value: 'monitor' } });
     fireEvent.keyDown(screen.getByLabelText('Search mail'), { key: 'Escape' });
@@ -191,6 +300,7 @@ describe('the title bar search box', () => {
 
   it('dispatches set_search_scope from the dropdown without a debounce', () => {
     render(<TitleBar />);
+    expandIsland();
 
     fireEvent.change(screen.getByLabelText('Search scope'), {
       target: { value: 'current_folder' },

@@ -139,6 +139,16 @@ describe('the settings screen', () => {
     await waitFor(() => expect(useSettingsStore.getState().about.version).toBe('0.1.0'));
   });
 
+  it('opens on the category a caller asked for and spends the ask', async () => {
+    useSettingsStore.getState().requestCategory('about');
+    render(<SettingsScreen />);
+
+    await waitFor(() =>
+      expect(screen.getByLabelText('Settings detail').textContent).toContain('0.1.0'),
+    );
+    expect(useSettingsStore.getState().requestedCategory).toBeNull();
+  });
+
   it('keeps rendering when the pull refuses', async () => {
     ipc.settings.mockRejectedValue(new Error('the pull refused'));
     const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);

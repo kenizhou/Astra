@@ -9,12 +9,14 @@
 // pane locally; Close hands the whole current draft over as a final save
 // that forgets the composition, then closes the pane too; every close
 // dismisses the request the composition came from. Send submits the current
-// document to the durable outbox; an accepted send clears the stored draft
+// document to the durable outbox through the store's one submit path (the
+// ribbon's Send rides the same); an accepted send clears the stored draft
 // and closes, a refused one keeps the pane open with its words and says
 // why, and neither its error nor its in-flight submit outlives its own
-// composition. The session's state itself lives in composerStore. The
-// toolbar carries the snippet picker, whose insert places the chosen body
-// at the editor's current selection.
+// composition. The session's state itself lives in composerStore, which
+// also holds the live editor handle the ribbon's snippet picker inserts
+// through. The pane's own toolbar carries the same picker, placing the
+// chosen body at the editor's current selection.
 
 import { useEffect, useRef, useState } from 'react';
 import type { Editor as CoreEditor } from '@tiptap/core';
@@ -24,7 +26,6 @@ import {
   draftResume,
   intents,
   type CompositionId,
-  type Intent,
 } from '@/services/ipc';
 import { isTauri } from '@/events/surfaceEvents';
 import { useAccountStore } from '@/stores/accountStore';
@@ -33,8 +34,14 @@ import { useDraftStore } from '@/stores/draftStore';
 import { ComposerFields } from './ComposerFields';
 import { Editor, insertAtSelection } from './Editor';
 import { SnippetPicker } from './SnippetPicker';
-import { fingerprintOf, mintCompositionId, opensInBody, useComposerStore, type CompositionRequest } from './composerStore';
-import { editorToDocument, type EditorDocument } from './documentWire';
+import {
+  fingerprintOf,
+  mintCompositionId,
+  opensInBody,
+  registerComposerEditor,
+  useComposerStore,
+} from './composerStore';
+import { editorToDocument } from './documentWire';
 import { useAutosave } from './useAutosave';
 
 /**
@@ -95,7 +102,7 @@ export function NewMessageAction({ disabled }: { disabled: boolean }) {
 }
 
 /** The save badge: the status surface's word for this composition alone. */
-function SaveBadge({ composition }: { composition: CompositionId }) {
+export function SaveBadge({ composition }: { composition: CompositionId }) {
   const snapshot = useDraftStore((s) => s.snapshot);
   if (snapshot === null || snapshot.composition !== composition) {
     return null;
@@ -105,68 +112,6 @@ function SaveBadge({ composition }: { composition: CompositionId }) {
   }
   const time = new Date(snapshot.saved_at).toISOString().slice(11, 16);
   return <span className="text-xs text-muted-foreground">{`Saved ${time} UTC`}</span>;
-}
-
-/** A refused send in words the pane can show, whatever the host handed back. */
-function sendErrorMessage(err: unknown): string {
-  if (err instanceof Error) {
-    return err.message;
-  }
-  if (typeof err === 'string') {
-    return err;
-  }
-  return 'The message was not sent';
-}
-
-/** A reply whose original arrived with no Message-ID: nothing to thread under. */
-const REPLY_WITHOUT_ORIGIN = 'The original message has no Message-ID to reply under';
-
-/**
- * The submit intent the composition's origin calls for, read at click time.
- * A plain composition sends as a fresh mail; one a request opened sends
- * through its own threaded submit, the reply under its original, the forward
- * answering no one. The threaded wires carry no bcc and the forward's no cc
- * either, so those fields are the plain send's alone.
- */
-function submitIntent(state: {
-  request: CompositionRequest | null;
-  from: string;
-  to: string;
-  cc: string;
-  bcc: string;
-  subject: string;
-  editor: EditorDocument;
-}): Intent {
-  const document = editorToDocument(state.editor);
-  if (state.request === null) {
-    return intents.submitRichMail({
-      from: state.from,
-      to: state.to,
-      cc: state.cc,
-      bcc: state.bcc,
-      subject: state.subject,
-      document,
-      blobs: [],
-    });
-  }
-  if (state.request.kind === 'forward') {
-    return intents.submitRichForward({
-      from: state.from,
-      to: state.to,
-      subject: state.subject,
-      document,
-      blobs: [],
-    });
-  }
-  return intents.submitRichReply({
-    from: state.from,
-    to: state.to,
-    cc: state.cc,
-    in_reply_to: state.request.inReplyTo ?? '',
-    subject: state.subject,
-    document,
-    blobs: [],
-  });
 }
 
 export function ComposerPane() {
@@ -179,6 +124,8 @@ export function ComposerPane() {
   const subject = useComposerStore((s) => s.subject);
   const initialContent = useComposerStore((s) => s.editor.content);
   const request = useComposerStore((s) => s.request);
+  const sending = useComposerStore((s) => s.sending);
+  const sendError = useComposerStore((s) => s.sendError);
   // A field's visibility is derived from its data: a toggle the user pressed
   // opens it, and a value the draft carries keeps it open, so a resumed
   // draft never hides the recipients it came with. The kind the composition
@@ -190,17 +137,10 @@ export function ComposerPane() {
   const [bccToggled, setBccToggled] = useState(false);
   const ccShown = ccOffered && (ccToggled || cc !== '');
   const bccShown = bccOffered && (bccToggled || bcc !== '');
-  // The send's own state, local to the pane: an in-flight submit disarms its
-  // button so one gesture cannot queue two sends, and a refused one says why.
-  const [sending, setSending] = useState(false);
-  const [sendError, setSendError] = useState<string | null>(null);
-  // The send's epoch: each composition's submits settle only against
-  // themselves, so one left in flight when the pane moved on can neither
-  // close the next composition nor stick its error under it.
-  const sendEpoch = useRef(0);
-  // The live editor instance, handed over by the editor itself: the picker's
-  // insert places its snippet's body at whatever selection now stands, and
-  // the opening caret lands in the body through it.
+  // The live editor instance, handed over by the editor itself and registered
+  // for the ribbon's inserts: the picker's insert places its snippet's body
+  // at whatever selection now stands, and the opening caret lands in the
+  // body through it.
   const editorRef = useRef<CoreEditor | null>(null);
   // The To field's input, handed over by the recipient field: the opening
   // caret lands in it on a new message.
@@ -241,15 +181,9 @@ export function ComposerPane() {
     return useComposerStore.subscribe(() => autosave.noteEdit());
   }, [open, autosave]);
 
-  // A composition inherits nothing from the one before it: the pane's own
-  // state resets on the new, close, and hydrate paths, and so does the
-  // send's error line and in-flight flag, with the epoch moved past
-  // whatever was still in flight.
-  useEffect(() => {
-    sendEpoch.current += 1;
-    setSending(false);
-    setSendError(null);
-  }, [composition]);
+  // A composition inherits nothing from the one before it: the opening paths
+  // reset the whole store, send state included, and the pane's own local
+  // state moves with the composition id.
 
   // The opening caret goes where the work starts, decided by the one
   // predicate: in the body when the composer was already addressed, in To
@@ -304,49 +238,6 @@ export function ComposerPane() {
     useComposerStore.getState().closePane();
   };
 
-  const send = (): void => {
-    // The submit reads the pane's state at click time, so the document is
-    // the one on screen: no flush window stands between the words and the
-    // queue. A blank To would be refused before the queue with nothing
-    // published, so the button never offers it. A reply whose original
-    // carried no Message-ID is refused here too: the core would reject the
-    // blank threading header after the queue, a dead end with the words
-    // already spent, so the pane says it and keeps them.
-    const state = useComposerStore.getState();
-    if (state.to.trim() === '') {
-      return;
-    }
-    if (
-      state.request !== null &&
-      state.request.kind !== 'forward' &&
-      state.request.inReplyTo === null
-    ) {
-      setSendError(REPLY_WITHOUT_ORIGIN);
-      return;
-    }
-    setSendError(null);
-    setSending(true);
-    const run = ++sendEpoch.current;
-    void dispatch(submitIntent(state))
-      .then(() => {
-        if (sendEpoch.current !== run) {
-          // The composition this send belonged to is gone; its settlement
-          // must not touch whatever the pane shows now.
-          return;
-        }
-        // The submit carries no composition id, so the stored draft the
-        // autosave left behind goes with an explicit discard.
-        void dispatch(intents.discardDraft(composition));
-        useComposerStore.getState().closePane();
-      })
-      .catch((err: unknown) => {
-        if (sendEpoch.current !== run) {
-          return;
-        }
-        setSending(false);
-        setSendError(sendErrorMessage(err));
-      });
-  };
   const sendGated = to.trim() === '';
 
   return (
@@ -367,7 +258,7 @@ export function ComposerPane() {
           />
           <button
             type="button"
-            onClick={send}
+            onClick={() => useComposerStore.getState().submit()}
             disabled={sendGated || sending}
             title={sendGated ? 'Add a recipient first' : 'Send'}
             className="rounded-[var(--radius-xs)] bg-primary px-2 py-1 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-50"
@@ -421,6 +312,7 @@ export function ComposerPane() {
         onChange={(doc) => useComposerStore.getState().setEditorContent(doc.content ?? [])}
         onReady={(editor) => {
           editorRef.current = editor;
+          registerComposerEditor(editor);
         }}
       />
     </section>

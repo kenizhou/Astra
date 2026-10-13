@@ -76,4 +76,12 @@ describe('the settings store apply', () => {
     );
     expect(useUiStore.getState().themeMode).toBe('follow_host');
   });
+
+  it('holds a requested category until the screen spends it', () => {
+    useSettingsStore.getState().requestCategory('about');
+    expect(useSettingsStore.getState().requestedCategory).toBe('about');
+
+    useSettingsStore.getState().requestCategory(null);
+    expect(useSettingsStore.getState().requestedCategory).toBeNull();
+  });
 });

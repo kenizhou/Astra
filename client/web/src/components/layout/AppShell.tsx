@@ -1,18 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The desktop shell: the frameless title bar over a content row, the status
-// bar under it, all coloured through the theme tokens. The content row is the
-// tool rail beside a padded surface holding the active view's cards: the mail
-// view is a resizable panel row (folder pane, message list, reading pane, and
-// the composer pane when a composition is open), the calendar and people
+// The desktop shell: the frameless title bar over the command ribbon and a
+// content row, the status bar under it, all coloured through the theme
+// tokens. The ribbon stands in the mail view only. The content row is the
+// tool rail beside a padded surface holding the active view's cards: the
+// mail view is a resizable panel row (folder pane, message list, reading
+// pane, the composer pane when a composition is open, and the agent panel
+// docked right when the rail's toggle opens it), the calendar and people
 // views fill one card each. Under the compact breakpoint the folder panel
-// leaves the row and rides the drawer the rail opens. The New message action
-// floats over the panes' corner, the app start resume opens the stored draft
-// into the composer, a landed compose request opens the composer hydrated
-// from it, the outbox, agent, and AI documents panels ride above the status
-// bar's corner when the rail's toggles open them, the send-result toast
-// says when a queued send has gone out, the settings screen rides above the
-// shell when the title bar's gear opens it, and the account setup flow rides
-// above everything when it is open.
+// leaves the row and rides the drawer the rail opens. The New message
+// action floats over the panes' corner, the app start resume opens the
+// stored draft into the composer, a landed compose request opens the
+// composer hydrated from it, the outbox and AI documents panels ride above
+// the status bar's corner when the rail's toggles open them, the
+// send-result toast says when a queued send has gone out, the settings
+// screen rides above the shell when the title bar's gear opens it, and the
+// account setup flow rides above everything when it is open.
 
 import { Group, Panel, Separator } from 'react-resizable-panels';
 
@@ -31,6 +33,7 @@ import { FolderPane } from '@/components/folder-pane/FolderPane';
 import { useIsCompact } from '@/hooks/useWindowSize';
 import { useAccountStore } from '@/stores/accountStore';
 import { useUiStore } from '@/stores/uiStore';
+import { CommandRibbon } from '@/components/ribbon/CommandRibbon';
 import { FolderPaneDrawer } from './FolderPaneDrawer';
 import { MessageList } from './MessageList';
 import { ReadingPane } from './ReadingPane';
@@ -55,40 +58,60 @@ function VDivider() {
   );
 }
 
-/** The mail view: a resizable row of folder tree, list, reading, composer. */
+/** The mail view: a resizable row of folder tree, list, reading, composer,
+ *  and the docked agent column. Every conditional panel joins the Group key,
+ *  so the layout remounts cleanly when one arrives or leaves. The default
+ *  sizes sum to one hundred in each combination. */
 function MailRow({ compact }: { compact: boolean }) {
   const composerOpen = useComposerStore((s) => s.open && s.composition !== null);
+  const agentOpen = useUiStore((s) => s.agentOpen);
 
   return (
     <Group
-      key={`${composerOpen ? 'composing' : 'reading'}-${compact ? 'compact' : 'wide'}`}
+      key={`${composerOpen ? 'composing' : 'reading'}-${agentOpen ? 'agent' : 'solo'}-${compact ? 'compact' : 'wide'}`}
       orientation="horizontal"
       className="h-full"
     >
       {!compact && (
-        <Panel id="folder-pane" defaultSize={pct(18)} minSize={pct(12)}>
+        <Panel id="folder-pane" defaultSize={pct(composerOpen && agentOpen ? 13 : 18)} minSize={pct(12)}>
           <PanelCard>
             <FolderPane />
           </PanelCard>
         </Panel>
       )}
       {!compact && <VDivider />}
-      <Panel id="message-list" defaultSize={pct(composerOpen ? 32 : 38)} minSize={pct(25)}>
+      <Panel
+        id="message-list"
+        defaultSize={pct(composerOpen ? (agentOpen ? 25 : 32) : agentOpen ? 34 : 38)}
+        minSize={pct(25)}
+      >
         <PanelCard>
           <MessageList />
         </PanelCard>
       </Panel>
       <VDivider />
-      <Panel id="reading-pane" defaultSize={pct(composerOpen ? 24 : 44)} minSize={pct(20)}>
+      <Panel
+        id="reading-pane"
+        defaultSize={pct(composerOpen ? (agentOpen ? 20 : 24) : agentOpen ? 26 : 44)}
+        minSize={pct(20)}
+      >
         <PanelCard>
           <ReadingPane />
         </PanelCard>
       </Panel>
       {composerOpen && <VDivider />}
       {composerOpen && (
-        <Panel id="composer" defaultSize={pct(26)} minSize={pct(20)}>
+        <Panel id="composer" defaultSize={pct(agentOpen ? 20 : 26)} minSize={pct(20)}>
           <PanelCard>
             <ComposerPane />
+          </PanelCard>
+        </Panel>
+      )}
+      {agentOpen && <VDivider />}
+      {agentOpen && (
+        <Panel id="agent-dock" defaultSize={pct(22)} minSize={pct(14)} maxSize={pct(40)}>
+          <PanelCard>
+            <AgentPanel />
           </PanelCard>
         </Panel>
       )}
@@ -106,6 +129,7 @@ export function AppShell() {
   return (
     <div className="relative flex h-full flex-col overflow-hidden bg-background font-ui text-foreground">
       <TitleBar />
+      <CommandRibbon />
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <ToolWindowBar />
         <main className="min-w-0 flex-1 bg-surface p-2">
@@ -134,7 +158,6 @@ export function AppShell() {
           stands nowhere over the calendar or people panes. */}
       <NewMessageAction disabled={accountCount === 0 || shellView !== 'mail'} />
       <OutboxPanel />
-      <AgentPanel />
       <AiPanel />
       <SendResultToast />
       <SettingsScreen />

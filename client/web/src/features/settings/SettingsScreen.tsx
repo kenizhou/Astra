@@ -20,17 +20,9 @@ import { CalendarDetail } from './CalendarDetail';
 import { ComposingDetail } from './ComposingDetail';
 import { GeneralDetail } from './GeneralDetail';
 import { ReadingDetail } from './ReadingDetail';
-import { useSettingsStore } from './settingsStore';
+import { useSettingsStore, type SettingsCategory } from './settingsStore';
 
-/** The category id, one per detail the screen ships. */
-export type SettingsCategory =
-  | 'general'
-  | 'calendar'
-  | 'reading'
-  | 'composing'
-  | 'accounts'
-  | 'advanced'
-  | 'about';
+export type { SettingsCategory } from './settingsStore';
 
 /** The categories the screen offers, in the settings taxonomy's own order. */
 const CATEGORIES: ReadonlyArray<{ id: SettingsCategory; label: string }> = [
@@ -52,6 +44,13 @@ export function SettingsScreen() {
   useEffect(() => {
     if (!open) {
       return;
+    }
+    // A caller may have asked for one category (the Help menu's About); the
+    // ask is spent the moment the screen opens on it.
+    const requested = useSettingsStore.getState().requestedCategory;
+    if (requested !== null) {
+      useSettingsStore.getState().requestCategory(null);
+      setCategory(requested);
     }
     let standing = true;
     settings()

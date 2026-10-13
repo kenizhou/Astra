@@ -4,7 +4,9 @@
 // the answer dispatched straight back, and the abort button for the live
 // turn. Streamed events arrive through the agent store (the host's
 // `agent:event` emissions, folded in by the app root's listener); the
-// status word beside the title says where the relay stands.
+// status word beside the title says where the relay stands. The panel
+// docks as the mail row's resizable right column; the tool rail's toggle
+// opens and shuts it.
 
 import { useEffect, useRef, useState } from 'react';
 
@@ -77,7 +79,7 @@ function ApprovalCard({ approval }: { approval: PendingApproval }) {
   );
 }
 
-/** The agent panel over the shell's corner; renders nothing when shut. */
+/** The agent panel, docked in the mail row; renders nothing when shut. */
 export function AgentPanel() {
   const open = useUiStore((s) => s.agentOpen);
   const status = useAgentStore((s) => s.status);
@@ -116,7 +118,7 @@ export function AgentPanel() {
   return (
     <section
       aria-label="Agent"
-      className="absolute bottom-[calc(var(--status-h)+12px)] right-3 z-[var(--z-popover)] flex max-h-[70vh] w-[380px] flex-col overflow-hidden rounded-[var(--radius)] border border-border bg-chrome shadow-lg"
+      className="flex h-full w-full flex-col overflow-hidden bg-background"
     >
       <div className="flex h-[var(--pane-header-h)] shrink-0 items-center justify-between border-b border-border px-3">
         <span className="flex items-baseline gap-2 text-xs font-medium text-foreground">
