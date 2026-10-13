@@ -65,6 +65,11 @@ pub fn run() {
                 let _ = window.set_focus();
                 let _ = window.unminimize();
             }
+            // A deep link that reached the already-running app arrives as
+            // this argv on Windows; the hand-off makes the deep-link
+            // plugin emit it, which is the only road an OAuth redirect
+            // takes back into a running instance.
+            oauth::commands::forward_launch_arguments(app, &argv);
             let _ = app.emit("single-instance-args", argv);
         }))
         .plugin(tauri_plugin_deep_link::init())
@@ -110,6 +115,9 @@ pub fn run() {
             commands::add_account,
             commands::imap_test_connection,
             commands::detect_account_settings,
+            oauth::commands::oauth_offer,
+            oauth::commands::oauth_begin,
+            oauth::commands::oauth_cancel,
             agent::commands::agent_prompt,
             agent::commands::agent_abort,
             agent::commands::agent_status,

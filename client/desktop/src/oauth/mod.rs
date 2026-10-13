@@ -1,12 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The module ships its tests in this task and its runtime consumers
-// (the wizard's sign-in commands, the next task in this slice) after;
-// until those land, the dead-code lint is answered once here rather
-// than by wiring a command surface this task does not own.
-#![allow(dead_code)]
-//! The host's OAuth halves: the system-browser sign-in session and the
-//! credential transaction (the design's D2 and D3). The pure client lives
-//! in `astra-oauth`; everything here is the platform half that crate
+//! The host's OAuth halves: the system-browser sign-in session, the
+//! credential transaction (the design's D2 and D3), and the wizard's
+//! sign-in command surface over them. The pure client lives in
+//! `astra-oauth`; everything here is the platform half that crate
 //! deliberately does not own: opening the browser, capturing the
 //! deep-link redirect, and moving the resulting credential through the
 //! OS secure store.
@@ -55,16 +51,26 @@
 //! `on_open_url` event, whose payload is a batch of parsed URLs;
 //! [`oauth_callback`] is the filter that keeps the OAuth-scheme URL and
 //! hands it on **whole**, never parsed by this host (the `state` CSRF
-//! check stands in `astra-oauth`'s `parse_callback`). Two pieces of
-//! runtime wiring land with the wizard's sign-in commands, not here,
-//! because nothing consumes a session until a provider exists: the
-//! listener registration that forwards filtered URLs into the capture
-//! channel, and the Windows argv forwarding in the single-instance
-//! callback (`DeepLink::handle_cli_arguments`), without which a running
-//! app on this platform never sees the redirect, and the opener-backed
-//! `SystemBrowser` the sign-in commands install. When SP2m wires Graph,
-//! the host refresh path holds this transaction and answers its rotate.
-//! All are named here so the gap is recorded, never silent.
+//! check stands in `astra-oauth`'s `parse_callback`). The runtime wiring
+//! lives in the sign-in commands module and the app setup:
+//! [`forward_oauth_callbacks`] is registered in the boot hook, the
+//! single-instance callback's argv is handed to the deep-link plugin on
+//! Windows (without which a running app on this platform never sees the
+//! redirect), and the opener-backed [`SystemBrowser`] is the browser the
+//! sign-in commands install. When SP2m wires Graph, the host refresh
+//! path holds the credential transaction and answers its rotate; until
+//! then the transaction's paths stand pinned by their tests alone.
+//!
+//! [`AccountCredentialStore`]: crate::credential_store::AccountCredentialStore
+//! [`oauth_callback`]: session::oauth_callback
+//! [`forward_oauth_callbacks`]: session::forward_oauth_callbacks
+//! [`SystemBrowser`]: session::SystemBrowser
 
+pub(crate) mod commands;
 pub(crate) mod session;
+// The credential transaction's runtime consumers are the provider slices
+// (SP2m wires Graph's sign-in and refresh first); its paths are pinned by
+// tests today, which dead-code analysis ignores, so the lint is answered
+// here rather than by wiring a caller this task does not own.
+#[allow(dead_code)]
 pub(crate) mod transaction;

@@ -7,9 +7,11 @@
 //! routing through the core's parser (the forged state refused, the
 //! provider's own error carried through, no flow to spend refused). No
 //! test touches a network: the client's exchange is only ever reached
-//! past a parse the tests refuse. The async bodies run on one runtime
-//! per test, the host's drive pattern (this crate forbids
-//! `#[tokio::test]`'s `block_on` by clippy config).
+//! past a parse the tests refuse. The begin half is synchronous (it
+//! answers once the browser opened) and the wait half is async, the
+//! seam the wizard's command pair splits its answer over; the async
+//! bodies run on one runtime per test, the host's drive pattern (this
+//! crate forbids `#[tokio::test]`'s `block_on` by clippy config).
 
 use std::sync::{Arc, Mutex};
 
@@ -140,23 +142,26 @@ fn the_config_registers_the_oauth_callback_scheme() {
 }
 
 #[test]
-fn a_begin_opens_the_browser_once_and_hands_the_raw_url_back_whole() {
+fn a_begin_opens_the_browser_once_and_the_wait_hands_the_raw_url_back_whole() {
     crate::runtime::build_runtime()
         .expect("the test runtime builds")
         .block_on(|| async {
             let browser = CountingBrowser::opening();
-            let session = SignInSession::new(client(), as_seam(&browser), fed_capture());
+            let session = SignInSession::new(as_seam(&browser), fed_capture());
+
+            session
+                .begin_sign_in(&client(), None)
+                .expect("the browser opened for the flow");
+            assert_eq!(browser.opens(), 1, "the browser opens exactly once");
 
             let handed_back = session
-                .begin_sign_in(None)
+                .wait_for_callback()
                 .await
-                .expect("the fed delivery completes the begin");
-
+                .expect("the fed delivery completes the wait");
             assert_eq!(
                 handed_back, RAW_CALLBACK,
                 "the raw redirect crosses whole, never parsed by the host"
             );
-            assert_eq!(browser.opens(), 1, "the browser opens exactly once");
         });
 }
 
@@ -166,20 +171,22 @@ fn a_second_begin_refuses_while_one_is_in_flight() {
         .expect("the test runtime builds")
         .block_on(|| async {
             let browser = CountingBrowser::opening();
-            let session = SignInSession::new(client(), as_seam(&browser), fed_capture());
+            let session = SignInSession::new(as_seam(&browser), fed_capture());
 
-            // The first begin resolves once the fed delivery arrives, but
-            // the flow it began stands until its completion spends it:
-            // exactly the window in which a second begin must refuse.
+            session
+                .begin_sign_in(&client(), None)
+                .expect("the browser opened for the flow");
+            // The fed delivery resolves the wait, but the flow it began
+            // stands until its completion spends it: exactly the window
+            // in which a second begin must refuse.
             let first = session
-                .begin_sign_in(None)
+                .wait_for_callback()
                 .await
-                .expect("the fed delivery completes the begin");
+                .expect("the fed delivery completes the wait");
             assert_eq!(first, RAW_CALLBACK);
 
             let refused = session
-                .begin_sign_in(None)
-                .await
+                .begin_sign_in(&client(), None)
                 .expect_err("a second begin while one stands refuses");
             assert!(
                 matches!(refused, SignInError::InFlight),
@@ -195,34 +202,28 @@ fn a_second_begin_refuses_while_one_is_in_flight() {
 
 #[test]
 fn a_failed_browser_open_leaves_nothing_in_flight() {
-    crate::runtime::build_runtime()
-        .expect("the test runtime builds")
-        .block_on(|| async {
-            let browser = CountingBrowser::refusing();
-            let (_tx, rx) = mpsc::unbounded_channel::<String>();
-            let session = SignInSession::new(client(), as_seam(&browser), rx);
+    let browser = CountingBrowser::refusing();
+    let (_tx, rx) = mpsc::unbounded_channel::<String>();
+    let session = SignInSession::new(as_seam(&browser), rx);
 
-            let refused = session
-                .begin_sign_in(None)
-                .await
-                .expect_err("a browser that refuses ends the begin");
-            assert!(
-                matches!(refused, SignInError::Browser(_)),
-                "the browser's refusal is the answer: {refused}"
-            );
+    let refused = session
+        .begin_sign_in(&client(), None)
+        .expect_err("a browser that refuses ends the begin");
+    assert!(
+        matches!(refused, SignInError::Browser(_)),
+        "the browser's refusal is the answer: {refused}"
+    );
 
-            // The failed open cleared the slot, so a retry is a fresh
-            // begin (it reaches the browser again, refusing the same
-            // honest way) rather than an in-flight refusal.
-            let retried = session
-                .begin_sign_in(None)
-                .await
-                .expect_err("the refusing browser refuses the retry too");
-            assert!(
-                matches!(retried, SignInError::Browser(_)),
-                "the retry begins fresh rather than meeting a stale in-flight: {retried}"
-            );
-        });
+    // The failed open cleared the slot, so a retry is a fresh begin (it
+    // reaches the browser again, refusing the same honest way) rather
+    // than an in-flight refusal.
+    let retried = session
+        .begin_sign_in(&client(), None)
+        .expect_err("the refusing browser refuses the retry too");
+    assert!(
+        matches!(retried, SignInError::Browser(_)),
+        "the retry begins fresh rather than meeting a stale in-flight: {retried}"
+    );
 }
 
 #[test]
@@ -233,10 +234,13 @@ fn a_closed_capture_ends_the_wait() {
             let browser = CountingBrowser::opening();
             let (tx, rx) = mpsc::unbounded_channel::<String>();
             drop(tx);
-            let session = SignInSession::new(client(), as_seam(&browser), rx);
+            let session = SignInSession::new(as_seam(&browser), rx);
 
+            session
+                .begin_sign_in(&client(), None)
+                .expect("the browser opened for the flow");
             let ended = session
-                .begin_sign_in(None)
+                .wait_for_callback()
                 .await
                 .expect_err("a capture with no sender never delivers");
             assert!(
@@ -253,11 +257,14 @@ fn completion_refuses_a_forged_state() {
         .expect("the test runtime builds")
         .block_on(|| async {
             let browser = CountingBrowser::opening();
-            let session = SignInSession::new(client(), as_seam(&browser), fed_capture());
+            let session = SignInSession::new(as_seam(&browser), fed_capture());
+            session
+                .begin_sign_in(&client(), None)
+                .expect("the browser opened for the flow");
             let raw = session
-                .begin_sign_in(None)
+                .wait_for_callback()
                 .await
-                .expect("the fed delivery completes the begin");
+                .expect("the fed delivery completes the wait");
 
             // A second URL, whose state differs from both the fed
             // delivery's and the minted one: the completion must spend
@@ -284,11 +291,10 @@ fn completion_carries_a_provider_refusal_through_the_parser() {
         .expect("the test runtime builds")
         .block_on(|| async {
             let browser = CountingBrowser::opening();
-            let session = SignInSession::new(client(), as_seam(&browser), fed_capture());
+            let session = SignInSession::new(as_seam(&browser), fed_capture());
             session
-                .begin_sign_in(None)
-                .await
-                .expect("the fed delivery completes the begin");
+                .begin_sign_in(&client(), None)
+                .expect("the browser opened for the flow");
 
             // The parser reads a provider error before any state, so the
             // refused consent crosses without the flow's own state at
@@ -314,7 +320,7 @@ fn completion_without_a_sign_in_refuses() {
         .block_on(|| async {
             let browser = CountingBrowser::opening();
             let (_tx, rx) = mpsc::unbounded_channel::<String>();
-            let session = SignInSession::new(client(), as_seam(&browser), rx);
+            let session = SignInSession::new(as_seam(&browser), rx);
 
             match session
                 .complete_sign_in(RAW_CALLBACK, OffsetDateTime::UNIX_EPOCH)
@@ -331,22 +337,17 @@ fn completion_without_a_sign_in_refuses() {
 
 #[test]
 fn cancel_takes_the_in_flight_pair_back_so_a_later_begin_starts_fresh() {
-    crate::runtime::build_runtime()
-        .expect("the test runtime builds")
-        .block_on(|| async {
-            let browser = CountingBrowser::opening();
-            // A capture nobody feeds: the begin below resolves on its own
-            // delivered-pair seam, leaving the flow in flight, exactly the
-            // abandoned wizard's shape.
-            let (_tx, rx) = tokio::sync::mpsc::unbounded_channel();
-            let session = SignInSession::new(client(), as_seam(&browser), rx);
+    let browser = CountingBrowser::opening();
+    // A capture nobody feeds: the flow below stands in flight, exactly
+    // the abandoned wizard's shape.
+    let (_tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let session = SignInSession::new(as_seam(&browser), rx);
 
-            let seeded =
-                session.seed_in_flight_for_test(("state-1".to_owned(), "verifier-1".to_owned()));
-            assert!(seeded, "the pair stands in flight");
-            assert!(session.cancel_sign_in());
-            let seeded_again =
-                session.seed_in_flight_for_test(("state-2".to_owned(), "verifier-2".to_owned()));
-            assert!(seeded_again, "a later begin starts fresh, not InFlight");
-        });
+    let seeded =
+        session.seed_in_flight_for_test(&client(), ("state-1".to_owned(), "verifier-1".to_owned()));
+    assert!(seeded, "the pair stands in flight");
+    assert!(session.cancel_sign_in());
+    let seeded_again =
+        session.seed_in_flight_for_test(&client(), ("state-2".to_owned(), "verifier-2".to_owned()));
+    assert!(seeded_again, "a later begin starts fresh, not InFlight");
 }

@@ -17,6 +17,10 @@
 //! function the tests drive with parsed URLs, so the filter's behaviour
 //! is pinned exactly as the runtime delivers it.
 //!
+//! The client is a per-flow input, not session state: Microsoft and
+//! Google flows share one session (one channel, one in-flight slot),
+//! and each begin names the provider whose client mints it.
+//!
 //! [`OAuthClient::begin`]: astra_oauth::OAuthClient::begin
 //! [`OAuthClient::complete`]: astra_oauth::OAuthClient::complete
 
@@ -85,14 +89,13 @@ pub(crate) fn oauth_callback(urls: &[url::Url]) -> Option<String> {
 
 /// Wires the deep-link plugin's event stream into `tx`: every OAuth
 /// callback the running app receives is forwarded whole. The sign-in
-/// commands call this once at their wiring; it is here, beside the
-/// filter it applies, so the capture's production shape lives in one
-/// place.
+/// wiring calls this once at setup; it is here, beside the filter it
+/// applies, so the capture's production shape lives in one place.
 ///
 /// On Windows, a deep link that arrives while the app is already running
 /// reaches the first instance through the single-instance callback's
 /// argv, not this event; that forwarding (`DeepLink::handle_cli_arguments`)
-/// is the commands' wiring too, recorded in the module doc.
+/// is the sign-in commands' wiring too, recorded in the module doc.
 pub(crate) fn forward_oauth_callbacks<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     tx: mpsc::UnboundedSender<String>,
@@ -106,11 +109,15 @@ pub(crate) fn forward_oauth_callbacks<R: tauri::Runtime>(
     });
 }
 
-/// One in-flight flow's held half: the `state` the callback must echo and
-/// the PKCE verifier the exchange sends. Held from [`SignInSession::begin_sign_in`]
-/// minted it until [`SignInSession::complete_sign_in`] spent it, so a
-/// second begin can be refused honestly.
+/// One in-flight flow's held half: the client that minted it, the
+/// `state` the callback must echo, and the PKCE verifier the exchange
+/// sends. Held from [`SignInSession::begin_sign_in`] minted it until
+/// [`SignInSession::complete_sign_in`] spent it, so a second begin can
+/// be refused honestly.
 struct InFlight {
+    /// The client whose flow this is; the completion's exchange runs on
+    /// it, so the flow spends the client it was minted by.
+    client: Arc<OAuthClient>,
     /// The CSRF state issued at begin; the callback must echo it.
     state: String,
     /// The PKCE verifier paired with the challenge the authorization
@@ -119,12 +126,11 @@ struct InFlight {
 }
 
 /// One sign-in flow at a time over the injected browser and capture
-/// channel. The session holds the client it begins flows on and the
-/// in-flight pair; it owns no token storage (that is the credential
+/// channel. The session holds the in-flight pair only; each flow's client
+/// arrives with its begin (Microsoft and Google share the one channel and
+/// the one slot), and it owns no token storage (that is the credential
 /// transaction's half, over the OS store).
 pub(crate) struct SignInSession {
-    /// The core client whose `begin` mints each flow.
-    client: Arc<OAuthClient>,
     /// The system browser the authorization URL opens in.
     browser: Arc<dyn SystemBrowser>,
     /// The OAuth callbacks the deep-link capture forwards; the receiving
@@ -136,43 +142,41 @@ pub(crate) struct SignInSession {
 }
 
 impl SignInSession {
-    /// A session over `client` that opens URLs in `browser` and reads
-    /// redirects from `callbacks`.
+    /// A session that opens URLs in `browser` and reads redirects from
+    /// `callbacks`.
     #[must_use]
     pub(crate) fn new(
-        client: Arc<OAuthClient>,
         browser: Arc<dyn SystemBrowser>,
         callbacks: mpsc::UnboundedReceiver<String>,
     ) -> Self {
         Self {
-            client,
             browser,
             callbacks: tokio::sync::Mutex::new(callbacks),
             in_flight: Mutex::new(None),
         }
     }
 
-    /// Begins one sign-in: mints the request, opens the authorization
-    /// URL in the system browser, and waits for the deep-link redirect,
-    /// returning its raw URL whole for [`SignInSession::complete_sign_in`].
+    /// Begins one sign-in: mints the request over `client` and opens the
+    /// authorization URL in the system browser, returning once the browser
+    /// opened, so the caller can answer "browser opened" honestly before
+    /// any wait. The redirect wait is [`SignInSession::wait_for_callback`]
+    /// and the spend is [`SignInSession::complete_sign_in`].
     ///
     /// One sign-in at a time: while a flow stands (begun, not yet
     /// completed), a second begin answers [`SignInError::InFlight`]
     /// without opening anything. A browser that refuses to open leaves
-    /// nothing in flight. The wait ends when the capture forwards a URL
-    /// or its channel closes ([`SignInError::CaptureClosed`]).
+    /// nothing in flight.
     ///
     /// # Errors
     ///
     /// Returns [`SignInError::InFlight`] when a sign-in already stands,
-    /// [`SignInError::Browser`] when the URL could not be opened, and
-    /// [`SignInError::CaptureClosed`] when the capture went away before
-    /// any redirect arrived.
-    pub(crate) async fn begin_sign_in(
+    /// and [`SignInError::Browser`] when the URL could not be opened.
+    pub(crate) fn begin_sign_in(
         &self,
+        client: &Arc<OAuthClient>,
         login_hint: Option<&str>,
-    ) -> Result<String, SignInError> {
-        // Reserve the single slot before anything async: the refusal a
+    ) -> Result<(), SignInError> {
+        // Reserve the single slot before anything else: the refusal a
         // second begin meets is the flow that already stands, not a race
         // that both flowed through.
         let request = {
@@ -180,8 +184,9 @@ impl SignInSession {
             if in_flight.is_some() {
                 return Err(SignInError::InFlight);
             }
-            let request = self.client.begin(login_hint);
+            let request = client.begin(login_hint);
             *in_flight = Some(InFlight {
+                client: Arc::clone(client),
                 state: request.state.clone(),
                 verifier: request.pkce.verifier().to_owned(),
             });
@@ -196,6 +201,19 @@ impl SignInSession {
                 .take();
             return Err(SignInError::Browser(err));
         }
+        Ok(())
+    }
+
+    /// Waits for the deep-link redirect of the flow [`begin_sign_in`]
+    /// minted, handing its raw URL back whole for
+    /// [`SignInSession::complete_sign_in`]. The wait ends when the capture
+    /// forwards a URL or its channel closes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SignInError::CaptureClosed`] when the capture went away
+    /// before any redirect arrived.
+    pub(crate) async fn wait_for_callback(&self) -> Result<String, SignInError> {
         self.callbacks
             .lock()
             .await
@@ -205,9 +223,9 @@ impl SignInSession {
     }
 
     /// Completes the in-flight flow from the raw redirect URL: spends
-    /// the held state and verifier on the core's complete, where the
-    /// `state` CSRF check stands and the code is exchanged. The flow is
-    /// spent whether or not the completion succeeds; a refused callback
+    /// the held client, state, and verifier on the core's complete, where
+    /// the `state` CSRF check stands and the code is exchanged. The flow
+    /// is spent whether or not the completion succeeds; a refused callback
     /// (a mismatched state, a forged `iss`) ends the flow, and the next
     /// begin starts fresh.
     ///
@@ -215,33 +233,6 @@ impl SignInSession {
     ///
     /// Returns [`OAuthError::Callback`] when no sign-in is in flight or
     /// the redirect is malformed or forged, and the core's own errors
-    /// Takes the in-flight pair back: the way out for a sign-in the
-    /// caller abandoned (the wizard closed while the redirect was still
-    /// pending), so a later begin does not answer InFlight until the
-    /// app restarts.
-    pub(crate) fn cancel_sign_in(&self) -> bool {
-        self.in_flight
-            .lock()
-            .expect("oauth in-flight lock poisoned")
-            .take()
-            .is_some()
-    }
-
-    /// Stands a pair in the in-flight slot without opening a browser:
-    /// the test seam for the refusal and cancellation windows, where
-    /// the product path mints its own pair through begin.
-    #[cfg(test)]
-    pub(crate) fn seed_in_flight_for_test(&self, pair: (String, String)) -> bool {
-        self.in_flight
-            .lock()
-            .expect("oauth in-flight lock poisoned")
-            .replace(InFlight {
-                state: pair.0,
-                verifier: pair.1,
-            })
-            .is_none()
-    }
-
     /// for the exchange beyond it.
     pub(crate) async fn complete_sign_in(
         &self,
@@ -259,9 +250,42 @@ impl SignInSession {
             .ok_or_else(|| {
                 OAuthError::Callback("no sign-in is in flight to complete".to_owned())
             })?;
-        self.client
+        in_flight
+            .client
             .complete(raw_url, &in_flight.state, &in_flight.verifier, now)
             .await
+    }
+
+    /// Takes the in-flight pair back: the way out for a sign-in the
+    /// caller abandoned (the wizard closed while the redirect was still
+    /// pending), so a later begin does not answer InFlight until the
+    /// app restarts.
+    pub(crate) fn cancel_sign_in(&self) -> bool {
+        self.in_flight
+            .lock()
+            .expect("oauth in-flight lock poisoned")
+            .take()
+            .is_some()
+    }
+
+    /// Stands a pair in the in-flight slot without opening a browser:
+    /// the test seam for the refusal and cancellation windows, where
+    /// the product path mints its own pair through begin.
+    #[cfg(test)]
+    pub(crate) fn seed_in_flight_for_test(
+        &self,
+        client: &Arc<OAuthClient>,
+        pair: (String, String),
+    ) -> bool {
+        self.in_flight
+            .lock()
+            .expect("oauth in-flight lock poisoned")
+            .replace(InFlight {
+                client: Arc::clone(client),
+                state: pair.0,
+                verifier: pair.1,
+            })
+            .is_none()
     }
 }
 

@@ -16,6 +16,7 @@ const ipc = vi.hoisted(() => ({
   addAccount: vi.fn(),
   imapTestConnection: vi.fn(),
   detectAccountSettings: vi.fn(),
+  oauthOffer: vi.fn(),
 }));
 
 vi.mock('@/services/ipc', async (importOriginal) => ({
@@ -169,6 +170,8 @@ function submitEmail(email = 'user@example.test') {
 beforeEach(() => {
   ipc.detectAccountSettings.mockReset();
   ipc.detectAccountSettings.mockResolvedValue(manualView);
+  ipc.oauthOffer.mockReset();
+  ipc.oauthOffer.mockResolvedValue({ providers: [] });
   useUiStore.setState({ accountSetupOpen: true });
 });
 

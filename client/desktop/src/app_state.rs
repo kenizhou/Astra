@@ -420,6 +420,11 @@ pub(crate) struct AppState {
     pub(crate) photo_root: std::path::PathBuf,
     /// The OS secure store the account-add flow persists through.
     pub(crate) credential_store: Arc<dyn AccountCredentialStore>,
+    /// The OAuth sign-in surface: the session over the system browser and
+    /// the deep-link capture, beside the registered provider clients. The
+    /// wizard's sign-in commands drive it; a build carrying no
+    /// registration offers nothing.
+    pub(crate) oauth: Arc<crate::oauth::commands::SignInSurface>,
     /// The app's async runtime: dispatches, first syncs and blocking dials run on it.
     pub(crate) runtime: AppRuntime,
 }
