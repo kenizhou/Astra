@@ -3,11 +3,12 @@
 // composer pane with the first account as its From, stays inert without an
 // account, the app start resume pulls the stored draft into the pane when
 // the host has one, a landed compose request opens the pane hydrated, and
-// the tool rail's outbox toggle opens the outbox panel. The rail's agent
+// the folder tree's Outbox row switches the message list to the account's
+// queue view. The rail's agent
 // toggle docks the agent panel as the mail row's right column, gone off the
 // mail view. The settings screen rides above the shell from the title
 // bar's gear, through the categories, down to the accounts page and About.
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // jsdom has no ResizeObserver; the resizable panel row measures through one.
@@ -48,12 +49,15 @@ import { AppShell } from './AppShell';
 import type { ComposeRequestSnapshot, ResumeView } from '@/services/ipc';
 import { useAccountStore } from '@/stores/accountStore';
 import { useComposeRequestStore } from '@/stores/composeRequestStore';
+import { useFolderStore } from '@/stores/folderStore';
 import { useSendingStore } from '@/stores/sendingStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useAgentStore } from '@/features/agent/agentStore';
 import { useComposerStore } from '@/features/composer/composerStore';
 import { documentToEditor } from '@/features/composer/documentWire';
 import { useSendResultStore } from '@/features/outbox/sendResult';
+import type { MailboxListSnapshot } from '@/services/surfaces';
+import fixtureJson from '@/services/__fixtures__/mailbox_list.json';
 
 beforeEach(() => {
   ipc.dispatch.mockReset();
@@ -93,7 +97,7 @@ beforeEach(() => {
   });
   useComposeRequestStore.setState({ snapshot: null });
   useSendingStore.getState().applySnapshot({ rows: [] });
-  useUiStore.getState().setOutboxOpen(false);
+  useFolderStore.setState({ accounts: [], selected: null, outboxAccount: null });
   useUiStore.getState().setAgentOpen(false);
   useUiStore.getState().setFolderDrawerOpen(false);
   useSendResultStore.getState().dismiss();
@@ -196,17 +200,36 @@ describe('the shell composer wiring', () => {
 });
 
 describe('the shell outbox wiring', () => {
-  it('opens the outbox panel from the tool rail and asks the host for the queue', () => {
+  it('switches the message list to the queue view from the folder tree row', () => {
+    useFolderStore.getState().applySnapshot(fixtureJson as MailboxListSnapshot);
+    useSendingStore.getState().applySnapshot({
+      rows: [
+        {
+          queued: { account: 'work', op: 3 },
+          state: 'queued',
+          subject: 'Quarterly review',
+          arrived_at: '2026-10-09T08:30:00Z',
+        },
+      ],
+    });
     render(<AppShell />);
 
-    expect(screen.queryByRole('region', { name: 'Outbox' })).toBeNull();
+    expect(screen.queryByRole('list', { name: 'Outbox' })).toBeNull();
 
     act(() => {
-      fireEvent.click(screen.getByRole('button', { name: 'Outbox' }));
+      fireEvent.click(screen.getByText('Outbox'));
     });
 
-    expect(screen.getByRole('region', { name: 'Outbox' })).toBeTruthy();
     expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe('{"outbox":"show"}');
+    const list = screen.getByRole('region', { name: 'Message list' });
+    expect(within(list).getByRole('list', { name: 'Outbox' })).toBeTruthy();
+    expect(within(list).getByText('Quarterly review')).toBeTruthy();
+
+    // A folder selection leads the list back to the folder view.
+    act(() => {
+      fireEvent.click(screen.getByText('Sent'));
+    });
+    expect(screen.queryByRole('list', { name: 'Outbox' })).toBeNull();
   });
 });
 

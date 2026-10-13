@@ -5,14 +5,17 @@
 // outside close it, and every entry either dispatches an existing intent,
 // calls a store setter, or talks to the window; nothing here is a
 // placeholder. The list and theme entries draw as radios against the
-// stores, the Fullscreen entry reads the window's real state at click time,
-// and every window call is guarded so a plain browser quietly does nothing.
+// stores, the Density submenu's radios set the list store's density
+// locally, the Fullscreen entry reads the window's real state at click
+// time, and every window call is guarded so a plain browser quietly does
+// nothing.
 
 import { useEffect, useRef, useState } from 'react';
 
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
 import { CheckIcon } from '@/components/icons';
+import { DENSITIES } from '@/components/message-list/density';
 import { useComposerStore } from '@/features/composer/composerStore';
 import { useSettingsStore, type SettingsCategory } from '@/features/settings/settingsStore';
 import { dispatch, intents } from '@/services/ipc';
@@ -24,6 +27,7 @@ import { useUiStore, type ThemeMode } from '@/stores/uiStore';
 type MenuEntry =
   | { kind: 'item'; label: string; disabled?: boolean; onSelect: () => void }
   | { kind: 'radio'; label: string; checked: boolean; onSelect: () => void }
+  | { kind: 'submenu'; label: string; entries: Array<{ kind: 'radio'; label: string; checked: boolean; onSelect: () => void }> }
   | { kind: 'separator' };
 
 interface MenuSpec {
@@ -71,6 +75,9 @@ function MenuEntryRow({ entry, onDone }: { entry: MenuEntry; onDone: () => void 
   if (entry.kind === 'separator') {
     return <div role="separator" className="mx-2 my-1 h-px bg-border-subtle" />;
   }
+  if (entry.kind === 'submenu') {
+    return <SubmenuRow entry={entry} onDone={onDone} />;
+  }
   const marked = entry.kind !== 'item';
   return (
     <button
@@ -99,8 +106,54 @@ function MenuEntryRow({ entry, onDone }: { entry: MenuEntry; onDone: () => void 
   );
 }
 
+/** One nested submenu: opens on hover or click, its radios act and close
+ * the whole menu through the parent's onDone. */
+function SubmenuRow({
+  entry,
+  onDone,
+}: {
+  entry: Extract<MenuEntry, { kind: 'submenu' }>;
+  onDone: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div
+      className="relative"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <button
+        type="button"
+        role="menuitem"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <span aria-hidden="true" className="grid w-4 shrink-0 place-items-center text-primary" />
+        <span className="flex-1 truncate">{entry.label}</span>
+        <span aria-hidden="true" className="text-muted-foreground">
+          ▸
+        </span>
+      </button>
+      {open && (
+        <div
+          role="menu"
+          aria-label={entry.label}
+          className="absolute left-full top-0 z-[var(--z-dropdown)] w-40 overflow-hidden rounded-[var(--radius-sm)] border border-border-subtle bg-surface-floating py-1 shadow-[var(--shadow-lg)]"
+        >
+          {entry.entries.map((sub) => (
+            <MenuEntryRow key={sub.label} entry={sub} onDone={onDone} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function MenuBar() {
   const viewMode = useListStore((s) => s.viewMode);
+  const density = useListStore((s) => s.density);
   const themeMode = useUiStore((s) => s.themeMode);
   const accountCount = useAccountStore((s) => s.accounts.length);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
@@ -174,6 +227,17 @@ export function MenuBar() {
             onSelect: () => void dispatch(intents.setViewMode(id)),
           }),
         ),
+        { kind: 'separator' },
+        {
+          kind: 'submenu',
+          label: 'Density',
+          entries: DENSITIES.map(({ id, label }) => ({
+            kind: 'radio' as const,
+            label,
+            checked: density === id,
+            onSelect: () => useListStore.getState().setDensity(id),
+          })),
+        },
         { kind: 'separator' },
         { kind: 'item', label: 'Toggle Fullscreen', onSelect: () => void toggleFullscreen() },
       ],

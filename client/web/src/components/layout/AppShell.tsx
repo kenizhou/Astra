@@ -10,8 +10,8 @@
 // leaves the row and rides the drawer the rail opens. The New message
 // action floats over the panes' corner, the app start resume opens the
 // stored draft into the composer, a landed compose request opens the
-// composer hydrated from it, the outbox and AI documents panels ride above
-// the status bar's corner when the rail's toggles open them, the
+// composer hydrated from it, the AI documents panel rides above
+// the status bar's corner when the rail's toggle opens it, the
 // send-result toast says when a queued send has gone out, the settings
 // screen rides above the shell when the title bar's gear opens it, and the
 // account setup flow rides above everything when it is open.
@@ -25,7 +25,6 @@ import { CalendarPane } from '@/features/calendar/CalendarPane';
 import { ComposerPane, NewMessageAction, useDraftResumeAtStart } from '@/features/composer/Composer';
 import { useComposeRequestHydration } from '@/features/composer/useComposeRequest';
 import { useComposerStore } from '@/features/composer/composerStore';
-import { OutboxPanel } from '@/features/outbox/OutboxPanel';
 import { SendResultToast } from '@/features/outbox/SendResultToast';
 import { PeoplePane } from '@/features/people/PeoplePane';
 import { SettingsScreen } from '@/features/settings/SettingsScreen';
@@ -157,7 +156,6 @@ export function AppShell() {
       {/* The composer pane mounts only in the mail view, so the action
           stands nowhere over the calendar or people panes. */}
       <NewMessageAction disabled={accountCount === 0 || shellView !== 'mail'} />
-      <OutboxPanel />
       <AiPanel />
       <SendResultToast />
       <SettingsScreen />

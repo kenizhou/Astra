@@ -5,10 +5,11 @@
 // stands disabled without an account), Add account and Preferences open
 // their surfaces, Sync now dispatches the refresh intent, Close Window
 // closes the Tauri window, the View radios dispatch the view-mode intent
-// against the list store, Toggle Fullscreen flips the window's real state,
+// against the list store and its Density submenu sets the list store's
+// density, Toggle Fullscreen flips the window's real state,
 // the Tools radios dispatch the theme intent against the shell's mode, and
 // About opens the settings screen on its About category.
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const windowApi = vi.hoisted(() => ({
@@ -46,7 +47,7 @@ beforeEach(() => {
   windowApi.setFullscreen.mockClear();
   ipc.dispatch.mockReset();
   useAccountStore.setState({ accounts: [{ accountId: 'work', displayName: 'Work' }] });
-  useListStore.setState({ viewMode: 'flat' });
+  useListStore.setState({ viewMode: 'flat', density: 'normal' });
   useUiStore.setState({
     themeMode: 'follow_host',
     accountSetupOpen: false,
@@ -199,6 +200,37 @@ describe('the View menu', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: 'Toggle Fullscreen' }));
 
     await waitFor(() => expect(windowApi.setFullscreen).toHaveBeenCalledWith(true));
+  });
+
+  it('sets the list density from the Density submenu radios', () => {
+    render(<MenuBar />);
+    openMenu('View');
+
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Density' }));
+    const submenu = screen.getByRole('menu', { name: 'Density' });
+    expect(
+      within(submenu).getByRole('menuitemradio', { name: 'Normal' }).getAttribute('aria-checked'),
+    ).toBe('true');
+
+    fireEvent.click(within(submenu).getByRole('menuitemradio', { name: 'Comfortable' }));
+
+    expect(useListStore.getState().density).toBe('comfortable');
+    // A radio's click closes the whole menu.
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  it('follows the list store when the density stands compact', () => {
+    useListStore.setState({ density: 'compact' });
+    render(<MenuBar />);
+    openMenu('View');
+
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Density' }));
+
+    expect(
+      screen
+        .getByRole('menuitemradio', { name: 'Compact' })
+        .getAttribute('aria-checked'),
+    ).toBe('true');
   });
 });
 

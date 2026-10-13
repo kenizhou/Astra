@@ -3,9 +3,9 @@
 // the host by default, Light and Dark as explicit overrides, the host
 // preference followed live while follow-host stands), the engine's
 // lifecycle as the shell sees it, the sync states the status bar draws,
-// and whether the account setup flow, the settings screen, the outbox
-// panel, the agent panel, the AI documents panel, or the compact shell's
-// folder drawer is up.
+// and whether the account setup flow, the settings screen, the agent
+// panel, the AI documents panel, or the compact shell's folder drawer is
+// up.
 
 import { create } from 'zustand';
 
@@ -42,8 +42,6 @@ interface UiStoreState {
   accountSetupOpen: boolean;
   /** The feature filling the shell's content row. */
   shellView: ShellView;
-  /** Whether the outbox panel is up over the shell's corner. */
-  outboxOpen: boolean;
   /** Whether the agent panel is up over the shell's corner. */
   agentOpen: boolean;
   /** Whether the AI documents panel is up over the shell's corner. */
@@ -57,7 +55,6 @@ interface UiStoreState {
   applySyncProgress: (snapshot: SyncProgressSnapshot) => void;
   setAccountSetupOpen: (open: boolean) => void;
   setShellView: (view: ShellView) => void;
-  setOutboxOpen: (open: boolean) => void;
   setAgentOpen: (open: boolean) => void;
   setAiPanelOpen: (open: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
@@ -120,7 +117,6 @@ export const useUiStore = create<UiStoreState>((set) => ({
   sync: [],
   accountSetupOpen: false,
   shellView: 'mail',
-  outboxOpen: false,
   agentOpen: false,
   aiPanelOpen: false,
   settingsOpen: false,
@@ -139,8 +135,6 @@ export const useUiStore = create<UiStoreState>((set) => ({
   setAccountSetupOpen: (open) => set({ accountSetupOpen: open }),
 
   setShellView: (view) => set({ shellView: view }),
-
-  setOutboxOpen: (open) => set({ outboxOpen: open }),
 
   setAgentOpen: (open) => set({ agentOpen: open }),
 

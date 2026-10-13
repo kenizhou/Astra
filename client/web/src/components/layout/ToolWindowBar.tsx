@@ -2,11 +2,10 @@
 // The tool rail: the shell's view switch as an icon column down the window's
 // left edge. The view buttons pin the active view with a primary bar; the
 // foot cluster holds the folder drawer toggle (compact windows only) and the
-// outbox, agent, and AI documents toggles.
+// agent and AI documents toggles.
 
 import { AgentStatus } from '@/features/agent/AgentPanel';
 import { AiStatus } from '@/features/ai-panel/AiPanel';
-import { OutboxStatus } from '@/features/outbox/OutboxPanel';
 import { CalendarIcon, MailIcon, PanelLeftIcon, PeopleIcon } from '@/components/icons';
 import { useIsCompact } from '@/hooks/useWindowSize';
 import { useUiStore } from '@/stores/uiStore';
@@ -72,7 +71,6 @@ export function ToolWindowBar() {
         >
           <PanelLeftIcon size={22} />
         </button>
-        <OutboxStatus />
         <AgentStatus />
         <AiStatus />
       </div>

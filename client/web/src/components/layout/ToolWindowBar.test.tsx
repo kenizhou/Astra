@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The tool rail: the view buttons switch the shell's view, the drawer toggle
-// opens and shuts the folder drawer flag, and the outbox, agent, and AI
-// documents toggles flip their panels' flags.
+// opens and shuts the folder drawer flag, and the agent and AI documents
+// toggles flip their panels' flags. The outbox lives in the folder tree now,
+// so the rail carries no toggle for it.
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -12,7 +13,6 @@ beforeEach(() => {
   useUiStore.setState({
     shellView: 'mail',
     folderDrawerOpen: false,
-    outboxOpen: false,
     agentOpen: false,
     aiPanelOpen: false,
   });
@@ -73,18 +73,10 @@ describe('the tool rail drawer toggle', () => {
 });
 
 describe('the tool rail panel toggles', () => {
-  it('toggles the outbox panel flag', () => {
+  it('carries no outbox toggle; the folder tree owns the outbox now', () => {
     render(<ToolWindowBar />);
 
-    act(() => {
-      fireEvent.click(screen.getByRole('button', { name: 'Outbox' }));
-    });
-    expect(useUiStore.getState().outboxOpen).toBe(true);
-
-    act(() => {
-      fireEvent.click(screen.getByRole('button', { name: 'Outbox' }));
-    });
-    expect(useUiStore.getState().outboxOpen).toBe(false);
+    expect(screen.queryByRole('button', { name: /Outbox/ })).toBeNull();
   });
 
   it('toggles the agent panel flag', () => {

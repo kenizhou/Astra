@@ -10,8 +10,10 @@ import { useState } from 'react';
 
 import { FlagIcon, PaperclipIcon } from '@/components/icons';
 import { dispatch, intents } from '@/services/ipc';
+import { useListStore } from '@/stores/listStore';
 import type { RowKey, MessageRowView } from '@/services/surfaces';
 import { Monogram } from './Monogram';
+import { DENSITY_ROW_CLASS } from './density';
 import { formatSentAt } from './sentAt';
 import { useSettingsStore } from '@/features/settings/settingsStore';
 
@@ -28,6 +30,7 @@ interface MessageRowProps {
 
 export function MessageRow({ row, selected, now, onSelect }: MessageRowProps) {
   const [hovered, setHovered] = useState(false);
+  const density = useListStore((s) => s.density);
   const actionsVisible = hovered || selected;
   const bold = row.unread ? 'font-semibold' : 'font-normal';
   const sender = row.sender_name || row.sender_address;
@@ -54,7 +57,7 @@ export function MessageRow({ row, selected, now, onSelect }: MessageRowProps) {
       onClick={() => onSelect(row.key)}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      className={`relative flex w-full cursor-pointer items-start gap-2.5 border-b border-border-subtle px-3 py-2 ${
+      className={`relative flex w-full cursor-pointer items-start gap-2.5 border-b border-border-subtle px-3 ${DENSITY_ROW_CLASS[density]} ${
         selected ? 'bg-selected' : 'hover:bg-hover'
       }`}
     >

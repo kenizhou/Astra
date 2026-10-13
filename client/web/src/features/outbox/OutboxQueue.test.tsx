@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The outbox panel: the queue's rows render with their state word, subject,
-// and arrival, every state offers exactly the actions the engine accepts (a
-// queued or refused send can go now or be withdrawn, an unconfirmed one
-// offers only the user's answer), opening the panel asks the host to rebuild
-// the queue, and the removal verbs mark their row so the send-result toast
-// never reads the user's own hand as a delivery.
+// The outbox queue view: the account's rows render with their state word,
+// subject, and arrival, every state offers exactly the actions the engine
+// accepts (a queued or refused send can go now or be withdrawn, an
+// unconfirmed one offers only the user's answer), and the removal verbs mark
+// their row so the send-result toast never reads the user's own hand as a
+// delivery. The payloads pinned here are the ones the floating panel pinned
+// before the queue moved into the list pane.
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -17,9 +18,8 @@ vi.mock('@/services/ipc', async (importOriginal) => ({
 
 import type { QueuedKey, QueuedRow } from '@/services/ipc';
 import { useSendingStore } from '@/stores/sendingStore';
-import { useUiStore } from '@/stores/uiStore';
 
-import { OutboxPanel, OutboxStatus } from './OutboxPanel';
+import { OutboxQueue } from './OutboxQueue';
 import { SendResultToast } from './SendResultToast';
 import { useSendResultStore } from './sendResult';
 
@@ -41,100 +41,50 @@ function reset(): void {
   useSendingStore.getState().applySnapshot({ rows: [] });
   useSendResultStore.getState().dismiss();
   useSendResultStore.setState({ settled: [], answered: [] });
-  useUiStore.getState().setOutboxOpen(false);
 }
 
 beforeEach(reset);
 
 afterEach(cleanup);
 
-describe('the outbox status toggle', () => {
-  it('opens and shuts the panel', () => {
-    render(
-      <>
-        <OutboxStatus />
-        <OutboxPanel />
-      </>,
-    );
-    expect(screen.queryByRole('region', { name: 'Outbox' })).toBeNull();
-
-    act(() => {
-      fireEvent.click(screen.getByRole('button', { name: 'Outbox' }));
-    });
-    expect(screen.getByRole('region', { name: 'Outbox' })).toBeTruthy();
-
-    act(() => {
-      fireEvent.click(screen.getByRole('button', { name: 'Close outbox' }));
-    });
-    expect(screen.queryByRole('region', { name: 'Outbox' })).toBeNull();
-  });
-
-  it('carries the count of sends that have not gone out', () => {
-    useSendingStore.getState().applySnapshot({ rows: [row('queued'), row('failed', { queued: { account: 'home', op: 1 } })] });
-    render(<OutboxStatus />);
-
-    expect(screen.getByRole('button', { name: 'Outbox 2' })).toBeTruthy();
-  });
-});
-
-describe('the panel opening', () => {
-  it('asks the host to rebuild the queue when it opens, once', () => {
-    render(<OutboxPanel />);
-
-    expect(ipc.dispatch).not.toHaveBeenCalled();
-
-    act(() => {
-      useUiStore.getState().setOutboxOpen(true);
-    });
-    expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe('{"outbox":"show"}');
-
-    ipc.dispatch.mockClear();
-    act(() => {
-      useSendingStore.getState().applySnapshot({ rows: [row('queued')] });
-    });
-    expect(ipc.dispatch).not.toHaveBeenCalled();
-  });
-});
-
 describe('the queue rows', () => {
-  it('renders the state word, the subject, and the arrival instant', () => {
-    useSendingStore.getState().applySnapshot({ rows: [row('unconfirmed')] });
-    useUiStore.getState().setOutboxOpen(true);
-    render(<OutboxPanel />);
+  it('renders only the account the view leads, with state, subject, and arrival', () => {
+    useSendingStore.getState().applySnapshot({
+      rows: [row('unconfirmed'), row('queued', { queued: { account: 'home', op: 1 }, subject: 'Off shift' })],
+    });
+    render(<OutboxQueue account="work" />);
 
-    const list = screen.getByRole('region', { name: 'Outbox' });
+    const list = screen.getByRole('list', { name: 'Outbox' });
     expect(within(list).getByText('Unconfirmed')).toBeTruthy();
     expect(within(list).getByText('Quarterly review')).toBeTruthy();
     expect(within(list).getByText('08:30 UTC')).toBeTruthy();
+    // The other account's send belongs to its own outbox row.
+    expect(within(list).queryByText('Off shift')).toBeNull();
   });
 
   it('says so when a send carried no subject and arrived who knows when', () => {
     useSendingStore
       .getState()
       .applySnapshot({ rows: [row('failed', { subject: '', arrived_at: '' })] });
-    useUiStore.getState().setOutboxOpen(true);
-    render(<OutboxPanel />);
+    render(<OutboxQueue account="work" />);
 
-    const list = screen.getByRole('region', { name: 'Outbox' });
+    const list = screen.getByRole('list', { name: 'Outbox' });
     expect(within(list).getByText('(no subject)')).toBeTruthy();
     expect(within(list).queryByText('UTC')).toBeNull();
   });
 
   it('offers an empty state when every send has gone', () => {
-    useUiStore.getState().setOutboxOpen(true);
-    render(<OutboxPanel />);
+    render(<OutboxQueue account="work" />);
 
     expect(screen.getByText('No sends waiting')).toBeTruthy();
+    expect(screen.queryByRole('list', { name: 'Outbox' })).toBeNull();
   });
 });
 
 describe('the row actions', () => {
   function openWith(rows: QueuedRow[]): void {
     useSendingStore.getState().applySnapshot({ rows });
-    useUiStore.getState().setOutboxOpen(true);
-    render(<OutboxPanel />);
-    // The opening gesture's show is not what these tests pin.
-    ipc.dispatch.mockClear();
+    render(<OutboxQueue account="work" />);
   }
 
   it('offers send now and cancel on a queued send, with exact payloads', () => {
@@ -233,14 +183,12 @@ describe('the row actions', () => {
 
   it('clears the settled mark when the engine refuses the removal in flight, and the later delivery toasts', async () => {
     useSendingStore.getState().applySnapshot({ rows: [row('queued')] });
-    useUiStore.getState().setOutboxOpen(true);
     render(
       <>
-        <OutboxPanel />
+        <OutboxQueue account="work" />
         <SendResultToast />
       </>,
     );
-    ipc.dispatch.mockClear();
 
     act(() => {
       fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));

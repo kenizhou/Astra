@@ -8,7 +8,8 @@
 // where the folder name stood (a zero horizon claims no note), the split
 // control hides (its sides derive
 // from the folder the search is not showing), and the exit affordance
-// clears the search back to the folder view.
+// clears the search back to the folder view. The outbox mode keeps only
+// the title: the queue has no sides and no grouping mode.
 
 import { dispatch, intents } from '@/services/ipc';
 import type { SearchState, ViewMode } from '@/services/surfaces';
@@ -39,15 +40,25 @@ interface ListToolbarProps {
   onSplitFilter: (filter: SplitFilter) => void;
   /** The live search state; its results header replaces the folder's own. */
   search: SearchState | null;
+  /** Whether the queue view leads: the title alone, no controls. */
+  outbox?: boolean;
 }
 
-export function ListToolbar({ folderName, viewMode, splitFilter, splitCounts, onSplitFilter, search }: ListToolbarProps) {
+export function ListToolbar({ folderName, viewMode, splitFilter, splitCounts, onSplitFilter, search, outbox = false }: ListToolbarProps) {
   const switchMode = (mode: ViewMode) => {
     void dispatch(intents.setViewMode(mode));
   };
   const exitSearch = () => {
     void dispatch(intents.search(null));
   };
+
+  if (outbox) {
+    return (
+      <div className="flex h-[var(--pane-header-h)] shrink-0 items-center justify-between gap-2 border-b border-border-subtle bg-surface px-3">
+        <span className="min-w-0 truncate text-[13px] font-semibold text-foreground">Outbox</span>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-[var(--pane-header-h)] shrink-0 items-center justify-between gap-2 border-b border-border-subtle bg-surface px-3">

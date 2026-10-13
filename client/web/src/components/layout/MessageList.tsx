@@ -3,25 +3,36 @@
 // with @tanstack/react-virtual the way KY windows its list (an absolutely
 // positioned row per virtual item, measured as it mounts, a fixed estimate
 // before the first measure). The rows come straight from the snapshot the
-// pulls keep fresh; the split filter narrows what renders, never the
-// window itself, so a full window keeps offering to grow. A single click
-// selects and opens (selection is open, the highlight following the open
-// message), and ShowMore grows the window the core owes whenever the rows
-// fill it. A live search state replaces the folder rows with the result
-// rows through the same window and the same open flow, keyed by message.
+// pulls keep fresh, grouped under a date header per sent-at day; the split
+// filter narrows what renders, never the window itself, so a full window
+// keeps offering to grow. A single click selects and opens (selection is
+// open, the highlight following the open message), and ShowMore grows the
+// window the core owes whenever the rows fill it. A live search state
+// replaces the folder rows with the result rows through the same window and
+// the same open flow, keyed by message, flat with no date headers. The
+// folder tree's Outbox row swaps the whole body for the account's queue
+// view. Row heights follow the density the list store holds.
 
 import { useEffect, useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 
 import { ListToolbar } from '@/components/message-list/ListToolbar';
 import { MessageRow } from '@/components/message-list/MessageRow';
+import {
+  HEADER_ROW_PX,
+  flatItems,
+  withDateHeaders,
+  type ListItem,
+} from '@/components/message-list/dateGroups';
+import { DENSITY_ROW_PX } from '@/components/message-list/density';
 import { sameRowKey } from '@/components/message-list/rowIdentity';
+import { OutboxQueue } from '@/features/outbox/OutboxQueue';
 import { dispatch, intents } from '@/services/ipc';
 import { useFolderStore } from '@/stores/folderStore';
 import { useListStore } from '@/stores/listStore';
 import { useReadingStore } from '@/stores/readingStore';
 import { splitCounts, useSplitStore, visibleRows } from '@/stores/splitStore';
-import type { MessageRowView, RowKey } from '@/services/surfaces';
+import type { RowKey } from '@/services/surfaces';
 
 /** The selected folder's display name, straight off the folder tree. */
 function folderDisplayName(
@@ -36,8 +47,8 @@ function folderDisplayName(
 }
 
 interface RowWindowProps {
-  /** The rows the mode is showing, in the snapshot's own order. */
-  rows: MessageRowView[];
+  /** The items the mode is showing, headers interleaved or flat. */
+  items: ListItem[];
   /** The key the highlight follows: the open message, or the local click. */
   highlight: RowKey | null;
   /** The clock the stamps are formatted against. */
@@ -49,12 +60,14 @@ interface RowWindowProps {
 }
 
 /** The virtualised row window both list modes draw their rows through. */
-function RowWindow({ rows, highlight, now, openRow, showMore }: RowWindowProps) {
+function RowWindow({ items, highlight, now, openRow, showMore }: RowWindowProps) {
+  const density = useListStore((s) => s.density);
   const scrollRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
-    count: rows.length,
+    count: items.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => 56,
+    estimateSize: (index) =>
+      items[index]?.kind === 'header' ? HEADER_ROW_PX : DENSITY_ROW_PX[density],
     overscan: 12,
   });
 
@@ -67,13 +80,13 @@ function RowWindow({ rows, highlight, now, openRow, showMore }: RowWindowProps) 
     >
       <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
         {virtualizer.getVirtualItems().map((item) => {
-          const row = rows[item.index];
-          if (row === undefined) {
+          const entry = items[item.index];
+          if (entry === undefined) {
             return null;
           }
           return (
             <div
-              key={item.key}
+              key={`${String(item.key)}:${density}`}
               data-index={item.index}
               ref={virtualizer.measureElement}
               style={{
@@ -84,12 +97,21 @@ function RowWindow({ rows, highlight, now, openRow, showMore }: RowWindowProps) 
                 transform: `translateY(${item.start}px)`,
               }}
             >
-              <MessageRow
-                row={row}
-                selected={sameRowKey(row.key, highlight)}
-                now={now}
-                onSelect={openRow}
-              />
+              {entry.kind === 'header' ? (
+                <div
+                  role="presentation"
+                  className="border-b border-border-subtle px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-text"
+                >
+                  {entry.label}
+                </div>
+              ) : (
+                <MessageRow
+                  row={entry.row}
+                  selected={sameRowKey(entry.row.key, highlight)}
+                  now={now}
+                  onSelect={openRow}
+                />
+              )}
             </div>
           );
         })}
@@ -117,9 +139,11 @@ export function MessageList() {
   const openSnapshot = useReadingStore((s) => s.snapshot);
   const accounts = useFolderStore((s) => s.accounts);
   const folder = useFolderStore((s) => s.selected);
+  const outboxAccount = useFolderStore((s) => s.outboxAccount);
   const splitFilter = useSplitStore((s) => s.filter);
   const entries = useSplitStore((s) => s.entries);
 
+  const outboxMode = outboxAccount !== null;
   const searching = search !== null;
   const shownRows = visibleRows(rows, splitFilter, entries);
   const counts = splitCounts(rows, entries);
@@ -175,12 +199,15 @@ export function MessageList() {
         splitCounts={counts}
         onSplitFilter={(filter) => useSplitStore.getState().setFilter(filter)}
         search={search}
+        outbox={outboxMode}
       />
-      {searching ? (
+      {outboxMode ? (
+        <OutboxQueue account={outboxAccount} />
+      ) : searching ? (
         search.rows.length === 0 ? (
           <p className="p-4 text-sm text-muted-foreground">No results.</p>
         ) : (
-          <RowWindow rows={search.rows} highlight={highlight} now={now} openRow={openRow} showMore={false} />
+          <RowWindow items={flatItems(search.rows)} highlight={highlight} now={now} openRow={openRow} showMore={false} />
         )
       ) : folder === null ? (
         <p className="p-4 text-sm text-muted-foreground">Select a folder to read its mail.</p>
@@ -189,7 +216,7 @@ export function MessageList() {
       ) : shownRows.length === 0 ? (
         <p className="p-4 text-sm text-muted-foreground">No messages on this side.</p>
       ) : (
-        <RowWindow rows={shownRows} highlight={highlight} now={now} openRow={openRow} showMore={windowIsFull} />
+        <RowWindow items={withDateHeaders(shownRows, now)} highlight={highlight} now={now} openRow={openRow} showMore={windowIsFull} />
       )}
     </section>
   );

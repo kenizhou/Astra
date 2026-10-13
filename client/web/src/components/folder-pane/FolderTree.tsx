@@ -3,7 +3,8 @@
 // parent keys, so nesting is an indent by depth and a visibility walk up the
 // parent chain. Expansion and selection cross back to the core as intents; the
 // tree keeps no expansion state of its own, which is what keeps it in step with
-// the snapshot every pull brings.
+// the snapshot every pull brings. Each account's group closes with its Outbox
+// row, which leads the list's queue view instead of a folder.
 
 import type { ComponentType } from 'react';
 
@@ -13,6 +14,7 @@ import {
   FolderIcon,
   InboxIcon,
   JunkIcon,
+  OutboxIcon,
   SentIcon,
   TrashIcon,
   type IconProps,
@@ -20,6 +22,7 @@ import {
 import { dispatch, intents, type FolderRef } from '@/services/ipc';
 import type { AccountFolderRow, FolderRow, FolderRole } from '@/services/surfaces';
 import { useFolderStore, visibleFolders } from '@/stores/folderStore';
+import { useSendingStore } from '@/stores/sendingStore';
 
 /** One icon per role; a folder with no role draws the plain folder icon. */
 const ROLE_ICON: Record<FolderRole, ComponentType<IconProps>> = {
@@ -100,7 +103,56 @@ function FolderTreeRow({ accountId, row, selected }: FolderTreeRowProps) {
   );
 }
 
-/** One account group: its header row and the folder rows beneath it. */
+/** The account's Outbox row: leads the list's queue view, badging the sends
+ * still owed to the server while any stand. */
+function OutboxTreeRow({ accountId }: { accountId: string }) {
+  const selected = useFolderStore((s) => s.outboxAccount === accountId);
+  const pending = useSendingStore(
+    (s) =>
+      s.snapshot.rows.filter(
+        (row) =>
+          row.queued.account === accountId && (row.state === 'queued' || row.state === 'sending'),
+      ).length,
+  );
+
+  const onSelect = () => {
+    useFolderStore.getState().selectOutbox(accountId);
+    void dispatch(intents.showOutbox());
+  };
+
+  return (
+    <div
+      role="treeitem"
+      aria-selected={selected}
+      aria-level={1}
+      className={`relative flex h-9 items-center gap-2 rounded-lg pl-3 pr-2 text-[13px] transition-colors ${
+        selected ? 'bg-primary-muted text-[var(--selected-text)]' : 'text-foreground hover:bg-hover'
+      }`}
+    >
+      {selected && (
+        <span
+          aria-hidden="true"
+          className="absolute bottom-0 left-0 top-0 w-[3px] rounded-r-full iris-line-v"
+        />
+      )}
+      <span className="h-4 w-4 shrink-0" aria-hidden="true" />
+      <span aria-hidden="true" className="flex w-4 shrink-0 items-center justify-center text-muted-text">
+        <OutboxIcon size={15} />
+      </span>
+      <button type="button" onClick={onSelect} className="min-w-0 flex-1 truncate text-left">
+        Outbox
+      </button>
+      {pending > 0 && (
+        <span className="shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-[11px] font-medium tabular-nums leading-none text-primary-foreground">
+          {pending}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** One account group: its header row, the folder rows beneath it, and the
+ * Outbox row closing the group. */
 export function FolderTree({ account }: { account: AccountFolderRow }) {
   const selected = useFolderStore((s) => s.selected);
   const rows = visibleFolders(account);
@@ -150,6 +202,7 @@ export function FolderTree({ account }: { account: AccountFolderRow }) {
           }
         />
       ))}
+      {account.expanded && <OutboxTreeRow accountId={account.account_id} />}
     </section>
   );
 }

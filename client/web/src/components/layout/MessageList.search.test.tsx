@@ -242,4 +242,17 @@ describe('the search results mode', () => {
     expect(screen.getByText('No results.')).toBeTruthy();
     expect(screen.queryByRole('option')).toBeNull();
   });
+
+  it('keeps the results flat with no date group headers', () => {
+    applySearch({ rows: [hit, threadHit] });
+
+    render(<MessageList />);
+
+    // The hits fall within the last week, so the folder listing would head
+    // them with their weekdays; the results list never groups.
+    expect(screen.queryByText('Today')).toBeNull();
+    expect(screen.queryByText('Yesterday')).toBeNull();
+    expect(screen.queryByText('Wednesday')).toBeNull();
+    expect(screen.queryByText('Tuesday')).toBeNull();
+  });
 });

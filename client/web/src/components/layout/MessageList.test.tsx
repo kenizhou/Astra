@@ -5,8 +5,10 @@
 // highlight following the open message), every intent crossing back
 // (show more, view mode, mark read, set flagged, open message) with its
 // exact payload, and the split filter (the badges, the side views, the
-// unmapped rows riding All only, and the selection reset). The search
-// results mode has its own file: MessageList.search.test.tsx.
+// unmapped rows riding All only, and the selection reset). The date group
+// headers, the density, and the outbox queue view have their own file:
+// MessageList.groups.test.tsx; the search results mode has its own file:
+// MessageList.search.test.tsx.
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -90,6 +92,7 @@ beforeEach(() => {
   useFolderStore.setState({
     accounts: (fixtureJson as MailboxListSnapshot).account_folders,
     selected: { account: 'work', key: 'INBOX' },
+    outboxAccount: null,
   });
   useListStore.setState({
     rows: [],
@@ -98,6 +101,7 @@ beforeEach(() => {
     selection: null,
     selectedKey: null,
     search: null,
+    density: 'normal',
   });
   useReadingStore.setState({ snapshot: null, showRemoteImages: false });
   useSplitStore.setState({ entries: {}, filter: 'all' });
