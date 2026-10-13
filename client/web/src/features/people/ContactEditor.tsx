@@ -22,6 +22,7 @@ import {
   type EditableCardRow,
   type PeopleWriteRow,
 } from '@/services/ipc';
+import type { ContactCreateSeed } from './peopleStore';
 
 /** The sentence a refused form draws, under itself. */
 const INVALID_SENTENCE =
@@ -32,6 +33,8 @@ interface ContactEditorProps {
   createTargets: CreateTargetRow[];
   editableCards: EditableCardRow[];
   writeStates: PeopleWriteRow[];
+  /** A seed a create opens with: the form starts holding it. */
+  prefill?: ContactCreateSeed | null;
   onClose: () => void;
 }
 
@@ -84,6 +87,7 @@ export function ContactEditor({
   createTargets,
   editableCards,
   writeStates,
+  prefill = null,
   onClose,
 }: ContactEditorProps) {
   const defaultBook =
@@ -95,7 +99,13 @@ export function ContactEditor({
     editableCards.length === 1 ? editableCards[0]! : null,
   );
   const [pickedKey, setPickedKey] = useState('');
-  const [form, setForm] = useState<EditorForm>(EMPTY_FORM);
+  // A create with a seed starts holding it: the whole name lands in the
+  // given field and the address in emails, both editable from there.
+  const [form, setForm] = useState<EditorForm>(() =>
+    mode === 'create' && prefill !== null
+      ? { ...EMPTY_FORM, given: prefill.name, emails: prefill.address }
+      : EMPTY_FORM,
+  );
   const [baseline, setBaseline] = useState<EditorForm>(EMPTY_FORM);
   const [watch, setWatch] = useState<{ account: string; baseline: PeopleWriteRow[] } | null>(
     null,

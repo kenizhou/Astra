@@ -139,7 +139,16 @@ export function PeoplePane() {
   const detail = usePeopleStore((s) => s.detail);
   const createTargets = usePeopleStore((s) => s.createTargets);
   const writeStates = usePeopleStore((s) => s.writeStates);
+  const pendingCreate = usePeopleStore((s) => s.pendingContactCreate);
   const [editing, setEditing] = useState<'create' | 'edit' | null>(null);
+
+  // Another surface's create request (the reading pane's sender chip)
+  // opens the editor prefilled once a writable book stands.
+  useEffect(() => {
+    if (pendingCreate !== null && editing === null && createTargets.length > 0) {
+      setEditing('create');
+    }
+  }, [pendingCreate, editing, createTargets.length]);
 
   // A people surface entering the view syncs: the same refresh a failed
   // write's recovery waits for, and the one a focus regain repeats.
@@ -220,7 +229,11 @@ export function PeoplePane() {
           createTargets={createTargets}
           editableCards={detail?.editable_cards ?? []}
           writeStates={writeStates}
-          onClose={() => setEditing(null)}
+          prefill={editing === 'create' ? pendingCreate : null}
+          onClose={() => {
+            setEditing(null);
+            usePeopleStore.getState().clearContactCreate();
+          }}
         />
       )}
     </section>

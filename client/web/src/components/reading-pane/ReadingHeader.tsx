@@ -58,9 +58,17 @@ interface ReadingHeaderProps {
   fromAddress: string;
   /** When the message was sent, as a whole-second UTC instant string. */
   sentAt: string;
+  /** When set and a sender stands, the header offers an add-contact chip. */
+  onAddContact?: () => void;
 }
 
-export function ReadingHeader({ subject, fromName, fromAddress, sentAt }: ReadingHeaderProps) {
+export function ReadingHeader({
+  subject,
+  fromName,
+  fromAddress,
+  sentAt,
+  onAddContact,
+}: ReadingHeaderProps) {
   const twentyFour = useSettingsStore((s) => s.settings.twenty_four_clock);
   const hasSender = fromName !== '' || fromAddress !== '';
   const displayName = fromName === '' ? fromAddress : fromName;
@@ -79,6 +87,15 @@ export function ReadingHeader({ subject, fromName, fromAddress, sentAt }: Readin
               <p className="truncate text-xs text-muted-text">{fromAddress}</p>
             )}
           </div>
+          {onAddContact !== undefined && fromAddress !== '' && (
+            <button
+              type="button"
+              onClick={onAddContact}
+              className="shrink-0 rounded-full border border-border-subtle px-2 py-0.5 text-[11px] text-muted-text transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              Add to contacts
+            </button>
+          )}
           {date !== '' && (
             <span className="shrink-0 self-start text-xs tabular-nums text-muted-text">
               {date}

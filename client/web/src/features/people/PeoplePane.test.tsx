@@ -50,6 +50,7 @@ beforeEach(() => {
   ipc.peopleCard.mockReset();
   ipc.peopleCard.mockResolvedValue(null);
   usePeopleStore.getState().applySnapshot(snapshot());
+  usePeopleStore.getState().clearContactCreate();
 });
 
 afterEach(() => {
@@ -172,5 +173,24 @@ describe('the people pane', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'New contact' }));
     expect(screen.getByRole('dialog', { name: 'New contact' })).toBeTruthy();
+  });
+
+  it('opens the create editor prefilled when another surface hands a seed over', () => {
+    usePeopleStore.getState().applySnapshot({
+      ...snapshot(),
+      create_targets: [{ account: 'work', book: '/dav/book/', name: 'Contacts', is_default: true }],
+    });
+    act(() => {
+      usePeopleStore.getState().requestContactCreate({
+        name: 'Ada Lovelace',
+        address: 'ada@example.test',
+      });
+    });
+    render(<PeoplePane />);
+
+    const dialog = screen.getByRole('dialog', { name: 'New contact' });
+    expect(dialog).toBeTruthy();
+    expect((screen.getByLabelText('Emails') as HTMLInputElement).value).toBe('ada@example.test');
+    expect((screen.getByLabelText('Given name') as HTMLInputElement).value).toBe('Ada Lovelace');
   });
 });

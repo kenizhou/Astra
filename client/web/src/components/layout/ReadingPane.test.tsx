@@ -33,7 +33,9 @@ vi.mock('@/services/ai', () => ai);
 
 import { ReadingPane } from './ReadingPane';
 import { useAiChipsStore } from '@/stores/aiChipsStore';
+import { usePeopleStore } from '@/features/people/peopleStore';
 import { useReadingStore } from '@/stores/readingStore';
+import { useUiStore } from '@/stores/uiStore';
 import type { ReadingSnapshot } from '@/services/ipc';
 
 /** The sanitised body the Rust gate emits: one inline data URI, one remote
@@ -75,6 +77,8 @@ beforeEach(() => {
   ai.translateMessage.mockReset();
   useReadingStore.setState({ snapshot: null, showRemoteImages: false });
   useAiChipsStore.setState({ message: null, chips: [] });
+  usePeopleStore.setState({ pendingContactCreate: null });
+  useUiStore.setState({ shellView: 'mail' });
 });
 
 afterEach(cleanup);
@@ -206,5 +210,27 @@ describe('the reading pane', () => {
     render(<ReadingPane />);
 
     expect(screen.queryByRole('region', { name: 'Invitation' })).toBeNull();
+  });
+
+  it('hands the sender to the people view from the add-contact chip', () => {
+    useReadingStore.getState().applySnapshot(snapshot());
+    render(<ReadingPane />);
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Add to contacts' }));
+    });
+
+    expect(usePeopleStore.getState().pendingContactCreate).toEqual({
+      name: 'Ada Lovelace',
+      address: 'ada@example.test',
+    });
+    expect(useUiStore.getState().shellView).toBe('people');
+  });
+
+  it('offers no add-contact chip for a senderless message', () => {
+    useReadingStore.getState().applySnapshot(snapshot({ from_name: '', from_address: '' }));
+    render(<ReadingPane />);
+
+    expect(screen.queryByRole('button', { name: 'Add to contacts' })).toBeNull();
   });
 });

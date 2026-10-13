@@ -20,7 +20,9 @@ import { SummaryBlock } from '@/components/reading-pane/SummaryBlock';
 import { TranslateBlock } from '@/components/reading-pane/TranslateBlock';
 import { CloseIcon, MailIcon } from '@/components/icons';
 import { dispatch, intents } from '@/services/ipc';
+import { usePeopleStore } from '@/features/people/peopleStore';
 import { useReadingStore } from '@/stores/readingStore';
+import { useUiStore } from '@/stores/uiStore';
 
 export function ReadingPane() {
   const snapshot = useReadingStore((s) => s.snapshot);
@@ -66,6 +68,13 @@ export function ReadingPane() {
         fromName={snapshot.from_name}
         fromAddress={snapshot.from_address}
         sentAt={snapshot.sent_at}
+        onAddContact={() => {
+          usePeopleStore.getState().requestContactCreate({
+            name: snapshot.from_name,
+            address: snapshot.from_address,
+          });
+          useUiStore.getState().setShellView('people');
+        }}
       />
       {snapshot.invitation !== undefined && (
         <InvitationCard message={snapshot.message} invitation={snapshot.invitation} />
