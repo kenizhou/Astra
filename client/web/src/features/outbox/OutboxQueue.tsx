@@ -1,23 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The outbox panel: every account's sends that have not gone out, over the
-// shell's corner. Each state offers exactly the actions the engine accepts
-// (a queued or refused send can go now or be withdrawn, a send in flight
-// cannot be called back, an unconfirmed one offers only the user's answer),
-// opening the panel asks the host to rebuild the queue, and the removal
-// verbs mark their row so the send-result toast never reads the user's own
-// hand as a delivery, with the mark taken back when the host refuses the
-// action and judged by the snapshot that follows when the engine answers.
-// The status bar's toggle carries the outstanding count.
-
-import { useEffect } from 'react';
+// The outbox queue view: one account's sends that have not gone out, drawn in
+// the message list pane when the folder tree's Outbox row leads. Each state
+// offers exactly the actions the engine accepts (a queued or refused send can
+// go now or be withdrawn, a send in flight cannot be called back, an
+// unconfirmed one offers only the user's answer), and the removal verbs mark
+// their row so the send-result toast never reads the user's own hand as a
+// delivery, with the mark taken back when the host refuses the action and
+// judged by the snapshot that follows when the engine answers.
 
 import { dispatch, intents, type Intent, type QueuedKey, type QueuedRow } from '@/services/ipc';
 import { useSendingStore } from '@/stores/sendingStore';
-import { useUiStore } from '@/stores/uiStore';
 
 import { useSendResultStore } from './sendResult';
 
-/** One queued send's state word, as the panel spells it. */
+/** One queued send's state word, as the queue spells it. */
 const stateWord: Record<QueuedRow['state'], string> = {
   queued: 'Queued',
   sending: 'Sending',
@@ -25,7 +21,7 @@ const stateWord: Record<QueuedRow['state'], string> = {
   failed: 'Failed',
 };
 
-/** The arrival instant as the panel shows it; nothing when it is unknown. */
+/** The arrival instant as the queue shows it; nothing when it is unknown. */
 function arrivalWord(arrivedAt: string): string {
   return arrivedAt === '' ? '' : `${new Date(arrivedAt).toISOString().slice(11, 16)} UTC`;
 }
@@ -51,7 +47,7 @@ function dispatchRemoval(intent: Intent, queued: QueuedKey): void {
 }
 
 /** One queued send, with the actions its state accepts. */
-function OutboxRow({ row }: { row: QueuedRow }) {
+function OutboxQueueRow({ row }: { row: QueuedRow }) {
   const actions: Array<{ label: string; run: () => void }> = [];
   if (row.state === 'queued' || row.state === 'failed') {
     // A refused send's first attempt is gone, so the verb says what it does.
@@ -97,67 +93,19 @@ function OutboxRow({ row }: { row: QueuedRow }) {
   );
 }
 
-/** The outbox panel over the shell's corner; renders nothing when shut. */
-export function OutboxPanel() {
-  const open = useUiStore((s) => s.outboxOpen);
+/** The account's queue as the list pane's body. */
+export function OutboxQueue({ account }: { account: string }) {
   const rows = useSendingStore((s) => s.snapshot.rows);
+  const own = rows.filter((row) => row.queued.account === account);
 
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-    // A show that finds nothing moved says nothing; the pull answers the rest.
-    void dispatch(intents.showOutbox());
-  }, [open]);
-
-  if (!open) {
-    return null;
+  if (own.length === 0) {
+    return <p className="p-4 text-sm text-muted-foreground">No sends waiting</p>;
   }
-
   return (
-    <section
-      aria-label="Outbox"
-      className="absolute bottom-[calc(var(--status-h)+12px)] right-3 z-[var(--z-popover)] flex max-h-[60vh] w-[340px] flex-col overflow-hidden rounded-[var(--radius)] border border-border bg-surface shadow-lg"
-    >
-      <div className="flex h-[var(--pane-header-h)] shrink-0 items-center justify-between border-b border-border px-3">
-        <span className="text-xs font-medium text-foreground">Outbox</span>
-        <button
-          type="button"
-          aria-label="Close outbox"
-          onClick={() => useUiStore.getState().setOutboxOpen(false)}
-          className={actionClass}
-        >
-          Close
-        </button>
-      </div>
-      {rows.length === 0 ? (
-        <p className="px-3 py-3 text-xs text-muted-foreground">No sends waiting</p>
-      ) : (
-        <ul className="min-h-0 flex-1 overflow-y-auto">
-          {rows.map((row) => (
-            <OutboxRow
-              key={`${row.queued.account}/${row.queued.op}`}
-              row={row}
-            />
-          ))}
-        </ul>
-      )}
-    </section>
-  );
-}
-
-/** The status bar's outbox toggle, carrying the outstanding send count. */
-export function OutboxStatus() {
-  const open = useUiStore((s) => s.outboxOpen);
-  const count = useSendingStore((s) => s.snapshot.rows.length);
-
-  return (
-    <button
-      type="button"
-      onClick={() => useUiStore.getState().setOutboxOpen(!open)}
-      className="rounded-[var(--radius-xs)] px-1.5 py-0.5 transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-    >
-      {count > 0 ? `Outbox ${count}` : 'Outbox'}
-    </button>
+    <ul aria-label="Outbox" className="min-h-0 flex-1 overflow-y-auto">
+      {own.map((row) => (
+        <OutboxQueueRow key={`${row.queued.account}/${row.queued.op}`} row={row} />
+      ))}
+    </ul>
   );
 }

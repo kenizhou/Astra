@@ -18,6 +18,17 @@ import type {
 } from '@/services/ipc';
 import { useUiStore } from '@/stores/uiStore';
 
+/** The category id, one per detail the settings screen ships. */
+export type SettingsCategory =
+  | 'general'
+  | 'calendar'
+  | 'reading'
+  | 'composing'
+  | 'shortcuts'
+  | 'accounts'
+  | 'advanced'
+  | 'about';
+
 /** The block the core hands a fresh preferences document: the shipped defaults. */
 const DEFAULT_SETTINGS: SettingsBlock = {
   theme: 'follow_host',
@@ -40,8 +51,12 @@ interface SettingsStoreState {
   error: SettingsError | undefined;
   /** Moves on every applied snapshot, so watches see a fresh publish. */
   revision: number;
+  /** The category the next open lands on; null opens on the last one. */
+  requestedCategory: SettingsCategory | null;
   /** Applies a pulled snapshot. */
   applySnapshot: (snapshot: SettingsSnapshot) => void;
+  /** Asks the next open to land on one category, or clears the ask. */
+  requestCategory: (category: SettingsCategory | null) => void;
 }
 
 export const useSettingsStore = create<SettingsStoreState>((set) => ({
@@ -50,6 +65,7 @@ export const useSettingsStore = create<SettingsStoreState>((set) => ({
   about: { version: '' },
   error: undefined,
   revision: 0,
+  requestedCategory: null,
 
   applySnapshot: (snapshot) => {
     useUiStore.getState().setTheme(snapshot.settings.theme);
@@ -61,4 +77,6 @@ export const useSettingsStore = create<SettingsStoreState>((set) => ({
       revision: state.revision + 1,
     }));
   },
+
+  requestCategory: (category) => set({ requestedCategory: category }),
 }));

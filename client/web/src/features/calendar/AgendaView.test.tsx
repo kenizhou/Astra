@@ -78,7 +78,7 @@ describe('the agenda view', () => {
     useCalendarStore.setState({
       occurrences: [row(), row({ event: 'b', title: 'Next day', start: '2026-10-20T07:00:00Z', end: '2026-10-20T08:00:00Z' })],
     });
-    render(<AgendaView onOpenEvent={open} />);
+    render(<AgendaView onSelectEvent={open} />);
 
     expect(screen.getByText('Monday 19 October')).toBeTruthy();
     expect(screen.getByText('Tuesday 20 October')).toBeTruthy();
@@ -90,7 +90,7 @@ describe('the agenda view', () => {
   it('answers the clock setting the settings block carries', () => {
     useCalendarStore.setState({ occurrences: [row()] });
     useSettingsStore.getState().applySnapshot(clockSnapshot(true));
-    render(<AgendaView onOpenEvent={open} />);
+    render(<AgendaView onSelectEvent={open} />);
 
     expect(screen.getByText('09:00')).toBeTruthy();
     useSettingsStore.getState().applySnapshot(clockSnapshot(false));
@@ -103,7 +103,7 @@ describe('the agenda view', () => {
         row({ event: 'a', title: 'Earlier', start: '2026-10-19T07:00:00Z', end: '2026-10-19T08:00:00Z' }),
       ],
     });
-    render(<AgendaView onOpenEvent={open} />);
+    render(<AgendaView onSelectEvent={open} />);
 
     const rows = screen.getAllByRole('listitem');
     expect(rows.map((node) => node.textContent)).toEqual([
@@ -120,7 +120,7 @@ describe('the agenda view', () => {
         row({ event: 'r', title: 'Weekly', recurring: true }),
       ],
     });
-    render(<AgendaView onOpenEvent={open} />);
+    render(<AgendaView onSelectEvent={open} />);
 
     expect(screen.getByText('All day')).toBeTruthy();
     expect(screen.getByTitle('Unanswered awaits your answer')).toBeTruthy();
@@ -128,7 +128,7 @@ describe('the agenda view', () => {
   });
 
   it('draws the empty state when the window holds nothing', () => {
-    render(<AgendaView onOpenEvent={open} />);
+    render(<AgendaView onSelectEvent={open} />);
 
     expect(screen.getByText('No events in this window.')).toBeTruthy();
   });
@@ -136,7 +136,7 @@ describe('the agenda view', () => {
   it('opens the event on a row click', () => {
     const target = row();
     useCalendarStore.setState({ occurrences: [target] });
-    render(<AgendaView onOpenEvent={open} />);
+    render(<AgendaView onSelectEvent={open} />);
 
     screen.getByText('Standup').click();
 

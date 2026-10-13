@@ -66,6 +66,21 @@ impl<P: Provider> App<P> {
         self.compose_request.get()
     }
 
+    /// Takes the pending compose request, consuming the slot: the pop-out
+    /// composer window's pull, which hydrates from the answer and leaves the
+    /// slot empty so no later window re-reads a spent request. A taken slot
+    /// signals the surface, so every webview's pull re-reads the emptiness;
+    /// an empty slot answers `None` without signalling. The compose source
+    /// stays: the send path re-resolves the original from it to thread the
+    /// reply, and it stands until the next request replaces it.
+    pub fn take_compose_request(&self) -> Option<ComposeRequestSnapshot> {
+        let pending = self.compose_request.get();
+        if pending.is_some() {
+            self.compose_request.publish(None);
+        }
+        pending
+    }
+
     /// Routes one [`ComposeIntent`]: every variant builds and publishes one
     /// compose request from the message it names, so a host opening its
     /// composer on the signal pulls the whole prefill as one thing.

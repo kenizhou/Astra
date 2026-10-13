@@ -3,27 +3,41 @@
 // parent keys, so nesting is an indent by depth and a visibility walk up the
 // parent chain. Expansion and selection cross back to the core as intents; the
 // tree keeps no expansion state of its own, which is what keeps it in step with
-// the snapshot every pull brings.
+// the snapshot every pull brings. Each account's group closes with its Outbox
+// row, which leads the list's queue view instead of a folder.
 
+import type { ComponentType } from 'react';
+
+import {
+  ArchiveIcon,
+  DraftsIcon,
+  FolderIcon,
+  InboxIcon,
+  JunkIcon,
+  OutboxIcon,
+  SentIcon,
+  TrashIcon,
+  type IconProps,
+} from '@/components/icons';
 import { dispatch, intents, type FolderRef } from '@/services/ipc';
 import type { AccountFolderRow, FolderRow, FolderRole } from '@/services/surfaces';
 import { useFolderStore, visibleFolders } from '@/stores/folderStore';
+import { useSendingStore } from '@/stores/sendingStore';
 
-/** One glyph per role, drawn from the font rather than an icon set for now. */
-const ROLE_GLYPH: Record<FolderRole, string> = {
-  inbox: '\u2709',
-  drafts: '\u270E',
-  sent: '\u27A4',
-  archive: '\u25A4',
-  junk: '\u2298',
-  trash: '\u232B',
-  other: '\u25A7',
+/** One icon per role; a folder with no role draws the plain folder icon. */
+const ROLE_ICON: Record<FolderRole, ComponentType<IconProps>> = {
+  inbox: InboxIcon,
+  drafts: DraftsIcon,
+  sent: SentIcon,
+  archive: ArchiveIcon,
+  junk: JunkIcon,
+  trash: TrashIcon,
+  other: FolderIcon,
 };
 
-const LEAF_GLYPH = '\u25AA';
-
-function roleGlyph(row: FolderRow): string {
-  return row.role === undefined ? LEAF_GLYPH : ROLE_GLYPH[row.role];
+function RoleIcon({ row }: { row: FolderRow }) {
+  const Icon = row.role === undefined ? FolderIcon : ROLE_ICON[row.role];
+  return <Icon size={15} />;
 }
 
 interface FolderTreeRowProps {
@@ -51,31 +65,37 @@ function FolderTreeRow({ accountId, row, selected }: FolderTreeRowProps) {
       aria-expanded={row.has_children ? row.expanded : undefined}
       aria-level={row.depth + 1}
       data-depth={row.depth}
-      className={`flex h-[var(--row-h)] items-center gap-1.5 pr-2 text-[13px] transition-colors ${
-        selected ? 'bg-selected text-[var(--selected-text)]' : 'text-foreground hover:bg-hover'
+      className={`relative flex h-9 items-center gap-2 rounded-lg pr-2 text-[13px] transition-colors ${
+        selected ? 'bg-primary-muted text-[var(--selected-text)]' : 'text-foreground hover:bg-hover'
       }`}
-      style={{ paddingLeft: `${6 + row.depth * 14}px` }}
+      style={{ paddingLeft: `${12 + row.depth * 14}px` }}
     >
+      {selected && (
+        <span
+          aria-hidden="true"
+          className="absolute bottom-0 left-0 top-0 w-[3px] rounded-r-full iris-line-v"
+        />
+      )}
       {row.has_children ? (
         <button
           type="button"
           onClick={onToggle}
           aria-label={row.expanded ? `Collapse ${row.name}` : `Expand ${row.name}`}
-          className="flex h-4 w-4 shrink-0 items-center justify-center rounded-[2px] text-muted-foreground hover:bg-hover hover:text-foreground"
+          className="flex h-4 w-4 shrink-0 items-center justify-center rounded-[2px] text-muted-text hover:bg-hover hover:text-foreground"
         >
-          {row.expanded ? '\u25BE' : '\u25B8'}
+          {row.expanded ? '▾' : '▸'}
         </button>
       ) : (
         <span className="h-4 w-4 shrink-0" aria-hidden="true" />
       )}
-      <span aria-hidden="true" className="w-4 shrink-0 text-center text-muted-foreground">
-        {roleGlyph(row)}
+      <span aria-hidden="true" className="flex w-4 shrink-0 items-center justify-center text-muted-text">
+        <RoleIcon row={row} />
       </span>
       <button type="button" onClick={onSelect} className="min-w-0 flex-1 truncate text-left">
         {row.name}
       </button>
       {row.unread > 0 && (
-        <span className="shrink-0 rounded-full bg-primary px-1.5 text-[11px] font-medium tabular-nums text-primary-foreground">
+        <span className="shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-[11px] font-medium tabular-nums leading-none text-primary-foreground">
           {row.unread}
         </span>
       )}
@@ -83,7 +103,56 @@ function FolderTreeRow({ accountId, row, selected }: FolderTreeRowProps) {
   );
 }
 
-/** One account group: its header row and the folder rows beneath it. */
+/** The account's Outbox row: leads the list's queue view, badging the sends
+ * still owed to the server while any stand. */
+function OutboxTreeRow({ accountId }: { accountId: string }) {
+  const selected = useFolderStore((s) => s.outboxAccount === accountId);
+  const pending = useSendingStore(
+    (s) =>
+      s.snapshot.rows.filter(
+        (row) =>
+          row.queued.account === accountId && (row.state === 'queued' || row.state === 'sending'),
+      ).length,
+  );
+
+  const onSelect = () => {
+    useFolderStore.getState().selectOutbox(accountId);
+    void dispatch(intents.showOutbox());
+  };
+
+  return (
+    <div
+      role="treeitem"
+      aria-selected={selected}
+      aria-level={1}
+      className={`relative flex h-9 items-center gap-2 rounded-lg pl-3 pr-2 text-[13px] transition-colors ${
+        selected ? 'bg-primary-muted text-[var(--selected-text)]' : 'text-foreground hover:bg-hover'
+      }`}
+    >
+      {selected && (
+        <span
+          aria-hidden="true"
+          className="absolute bottom-0 left-0 top-0 w-[3px] rounded-r-full iris-line-v"
+        />
+      )}
+      <span className="h-4 w-4 shrink-0" aria-hidden="true" />
+      <span aria-hidden="true" className="flex w-4 shrink-0 items-center justify-center text-muted-text">
+        <OutboxIcon size={15} />
+      </span>
+      <button type="button" onClick={onSelect} className="min-w-0 flex-1 truncate text-left">
+        Outbox
+      </button>
+      {pending > 0 && (
+        <span className="shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-[11px] font-medium tabular-nums leading-none text-primary-foreground">
+          {pending}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** One account group: its header row, the folder rows beneath it, and the
+ * Outbox row closing the group. */
 export function FolderTree({ account }: { account: AccountFolderRow }) {
   const selected = useFolderStore((s) => s.selected);
   const rows = visibleFolders(account);
@@ -99,8 +168,8 @@ export function FolderTree({ account }: { account: AccountFolderRow }) {
     : account.folders.reduce((total, row) => total + row.unread, 0);
 
   return (
-    <section aria-label={account.display_name}>
-      <div className="flex h-[var(--row-h)] items-center gap-1 pr-2 pl-1">
+    <section aria-label={account.display_name} className="space-y-0.5 pb-1">
+      <div className="flex h-9 items-center gap-1 pl-2 pr-2">
         <button
           type="button"
           onClick={onToggleAccount}
@@ -108,15 +177,15 @@ export function FolderTree({ account }: { account: AccountFolderRow }) {
             account.expanded ? `Collapse ${account.display_name}` : `Expand ${account.display_name}`
           }
           aria-expanded={account.expanded}
-          className="flex h-4 w-4 shrink-0 items-center justify-center rounded-[2px] text-muted-foreground hover:bg-hover hover:text-foreground"
+          className="flex h-4 w-4 shrink-0 items-center justify-center rounded-[2px] text-muted-text hover:bg-hover hover:text-foreground"
         >
-          {account.expanded ? '\u25BE' : '\u25B8'}
+          {account.expanded ? '▾' : '▸'}
         </button>
-        <span className="truncate text-[var(--text-pane-title)] text-muted-foreground">
+        <span className="truncate text-[11px] uppercase tracking-wide text-muted-text">
           {account.display_name}
         </span>
         {collapsedUnread > 0 && (
-          <span className="ml-auto shrink-0 rounded-full bg-primary px-1.5 text-[11px] font-medium tabular-nums text-primary-foreground">
+          <span className="ml-auto shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-[11px] font-medium tabular-nums leading-none text-primary-foreground">
             {collapsedUnread}
           </span>
         )}
@@ -133,6 +202,7 @@ export function FolderTree({ account }: { account: AccountFolderRow }) {
           }
         />
       ))}
+      {account.expanded && <OutboxTreeRow accountId={account.account_id} />}
     </section>
   );
 }

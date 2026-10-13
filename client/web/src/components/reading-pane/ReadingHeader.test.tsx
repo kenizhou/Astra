@@ -44,7 +44,8 @@ describe('the reading header', () => {
     );
 
     expect(screen.getByText('Launch')).toBeTruthy();
-    expect(screen.getByText('Ada Lovelace <ada@example.test>')).toBeTruthy();
+    expect(screen.getByText('Ada Lovelace')).toBeTruthy();
+    expect(screen.getByText('ada@example.test')).toBeTruthy();
     expect(screen.getByText('9 Oct 2026, 08:30')).toBeTruthy();
   });
 
@@ -87,7 +88,7 @@ describe('the reading header', () => {
       expect(badge.textContent).toBe('AL');
       return badge;
     });
-    const sender = screen.getByText('Ada Lovelace <ada@example.test>');
+    const sender = screen.getByText('Ada Lovelace');
     expect(avatar.compareDocumentPosition(sender) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 

@@ -4,13 +4,14 @@
 // button, and the alert region that surfaces a refused read or
 // generation above whatever document still shows. The panel rides above
 // the status bar's right corner beside the agent and outbox panels,
-// opened by the status bar's AI toggle (the placement choice the plan
-// asked the picker to record); it serves the selected folder's account,
-// the first account until one is.
+// opened by the tool rail's AI toggle; it serves the selected folder's
+// account, the first account until one is.
 
 import { useEffect } from 'react';
 
 import { DAYS_MAX, DAYS_MIN, useAiPanelStore } from './aiPanelStore';
+import { AiIcon } from '@/components/icons';
+import { RAIL_BUTTON_CLASS, railButtonColours } from '@/components/layout/railButton';
 import type { DocumentKind } from '@/services/ai';
 import { useAccountStore } from '@/stores/accountStore';
 import { useFolderStore } from '@/stores/folderStore';
@@ -195,17 +196,20 @@ export function AiPanel() {
   );
 }
 
-/** The status bar's AI documents toggle. */
+/** The tool rail's AI documents toggle. */
 export function AiStatus() {
   const open = useUiStore((s) => s.aiPanelOpen);
 
   return (
     <button
       type="button"
+      aria-label="AI"
+      aria-pressed={open}
+      title="AI documents"
       onClick={() => useUiStore.getState().setAiPanelOpen(!open)}
-      className="rounded-[var(--radius-xs)] px-1.5 py-0.5 transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className={`${RAIL_BUTTON_CLASS} ${railButtonColours(open)}`}
     >
-      AI
+      <AiIcon size={22} />
     </button>
   );
 }

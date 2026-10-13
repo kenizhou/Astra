@@ -396,6 +396,56 @@ async fn a_bodyless_original_publishes_the_prefill_without_a_quote_block() {
     );
 }
 
+#[tokio::test]
+async fn a_take_hands_over_the_pending_request_and_consumes_the_slot() {
+    let surfaces = Arc::new(Mutex::new(Vec::new()));
+    let app = app_over(
+        original("m1", "Quarterly report"),
+        Some(plain_source()),
+        &surfaces,
+    )
+    .await;
+    app.dispatch(compose(ComposeKind::Reply)).await.unwrap();
+    let published = app.compose_request().expect("the reply's prefill");
+    surfaces.lock().unwrap().clear();
+
+    let taken = app.take_compose_request();
+
+    assert_eq!(taken, Some(published), "the take answers what was pending");
+    assert!(
+        app.compose_request().is_none(),
+        "and the slot stands empty behind it"
+    );
+    assert!(
+        surfaces.lock().unwrap().contains(&Surface::ComposeRequest),
+        "the clear signals, so every surface's pull re-reads the emptiness"
+    );
+    assert_eq!(
+        app.take_compose_request(),
+        None,
+        "a second take answers nothing and does not signal again"
+    );
+    assert_eq!(surfaces.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn a_take_without_a_pending_request_answers_nothing_and_says_nothing() {
+    let surfaces = Arc::new(Mutex::new(Vec::new()));
+    let app = app_over(
+        original("m1", "Quarterly report"),
+        Some(plain_source()),
+        &surfaces,
+    )
+    .await;
+    surfaces.lock().unwrap().clear();
+
+    assert_eq!(app.take_compose_request(), None);
+    assert!(
+        surfaces.lock().unwrap().is_empty(),
+        "nothing pending, nothing signalled"
+    );
+}
+
 // The accepted-chip arm's tests (the compose-from-draft publish and the
 // draft document's own shape), a child module so they share this module's
 // fixtures while each file stays under the line cap.

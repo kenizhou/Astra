@@ -12,14 +12,14 @@ export function FolderPane() {
   return (
     <nav
       aria-label="Mail folders"
-      className="w-56 shrink-0 overflow-y-auto border-r border-border bg-surface py-1"
+      className="h-full w-full overflow-y-auto bg-surface py-1"
     >
       {accounts.length === 0 && (
-        <p className="px-3 py-2 text-xs text-muted-foreground">
+        <p className="px-3 py-2 text-xs text-muted-text">
           No account yet. Add one from the title bar.
         </p>
       )}
-      <div role="tree" aria-label="Accounts">
+      <div role="tree" aria-label="Accounts" className="space-y-1 px-1.5">
         {accounts.map((account) => (
           <FolderTree key={account.account_id} account={account} />
         ))}

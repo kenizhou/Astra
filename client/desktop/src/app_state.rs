@@ -71,6 +71,11 @@ pub(crate) trait AppPort: Send + Sync {
     /// request is pending.
     fn compose_request(&self) -> Option<ComposeRequestSnapshot>;
 
+    /// Takes the pending compose request, consuming the slot: the pop-out
+    /// composer window's pull, so a later window never re-reads a spent
+    /// request.
+    fn take_compose_request(&self) -> Option<ComposeRequestSnapshot>;
+
     /// The published sending snapshot, for the host's pull: every account's
     /// sends that have not gone out, or nothing outstanding.
     fn sending(&self) -> SendingSnapshot;
@@ -255,6 +260,10 @@ impl AppPort for App<HostProvider> {
 
     fn compose_request(&self) -> Option<ComposeRequestSnapshot> {
         App::compose_request(self)
+    }
+
+    fn take_compose_request(&self) -> Option<ComposeRequestSnapshot> {
+        App::take_compose_request(self)
     }
 
     fn sending(&self) -> SendingSnapshot {

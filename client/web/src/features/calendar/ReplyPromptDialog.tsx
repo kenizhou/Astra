@@ -44,7 +44,7 @@ export function ReplyPromptDialog({ prompt }: ReplyPromptDialogProps) {
       <div
         role="dialog"
         aria-label="Reply not delivered"
-        className="flex w-[420px] flex-col gap-3 rounded-[var(--radius)] border border-border bg-surface-floating p-4 shadow-[var(--shadow-lg)]"
+        className="flex w-[420px] flex-col gap-3 rounded-xl border border-border-subtle bg-card p-5 shadow-[var(--shadow-lg)]"
       >
         <h2 className="text-sm font-semibold text-foreground">{prompt.summary}</h2>
         <p className="text-xs text-foreground">
@@ -86,18 +86,18 @@ export function ReplyPromptDialog({ prompt }: ReplyPromptDialogProps) {
           />
           Remember this decision for this account
         </label>
-        <div className="flex justify-end gap-2 border-t border-border pt-3">
+        <div className="flex justify-end gap-2 border-t border-border-subtle pt-3">
           <button
             type="button"
             onClick={() => answer(false)}
-            className="rounded-[var(--radius)] border border-border px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+            className="rounded-[var(--radius)] border border-border-subtle px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
           >
             Don't send
           </button>
           <button
             type="button"
             onClick={() => answer(true)}
-            className="rounded-[var(--radius)] bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground transition-colors hover:opacity-90"
+            className="rounded-[var(--radius)] bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground shadow-[var(--shadow-sm)] transition-colors hover:opacity-90"
           >
             Send
           </button>

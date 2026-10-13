@@ -183,6 +183,10 @@ impl AppPort for FakeApp {
         self.compose_request.lock().unwrap().clone()
     }
 
+    fn take_compose_request(&self) -> Option<ComposeRequestSnapshot> {
+        self.compose_request.lock().unwrap().take()
+    }
+
     fn sending(&self) -> SendingSnapshot {
         self.sending.lock().unwrap().snapshot.clone()
     }

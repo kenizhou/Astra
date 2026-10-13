@@ -33,7 +33,7 @@ describe('the people list', () => {
       row({ person: 4, display_name: '3rd Party', section: '#', primary_address: 'third@example.test' }),
     ];
 
-    render(<PeopleList rows={rows} onOpen={() => undefined} />);
+    render(<PeopleList rows={rows} selectedPerson={null} onOpen={() => undefined} />);
 
     const headings = screen
       .getAllByRole('heading')
@@ -47,7 +47,7 @@ describe('the people list', () => {
       row({ person: 2, display_name: 'Ann Other', section: 'A', primary_address: 'ann@example.test' }),
     ];
 
-    render(<PeopleList rows={rows} onOpen={() => undefined} />);
+    render(<PeopleList rows={rows} selectedPerson={null} onOpen={() => undefined} />);
 
     expect(screen.getAllByRole('heading')).toHaveLength(1);
     expect(screen.getByText('Ada Lovelace')).toBeTruthy();
@@ -60,7 +60,7 @@ describe('the people list', () => {
       row({ person: 2, display_name: 'Bea Plain' }),
     ];
 
-    render(<PeopleList rows={rows} onOpen={() => undefined} />);
+    render(<PeopleList rows={rows} selectedPerson={null} onOpen={() => undefined} />);
 
     expect(screen.getByText('In 3 accounts')).toBeTruthy();
     // The row without a count carries no disclosure of its own.
@@ -71,6 +71,7 @@ describe('the people list', () => {
     render(
       <PeopleList
         rows={[row({ person: 5, display_name: '', primary_address: 'nameless@example.test' })]}
+        selectedPerson={null}
         onOpen={() => undefined}
       />,
     );
@@ -87,6 +88,7 @@ describe('the people list', () => {
           row({ person: 1, display_name: 'Ada Lovelace' }),
           row({ person: 2, display_name: 'Bea Plain', section: 'B', primary_address: 'bea@example.test' }),
         ]}
+        selectedPerson={null}
         onOpen={onOpen}
       />,
     );

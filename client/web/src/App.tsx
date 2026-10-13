@@ -13,6 +13,7 @@ import { AppShell } from '@/components/layout/AppShell';
 import { mountDraftPoolEvents } from '@/events/draftPoolEvents';
 import { mountAgentEvents } from '@/events/agentEvents';
 import { hydrate, mountSurfaceEvents } from '@/events/surfaceEvents';
+import { applyAppearance } from '@/services/appearance';
 import { useUiStore } from '@/stores/uiStore';
 
 export default function App() {
@@ -21,6 +22,10 @@ export default function App() {
   useEffect(() => {
     useUiStore.getState().setTheme(themeMode);
   }, [themeMode]);
+
+  // The device-local appearance attributes land once, before the shell's
+  // first interactive paint.
+  useEffect(() => applyAppearance(), []);
 
   useEffect(() => {
     void hydrate();

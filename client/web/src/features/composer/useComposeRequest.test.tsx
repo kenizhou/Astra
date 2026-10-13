@@ -1,25 +1,36 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The compose request flow: a published request opens the composer with the
-// prefill the core computed (recipients, prefixed subject, the quoted
-// original held as retained content, the threading header kept for the
-// send), a request landing on an open composition closes that one through
-// the Close discipline first so no words are lost, a second request replaces
-// the first, and a null application opens nothing.
+// The compose request flow's routing: a landed request opens a pop-out
+// composer window on a minted composition id and leaves the inline composer
+// and a standing strip composition alone; the quick-reply strip's
+// expectation opens it inline instead, prefilled and threaded, consuming the
+// engine's slot behind it; and a null application opens nothing.
 import { act, cleanup, fireEvent, render, renderHook, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { JSONContent } from '@tiptap/react';
 
-const ipc = vi.hoisted(() => ({ dispatch: vi.fn(), draftResume: vi.fn() }));
+const ipc = vi.hoisted(() => ({
+  dispatch: vi.fn(),
+  draftResume: vi.fn(),
+  takeComposeRequest: vi.fn(),
+}));
 
 vi.mock('@/services/ipc', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   dispatch: ipc.dispatch,
   draftResume: ipc.draftResume,
+  takeComposeRequest: ipc.takeComposeRequest,
 }));
 
 vi.mock('@/events/surfaceEvents', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   isTauri: true,
+}));
+
+const windows = vi.hoisted(() => ({ openComposerWindow: vi.fn() }));
+
+vi.mock('./composeWindow', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  openComposerWindow: windows.openComposerWindow,
 }));
 
 vi.mock('./Editor', () => ({
@@ -110,6 +121,7 @@ function resetStores(): void {
   useDraftStore.setState({ snapshot: null });
   useComposerStore.setState({
     open: false,
+    inlineExpected: false,
     resumeAttempted: false,
     composition: null,
     from: '',
@@ -139,11 +151,23 @@ function newMessage(): string {
   return composition as string;
 }
 
+/** Lands a request routed to the inline composer, the strip's path. */
+function landInline(request: ComposeRequestSnapshot): void {
+  act(() => {
+    useComposerStore.getState().expectInlineReply();
+  });
+  land(request);
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   ipc.dispatch.mockReset();
   ipc.dispatch.mockResolvedValue(undefined);
   ipc.draftResume.mockReset();
+  ipc.takeComposeRequest.mockReset();
+  ipc.takeComposeRequest.mockResolvedValue(null);
+  windows.openComposerWindow.mockReset();
+  windows.openComposerWindow.mockResolvedValue(undefined);
   resetStores();
 });
 
@@ -152,10 +176,68 @@ afterEach(() => {
   cleanup();
 });
 
-describe('the compose request hydration', () => {
-  it('opens the composer from a request with the pane shut, prefill and all', () => {
+describe('the pop-out route', () => {
+  it('opens a window on a minted composition, leaving the inline composer shut', () => {
     renderHook(() => useComposeRequestHydration());
     land(replyRequest());
+
+    expect(windows.openComposerWindow).toHaveBeenCalledTimes(1);
+    const [composition, title] = windows.openComposerWindow.mock.calls[0] ?? [];
+    expect(composition).toMatch(UUID);
+    expect(title).toBe('Re: Quarterly report');
+    expect(useComposerStore.getState().open).toBe(false);
+    // The request is the window's now; the main window holds no copy.
+    expect(useComposeRequestStore.getState().snapshot).toBeNull();
+  });
+
+  it('routes each landed request to its own window', () => {
+    renderHook(() => useComposeRequestHydration());
+    land(replyRequest());
+    land(forwardRequest());
+
+    expect(windows.openComposerWindow).toHaveBeenCalledTimes(2);
+    const [first] = windows.openComposerWindow.mock.calls[0] ?? [];
+    const [second, secondTitle] = windows.openComposerWindow.mock.calls[1] ?? [];
+    expect(second).not.toBe(first);
+    expect(secondTitle).toBe('Fwd: Quarterly report');
+  });
+
+  it('leaves a standing inline composition untouched', () => {
+    renderHook(() => useComposeRequestHydration());
+    const standing = newMessage();
+    act(() => {
+      const store = useComposerStore.getState();
+      store.setField('to', 'you@test.local');
+      store.setField('subject', 'Later');
+    });
+
+    land(replyRequest());
+
+    // The pop-out takes nothing from the strip: no final save crosses, and
+    // the standing composition keeps its words.
+    expect(ipc.dispatch).not.toHaveBeenCalled();
+    const state = useComposerStore.getState();
+    expect(state.open).toBe(true);
+    expect(state.composition).toBe(standing);
+    expect(state.subject).toBe('Later');
+  });
+
+  it('opens nothing when the pull clears the request', () => {
+    renderHook(() => useComposeRequestHydration());
+
+    act(() => {
+      useComposeRequestStore.getState().applySnapshot(null);
+    });
+
+    expect(windows.openComposerWindow).not.toHaveBeenCalled();
+    expect(useComposerStore.getState().open).toBe(false);
+  });
+});
+
+describe('the inline route', () => {
+  it('opens the composer prefilled and threaded, consuming the engine slot', () => {
+    renderHook(() => useComposeRequestHydration());
+    landInline(replyRequest());
 
     const state = useComposerStore.getState();
     expect(state.open).toBe(true);
@@ -167,11 +249,14 @@ describe('the compose request hydration', () => {
     expect(state.bcc).toBe('');
     expect(state.subject).toBe('Re: Quarterly report');
     expect(state.request).toEqual({ kind: 'reply', inReplyTo: 'orig-1@server.test' });
+    expect(ipc.takeComposeRequest).toHaveBeenCalledTimes(1);
+    expect(windows.openComposerWindow).not.toHaveBeenCalled();
+    expect(useComposerStore.getState().inlineExpected).toBe(false);
   });
 
   it('holds the quoted original as retained content that round-trips', () => {
     renderHook(() => useComposeRequestHydration());
-    land(replyRequest());
+    landInline(replyRequest());
 
     const editor = useComposerStore.getState().editor;
     // The trimmed editor cannot show a quote: it rides beneath the words,
@@ -184,7 +269,7 @@ describe('the compose request hydration', () => {
   it('shows the prefill in the fields, subject prefix and all', () => {
     renderHook(() => useComposeRequestHydration());
     render(<ComposerPane />);
-    land(replyRequest({ kind: 'reply_all', cc: 'bob@example.test' }));
+    landInline(replyRequest({ kind: 'reply_all', cc: 'bob@example.test' }));
 
     expect((screen.getByRole('textbox', { name: 'To' }) as HTMLInputElement).value).toBe(
       'ada@example.test',
@@ -200,7 +285,7 @@ describe('the compose request hydration', () => {
 
   it('labels the from with the account id when no account is known', () => {
     renderHook(() => useComposeRequestHydration());
-    land(replyRequest({ from: 'ghost' }));
+    landInline(replyRequest({ from: 'ghost' }));
 
     expect(useComposerStore.getState().fromLabel).toBe('ghost');
   });
@@ -208,7 +293,7 @@ describe('the compose request hydration', () => {
   it('saves the reply draft over the idle with its quote, then still threads the send', () => {
     renderHook(() => useComposeRequestHydration());
     render(<ComposerPane />);
-    land(replyRequest());
+    landInline(replyRequest());
     const composition = useComposerStore.getState().composition as string;
 
     act(() => {
@@ -244,10 +329,10 @@ describe('the compose request hydration', () => {
       ]);
     });
 
-    land(replyRequest());
+    landInline(replyRequest());
 
     // The standing composition's words went out as a final save, kept in
-    // Drafts, before the request took the pane.
+    // Drafts, before the request took the strip.
     expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
       `{"drafts":{"save":{"composition":"${standing}","from":"work","to":"you@test.local","cc":"","bcc":"","subject":"Later",` +
         `"document":{"blocks":[${paragraphBlock('Half written')}],"attachments":[]},"then_close":true}}}`,
@@ -255,30 +340,5 @@ describe('the compose request hydration', () => {
     const state = useComposerStore.getState();
     expect(state.composition).not.toBe(standing);
     expect(state.subject).toBe('Re: Quarterly report');
-  });
-
-  it('replaces an open request composition with a second request', () => {
-    renderHook(() => useComposeRequestHydration());
-    render(<ComposerPane />);
-    land(replyRequest());
-    const first = useComposerStore.getState().composition;
-
-    land(forwardRequest());
-
-    const state = useComposerStore.getState();
-    expect(state.composition).toMatch(UUID);
-    expect(state.composition).not.toBe(first);
-    expect(state.subject).toBe('Fwd: Quarterly report');
-    expect(state.request).toEqual({ kind: 'forward', inReplyTo: null });
-  });
-
-  it('opens nothing when the pull clears the request', () => {
-    renderHook(() => useComposeRequestHydration());
-
-    act(() => {
-      useComposeRequestStore.getState().applySnapshot(null);
-    });
-
-    expect(useComposerStore.getState().open).toBe(false);
   });
 });

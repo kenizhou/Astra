@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The reading pane: the empty state with nothing open (the compose actions
-// standing disabled beside it), the full pane from a snapshot (header, gated
-// body, attachment rows, the compose actions dispatching for the open
-// message), the remote toggle through the reading store, the plain fallback,
-// the no-body note, and the close intent crossing back. The AI replies
-// surfaces (the chips strip and the summarise block) mount below the header.
+// The reading pane: the empty state with nothing open, the full pane from a
+// snapshot (header, gated body, attachment rows), the remote toggle through
+// the reading store, the plain fallback, the no-body note, and the close
+// intent crossing back. The compose actions live on the command ribbon now,
+// pinned in its own suite. The AI replies surfaces (the chips strip and the
+// summarise block) mount below the header.
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -33,7 +33,9 @@ vi.mock('@/services/ai', () => ai);
 
 import { ReadingPane } from './ReadingPane';
 import { useAiChipsStore } from '@/stores/aiChipsStore';
+import { usePeopleStore } from '@/features/people/peopleStore';
 import { useReadingStore } from '@/stores/readingStore';
+import { useUiStore } from '@/stores/uiStore';
 import type { ReadingSnapshot } from '@/services/ipc';
 
 /** The sanitised body the Rust gate emits: one inline data URI, one remote
@@ -75,40 +77,19 @@ beforeEach(() => {
   ai.translateMessage.mockReset();
   useReadingStore.setState({ snapshot: null, showRemoteImages: false });
   useAiChipsStore.setState({ message: null, chips: [] });
+  usePeopleStore.setState({ pendingContactCreate: null });
+  useUiStore.setState({ shellView: 'mail' });
 });
 
 afterEach(cleanup);
 
 describe('the reading pane', () => {
-  it('shows the empty state with nothing open and the actions disabled', () => {
+  it('shows the empty state with nothing open', () => {
     render(<ReadingPane />);
 
     expect(screen.getByText('Select a message to read it.')).toBeTruthy();
     expect(screen.queryByTitle('Message body')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Close reading pane' })).toBeNull();
-    for (const name of ['Reply', 'Reply all', 'Forward']) {
-      const button = screen.getByRole('button', { name }) as HTMLButtonElement;
-      expect(button.disabled).toBe(true);
-    }
-  });
-
-  it('dispatches the compose family from the actions for the open message', () => {
-    useReadingStore.getState().applySnapshot(snapshot());
-    render(<ReadingPane />);
-
-    for (const name of ['Reply', 'Reply all', 'Forward']) {
-      const button = screen.getByRole('button', { name }) as HTMLButtonElement;
-      expect(button.disabled).toBe(false);
-    }
-
-    act(() => {
-      fireEvent.click(screen.getByRole('button', { name: 'Reply all' }));
-    });
-
-    expect(ipc.dispatch).toHaveBeenCalledTimes(1);
-    expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
-      '{"compose":{"reply_all":{"message":{"account":"work","key":"imap:v1:u1"}}}}',
-    );
   });
 
   it('renders the header, the gated body, and the attachments from the snapshot', () => {
@@ -116,7 +97,8 @@ describe('the reading pane', () => {
     render(<ReadingPane />);
 
     expect(screen.getByText('Launch')).toBeTruthy();
-    expect(screen.getByText('Ada Lovelace <ada@example.test>')).toBeTruthy();
+    expect(screen.getByText('Ada Lovelace')).toBeTruthy();
+    expect(screen.getByText('ada@example.test')).toBeTruthy();
     // The default clock setting is the core's own default: 12-hour.
     expect(screen.getByText('9 Oct 2026, 8:30 AM')).toBeTruthy();
     expect(frameDoc()).toBe(sanitisedHtml);
@@ -228,5 +210,27 @@ describe('the reading pane', () => {
     render(<ReadingPane />);
 
     expect(screen.queryByRole('region', { name: 'Invitation' })).toBeNull();
+  });
+
+  it('hands the sender to the people view from the add-contact chip', () => {
+    useReadingStore.getState().applySnapshot(snapshot());
+    render(<ReadingPane />);
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Add to contacts' }));
+    });
+
+    expect(usePeopleStore.getState().pendingContactCreate).toEqual({
+      name: 'Ada Lovelace',
+      address: 'ada@example.test',
+    });
+    expect(useUiStore.getState().shellView).toBe('people');
+  });
+
+  it('offers no add-contact chip for a senderless message', () => {
+    useReadingStore.getState().applySnapshot(snapshot({ from_name: '', from_address: '' }));
+    render(<ReadingPane />);
+
+    expect(screen.queryByRole('button', { name: 'Add to contacts' })).toBeNull();
   });
 });

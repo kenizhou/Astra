@@ -37,6 +37,7 @@ beforeEach(() => {
     nowData: null,
     view: 'month',
     anchor: null,
+    selectedEvent: null,
   });
 });
 
@@ -119,5 +120,41 @@ describe('the calendar store apply', () => {
 
     useCalendarStore.getState().setView('agenda');
     expect(useCalendarStore.getState().view).toBe('agenda');
+  });
+});
+
+describe('the calendar store selection', () => {
+  it('picks an occurrence and clears it on a second pick', () => {
+    const row = occurrence();
+
+    useCalendarStore.getState().selectEvent(row);
+    expect(useCalendarStore.getState().selectedEvent).toBe(row);
+
+    useCalendarStore.getState().selectEvent(row);
+    expect(useCalendarStore.getState().selectedEvent).toBeNull();
+  });
+
+  it('clears the pick on navigation', () => {
+    useCalendarStore.getState().selectEvent(occurrence());
+
+    useCalendarStore.getState().setAnchor('2026-11-02');
+    expect(useCalendarStore.getState().selectedEvent).toBeNull();
+
+    useCalendarStore.getState().selectEvent(occurrence());
+    useCalendarStore.getState().setView('day');
+    expect(useCalendarStore.getState().selectedEvent).toBeNull();
+  });
+
+  it('tracks the picked row across a publish and drops it when it leaves the window', () => {
+    const stale = occurrence({ title: 'Old words' });
+    useCalendarStore.setState({ occurrences: [stale] });
+    useCalendarStore.getState().selectEvent(stale);
+
+    const fresh = occurrence({ title: 'New words' });
+    useCalendarStore.getState().applySnapshot({ occurrences: [fresh] });
+    expect(useCalendarStore.getState().selectedEvent).toBe(fresh);
+
+    useCalendarStore.getState().applySnapshot({ occurrences: [] });
+    expect(useCalendarStore.getState().selectedEvent).toBeNull();
   });
 });

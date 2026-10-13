@@ -1,5 +1,6 @@
 @import 'tailwindcss';
 @import './theme.css';
+@import './skins.css';
 
 /* Tailwind v4 reads the custom properties above through this inline theme so
    utilities such as bg-background and text-foreground resolve to tokens. */
@@ -30,8 +31,12 @@
   --color-surface-elevated: var(--surface-elevated);
   --color-surface-floating: var(--surface-floating);
   --color-chrome: var(--chrome);
+  --color-chrome-tint: var(--chrome-tint);
   --color-hover: var(--hover);
   --color-selected: var(--selected);
+  --color-muted-text: var(--muted-text);
+  --color-primary-muted: var(--primary-muted);
+  --color-border-subtle: var(--border-subtle);
   --font-ui: var(--font-ui);
   --font-serif: var(--font-serif);
   --font-mono: var(--font-mono);
@@ -41,4 +46,41 @@ html,
 body,
 #root {
   height: 100%;
+}
+
+/* Translucent chrome with backdrop blur and saturation. */
+@utility glass {
+  background-color: var(--chrome-glass);
+  backdrop-filter: blur(20px) saturate(200%);
+  -webkit-backdrop-filter: blur(20px) saturate(200%);
+}
+
+/* Selection-indicator bars: solid primary; a gradient would show its end
+   stop across a 3px-wide bar. */
+@utility iris-line-v {
+  background-color: var(--primary);
+}
+
+/* The compact shell's folder drawer slide-in. */
+@keyframes drawer-slide-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+/* Dark mode: heavy saturation amplifies the chrome's accent tint into a
+   visibly bluer cast, so keep it gentle. */
+.dark .glass {
+  backdrop-filter: blur(20px) saturate(130%);
+  -webkit-backdrop-filter: blur(20px) saturate(130%);
+}
+
+/* High contrast disables the backdrop blur so edges stay crisp. */
+[data-contrast='high'] .glass,
+[data-contrast='high'].glass {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }

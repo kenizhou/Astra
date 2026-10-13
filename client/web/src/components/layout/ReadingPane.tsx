@@ -1,44 +1,28 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The reading pane: the right-hand column of the shell. Nothing open draws
-// the empty state with the compose actions standing disabled; a pulled
-// snapshot draws its header, the invitation card when the message is a
-// scheduling one, its AI replies surfaces (the smart replies strip, the
-// summarise block, and the translate block, all keyed to the open message
-// and standing absent with nothing to show), its body (the sandboxed HTML,
-// the plain fallback, or a no-body note), and its attachment rows, with the
-// compose actions dispatching the family for the open message and the close
-// button crossing back as close_reading.
+// the empty state; a pulled snapshot draws its header, the invitation card
+// when the message is a scheduling one, its AI replies surfaces (the smart
+// replies strip, the summarise block, and the translate block, all keyed to
+// the open message and standing absent with nothing to show), its body (the
+// sandboxed HTML, the plain fallback, or a no-body note), and its
+// attachment rows, with the close button crossing back as close_reading.
+// The quick-reply strip docks at the bottom: a one-line Reply affordance
+// that expands into the inline composer. The pop-out compose actions live
+// on the command ribbon, their single home.
 
 import { AttachmentList } from '@/components/reading-pane/AttachmentList';
 import { InvitationCard } from '@/components/reading-pane/InvitationCard';
 import { MessageHtml } from '@/components/reading-pane/MessageHtml';
-import { ReadingActions } from '@/components/reading-pane/ReadingActions';
+import { QuickReplyStrip } from '@/components/reading-pane/QuickReplyStrip';
 import { ReadingHeader } from '@/components/reading-pane/ReadingHeader';
 import { SmartReplies } from '@/components/reading-pane/SmartReplies';
 import { SummaryBlock } from '@/components/reading-pane/SummaryBlock';
 import { TranslateBlock } from '@/components/reading-pane/TranslateBlock';
+import { CloseIcon, MailIcon } from '@/components/icons';
 import { dispatch, intents } from '@/services/ipc';
+import { usePeopleStore } from '@/features/people/peopleStore';
 import { useReadingStore } from '@/stores/readingStore';
-
-/** A stroke-drawn cross glyph for the close button. */
-function CloseGlyph() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width="13"
-      height="13"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M18 6 6 18" />
-      <path d="m6 6 12 12" />
-    </svg>
-  );
-}
+import { useUiStore } from '@/stores/uiStore';
 
 export function ReadingPane() {
   const snapshot = useReadingStore((s) => s.snapshot);
@@ -49,12 +33,17 @@ export function ReadingPane() {
     return (
       <aside
         aria-label="Reading pane"
-        className="flex w-[440px] shrink-0 flex-col border-l border-border bg-background"
+        className="flex h-full w-full flex-col bg-background"
       >
-        <div className="flex h-[var(--pane-header-h)] shrink-0 items-center border-b border-border bg-surface px-3">
-          <ReadingActions message={null} />
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 p-4">
+          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-primary-muted text-primary">
+            <MailIcon size={24} />
+          </span>
+          <p className="text-sm text-muted-text">Select a message to read it.</p>
         </div>
-        <p className="p-4 text-sm text-muted-foreground">Select a message to read it.</p>
+        {/* The strip's expanded state stands even with nothing open: the app
+            start resume opens its draft here. */}
+        <QuickReplyStrip />
       </aside>
     );
   }
@@ -62,17 +51,16 @@ export function ReadingPane() {
   return (
     <aside
       aria-label="Reading pane"
-      className="flex w-[440px] shrink-0 flex-col overflow-hidden border-l border-border bg-background"
+      className="flex h-full w-full flex-col overflow-hidden bg-background"
     >
-      <div className="flex h-[var(--pane-header-h)] shrink-0 items-center justify-between gap-2 border-b border-border bg-surface px-3">
-        <ReadingActions message={snapshot.message} />
+      <div className="flex h-[var(--pane-header-h)] shrink-0 items-center justify-end gap-2 border-b border-border-subtle bg-surface px-3">
         <button
           type="button"
           aria-label="Close reading pane"
           onClick={() => void dispatch(intents.closeReading())}
-          className="rounded-[var(--radius-xs)] p-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-text transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <CloseGlyph />
+          <CloseIcon size={16} />
         </button>
       </div>
       <ReadingHeader
@@ -80,6 +68,13 @@ export function ReadingPane() {
         fromName={snapshot.from_name}
         fromAddress={snapshot.from_address}
         sentAt={snapshot.sent_at}
+        onAddContact={() => {
+          usePeopleStore.getState().requestContactCreate({
+            name: snapshot.from_name,
+            address: snapshot.from_address,
+          });
+          useUiStore.getState().setShellView('people');
+        }}
       />
       {snapshot.invitation !== undefined && (
         <InvitationCard message={snapshot.message} invitation={snapshot.invitation} />
@@ -104,6 +99,7 @@ export function ReadingPane() {
         </p>
       )}
       <AttachmentList attachments={snapshot.attachments ?? []} />
+      <QuickReplyStrip />
     </aside>
   );
 }

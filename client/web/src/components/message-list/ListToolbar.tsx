@@ -8,7 +8,8 @@
 // where the folder name stood (a zero horizon claims no note), the split
 // control hides (its sides derive
 // from the folder the search is not showing), and the exit affordance
-// clears the search back to the folder view.
+// clears the search back to the folder view. The outbox mode keeps only
+// the title: the queue has no sides and no grouping mode.
 
 import { dispatch, intents } from '@/services/ipc';
 import type { SearchState, ViewMode } from '@/services/surfaces';
@@ -39,9 +40,11 @@ interface ListToolbarProps {
   onSplitFilter: (filter: SplitFilter) => void;
   /** The live search state; its results header replaces the folder's own. */
   search: SearchState | null;
+  /** Whether the queue view leads: the title alone, no controls. */
+  outbox?: boolean;
 }
 
-export function ListToolbar({ folderName, viewMode, splitFilter, splitCounts, onSplitFilter, search }: ListToolbarProps) {
+export function ListToolbar({ folderName, viewMode, splitFilter, splitCounts, onSplitFilter, search, outbox = false }: ListToolbarProps) {
   const switchMode = (mode: ViewMode) => {
     void dispatch(intents.setViewMode(mode));
   };
@@ -49,8 +52,16 @@ export function ListToolbar({ folderName, viewMode, splitFilter, splitCounts, on
     void dispatch(intents.search(null));
   };
 
+  if (outbox) {
+    return (
+      <div className="flex h-[var(--pane-header-h)] shrink-0 items-center justify-between gap-2 border-b border-border-subtle bg-surface px-3">
+        <span className="min-w-0 truncate text-[13px] font-semibold text-foreground">Outbox</span>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex h-[var(--pane-header-h)] shrink-0 items-center justify-between gap-2 border-b border-border bg-surface px-3">
+    <div className="flex h-[var(--pane-header-h)] shrink-0 items-center justify-between gap-2 border-b border-border-subtle bg-surface px-3">
       {search === null ? (
         <span className="min-w-0 truncate text-[13px] font-semibold text-foreground">
           {folderName ?? 'Mail'}
@@ -69,19 +80,23 @@ export function ListToolbar({ folderName, viewMode, splitFilter, splitCounts, on
           )}
         </span>
       )}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2">
         {search === null && (
-          <div role="group" aria-label="Split" className="flex items-center gap-1">
+          <div
+            role="group"
+            aria-label="Split"
+            className="flex items-center gap-0.5 rounded-md bg-muted p-0.5"
+          >
             {SIDES.map(({ id, label }) => (
               <button
                 key={id}
                 type="button"
                 aria-pressed={splitFilter === id}
                 onClick={() => onSplitFilter(id)}
-                className={`rounded-[var(--radius-xs)] px-2 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                className={`rounded-[var(--radius-xs)] px-2 py-0.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                   splitFilter === id
-                    ? 'bg-selected font-medium text-foreground'
-                    : 'text-muted-foreground hover:bg-hover hover:text-foreground'
+                    ? 'bg-background font-medium text-foreground shadow-[var(--shadow-sm)]'
+                    : 'text-muted-text hover:text-foreground'
                 }`}
               >
                 {label} {splitCounts[id]}
@@ -89,17 +104,21 @@ export function ListToolbar({ folderName, viewMode, splitFilter, splitCounts, on
             ))}
           </div>
         )}
-        <div role="group" aria-label="View mode" className="flex items-center gap-1">
+        <div
+          role="group"
+          aria-label="View mode"
+          className="flex items-center gap-0.5 rounded-md bg-muted p-0.5"
+        >
           {MODES.map(({ id, label }) => (
             <button
               key={id}
               type="button"
               aria-pressed={viewMode === id}
               onClick={() => switchMode(id)}
-              className={`rounded-[var(--radius-xs)] px-2 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+              className={`rounded-[var(--radius-xs)] px-2 py-0.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                 viewMode === id
-                  ? 'bg-selected font-medium text-foreground'
-                  : 'text-muted-foreground hover:bg-hover hover:text-foreground'
+                  ? 'bg-background font-medium text-foreground shadow-[var(--shadow-sm)]'
+                  : 'text-muted-text hover:text-foreground'
               }`}
             >
               {label}

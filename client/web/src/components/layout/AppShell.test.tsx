@@ -1,21 +1,37 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The shell's composer and outbox wiring: the New message action opens the
-// composer pane with the first account as its From, stays inert without an
-// account, the app start resume pulls the stored draft into the pane when the
-// host has one, a landed compose request opens the pane hydrated, and the
-// status bar's outbox toggle opens the outbox panel. The settings screen
-// rides above the shell from the title bar's gear, through the categories,
-// down to the accounts page and About.
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+// pop-out composer window, stays inert without an account, the app start
+// resume pulls the stored draft into the quick-reply strip when the host
+// has one, a landed compose request opens a pop-out window, and the folder
+// tree's Outbox row switches the message list to the account's queue view.
+// The rail's agent
+// toggle docks the agent panel as the mail row's right column, gone off the
+// mail view. The settings screen rides above the shell from the title
+// bar's gear, through the categories, down to the accounts page and About.
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const ipc = vi.hoisted(() => ({ dispatch: vi.fn(), draftResume: vi.fn(), settings: vi.fn() }));
+// jsdom has no ResizeObserver; the resizable panel row measures through one.
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+vi.stubGlobal('ResizeObserver', ResizeObserverStub);
+
+const ipc = vi.hoisted(() => ({
+  dispatch: vi.fn(),
+  draftResume: vi.fn(),
+  settings: vi.fn(),
+  takeComposeRequest: vi.fn(),
+}));
 
 vi.mock('@/services/ipc', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   dispatch: ipc.dispatch,
   draftResume: ipc.draftResume,
   settings: ipc.settings,
+  takeComposeRequest: ipc.takeComposeRequest,
 }));
 
 vi.mock('@/events/surfaceEvents', async (importOriginal) => ({
@@ -23,15 +39,45 @@ vi.mock('@/events/surfaceEvents', async (importOriginal) => ({
   isTauri: true,
 }));
 
+const windows = vi.hoisted(() => ({
+  openComposerWindow: vi.fn(),
+  openNewMessageComposer: vi.fn(),
+}));
+
+vi.mock('@/features/composer/composeWindow', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  openComposerWindow: windows.openComposerWindow,
+  // The FAB's route is mocked whole: a partial override cannot rewire the
+  // real route's internal call to openComposerWindow, and the URL and label
+  // construction has its own tests in composeWindow.test.ts.
+  openNewMessageComposer: windows.openNewMessageComposer,
+}));
+
+const agent = vi.hoisted(() => ({
+  agentStatus: vi.fn(),
+  agentPrompt: vi.fn(),
+  agentAbort: vi.fn(),
+  permissionResponse: vi.fn(),
+}));
+
+vi.mock('@/services/agent', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  ...agent,
+}));
+
 import { AppShell } from './AppShell';
 import type { ComposeRequestSnapshot, ResumeView } from '@/services/ipc';
 import { useAccountStore } from '@/stores/accountStore';
 import { useComposeRequestStore } from '@/stores/composeRequestStore';
+import { useFolderStore } from '@/stores/folderStore';
 import { useSendingStore } from '@/stores/sendingStore';
 import { useUiStore } from '@/stores/uiStore';
+import { useAgentStore } from '@/features/agent/agentStore';
 import { useComposerStore } from '@/features/composer/composerStore';
 import { documentToEditor } from '@/features/composer/documentWire';
 import { useSendResultStore } from '@/features/outbox/sendResult';
+import type { MailboxListSnapshot } from '@/services/surfaces';
+import fixtureJson from '@/services/__fixtures__/mailbox_list.json';
 
 beforeEach(() => {
   ipc.dispatch.mockReset();
@@ -57,6 +103,7 @@ beforeEach(() => {
   useAccountStore.setState({ accounts: [{ accountId: 'work', displayName: 'Work' }] });
   useComposerStore.setState({
     open: false,
+    inlineExpected: false,
     resumeAttempted: false,
     composition: null,
     from: '',
@@ -71,36 +118,56 @@ beforeEach(() => {
   });
   useComposeRequestStore.setState({ snapshot: null });
   useSendingStore.getState().applySnapshot({ rows: [] });
-  useUiStore.getState().setOutboxOpen(false);
+  useFolderStore.setState({ accounts: [], selected: null, outboxAccount: null });
+  useUiStore.getState().setAgentOpen(false);
+  useUiStore.getState().setFolderDrawerOpen(false);
   useSendResultStore.getState().dismiss();
   useSendResultStore.setState({ settled: [], answered: [] });
+  ipc.takeComposeRequest.mockReset();
+  ipc.takeComposeRequest.mockResolvedValue(null);
+  windows.openComposerWindow.mockReset();
+  windows.openComposerWindow.mockResolvedValue(undefined);
+  windows.openNewMessageComposer.mockReset();
+  windows.openNewMessageComposer.mockResolvedValue(undefined);
+  agent.agentStatus.mockReset();
+  agent.agentStatus.mockResolvedValue({ state: 'down', model: null });
+  agent.agentPrompt.mockReset();
+  agent.agentAbort.mockReset();
+  agent.permissionResponse.mockReset();
+  useAgentStore.getState().reset();
 });
 
 afterEach(cleanup);
 
 describe('the shell composer wiring', () => {
-  it('opens the composer pane from the new message action', () => {
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+  it('opens the pop-out composer window from the new message action', async () => {
     render(<AppShell />);
 
-    act(() => {
+    await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'New message' }));
+      await Promise.resolve();
     });
 
-    expect(screen.getByRole('region', { name: 'Composer' })).toBeTruthy();
-    expect(screen.getByText('Work')).toBeTruthy();
+    expect(windows.openNewMessageComposer).toHaveBeenCalledTimes(1);
+    // Nothing opens inline: the strip keeps its affordance.
+    expect(screen.queryByRole('region', { name: 'Composer' })).toBeNull();
   });
 
-  it('keeps the new message action inert without an account', () => {
+  it('keeps the new message action inert without an account', async () => {
     useAccountStore.setState({ accounts: [] });
     render(<AppShell />);
 
     const action = screen.getByRole('button', { name: 'New message' }) as HTMLButtonElement;
     expect(action.disabled).toBe(true);
 
-    act(() => {
+    await act(async () => {
       action.click();
+      await Promise.resolve();
     });
 
+    expect(windows.openNewMessageComposer).not.toHaveBeenCalled();
     expect(screen.queryByRole('region', { name: 'Composer' })).toBeNull();
   });
 
@@ -115,7 +182,7 @@ describe('the shell composer wiring', () => {
     expect(action.disabled).toBe(true);
   });
 
-  it('resumes the stored draft into the pane at app start', async () => {
+  it('resumes the stored draft into the strip at app start', async () => {
     const view: ResumeView = {
       account: 'work',
       to: 'you@test.local',
@@ -140,7 +207,7 @@ describe('the shell composer wiring', () => {
     );
   });
 
-  it('opens the composer hydrated when a compose request lands', () => {
+  it('opens a pop-out window when a compose request lands, nothing inline', () => {
     const request: ComposeRequestSnapshot = {
       kind: 'reply',
       from: 'work',
@@ -156,27 +223,73 @@ describe('the shell composer wiring', () => {
       useComposeRequestStore.getState().applySnapshot(request);
     });
 
+    expect(windows.openComposerWindow).toHaveBeenCalledTimes(1);
+    const [composition, title] = windows.openComposerWindow.mock.calls[0] ?? [];
+    expect(composition).toMatch(UUID);
+    expect(title).toBe('Re: Quarterly report');
+    expect(screen.queryByRole('textbox', { name: 'To' })).toBeNull();
+    expect(useComposeRequestStore.getState().snapshot).toBeNull();
+  });
+
+  it('opens the request inline when the quick-reply strip asked for it', () => {
+    const request: ComposeRequestSnapshot = {
+      kind: 'reply',
+      from: 'work',
+      to: 'ada@example.test',
+      cc: '',
+      subject: 'Re: Quarterly report',
+      in_reply_to: 'orig-1@server.test',
+      document: { blocks: [], attachments: [] },
+    };
+    render(<AppShell />);
+
+    // The strip's click flags the route and dispatches the reply.
+    act(() => {
+      useComposerStore.getState().expectInlineReply();
+    });
+    act(() => {
+      useComposeRequestStore.getState().applySnapshot(request);
+    });
+
+    expect(windows.openComposerWindow).not.toHaveBeenCalled();
     expect((screen.getByRole('textbox', { name: 'To' }) as HTMLInputElement).value).toBe(
       'ada@example.test',
     );
-    expect((screen.getByRole('textbox', { name: 'Subject' }) as HTMLInputElement).value).toBe(
-      'Re: Quarterly report',
-    );
+    expect(ipc.takeComposeRequest).toHaveBeenCalledTimes(1);
   });
 });
 
 describe('the shell outbox wiring', () => {
-  it('opens the outbox panel from the status bar and asks the host for the queue', () => {
+  it('switches the message list to the queue view from the folder tree row', () => {
+    useFolderStore.getState().applySnapshot(fixtureJson as MailboxListSnapshot);
+    useSendingStore.getState().applySnapshot({
+      rows: [
+        {
+          queued: { account: 'work', op: 3 },
+          state: 'queued',
+          subject: 'Quarterly review',
+          arrived_at: '2026-10-09T08:30:00Z',
+        },
+      ],
+    });
     render(<AppShell />);
 
-    expect(screen.queryByRole('region', { name: 'Outbox' })).toBeNull();
+    expect(screen.queryByRole('list', { name: 'Outbox' })).toBeNull();
 
     act(() => {
-      fireEvent.click(screen.getByRole('button', { name: 'Outbox' }));
+      fireEvent.click(screen.getByText('Outbox'));
     });
 
-    expect(screen.getByRole('region', { name: 'Outbox' })).toBeTruthy();
     expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe('{"outbox":"show"}');
+    const list = screen.getByRole('region', { name: 'Message list' });
+    expect(within(list).getByRole('list', { name: 'Outbox' })).toBeTruthy();
+    expect(within(list).getByText('Quarterly review')).toBeTruthy();
+
+    // A folder selection leads the list back to the folder view.
+    act(() => {
+      fireEvent.click(screen.getByText('Sent'));
+    });
+    expect(screen.queryByRole('list', { name: 'Outbox' })).toBeNull();
   });
 });
 
@@ -261,6 +374,45 @@ describe('the shell settings screen', () => {
     expect((screen.getByLabelText('Username') as HTMLInputElement).value).toBe(
       'ada@example.test',
     );
+  });
+});
+
+describe('the shell agent dock', () => {
+  it('docks the agent panel in the mail row from the rail toggle', () => {
+    render(<AppShell />);
+
+    expect(screen.queryByRole('region', { name: 'Agent' })).toBeNull();
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Agent' }));
+    });
+
+    expect(screen.getByRole('region', { name: 'Agent' })).toBeTruthy();
+    expect(agent.agentStatus).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Close agent' }));
+    });
+    expect(screen.queryByRole('region', { name: 'Agent' })).toBeNull();
+  });
+
+  it('leaves the dock behind off the mail view', () => {
+    render(<AppShell />);
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Agent' }));
+    });
+    expect(screen.getByRole('region', { name: 'Agent' })).toBeTruthy();
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Calendar' }));
+    });
+    expect(screen.queryByRole('region', { name: 'Agent' })).toBeNull();
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Mail' }));
+    });
+    expect(screen.getByRole('region', { name: 'Agent' })).toBeTruthy();
   });
 });
 

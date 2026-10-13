@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The folder pane's state: the last mailbox-list snapshot's account groups and
-// the folder the user opened. Expansion state deliberately lives in the core,
-// not here; the store only mirrors what each pull brought back, so the tree
-// never disagrees with itself across surfaces or across a restart.
+// the folder the user opened, or the account whose outbox the list shows
+// instead. Expansion state deliberately lives in the core, not here; the store
+// only mirrors what each pull brought back, so the tree never disagrees with
+// itself across surfaces or across a restart.
 
 import { create } from 'zustand';
 
@@ -14,19 +15,27 @@ interface FolderStoreState {
   accounts: AccountFolderRow[];
   /** The folder whose mail the list shows; null before the first selection. */
   selected: FolderRef | null;
+  /** The account whose outbox the list shows; null while a folder leads. */
+  outboxAccount: string | null;
   /** Replaces the tree from a fresh mailbox-list snapshot. */
   applySnapshot: (snapshot: MailboxListSnapshot) => void;
-  /** Records a selection the surface just dispatched. */
+  /** Records a folder selection the surface just dispatched. */
   select: (folder: FolderRef) => void;
+  /** Records an outbox selection the surface just dispatched. */
+  selectOutbox: (account: string) => void;
 }
 
 export const useFolderStore = create<FolderStoreState>((set) => ({
   accounts: [],
   selected: null,
+  outboxAccount: null,
 
   applySnapshot: (snapshot) => set({ accounts: snapshot.account_folders }),
 
-  select: (folder) => set({ selected: folder }),
+  // A folder and an outbox never lead at once: each selection clears the other.
+  select: (folder) => set({ selected: folder, outboxAccount: null }),
+
+  selectOutbox: (account) => set({ outboxAccount: account, selected: null }),
 }));
 
 /**

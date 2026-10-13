@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The message list's state: the last mailbox-list snapshot's rows, the
 // grouping mode, the visible window they were built against, and the search
-// state that supersedes them while a search runs. The row selection is
-// local to the surface: no intent exists for it, so the store holds what
-// the user clicked and never writes it back.
+// state that supersedes them while a search runs. The row selection and the
+// row density are local to the surface: no intent exists for either, so the
+// store holds what the user chose and never writes it back.
 
 import { create } from 'zustand';
 
 import { sameRowKey } from '@/components/message-list/rowIdentity';
+import type { Density } from '@/components/message-list/density';
 import type {
   MailboxListSnapshot,
   MessageRowView,
@@ -29,10 +30,14 @@ interface ListStoreState {
   selectedKey: RowKey | null;
   /** The live search state; null at rest, while no search is running. */
   search: SearchState | null;
+  /** The row height the list draws at; session-only, normal until changed. */
+  density: Density;
   /** Replaces the list view from a fresh mailbox-list snapshot. */
   applySnapshot: (snapshot: MailboxListSnapshot) => void;
   /** Records a local row selection the surface just drew. */
   select: (key: RowKey | null) => void;
+  /** Records the density the view menu or the status bar chose. */
+  setDensity: (density: Density) => void;
 }
 
 export const useListStore = create<ListStoreState>((set) => ({
@@ -42,6 +47,7 @@ export const useListStore = create<ListStoreState>((set) => ({
   selection: null,
   selectedKey: null,
   search: null,
+  density: 'normal',
 
   applySnapshot: (snapshot) =>
     set((state) => ({
@@ -63,4 +69,6 @@ export const useListStore = create<ListStoreState>((set) => ({
     })),
 
   select: (key) => set({ selectedKey: key }),
+
+  setDensity: (density) => set({ density }),
 }));

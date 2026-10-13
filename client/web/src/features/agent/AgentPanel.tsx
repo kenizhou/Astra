@@ -4,11 +4,15 @@
 // the answer dispatched straight back, and the abort button for the live
 // turn. Streamed events arrive through the agent store (the host's
 // `agent:event` emissions, folded in by the app root's listener); the
-// status word beside the title says where the relay stands.
+// status word beside the title says where the relay stands. The panel
+// docks as the mail row's resizable right column; the tool rail's toggle
+// opens and shuts it.
 
 import { useEffect, useRef, useState } from 'react';
 
 import { useAgentStore, type AgentMessage } from './agentStore';
+import { AgentIcon } from '@/components/icons';
+import { RAIL_BUTTON_CLASS, railButtonColours } from '@/components/layout/railButton';
 import { useUiStore } from '@/stores/uiStore';
 import type { PendingApproval } from '@/services/agent';
 
@@ -75,7 +79,7 @@ function ApprovalCard({ approval }: { approval: PendingApproval }) {
   );
 }
 
-/** The agent panel over the shell's corner; renders nothing when shut. */
+/** The agent panel, docked in the mail row; renders nothing when shut. */
 export function AgentPanel() {
   const open = useUiStore((s) => s.agentOpen);
   const status = useAgentStore((s) => s.status);
@@ -114,7 +118,7 @@ export function AgentPanel() {
   return (
     <section
       aria-label="Agent"
-      className="absolute bottom-[calc(var(--status-h)+12px)] right-3 z-[var(--z-popover)] flex max-h-[70vh] w-[380px] flex-col overflow-hidden rounded-[var(--radius)] border border-border bg-chrome shadow-lg"
+      className="flex h-full w-full flex-col overflow-hidden bg-background"
     >
       <div className="flex h-[var(--pane-header-h)] shrink-0 items-center justify-between border-b border-border px-3">
         <span className="flex items-baseline gap-2 text-xs font-medium text-foreground">
@@ -186,7 +190,7 @@ export function AgentPanel() {
   );
 }
 
-/** The status bar's agent toggle, carrying the count of pending approvals. */
+/** The tool rail's agent toggle, carrying the approvals awaiting a decision. */
 export function AgentStatus() {
   const open = useUiStore((s) => s.agentOpen);
   const count = useAgentStore((s) => s.approvals.length);
@@ -194,10 +198,21 @@ export function AgentStatus() {
   return (
     <button
       type="button"
+      aria-label={count > 0 ? `Agent ${count}` : 'Agent'}
+      aria-pressed={open}
+      title={count > 0 ? `Agent, ${count} awaiting a decision` : 'Agent'}
       onClick={() => useUiStore.getState().setAgentOpen(!open)}
-      className="rounded-[var(--radius-xs)] px-1.5 py-0.5 transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className={`${RAIL_BUTTON_CLASS} ${railButtonColours(open)}`}
     >
-      {count > 0 ? `Agent ${count}` : 'Agent'}
+      <AgentIcon size={22} />
+      {count > 0 && (
+        <span
+          aria-hidden="true"
+          className="absolute right-1 top-1 grid h-4 min-w-4 place-items-center rounded-full bg-primary px-1 text-[10px] font-medium text-primary-foreground"
+        >
+          {count}
+        </span>
+      )}
     </button>
   );
 }

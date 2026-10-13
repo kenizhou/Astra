@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The month view: the fixed six-week civil grid around the anchor month, a
-// day cell per key with its chips bucketed by zone-local day, the overflow
-// affordance into the day view, and today named from the snapshot's now
-// data.
+// The month view: the fixed six-week civil grid around the anchor month
+// under a weekday header row in the grid's own first-day order, a day cell
+// per key with its chips bucketed by zone-local day, the overflow affordance
+// into the day view, and today named from the snapshot's now data.
 
 import { useCalendarStore } from './calendarStore';
 import { useSettingsStore } from '@/features/settings/settingsStore';
 import { dayKeyOf, monthGrid, parseDayKey } from './calendarRange';
-import { fullDayLabel, firstDayIndex } from './dayLabels';
+import { fullDayLabel, firstDayIndex, weekdayShortLabel } from './dayLabels';
 import { CalendarDot, RepeatGlyph, holdClass, isHold } from './EventMarkers';
 import { dayBlocks } from './rowLayout';
 import type { OccurrenceRow } from '@/services/ipc';
@@ -19,11 +19,11 @@ const MAX_CHIPS = 3;
 function Chip({
   row,
   color,
-  onOpenEvent,
+  onSelectEvent,
 }: {
   row: OccurrenceRow;
   color: string | undefined;
-  onOpenEvent: (row: OccurrenceRow) => void;
+  onSelectEvent: (row: OccurrenceRow) => void;
 }) {
   const hold = isHold(row);
   const title = row.title === '' ? '(no title)' : row.title;
@@ -33,8 +33,8 @@ function Chip({
       data-chip=""
       data-hold={hold}
       title={title}
-      onClick={() => onOpenEvent(row)}
-      className={`flex w-full items-center gap-1 truncate rounded-[var(--radius-xs)] border px-1 text-left text-[10px] leading-4 ${holdClass(hold)}`}
+      onClick={() => onSelectEvent(row)}
+      className={`flex w-full items-center gap-1 truncate rounded-[var(--radius)] border px-1 text-left text-[10px] leading-4 ${holdClass(hold)}`}
       style={
         hold
           ? { borderColor: color ?? 'var(--primary)' }
@@ -58,12 +58,12 @@ function Chip({
 /** The month grid over the anchor month. */
 export function MonthGrid({
   onPickDay,
-  onOpenEvent,
+  onSelectEvent,
 }: {
   /** Navigates the anchor to a day (the day header and the overflow). */
   onPickDay: (dayKey: string) => void;
-  /** Opens an event's editor from a chip. */
-  onOpenEvent: (row: OccurrenceRow) => void;
+  /** Picks an event for the detail dock from a chip. */
+  onSelectEvent: (row: OccurrenceRow) => void;
 }) {
   const anchor = useCalendarStore((s) => s.anchor);
   const occurrences = useCalendarStore((s) => s.occurrences);
@@ -82,7 +82,18 @@ export function MonthGrid({
     calendars.find((c) => c.account === row.account && c.id === row.calendar)?.color;
 
   return (
-    <div className="grid min-h-0 flex-1 grid-cols-7 overflow-y-auto border-l border-t border-border">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div className="grid shrink-0 grid-cols-7 border-b border-border-subtle bg-surface">
+        {grid.slice(0, 7).map((dayKey) => (
+          <div
+            key={dayKey}
+            className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-text"
+          >
+            {weekdayShortLabel(dayKey)}
+          </div>
+        ))}
+      </div>
+      <div className="grid min-h-0 flex-1 grid-cols-7 overflow-y-auto border-l border-border-subtle">
       {grid.map((dayKey) => {
         const inMonth = parseDayKey(dayKey).month === anchorMonth;
         const blocks = dayBlocks(occurrences, dayKey, zone);
@@ -95,8 +106,8 @@ export function MonthGrid({
             aria-label={fullDayLabel(dayKey)}
             data-in-month={inMonth}
             data-today={isToday}
-            className={`flex min-h-[92px] flex-col gap-0.5 border-b border-r border-border p-1 ${
-              inMonth ? 'bg-background' : 'bg-surface'
+            className={`flex min-h-[92px] flex-col gap-0.5 border-b border-r border-border-subtle p-1 transition-colors ${
+              inMonth ? 'hover:bg-hover' : 'bg-surface'
             }`}
           >
             <button
@@ -119,7 +130,7 @@ export function MonthGrid({
                   key={`${row.account}:${row.event}:${row.start}`}
                   row={row}
                   color={colorOf(row)}
-                  onOpenEvent={onOpenEvent}
+                  onSelectEvent={onSelectEvent}
                 />
               ))}
               {overflow > 0 && (
@@ -135,6 +146,7 @@ export function MonthGrid({
           </div>
         );
       })}
+      </div>
     </div>
   );
 }

@@ -1,10 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The people pane: the refresh on entry and on focus regain, the search box
-// debouncing its query into the Search intent, the write statuses beside the
-// list (never inside the detail pane), the create affordance standing only
-// where a writable book exists, and the row tap opening the person.
+// debouncing its query into the Search intent, the resizable two-card row
+// (list and detail), the write statuses beside the list (never inside the
+// detail card), the create affordance standing only where a writable book
+// exists, and the row tap opening the person.
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// jsdom has no ResizeObserver; the resizable panel row measures through one.
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+vi.stubGlobal('ResizeObserver', ResizeObserverStub);
 
 const ipc = vi.hoisted(() => ({ dispatch: vi.fn(), peopleCard: vi.fn() }));
 
@@ -41,6 +50,7 @@ beforeEach(() => {
   ipc.peopleCard.mockReset();
   ipc.peopleCard.mockResolvedValue(null);
   usePeopleStore.getState().applySnapshot(snapshot());
+  usePeopleStore.getState().clearContactCreate();
 });
 
 afterEach(() => {
@@ -49,6 +59,15 @@ afterEach(() => {
 });
 
 describe('the people pane', () => {
+  it('lays out the list and detail cards with a resize handle', () => {
+    render(<PeoplePane />);
+
+    expect(screen.getByLabelText('People list')).toBeTruthy();
+    expect(screen.getAllByRole('separator')).toHaveLength(1);
+    // Nobody picked: the detail card stands as a placeholder, never blank.
+    expect(screen.queryByLabelText('Person detail')).toBeNull();
+  });
+
   it('refreshes on entry and again when the window regains focus', () => {
     render(<PeoplePane />);
     const entry = ipc.dispatch.mock.calls.filter(
@@ -154,5 +173,24 @@ describe('the people pane', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'New contact' }));
     expect(screen.getByRole('dialog', { name: 'New contact' })).toBeTruthy();
+  });
+
+  it('opens the create editor prefilled when another surface hands a seed over', () => {
+    usePeopleStore.getState().applySnapshot({
+      ...snapshot(),
+      create_targets: [{ account: 'work', book: '/dav/book/', name: 'Contacts', is_default: true }],
+    });
+    act(() => {
+      usePeopleStore.getState().requestContactCreate({
+        name: 'Ada Lovelace',
+        address: 'ada@example.test',
+      });
+    });
+    render(<PeoplePane />);
+
+    const dialog = screen.getByRole('dialog', { name: 'New contact' });
+    expect(dialog).toBeTruthy();
+    expect((screen.getByLabelText('Emails') as HTMLInputElement).value).toBe('ada@example.test');
+    expect((screen.getByLabelText('Given name') as HTMLInputElement).value).toBe('Ada Lovelace');
   });
 });

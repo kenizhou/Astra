@@ -37,12 +37,23 @@ interface CalendarStoreState {
   view: CalendarView;
   /** The navigation anchor, a civil day key in the snapshot's zone. */
   anchor: string | null;
+  /** The occurrence the detail dock shows, or null while nothing is picked. */
+  selectedEvent: OccurrenceRow | null;
   /** Applies a pulled snapshot. */
   applySnapshot: (snapshot: CalendarSnapshot) => void;
-  /** Switches the view kind. */
+  /** Switches the view kind; a view switch is navigation and clears the pick. */
   setView: (view: CalendarView) => void;
-  /** Moves the navigation anchor to a civil day key. */
+  /** Moves the navigation anchor to a civil day key; navigation clears the pick. */
   setAnchor: (day: string) => void;
+  /** Picks an occurrence for the detail dock; picking it again clears it. */
+  selectEvent: (row: OccurrenceRow) => void;
+  /** Clears the picked occurrence. */
+  clearSelection: () => void;
+}
+
+/** Whether two rows name the same occurrence. */
+function sameOccurrence(a: OccurrenceRow, b: OccurrenceRow): boolean {
+  return a.account === b.account && a.event === b.event && a.start === b.start;
 }
 
 export const useCalendarStore = create<CalendarStoreState>((set) => ({
@@ -53,21 +64,39 @@ export const useCalendarStore = create<CalendarStoreState>((set) => ({
   nowData: null,
   view: 'month',
   anchor: null,
+  selectedEvent: null,
 
   applySnapshot: (snapshot) =>
+    set((state) => {
+      const occurrences = snapshot.occurrences ?? [];
+      return {
+        calendars: snapshot.calendars ?? [],
+        occurrences,
+        writeStates: snapshot.write_states ?? [],
+        replyPrompts: snapshot.reply_prompts ?? [],
+        nowData: snapshot.now_data ?? null,
+        // The anchor is the user's place in the diary, not the clock's: seeded
+        // once from the first now data, moved only by navigation after that.
+        anchor:
+          state.anchor ?? (snapshot.now_data ? zoneToday(snapshot.now_data.now, snapshot.now_data.zone) : null),
+        // The pick tracks the publish: the fresh row replaces the stale one,
+        // and a row the window no longer holds drops the pick with it.
+        selectedEvent:
+          state.selectedEvent === null
+            ? null
+            : (occurrences.find((row) => sameOccurrence(row, state.selectedEvent!)) ?? null),
+      };
+    }),
+
+  setView: (view) => set({ view, selectedEvent: null }),
+
+  setAnchor: (day) => set({ anchor: day, selectedEvent: null }),
+
+  selectEvent: (row) =>
     set((state) => ({
-      calendars: snapshot.calendars ?? [],
-      occurrences: snapshot.occurrences ?? [],
-      writeStates: snapshot.write_states ?? [],
-      replyPrompts: snapshot.reply_prompts ?? [],
-      nowData: snapshot.now_data ?? null,
-      // The anchor is the user's place in the diary, not the clock's: seeded
-      // once from the first now data, moved only by navigation after that.
-      anchor:
-        state.anchor ?? (snapshot.now_data ? zoneToday(snapshot.now_data.now, snapshot.now_data.zone) : null),
+      selectedEvent:
+        state.selectedEvent !== null && sameOccurrence(state.selectedEvent, row) ? null : row,
     })),
 
-  setView: (view) => set({ view }),
-
-  setAnchor: (day) => set({ anchor: day }),
+  clearSelection: () => set({ selectedEvent: null }),
 }));

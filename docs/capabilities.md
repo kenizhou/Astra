@@ -11,7 +11,7 @@ this row ports.
 | Accounts | Auto-detect from email address (JMAP probe, SRV, autoconfig, ISPDB, MX), with results from an unencrypted hop disclosed and needing explicit approval | 🚧 | account-autodetect.md |
 | Mail | Folder pane across accounts with nested folders and persisted expansion | 🚧 | folder-pane.md |
 | Mail | Flat and threaded message list with windowed paging | 🚧 | mail-calendar capabilities |
-| Calendar | Day, work week, and month grids with drag to create, move, resize | 🚧 | grids, agenda, and drag move ship; resize is the dialog's end edit and create is the dialog, not a grid gesture; the host dials the calendar leg at boot when the account carries a dav section; calendar.md |
+| Calendar | Day, work week, and month grids with drag to create, move, resize | 🚧 | grids, agenda, drag move, and drag-create across empty time ship, the create landing in the dialog prefilled; resize is the dialog's end edit; the host dials the calendar leg at boot when the account carries a dav section; calendar.md |
 | Core | Reactive Rust to native binding, dispatch to immutable snapshots | 🚧 | |
 | Accounts | Settings accounts page lists every account, with per-service toggles, relinking, sign-in again, server editing, and removal | 🚧 | the page lists every account with its dialled legs, the dav section editor, and a confirmed removal; no per-service toggles, relinking, sign-in again, or server editing; settings.md |
 | Accounts | Outgoing name per account, asked once at connect, editable in settings, kept in step with the provider | ⬜ | sending.md |
@@ -40,12 +40,12 @@ this row ports.
 | Mail | Message laid out against the reading pane's own width, so a newsletter's own mobile rules apply | ⬜ | reading-zoom.md |
 | Mail | Fixed-width messages reflowed to fit at every pane width, live during resize | ⬜ | reading-zoom.md |
 | Mail | Offline-first bodies: synced bodies auto-download after every sync under a per-account cap, so opens are instant | ⬜ | |
-| Mail | Three-pane desktop layout: sidebar, list, reading pane | 🚧 | |
+| Mail | Three-pane desktop layout: resizable folder, list, and reading pane cards, app navigation on a left icon rail, message actions on a command ribbon under the title bar | 🚧 | |
 | Mail | Reading actions: reply, reply all, forward, archive, delete | 🚧 | sending.md |
 | Mail | Overflow menu with Save as .eml, writing the message exactly as delivered | ⬜ | reading-actions.md |
 | Mail | Print a message with subject and header lines through the platform print dialog | ⬜ | reading-actions.md |
 | Mail | Attachments: list, save, and open received files; attach files in the composer | ⬜ | |
-| Composer | Rich HTML composer for new mail, reply, reply all, and forward, with editable To, Cc, and Bcc | 🚧 | |
+| Composer | Rich HTML composer for new mail, reply, reply all, and forward, with editable To, Cc, and Bcc | 🚧 | the composer opens in its own window; a quick reply docks under the reading pane |
 | Composer | A forward opens holding the original's attachments, removable one by one | ⬜ | sending.md |
 | Composer | Drafts stored on the server while you type; one draft across devices; taken away on send | 🚧 | drafts.md |
 | Composer | A Drafts row opens back into the composer and saves over the same copy | ⬜ | |
@@ -73,12 +73,12 @@ this row ports.
 | Calendar | Write-status feedback: spinner while saving, warning on unconfirmed, retry | 🚧 | writing and failed-with-retry states settle per dispatch; calendar.md |
 | Calendar | All-day and multi-day banners with a per-day overflow count that expands | ⬜ | the all-day lane ships; the banner shape does not |
 | Calendar | Calendar manager: per-calendar visibility and colour override, persisted | 🚧 | visibility toggles ship; no colour override, nothing persisted; calendar.md |
-| Settings | Display settings: first day of week, 12 or 24-hour clock, light or dark appearance, calendar horizon | 🚧 | all four ship in the settings screen; the time zone carries via the calendar's display zone; settings.md |
+| Settings | Display settings: first day of week, 12 or 24-hour clock, light or dark appearance, calendar horizon | 🚧 | all four ship in the settings screen; accent skin, contrast, and font size ship as device-local options; the time zone carries via the calendar's display zone; settings.md |
 | Calendar | The shape and horizon you left the calendar in, restored on launch | ⬜ | |
 | Calendar | The diary on screen from the store at launch, filled without opening it, there offline | ⬜ | |
 | Calendar | Calendar refreshes periodically while the app stays open | ⬜ | |
 | Calendar | Event creation with a calendar picker, all-day, notes, location | 🚧 | calendar.md |
-| Calendar | Tap an event to view its detail and edit title, time, notes, location | 🚧 | calendar.md |
+| Calendar | Tap an event to view its detail and edit title, time, notes, location | 🚧 | a tap selects the event into the detail dock; the editor opens from there; calendar.md |
 | Calendar | Attendee list with responses, on the detail and read-only in the editor | ⬜ | |
 | Calendar | Deleting one occurrence of a repeating event asks this event or all events first | 🚧 | calendar.md |
 | Calendar | Editing a whole repeating event warns where the server would throw away single-occurrence changes | 🚧 | calendar.md |
@@ -97,7 +97,7 @@ this row ports.
 | Contacts | Unified contact list across account address books (CardDAV, JMAP, Google, Microsoft), with search and detail | 🚧 | the People view ships with search matched in the engine and the fold, monogram, and section letters derived once in the rebuild; the CardDAV leg dials at boot and is proven live; the JMAP, Google, and Microsoft legs do not stand; contacts.md |
 | Contacts | Add and edit a contact in a writable address book; one source card named when a person is filed twice | 🚧 | create and edit land through the engine's contact writes and read back live; the write states settle per dispatch; no delete; contacts.md |
 | Sending | Outbox keeps a message that could not be sent and sends it later by itself | 🚧 | sending.md |
-| Sending | Outbox actions: send now, cancel, or edit a message that has not gone | 🚧 | sending.md |
+| Sending | Outbox actions: send now, cancel, or edit a message that has not gone | 🚧 | the queue lives behind a per-account Outbox folder row and renders in the message list; sending.md |
 | Sending | A send interrupted by app close is kept and never sent twice; the user answers Mark as Sent or Send Again | 🚧 | sending.md |
 | Sending | A message the server refused stays until sent again, edited, or discarded | 🚧 | sending.md |
 | Sending | Reply and reply all from the reading pane: prefilled recipients, subject, and quoted original, sent as a threaded reply | 🚧 | sending.md |
@@ -112,7 +112,7 @@ this row ports.
 | Search | Search results follow the list's conversation grouping | 🚧 | search.md |
 | Sync | Per-account fetch depth and message size, with every folder synced within the depth | ⬜ | |
 | Sync | Sync progress: a bar under the list for a started download, a status line for background passes, Sync paused when throttled | 🚧 | sync-progress.md |
-| Settings | Unified settings screen: language, appearance, time zone, conversation grouping, swipe actions, per-account fetch, quote style, default send account, reset, About | 🚧 | six categories ship: General (appearance, clock), Calendar (zone, first day, horizon, default calendar), Reading (grouping), Composing (quote style), Accounts, About; language, swipe actions, per-account fetch, default send account, and reset stay absent; settings.md |
+| Settings | Unified settings screen: language, appearance, time zone, conversation grouping, swipe actions, per-account fetch, quote style, default send account, reset, About | 🚧 | seven categories ship in a modal with a tab rail: General (appearance, clock), Calendar (zone, first day, horizon, default calendar), Reading (grouping), Composing (quote style), Shortcuts, Accounts, About; language, swipe actions, per-account fetch, default send account, and reset stay absent; settings.md |
 | Sync | Per-mailbox sync behaviour: IMAP IDLE push where capable, otherwise 15 to 120 minute polling | ⬜ | |
 | Sync | Background mail delivery while the app is not in the foreground | ⬜ | background-sync.md |
 | Sync | New-mail notifications from the background sync: who it is from, what it is about, how it begins | ⬜ | |

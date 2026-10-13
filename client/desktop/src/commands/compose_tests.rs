@@ -10,6 +10,7 @@ use std::sync::Arc;
 use astra_viewmodel::{ComposeKind, ComposeRequestSnapshot};
 
 use super::compose_request_of;
+use super::take_compose_request_of;
 use crate::app_state::AppState;
 use crate::commands_fakes::{compose_prefill, state, FakeApp, FakeStore};
 
@@ -90,4 +91,42 @@ fn the_reply_all_prefill_preserves_the_original_cc() {
         "the original's Cc stays Cc"
     );
     wait_for_request(&state, Some(&prefill));
+}
+
+#[test]
+fn the_take_pull_hands_over_the_pending_request_and_consumes_it() {
+    let app = FakeApp::new();
+    let state = state("compose-take", Arc::clone(&app), FakeStore::accepting());
+
+    crate::commands::dispatch_intent(&state, compose_json("reply")).expect("the reply dispatches");
+    let reply = compose_prefill(ComposeKind::Reply, "work");
+    wait_for_request(&state, Some(&reply));
+
+    assert_eq!(
+        take_compose_request_of(&state),
+        Some(reply),
+        "the take answers the pending request"
+    );
+    assert_eq!(
+        compose_request_of(&state),
+        None,
+        "and the plain pull reads the consumed slot as empty"
+    );
+    assert_eq!(
+        take_compose_request_of(&state),
+        None,
+        "a second take answers nothing"
+    );
+}
+
+#[test]
+fn the_take_pull_answers_none_while_no_request_is_pending() {
+    let app = FakeApp::new();
+    let state = state(
+        "compose-take-none",
+        Arc::clone(&app),
+        FakeStore::accepting(),
+    );
+
+    assert_eq!(take_compose_request_of(&state), None);
 }

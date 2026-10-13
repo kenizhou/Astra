@@ -2,9 +2,10 @@
 // The shared time grid: an hour gutter, one column per civil day with an
 // all-day lane above, blocks placed by their zone-local clock and packed
 // where they overlap, the now line anchored on the snapshot's own instant,
-// and the drag gesture bound over the columns, its committed move held
-// optimistically until the next publish. The day and work-week grids are
-// this grid over different day sets.
+// and the drag gestures bound over the columns: a drag on a block moves it
+// (held optimistically until the next publish), a drag on empty time
+// previews the slot its pointer up would create. The day and work-week
+// grids are this grid over different day sets.
 
 import { useMemo } from 'react';
 
@@ -32,7 +33,7 @@ import {
   fullDayLabel,
   weekdayShortLabel,
 } from './dayLabels';
-import { useEventDrag } from './useEventDrag';
+import { useEventDrag, type CreateSlot } from './useEventDrag';
 import { useZonedNow } from './useZonedNow';
 
 interface TimeGridProps {
@@ -40,8 +41,10 @@ interface TimeGridProps {
   days: string[];
   /** The grid's accessible name, naming the span it shows. */
   ariaLabel: string;
-  /** Opens an event's editor. */
-  onOpenEvent: (row: OccurrenceRow) => void;
+  /** Picks an event for the detail dock. */
+  onSelectEvent: (row: OccurrenceRow) => void;
+  /** Opens the editor prefilled with a drag-created slot. */
+  onCreateSlot?: (slot: CreateSlot) => void;
 }
 
 /** One placed block of a day column. */
@@ -71,7 +74,7 @@ function Block({
       onPointerDown={onPointerDown}
       onClick={onClick}
       onKeyDown={(event) => {
-        // The keyboard's own click: Enter and Space open the editor the way
+        // The keyboard's own click: Enter and Space pick the event the way
         // a pointer click does.
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
@@ -87,7 +90,7 @@ function Block({
         transform: ghostShift === 0 ? undefined : `translateY(${ghostShift}px)`,
         ...colorStyling(calendarColor, hold),
       }}
-      className={`overflow-hidden rounded-[var(--radius-xs)] border px-1 py-0.5 text-left text-[11px] leading-tight transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${holdClass(hold)} ${
+      className={`overflow-hidden rounded-[var(--radius)] border px-1 py-0.5 text-left text-[11px] leading-tight transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${holdClass(hold)} ${
         block.row.can_move ? 'cursor-grab' : 'cursor-pointer'
       }`}
     >
@@ -126,9 +129,10 @@ function DayColumn({
   occurrences,
   colorOf,
   dragging,
+  creating,
   beginDrag,
   consumeClick,
-  onOpenEvent,
+  onSelectEvent,
   now,
   nowDay,
 }: {
@@ -137,9 +141,10 @@ function DayColumn({
   occurrences: OccurrenceRow[];
   colorOf: (row: OccurrenceRow) => string | undefined;
   dragging: ReturnType<typeof useEventDrag>['dragging'];
+  creating: CreateSlot | null;
   beginDrag: ReturnType<typeof useEventDrag>['beginDrag'];
   consumeClick: () => boolean;
-  onOpenEvent: (row: OccurrenceRow) => void;
+  onSelectEvent: (row: OccurrenceRow) => void;
   now: Date | null;
   nowDay: string | null;
 }) {
@@ -147,11 +152,22 @@ function DayColumn({
   return (
     <div
       aria-label={`Day column, ${fullDayLabel(dayKey)}`}
-      className="relative min-w-0 flex-1 border-l border-border"
+      className="relative min-w-0 flex-1 border-l border-border-subtle"
     >
       {Array.from({ length: 24 }, (_, hour) => (
         <div key={hour} style={{ height: HOUR_H }} className="border-b border-border/40" />
       ))}
+      {creating !== null && creating.day === dayKey && (
+        <div
+          data-create-ghost=""
+          aria-hidden="true"
+          className="pointer-events-none absolute left-0 right-0 rounded-[var(--radius)] border border-dashed border-[var(--primary)] bg-[var(--primary)]/10"
+          style={{
+            top: minuteTop(creating.startMinutes),
+            height: Math.max(minuteTop(creating.endMinutes - creating.startMinutes), 16),
+          }}
+        />
+      )}
       {blocks.timed.map((block) => (
         <Block
           key={`${block.row.account}:${block.row.event}:${block.row.start}`}
@@ -167,7 +183,7 @@ function DayColumn({
           onPointerDown={(event) => beginDrag(block.row, event)}
           onClick={() => {
             if (!consumeClick()) {
-              onOpenEvent(block.row);
+              onSelectEvent(block.row);
             }
           }}
         />
@@ -175,10 +191,10 @@ function DayColumn({
       {now !== null && nowDay === dayKey && (
         <div
           aria-label="Now"
-          className="pointer-events-none absolute left-0 right-0 z-10 border-t-2 border-[var(--destructive)]"
+          className="pointer-events-none absolute left-0 right-0 z-10 border-t-2 border-[var(--primary)]"
           style={{ top: minuteTop(minutesInZone(now, zone)) }}
         >
-          <span className="absolute -left-1 -top-[3px] h-1.5 w-1.5 rounded-full bg-[var(--destructive)]" />
+          <span className="absolute -left-1 -top-[3px] h-1.5 w-1.5 rounded-full bg-[var(--primary)]" />
         </div>
       )}
     </div>
@@ -186,7 +202,7 @@ function DayColumn({
 }
 
 /** The shared hour grid over the given civil days. */
-export function TimeGrid({ days, ariaLabel, onOpenEvent }: TimeGridProps) {
+export function TimeGrid({ days, ariaLabel, onSelectEvent, onCreateSlot }: TimeGridProps) {
   const occurrences = useCalendarStore((s) => s.occurrences);
   const calendars = useCalendarStore((s) => s.calendars);
   const nowData = useCalendarStore((s) => s.nowData);
@@ -194,7 +210,7 @@ export function TimeGrid({ days, ariaLabel, onOpenEvent }: TimeGridProps) {
   const zone = nowData?.zone ?? 'Etc/UTC';
   const now = useZonedNow(nowData);
   const nowDay = now !== null ? dayKeyOf(now, zone) : null;
-  const drag = useEventDrag(days.length, occurrences);
+  const drag = useEventDrag(days, occurrences, onCreateSlot);
 
   // A committed drag holds its moved position until the next publish: the
   // grid lays the shifted row out as an ordinary row at its new clock, so
@@ -227,24 +243,32 @@ export function TimeGrid({ days, ariaLabel, onOpenEvent }: TimeGridProps) {
 
   return (
     <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="flex shrink-0 border-b border-border bg-surface">
+      <div className="flex shrink-0 border-b border-border-subtle bg-surface">
         <div style={{ width: GUTTER_W }} className="shrink-0" />
         {days.map((dayKey) => (
           <div
             key={dayKey}
-            className={`min-w-0 flex-1 border-l border-border px-2 py-1 text-xs ${
-              nowDay === dayKey ? 'font-semibold text-primary' : 'text-muted-foreground'
+            className={`min-w-0 flex-1 border-l border-border-subtle px-2 py-1 text-xs ${
+              nowDay === dayKey ? 'font-semibold text-primary' : 'text-muted-text'
             }`}
           >
-            <span className="mr-1">{weekdayShortLabel(dayKey)}</span>
-            <span className="tabular-nums">{dayNumber(dayKey)}</span>
+            <span className="mr-1 text-[10px] font-medium uppercase tracking-wide">
+              {weekdayShortLabel(dayKey)}
+            </span>
+            {nowDay === dayKey ? (
+              <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold tabular-nums text-primary-foreground">
+                {dayNumber(dayKey)}
+              </span>
+            ) : (
+              <span className="tabular-nums">{dayNumber(dayKey)}</span>
+            )}
           </div>
         ))}
       </div>
-      <div className="flex shrink-0 border-b border-border bg-surface">
+      <div className="flex shrink-0 border-b border-border-subtle bg-surface">
         <div
           style={{ width: GUTTER_W }}
-          className="shrink-0 px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground"
+          className="shrink-0 px-2 py-1 text-[10px] uppercase tracking-wide text-muted-text"
         >
           All day
         </div>
@@ -252,16 +276,16 @@ export function TimeGrid({ days, ariaLabel, onOpenEvent }: TimeGridProps) {
           <div
             key={dayKey}
             aria-label={`All day, ${fullDayLabel(dayKey)}`}
-            className="flex min-h-[24px] min-w-0 flex-1 flex-col gap-0.5 border-l border-border px-1 py-0.5"
+            className="flex min-h-[24px] min-w-0 flex-1 flex-col gap-0.5 border-l border-border-subtle px-1 py-0.5"
           >
             {dayBlocks(laidOut, dayKey, zone).allDay.map((row) => (
               <button
                 key={`${row.account}:${row.event}`}
                 type="button"
                 data-hold={isHold(row)}
-                onClick={() => onOpenEvent(row)}
+                onClick={() => onSelectEvent(row)}
                 title={row.title === '' ? '(no title)' : row.title}
-                className={`flex items-center gap-1 truncate rounded-[var(--radius-xs)] border px-1 text-left text-[11px] ${holdClass(isHold(row))}`}
+                className={`flex items-center gap-1 truncate rounded-[var(--radius)] border px-1 text-left text-[11px] ${holdClass(isHold(row))}`}
                 style={colorStyling(colorOf(row), isHold(row))}
               >
                 {row.recurring && (
@@ -287,7 +311,7 @@ export function TimeGrid({ days, ariaLabel, onOpenEvent }: TimeGridProps) {
             <div
               key={hour}
               style={{ height: HOUR_H }}
-              className="relative border-b border-border/40 text-right text-[10px] text-muted-foreground"
+              className="relative border-b border-border/40 text-right text-[10px] text-muted-text"
             >
               <span className="absolute -top-1.5 right-1">{clockLabel(hour * 60, twentyFour)}</span>
             </div>
@@ -301,9 +325,10 @@ export function TimeGrid({ days, ariaLabel, onOpenEvent }: TimeGridProps) {
             occurrences={laidOut}
             colorOf={colorOf}
             dragging={drag.dragging}
+            creating={drag.creating}
             beginDrag={drag.beginDrag}
             consumeClick={drag.consumeClick}
-            onOpenEvent={onOpenEvent}
+            onSelectEvent={onSelectEvent}
             now={now}
             nowDay={nowDay}
           />

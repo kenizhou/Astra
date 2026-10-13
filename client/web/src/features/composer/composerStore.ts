@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The composer session's store: the composition the pane holds, its fields,
-// its split document, and the compose request it answers. Split from
+// its split document, and the compose request it answers, plus the send's
+// own state and submit path so the ribbon's Send and the pane's Send are one
+// gesture, and the live editor handle so an insert from outside the pane (the
+// ribbon's snippet picker) lands at the current selection. One store lives
+// per window: the main window's drives the docked quick-reply strip, a
+// pop-out composer window's drives its own, and the pop-out's opening paths
+// take the id the main window minted rather than minting anew. Split from
 // Composer.tsx so the pane renders and the store holds, one concern each,
 // both under the line cap. A composition inherits nothing from the one
 // before it: every opening path resets the whole state, and the pane's own
@@ -9,6 +15,7 @@
 // the document the per-message truth then owns.
 
 import { create } from 'zustand';
+import type { Editor as CoreEditor } from '@tiptap/core';
 import type { JSONContent } from '@tiptap/react';
 
 import type {
@@ -16,8 +23,10 @@ import type {
   ComposeRequestSnapshot,
   CompositionId,
   ComposerDocument,
+  Intent,
   ResumeView,
 } from '@/services/ipc';
+import { dispatch, intents } from '@/services/ipc';
 import { useComposeRequestStore } from '@/stores/composeRequestStore';
 import { useSettingsStore } from '@/features/settings/settingsStore';
 
@@ -60,6 +69,12 @@ interface ComposerStoreState {
   open: boolean;
   /** Whether the app start resume has been attempted, once per session. */
   resumeAttempted: boolean;
+  /**
+   * Whether the next landed compose request opens the inline quick-reply
+   * strip rather than a pop-out window: the strip's expanding click sets it,
+   * the request's opening spends it.
+   */
+  inlineExpected: boolean;
   composition: CompositionId | null;
   from: string;
   fromLabel: string;
@@ -73,13 +88,32 @@ interface ComposerStoreState {
   savedFingerprint: string | null;
   /** The compose request this composition answers; null for a plain one. */
   request: CompositionRequest | null;
-  newMessage: (account: SendAccount) => void;
+  /** Whether a send submit is in flight; one gesture cannot queue two sends. */
+  sending: boolean;
+  /** Why the last submit was refused, in words the pane can show. */
+  sendError: string | null;
+  /**
+   * Opens a plain composition. `composition` is the caller-minted id of the
+   * pop-out window the composition lives in; absent, one is minted here.
+   */
+  newMessage: (account: SendAccount, composition?: CompositionId) => void;
   /** Opens a resumed draft under the composition the resume pull named. */
   hydrate: (view: ResumeView, account: SendAccount, composition: CompositionId) => void;
-  /** Opens the composition a compose request prefilled, minting its id. */
-  openRequest: (snapshot: ComposeRequestSnapshot, fromLabel: string) => void;
+  /**
+   * Opens the composition a compose request prefilled. `composition` is the
+   * caller-minted id of the pop-out window; absent, one is minted here.
+   */
+  openRequest: (
+    snapshot: ComposeRequestSnapshot,
+    fromLabel: string,
+    composition?: CompositionId,
+  ) => void;
+  /** Flags the next landed compose request for the inline quick-reply strip. */
+  expectInlineReply: () => void;
   setField: (field: 'to' | 'cc' | 'bcc' | 'subject', value: string) => void;
   setEditorContent: (content: JSONContent[]) => void;
+  /** Submits the current document to the durable outbox, the send's one path. */
+  submit: () => void;
   closePane: () => void;
 }
 
@@ -125,6 +159,7 @@ export function fingerprintOf(state: {
 
 const closedState = {
   open: false,
+  inlineExpected: false,
   composition: null,
   from: '',
   fromLabel: '',
@@ -135,17 +170,94 @@ const closedState = {
   editor: emptyEditor(),
   savedFingerprint: null,
   request: null,
+  sending: false,
+  sendError: null,
 };
 
-export const useComposerStore = create<ComposerStoreState>((set) => ({
+/** A refused send in words the pane can show, whatever the host handed back. */
+function sendErrorMessage(err: unknown): string {
+  if (err instanceof Error) {
+    return err.message;
+  }
+  if (typeof err === 'string') {
+    return err;
+  }
+  return 'The message was not sent';
+}
+
+/** A reply whose original arrived with no Message-ID: nothing to thread under. */
+const REPLY_WITHOUT_ORIGIN = 'The original message has no Message-ID to reply under';
+
+/**
+ * The submit intent the composition's origin calls for. A plain composition
+ * sends as a fresh mail; one a request opened sends through its own threaded
+ * submit, the reply under its original, the forward answering no one. The
+ * threaded wires carry no bcc and the forward's no cc either, so those fields
+ * are the plain send's alone.
+ */
+function submitIntent(state: {
+  request: CompositionRequest | null;
+  from: string;
+  to: string;
+  cc: string;
+  bcc: string;
+  subject: string;
+  editor: EditorDocument;
+}): Intent {
+  const document = editorToDocument(state.editor);
+  if (state.request === null) {
+    return intents.submitRichMail({
+      from: state.from,
+      to: state.to,
+      cc: state.cc,
+      bcc: state.bcc,
+      subject: state.subject,
+      document,
+      blobs: [],
+    });
+  }
+  if (state.request.kind === 'forward') {
+    return intents.submitRichForward({
+      from: state.from,
+      to: state.to,
+      subject: state.subject,
+      document,
+      blobs: [],
+    });
+  }
+  return intents.submitRichReply({
+    from: state.from,
+    to: state.to,
+    cc: state.cc,
+    in_reply_to: state.request.inReplyTo ?? '',
+    subject: state.subject,
+    document,
+    blobs: [],
+  });
+}
+
+/** The live editor the open composition types into; null while none stands. */
+let activeEditor: CoreEditor | null = null;
+
+/** Records the editor the composer pane just mounted or unmounted. */
+export function registerComposerEditor(editor: CoreEditor | null): void {
+  activeEditor = editor;
+}
+
+/** The live composer editor, for inserts from outside the pane. */
+export function composerEditor(): CoreEditor | null {
+  return activeEditor;
+}
+
+export const useComposerStore = create<ComposerStoreState>((set, get) => ({
   ...closedState,
   resumeAttempted: false,
 
-  newMessage: (account) =>
+  newMessage: (account, composition) =>
     set({
       ...closedState,
       open: true,
-      composition: mintCompositionId(),
+      composition: composition ?? mintCompositionId(),
       from: account.id,
       fromLabel: account.label,
     }),
@@ -175,11 +287,11 @@ export const useComposerStore = create<ComposerStoreState>((set) => ({
     });
   },
 
-  openRequest: (snapshot, fromLabel) =>
+  openRequest: (snapshot, fromLabel, composition) =>
     set({
       ...closedState,
       open: true,
-      composition: mintCompositionId(),
+      composition: composition ?? mintCompositionId(),
       from: snapshot.from,
       fromLabel,
       to: normaliseRecipients(snapshot.to),
@@ -194,10 +306,58 @@ export const useComposerStore = create<ComposerStoreState>((set) => ({
       savedFingerprint: null,
     }),
 
+  expectInlineReply: () => set({ inlineExpected: true }),
+
   setField: (field, value) => set({ [field]: value }),
 
   setEditorContent: (content) =>
     set((state) => ({ editor: { ...state.editor, content } })),
+
+  submit: () => {
+    // The submit reads the store at click time, so the document is the one
+    // on screen. A blank To would be refused before the queue with nothing
+    // published, so the button never offers it. A reply whose original
+    // carried no Message-ID is refused here too: the core would reject the
+    // blank threading header after the queue, a dead end with the words
+    // already spent, so the surface says it and keeps them.
+    const state = get();
+    const composition = state.composition;
+    if (!state.open || composition === null || state.sending) {
+      return;
+    }
+    if (state.to.trim() === '') {
+      return;
+    }
+    if (
+      state.request !== null &&
+      state.request.kind !== 'forward' &&
+      state.request.inReplyTo === null
+    ) {
+      set({ sendError: REPLY_WITHOUT_ORIGIN });
+      return;
+    }
+    set({ sendError: null, sending: true });
+    void dispatch(submitIntent(state)).then(
+      () => {
+        // A settlement lands only against its own composition: one left in
+        // flight when the pane moved on can neither close the next
+        // composition nor stick its error under it.
+        if (get().composition !== composition) {
+          return;
+        }
+        // The submit carries no composition id, so the stored draft the
+        // autosave left behind goes with an explicit discard.
+        void dispatch(intents.discardDraft(composition));
+        get().closePane();
+      },
+      (err: unknown) => {
+        if (get().composition !== composition) {
+          return;
+        }
+        set({ sending: false, sendError: sendErrorMessage(err) });
+      },
+    );
+  },
 
   closePane: () => {
     // The composer's leaving dismisses the request it opened, so nothing
