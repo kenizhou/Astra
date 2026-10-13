@@ -264,6 +264,7 @@ dependencies = [
  "astra-autodetect",
  "astra-composer",
  "astra-mcp",
+ "astra-oauth",
  "astra-viewmodel",
  "async-trait",
  "engine-api",
@@ -286,6 +287,7 @@ dependencies = [
  "thiserror 2.0.21",
  "time",
  "tokio",
+ "url",
 ]
 
 [[package]]

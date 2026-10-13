@@ -1,0 +1,68 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// The module ships its tests in this task and its runtime consumers
+// (the wizard's sign-in commands, the next task in this slice) after;
+// until those land, the dead-code lint is answered once here rather
+// than by wiring a command surface this task does not own.
+#![allow(dead_code)]
+//! The host's OAuth halves: the system-browser sign-in session and the
+//! credential transaction (the design's D2 and D3). The pure client lives
+//! in `astra-oauth`; everything here is the platform half that crate
+//! deliberately does not own: opening the browser, capturing the
+//! deep-link redirect, and moving the resulting credential through the
+//! OS secure store.
+//!
+//! # Where the transaction lives, and why
+//!
+//! The reference put the credential transaction in the core, under its
+//! "the core owns when, the host owns where" split. Astra's split already
+//! answers differently, and this module records that honestly rather than
+//! porting the shape: **the transaction is host-side**, wrapping the
+//! [`AccountCredentialStore`] port, because
+//!
+//! - the port itself is host-side: the store over Windows Credential
+//!   Manager, the keychain, and the secret service is the desktop
+//!   crate's own, and `astra-app` sees it only through the
+//!   account-operations seam, which exposes no generic persist;
+//! - the app core carries no OAuth type at all: no token, no provider
+//!   config, and no dependency on `astra-oauth`, so an app-side
+//!   transaction would first have to widen the core's surface for a
+//!   consumer that does not exist until the provider slices (SP2m,
+//!   SP2n) wire sign-in;
+//! - the account-add flow already keeps its persist discipline here:
+//!   `add_account` persists after the dial, rolls the whole add back on
+//!   a refusal, and the settings seam answers a failed removal with the
+//!   error. The OAuth transaction is the same discipline named once,
+//!   beside the flow that will call it.
+//!
+//! The rules bind wherever the transaction lives: the add rolls back on
+//! failure, the rotation logs at error what the next launch faces, the
+//! removal answers the error rather than reverting. They are pinned by
+//! the transaction's tests against a scripted store.
+//!
+//! # The callback scheme
+//!
+//! The callback arrives on the app's own custom scheme, the identifier
+//! `tauri.conf.json` already carries ([`OAUTH_SCHEME`],
+//! `com.kenizhou.astra`), registered beside `mailto` in the deep-link
+//! block. The redirect URI the provider configs register is
+//! [`OAUTH_REDIRECT_URI`] (`com.kenizhou.astra://oauth`). The OS delivers
+//! only registered schemes, and the capture filters by the same scheme
+//! again, so a `mailto` delivery never reaches a sign-in flow.
+//!
+//! # The seams, and what is wired when
+//!
+//! The capture's production stream is `tauri-plugin-deep-link`'s
+//! `on_open_url` event, whose payload is a batch of parsed URLs;
+//! [`oauth_callback`] is the filter that keeps the OAuth-scheme URL and
+//! hands it on **whole**, never parsed by this host (the `state` CSRF
+//! check stands in `astra-oauth`'s `parse_callback`). Two pieces of
+//! runtime wiring land with the wizard's sign-in commands, not here,
+//! because nothing consumes a session until a provider exists: the
+//! listener registration that forwards filtered URLs into the capture
+//! channel, and the Windows argv forwarding in the single-instance
+//! callback (`DeepLink::handle_cli_arguments`), without which a running
+//! app on this platform never sees the redirect. Both are named here so
+//! the gap is recorded, never silent.
+
+pub(crate) mod session;
+pub(crate) mod transaction;

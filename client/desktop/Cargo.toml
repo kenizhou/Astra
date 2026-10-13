@@ -81,14 +81,24 @@ reqwest.workspace = true
 # engine-tls build autodetection's fetcher and the client tests use, now on
 # the runtime path (the llm store and client are assembled in the boot).
 engine-tls.workspace = true
+# The OAuth client the sign-in session drives: begin mints the authorization
+# URL and the PKCE/state pair, complete parses the deep-link callback and
+# exchanges the code (src/oauth).
+astra-oauth = { path = "../../crates/astra-oauth" }
+# The deep-link URLs the OAuth capture filters by scheme, as the plugin's
+# event hands them over.
+url.workspace = true
+# The instants the OAuth completions stamp their minted tokens with, and
+# the civil UTC instants the live documents suite reads back in tests.
+time.workspace = true
 
 [dev-dependencies]
 # The composer document the drafts intents carry; the command-surface fakes
 # render the saved document to the plain text a stored draft resumes as.
 astra-composer = { path = "../../crates/astra-composer" }
-# The provider-side plumbing the boot dial tests name: ConnectionInfo for the
-# stand-in providers' connection answers, which engine-api re-exports the
-# traits of but not the type itself.
+# The provider-side plumbing the boot dial tests name: ConnectionInfo for
+# the stand-in providers' connection answers, which engine-api re-exports
+# the traits of but not the type itself.
 engine-provider.workspace = true
 # Reading the LLM ledger rows back in the client tests, through the test's
 # own connection into the file-backed store the client records into.
@@ -97,7 +107,3 @@ rusqlite = { workspace = true, features = ["fallible_uint"] }
 # autodetection builds its fetcher; the plain-HTTP fixture never exercises
 # the TLS path, but the client build needs the installed provider.
 engine-tls.workspace = true
-# The live documents suite reads a stored window's period bounds back as
-# civil UTC instants, the same conversion the app core's window filter
-# makes over the engine's rows.
-time.workspace = true
