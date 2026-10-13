@@ -16,7 +16,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 
 import { CheckIcon } from '@/components/icons';
 import { DENSITIES } from '@/components/message-list/density';
-import { useComposerStore } from '@/features/composer/composerStore';
+import { openNewMessageComposer } from '@/features/composer/composeWindow';
 import { useSettingsStore, type SettingsCategory } from '@/features/settings/settingsStore';
 import { dispatch, intents } from '@/services/ipc';
 import type { ViewMode } from '@/services/surfaces';
@@ -44,13 +44,9 @@ async function closeWindow(): Promise<void> {
   }
 }
 
-/** Opens the composer on a fresh message, the New message action's path. */
+/** Opens the pop-out composer window on a fresh message, the New message action's path. */
 function newMail(): void {
-  const account = useAccountStore.getState().accounts[0];
-  if (account === undefined) {
-    return;
-  }
-  useComposerStore.getState().newMessage({ id: account.accountId, label: account.displayName });
+  void openNewMessageComposer();
 }
 
 /** Opens the settings screen on one category. */

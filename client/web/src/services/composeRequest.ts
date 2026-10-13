@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The compose half of the IPC wire: the compose family, its two threaded
-// submits, and the request surface's snapshot types, with their constructors.
+// submits, the consuming take the pop-out composer window hydrates through,
+// and the request surface's snapshot types, with their constructors.
 // Split from ipc.ts to keep that file under the line cap, like the sending
 // half before it, and re-exported whole through it, so ipc stays the one
 // import point of the wire. The literals are pinned in composeRequest.test.ts
 // against the JSON astra-app's protocol_tests.rs and protocol_submit_tests.rs
 // and astra-viewmodel's compose_request_tests.rs assert.
+
+import { invoke } from '@tauri-apps/api/core';
 
 import type { ComposerDocument } from './composerDocument';
 import type { MessageRef } from './ipc';
@@ -116,3 +119,13 @@ export const composeIntents = {
     },
   }),
 };
+
+/**
+ * Takes the pending compose request, consuming the slot: the pop-out
+ * composer window's hydration pull, so no later window re-reads a spent
+ * request. Null when nothing is pending, which a window opened on a plain
+ * new message reads as its blank composition.
+ */
+export function takeComposeRequest(): Promise<ComposeRequestSnapshot | null> {
+  return invoke('take_compose_request');
+}

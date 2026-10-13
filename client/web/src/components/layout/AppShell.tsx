@@ -3,14 +3,15 @@
 // content row, the status bar under it, all coloured through the theme
 // tokens. The ribbon stands in the mail view only. The content row is the
 // tool rail beside a padded surface holding the active view's cards: the
-// mail view is a resizable panel row (folder pane, message list, reading
-// pane, the composer pane when a composition is open, and the agent panel
-// docked right when the rail's toggle opens it), the calendar and people
-// views fill one card each. Under the compact breakpoint the folder panel
-// leaves the row and rides the drawer the rail opens. The New message
-// action floats over the panes' corner, the app start resume opens the
-// stored draft into the composer, a landed compose request opens the
-// composer hydrated from it, the AI documents panel rides above
+// mail view is a resizable panel row (folder pane, message list, and reading
+// pane, the quick-reply strip docked at the reading pane's bottom, and the
+// agent panel docked right when the rail's toggle opens it), the calendar
+// and people views fill one card each. Under the compact breakpoint the
+// folder panel leaves the row and rides the drawer the rail opens. The New
+// message action floats over the panes' corner and opens the pop-out
+// composer window, the app start resume opens the stored draft into the
+// strip, a landed compose request opens a pop-out window hydrated from it,
+// the AI documents panel rides above
 // the status bar's corner when the rail's toggle opens it, the
 // send-result toast says when a queued send has gone out, the settings
 // screen rides above the shell when the title bar's gear opens it, and the
@@ -22,9 +23,8 @@ import { AccountSetupFlow } from '@/features/account-setup/AccountSetupFlow';
 import { AiPanel } from '@/features/ai-panel/AiPanel';
 import { AgentPanel } from '@/features/agent/AgentPanel';
 import { CalendarPane } from '@/features/calendar/CalendarPane';
-import { ComposerPane, NewMessageAction, useDraftResumeAtStart } from '@/features/composer/Composer';
+import { NewMessageAction, useDraftResumeAtStart } from '@/features/composer/Composer';
 import { useComposeRequestHydration } from '@/features/composer/useComposeRequest';
-import { useComposerStore } from '@/features/composer/composerStore';
 import { SendResultToast } from '@/features/outbox/SendResultToast';
 import { PeoplePane } from '@/features/people/PeoplePane';
 import { SettingsScreen } from '@/features/settings/SettingsScreen';
@@ -57,55 +57,40 @@ function VDivider() {
   );
 }
 
-/** The mail view: a resizable row of folder tree, list, reading, composer,
- *  and the docked agent column. Every conditional panel joins the Group key,
- *  so the layout remounts cleanly when one arrives or leaves. The default
- *  sizes sum to one hundred in each combination. */
+/** The mail view: a resizable row of folder tree, list, and reading panes,
+ *  plus the docked agent column. The composer lives in the reading pane's
+ *  quick-reply strip and in pop-out windows now, so the row holds no fourth
+ *  column. Every conditional panel joins the Group key, so the layout
+ *  remounts cleanly when one arrives or leaves. The default sizes sum to
+ *  one hundred in each combination. */
 function MailRow({ compact }: { compact: boolean }) {
-  const composerOpen = useComposerStore((s) => s.open && s.composition !== null);
   const agentOpen = useUiStore((s) => s.agentOpen);
 
   return (
     <Group
-      key={`${composerOpen ? 'composing' : 'reading'}-${agentOpen ? 'agent' : 'solo'}-${compact ? 'compact' : 'wide'}`}
+      key={`${agentOpen ? 'agent' : 'solo'}-${compact ? 'compact' : 'wide'}`}
       orientation="horizontal"
       className="h-full"
     >
       {!compact && (
-        <Panel id="folder-pane" defaultSize={pct(composerOpen && agentOpen ? 13 : 18)} minSize={pct(12)}>
+        <Panel id="folder-pane" defaultSize={pct(18)} minSize={pct(12)}>
           <PanelCard>
             <FolderPane />
           </PanelCard>
         </Panel>
       )}
       {!compact && <VDivider />}
-      <Panel
-        id="message-list"
-        defaultSize={pct(composerOpen ? (agentOpen ? 25 : 32) : agentOpen ? 34 : 38)}
-        minSize={pct(25)}
-      >
+      <Panel id="message-list" defaultSize={pct(agentOpen ? 34 : 38)} minSize={pct(25)}>
         <PanelCard>
           <MessageList />
         </PanelCard>
       </Panel>
       <VDivider />
-      <Panel
-        id="reading-pane"
-        defaultSize={pct(composerOpen ? (agentOpen ? 20 : 24) : agentOpen ? 26 : 44)}
-        minSize={pct(20)}
-      >
+      <Panel id="reading-pane" defaultSize={pct(agentOpen ? 26 : 44)} minSize={pct(20)}>
         <PanelCard>
           <ReadingPane />
         </PanelCard>
       </Panel>
-      {composerOpen && <VDivider />}
-      {composerOpen && (
-        <Panel id="composer" defaultSize={pct(agentOpen ? 20 : 26)} minSize={pct(20)}>
-          <PanelCard>
-            <ComposerPane />
-          </PanelCard>
-        </Panel>
-      )}
       {agentOpen && <VDivider />}
       {agentOpen && (
         <Panel id="agent-dock" defaultSize={pct(22)} minSize={pct(14)} maxSize={pct(40)}>

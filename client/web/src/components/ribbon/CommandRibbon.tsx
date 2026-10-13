@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The command ribbon: the 56px strip under the title bar, in the mail view
-// only. Its mode follows the composer session: read mode while nothing is
-// being composed, compose mode while a composition is open. Under the
-// compact breakpoint the buttons collapse to icon-only, their labels kept
-// on the tooltips.
+// only. Its mode follows the inline composer: read mode while the strip is
+// collapsed, compose mode while a quick reply stands open in it. A pop-out
+// composer window runs its own store in its own webview, so it never turns
+// this ribbon. Under the compact breakpoint the buttons collapse to
+// icon-only, their labels kept on the tooltips.
 
 import { useIsCompact } from '@/hooks/useWindowSize';
 import { useComposerStore } from '@/features/composer/composerStore';

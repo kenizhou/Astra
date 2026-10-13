@@ -5,7 +5,9 @@
 // caret opens where the work starts, decided by the one predicate over the
 // composition's own request and To.
 import { act, cleanup, render, screen } from '@testing-library/react';
+import { useEffect } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Editor as CoreEditor } from '@tiptap/core';
 import type { JSONContent } from '@tiptap/react';
 
 const ipc = vi.hoisted(() => ({ dispatch: vi.fn() }));
@@ -20,19 +22,37 @@ vi.mock('@/events/surfaceEvents', async (importOriginal) => ({
   isTauri: true,
 }));
 
-const editorStub = vi.hoisted(() => ({ commands: { focus: vi.fn() } }));
+const editorStub = vi.hoisted(() => ({ focus: vi.fn() }));
 
-vi.mock('./Editor', () => ({
-  Editor: (props: {
-    initialContent: JSONContent[];
-    onChange: (doc: JSONContent) => void;
-    onReady?: (editor: { commands: { focus: () => void } } | null) => void;
-  }) => {
-    props.onReady?.(editorStub);
-    return <div data-testid="editor-stub" />;
-  },
-  insertAtSelection: () => undefined,
-}));
+vi.mock('./Editor', async (importOriginal) => {
+  const original = await importOriginal<typeof import('./Editor')>();
+  return {
+    ...original,
+    Editor: (props: {
+      initialContent: JSONContent[];
+      onChange: (doc: JSONContent) => void;
+      onReady?: (editor: CoreEditor | null) => void;
+    }) => {
+      // The real editor hands its instance over in an effect; the stub
+      // mirrors that over a bare editor from the same trimmed extension set,
+      // so the pane's toolbar can subscribe to it. The focus command reaches
+      // the view through a fresh commands object per access, so the spy
+      // stands on the view itself.
+      useEffect(() => {
+        const editor = original.createComposerEditor(props.initialContent);
+        editor.view.focus = () => editorStub.focus();
+        props.onReady?.(editor);
+        return () => {
+          props.onReady?.(null);
+          editor.destroy();
+        };
+        // One editor per mount, like the real Editor's useEditor.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, []);
+      return <div data-testid="editor-stub" />;
+    },
+  };
+});
 
 import type { ComposeRequestSnapshot } from '@/services/ipc';
 import { useAccountStore } from '@/stores/accountStore';
@@ -85,7 +105,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   ipc.dispatch.mockReset();
   ipc.dispatch.mockResolvedValue(undefined);
-  editorStub.commands.focus.mockReset();
+  editorStub.focus.mockReset();
   resetStores();
 });
 
@@ -159,13 +179,19 @@ describe('the caret predicate', () => {
     expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'To' }));
   });
 
-  it('places the caret in the body when the composer was opened already addressed', () => {
+  it('places the caret in the body when the composer was opened already addressed', async () => {
     act(() => {
       useComposerStore.getState().openRequest(pendingRequest, 'Work');
     });
     render(<ComposerPane />);
 
-    expect(editorStub.commands.focus).toHaveBeenCalled();
+    // The real focus command lands on the view inside a requestAnimationFrame,
+    // which the fake timers hold until advanced.
+    await act(async () => {
+      vi.advanceTimersByTime(100);
+    });
+
+    expect(editorStub.focus).toHaveBeenCalled();
     expect(document.activeElement).not.toBe(screen.getByRole('textbox', { name: 'To' }));
   });
 });

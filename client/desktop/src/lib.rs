@@ -85,6 +85,7 @@ pub fn run() {
             commands::drafts::draft_resume,
             commands::sending::sending,
             commands::compose::compose_request,
+            commands::compose::take_compose_request,
             commands::ai::draft_chips,
             commands::ai::summarise,
             commands::ai::style_profile,

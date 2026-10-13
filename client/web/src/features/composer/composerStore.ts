@@ -3,7 +3,10 @@
 // its split document, and the compose request it answers, plus the send's
 // own state and submit path so the ribbon's Send and the pane's Send are one
 // gesture, and the live editor handle so an insert from outside the pane (the
-// ribbon's snippet picker) lands at the current selection. Split from
+// ribbon's snippet picker) lands at the current selection. One store lives
+// per window: the main window's drives the docked quick-reply strip, a
+// pop-out composer window's drives its own, and the pop-out's opening paths
+// take the id the main window minted rather than minting anew. Split from
 // Composer.tsx so the pane renders and the store holds, one concern each,
 // both under the line cap. A composition inherits nothing from the one
 // before it: every opening path resets the whole state, and the pane's own
@@ -66,6 +69,12 @@ interface ComposerStoreState {
   open: boolean;
   /** Whether the app start resume has been attempted, once per session. */
   resumeAttempted: boolean;
+  /**
+   * Whether the next landed compose request opens the inline quick-reply
+   * strip rather than a pop-out window: the strip's expanding click sets it,
+   * the request's opening spends it.
+   */
+  inlineExpected: boolean;
   composition: CompositionId | null;
   from: string;
   fromLabel: string;
@@ -83,11 +92,24 @@ interface ComposerStoreState {
   sending: boolean;
   /** Why the last submit was refused, in words the pane can show. */
   sendError: string | null;
-  newMessage: (account: SendAccount) => void;
+  /**
+   * Opens a plain composition. `composition` is the caller-minted id of the
+   * pop-out window the composition lives in; absent, one is minted here.
+   */
+  newMessage: (account: SendAccount, composition?: CompositionId) => void;
   /** Opens a resumed draft under the composition the resume pull named. */
   hydrate: (view: ResumeView, account: SendAccount, composition: CompositionId) => void;
-  /** Opens the composition a compose request prefilled, minting its id. */
-  openRequest: (snapshot: ComposeRequestSnapshot, fromLabel: string) => void;
+  /**
+   * Opens the composition a compose request prefilled. `composition` is the
+   * caller-minted id of the pop-out window; absent, one is minted here.
+   */
+  openRequest: (
+    snapshot: ComposeRequestSnapshot,
+    fromLabel: string,
+    composition?: CompositionId,
+  ) => void;
+  /** Flags the next landed compose request for the inline quick-reply strip. */
+  expectInlineReply: () => void;
   setField: (field: 'to' | 'cc' | 'bcc' | 'subject', value: string) => void;
   setEditorContent: (content: JSONContent[]) => void;
   /** Submits the current document to the durable outbox, the send's one path. */
@@ -137,6 +159,7 @@ export function fingerprintOf(state: {
 
 const closedState = {
   open: false,
+  inlineExpected: false,
   composition: null,
   from: '',
   fromLabel: '',
@@ -230,11 +253,11 @@ export const useComposerStore = create<ComposerStoreState>((set, get) => ({
   ...closedState,
   resumeAttempted: false,
 
-  newMessage: (account) =>
+  newMessage: (account, composition) =>
     set({
       ...closedState,
       open: true,
-      composition: mintCompositionId(),
+      composition: composition ?? mintCompositionId(),
       from: account.id,
       fromLabel: account.label,
     }),
@@ -264,11 +287,11 @@ export const useComposerStore = create<ComposerStoreState>((set, get) => ({
     });
   },
 
-  openRequest: (snapshot, fromLabel) =>
+  openRequest: (snapshot, fromLabel, composition) =>
     set({
       ...closedState,
       open: true,
-      composition: mintCompositionId(),
+      composition: composition ?? mintCompositionId(),
       from: snapshot.from,
       fromLabel,
       to: normaliseRecipients(snapshot.to),
@@ -282,6 +305,8 @@ export const useComposerStore = create<ComposerStoreState>((set, get) => ({
       // from birth: the idle autosave gives it its first save unedited.
       savedFingerprint: null,
     }),
+
+  expectInlineReply: () => set({ inlineExpected: true }),
 
   setField: (field, value) => set({ [field]: value }),
 

@@ -86,3 +86,41 @@ describe('the composer quote default', () => {
     expect(editor.retained[0]?.index).toBe(1);
   });
 });
+
+describe('the caller-minted composition', () => {
+  it('opens a new message under the handed id, the pop-out window discipline', () => {
+    useComposerStore.getState().newMessage({ id: 'work', label: 'Work' }, 'compose-77');
+
+    const state = useComposerStore.getState();
+    expect(state.open).toBe(true);
+    expect(state.composition).toBe('compose-77');
+    expect(state.from).toBe('work');
+  });
+
+  it('opens a request under the handed id, minting nothing new', () => {
+    useComposerStore.getState().openRequest(request(), 'Work', 'compose-78');
+
+    const state = useComposerStore.getState();
+    expect(state.composition).toBe('compose-78');
+    expect(state.subject).toBe('Re: Quarterly report');
+    expect(state.request).toEqual({ kind: 'reply', inReplyTo: 'orig-1@server.test' });
+  });
+});
+
+describe('the inline expectation', () => {
+  it('flags the next request for the quick-reply strip until the opening spends it', () => {
+    expect(useComposerStore.getState().inlineExpected).toBe(false);
+
+    useComposerStore.getState().expectInlineReply();
+    expect(useComposerStore.getState().inlineExpected).toBe(true);
+
+    useComposerStore.getState().openRequest(request(), 'Work');
+    expect(useComposerStore.getState().inlineExpected).toBe(false);
+  });
+
+  it('a close spends a standing expectation too', () => {
+    useComposerStore.getState().expectInlineReply();
+    useComposerStore.getState().closePane();
+    expect(useComposerStore.getState().inlineExpected).toBe(false);
+  });
+});

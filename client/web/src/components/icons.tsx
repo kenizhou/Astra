@@ -7,6 +7,7 @@ import type { SVGProps } from 'react';
 import {
   Add01Icon,
   ArchiveIcon as ArchiveIconData,
+  BookOpen02Icon as ReadingIconData,
   Calendar03Icon,
   Cancel01Icon,
   CheckIcon as CheckIconData,
@@ -16,7 +17,12 @@ import {
   Flag02Icon,
   Folder01Icon,
   Forward01Icon,
+  InformationCircleIcon as AboutIconData,
   InboxIcon as InboxIconData,
+  KeyboardIcon as ShortcutsIconData,
+  LeftToRightListBulletIcon,
+  LeftToRightListNumberIcon,
+  Link01Icon,
   Mail01Icon,
   MailEdit01Icon,
   MailOpen01Icon,
@@ -27,13 +33,19 @@ import {
   Note01Icon,
   PanelLeftIcon as PanelLeftIconData,
   PaperclipIcon as PaperclipIconData,
+  RedoIcon as RedoIconData,
   Robot01Icon,
   Search01Icon,
   SentIcon as SentIconData,
   Settings02Icon,
+  SlidersHorizontalIcon as AdvancedIconData,
   SpamIcon,
   SparklesIcon,
   Sun03Icon,
+  TextBoldIcon,
+  TextItalicIcon,
+  TextUnderlineIcon,
+  UndoIcon as UndoIconData,
   UserMultipleIcon,
 } from '@hugeicons/core-free-icons';
 
@@ -79,3 +91,15 @@ export const ChevronLeftIcon = makeIcon(ChevronLeftIconData);
 export const ChevronRightIcon = makeIcon(ChevronRightIconData);
 export const SettingsIcon = makeIcon(Settings02Icon);
 export const CheckIcon = makeIcon(CheckIconData);
+export const ReadingIcon = makeIcon(ReadingIconData);
+export const ShortcutsIcon = makeIcon(ShortcutsIconData);
+export const AboutIcon = makeIcon(AboutIconData);
+export const AdvancedIcon = makeIcon(AdvancedIconData);
+export const BoldIcon = makeIcon(TextBoldIcon);
+export const ItalicIcon = makeIcon(TextItalicIcon);
+export const UnderlineIcon = makeIcon(TextUnderlineIcon);
+export const BulletListIcon = makeIcon(LeftToRightListBulletIcon);
+export const OrderedListIcon = makeIcon(LeftToRightListNumberIcon);
+export const LinkIcon = makeIcon(Link01Icon);
+export const UndoIcon = makeIcon(UndoIconData);
+export const RedoIcon = makeIcon(RedoIconData);

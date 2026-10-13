@@ -258,7 +258,7 @@ describe('leaving the composer', () => {
 
   it('closes through a final save with then_close and closes the pane locally', () => {
     const composition = newMessage();
-    render(<ComposerPane />);
+    render(<ComposerPane showClose />);
 
     act(() => {
       const store = useComposerStore.getState();

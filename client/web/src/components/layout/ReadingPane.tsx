@@ -6,11 +6,14 @@
 // the open message and standing absent with nothing to show), its body (the
 // sandboxed HTML, the plain fallback, or a no-body note), and its
 // attachment rows, with the close button crossing back as close_reading.
-// The compose actions live on the command ribbon, their single home.
+// The quick-reply strip docks at the bottom: a one-line Reply affordance
+// that expands into the inline composer. The pop-out compose actions live
+// on the command ribbon, their single home.
 
 import { AttachmentList } from '@/components/reading-pane/AttachmentList';
 import { InvitationCard } from '@/components/reading-pane/InvitationCard';
 import { MessageHtml } from '@/components/reading-pane/MessageHtml';
+import { QuickReplyStrip } from '@/components/reading-pane/QuickReplyStrip';
 import { ReadingHeader } from '@/components/reading-pane/ReadingHeader';
 import { SmartReplies } from '@/components/reading-pane/SmartReplies';
 import { SummaryBlock } from '@/components/reading-pane/SummaryBlock';
@@ -36,6 +39,9 @@ export function ReadingPane() {
           </span>
           <p className="text-sm text-muted-text">Select a message to read it.</p>
         </div>
+        {/* The strip's expanded state stands even with nothing open: the app
+            start resume opens its draft here. */}
+        <QuickReplyStrip />
       </aside>
     );
   }
@@ -84,6 +90,7 @@ export function ReadingPane() {
         </p>
       )}
       <AttachmentList attachments={snapshot.attachments ?? []} />
+      <QuickReplyStrip />
     </aside>
   );
 }

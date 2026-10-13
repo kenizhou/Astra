@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The ribbon's read mode: New Email opens a plain composition the way the
-// floating action does, Reply, Reply all, and Forward dispatch the compose
-// family for the message the reading pane has open, and Mark read/unread
+// The ribbon's read mode: New Email opens the pop-out composer window the
+// way the floating action does, Reply, Reply all, and Forward dispatch the
+// compose family for the message the reading pane has open (the landed
+// request routes to a pop-out window of its own), and Mark read/unread
 // and Flag/unflag act on the list's selected row, their labels naming the
 // state the click leaves behind. Without an open message or a selection the
 // matching verbs stand disabled: there is nothing to compose from or act
@@ -19,22 +20,13 @@ import {
   type IconProps,
 } from '@/components/icons';
 import { sameRowKey } from '@/components/message-list/rowIdentity';
+import { openNewMessageComposer } from '@/features/composer/composeWindow';
 import { dispatch, intents, type Intent, type MessageRef } from '@/services/ipc';
 import { useAccountStore } from '@/stores/accountStore';
 import { useListStore } from '@/stores/listStore';
 import { useReadingStore } from '@/stores/readingStore';
-import { useComposerStore } from '@/features/composer/composerStore';
 
 import { RibbonButton, RibbonGroup } from './RibbonPrimitives';
-
-/** Opens a plain composition from the first account, as the FAB does. */
-function openNewMessage(): void {
-  const account = useAccountStore.getState().accounts[0];
-  if (account === undefined) {
-    return;
-  }
-  useComposerStore.getState().newMessage({ id: account.accountId, label: account.displayName });
-}
 
 /** The compose verbs, in display order, each with the intent it dispatches. */
 const COMPOSE_ACTIONS: ReadonlyArray<{
@@ -67,7 +59,7 @@ export function ReadRibbon({ iconOnly }: { iconOnly: boolean }) {
           disabled={accountCount === 0}
           title={accountCount === 0 ? 'Add an account first' : 'New Email'}
           iconOnly={iconOnly}
-          onClick={openNewMessage}
+          onClick={() => void openNewMessageComposer()}
         />
       </RibbonGroup>
       <RibbonGroup>

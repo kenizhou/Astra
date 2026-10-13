@@ -28,6 +28,23 @@ pub(crate) fn compose_request(state: State<'_, AppState>) -> Option<ComposeReque
     compose_request_of(&state)
 }
 
+/// The consuming take: the pop-out composer window's pull, which hydrates
+/// from the answer while the slot empties behind it, so a later window never
+/// re-reads a spent request.
+pub(crate) fn take_compose_request_of(state: &AppState) -> Option<ComposeRequestSnapshot> {
+    state.app.take_compose_request()
+}
+
+/// Takes the pending compose request, consuming it: the pop-out composer
+/// window's hydration pull. Null when no request is pending, which a window
+/// opened on a plain new message reads as its blank composition.
+// Tauri's command macro hands `State` by value; the wrapper only reads through it.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) fn take_compose_request(state: State<'_, AppState>) -> Option<ComposeRequestSnapshot> {
+    take_compose_request_of(&state)
+}
+
 #[cfg(test)]
 #[path = "compose_tests.rs"]
 mod tests;

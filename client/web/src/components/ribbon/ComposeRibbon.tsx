@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The ribbon's compose mode, standing while a composition is open: Send
-// rides the store's one submit path (the pane's own Send button too), the
-// save hint repeats the status surface's word for this composition, the
-// snippet picker inserts through the live editor handle the pane
-// registered, and Discard runs the pane's discard flow: the stored copy
-// goes and the pane closes locally.
+// The ribbon's compose mode, standing while the quick-reply strip's inline
+// composition is open: Send rides the store's one submit path (the pane's
+// own Send button too), the save hint repeats the status surface's word for
+// this composition, the snippet picker inserts through the live editor
+// handle the pane registered, and Discard runs the pane's discard flow: the
+// stored copy goes and the strip collapses locally. A pop-out composer
+// window has its own store in its own webview; this ribbon never sees it.
 
 import { SentIcon, TrashIcon } from '@/components/icons';
 import { insertAtSelection } from '@/features/composer/Editor';

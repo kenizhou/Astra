@@ -13,7 +13,7 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke }));
 
 import type { ComposeKind, ComposeRequestSnapshot, ComposerDocument } from './ipc';
 
-import { composeRequest, intents } from './ipc';
+import { composeRequest, intents, takeComposeRequest } from './ipc';
 
 /** A one-paragraph document carrying `text`, the smallest document a send holds. */
 function document(text: string): ComposerDocument {
@@ -198,5 +198,11 @@ describe('the compose request pull', () => {
     invoke.mockResolvedValue(null);
     await composeRequest();
     expect(invoke).toHaveBeenCalledWith('compose_request');
+  });
+
+  it('takes the pending request by its command name, consuming the slot', async () => {
+    invoke.mockResolvedValue(null);
+    await takeComposeRequest();
+    expect(invoke).toHaveBeenCalledWith('take_compose_request');
   });
 });
