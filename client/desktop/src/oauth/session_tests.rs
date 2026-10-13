@@ -328,3 +328,25 @@ fn completion_without_a_sign_in_refuses() {
             }
         });
 }
+
+#[test]
+fn cancel_takes_the_in_flight_pair_back_so_a_later_begin_starts_fresh() {
+    crate::runtime::build_runtime()
+        .expect("the test runtime builds")
+        .block_on(|| async {
+            let browser = CountingBrowser::opening();
+            // A capture nobody feeds: the begin below resolves on its own
+            // delivered-pair seam, leaving the flow in flight, exactly the
+            // abandoned wizard's shape.
+            let (_tx, rx) = tokio::sync::mpsc::unbounded_channel();
+            let session = SignInSession::new(client(), as_seam(&browser), rx);
+
+            let seeded =
+                session.seed_in_flight_for_test(("state-1".to_owned(), "verifier-1".to_owned()));
+            assert!(seeded, "the pair stands in flight");
+            assert!(session.cancel_sign_in());
+            let seeded_again =
+                session.seed_in_flight_for_test(("state-2".to_owned(), "verifier-2".to_owned()));
+            assert!(seeded_again, "a later begin starts fresh, not InFlight");
+        });
+}

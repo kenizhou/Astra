@@ -61,8 +61,10 @@
 //! listener registration that forwards filtered URLs into the capture
 //! channel, and the Windows argv forwarding in the single-instance
 //! callback (`DeepLink::handle_cli_arguments`), without which a running
-//! app on this platform never sees the redirect. Both are named here so
-//! the gap is recorded, never silent.
+//! app on this platform never sees the redirect, and the opener-backed
+//! `SystemBrowser` the sign-in commands install. When SP2m wires Graph,
+//! the host refresh path holds this transaction and answers its rotate.
+//! All are named here so the gap is recorded, never silent.
 
 pub(crate) mod session;
 pub(crate) mod transaction;

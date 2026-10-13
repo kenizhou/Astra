@@ -215,6 +215,33 @@ impl SignInSession {
     ///
     /// Returns [`OAuthError::Callback`] when no sign-in is in flight or
     /// the redirect is malformed or forged, and the core's own errors
+    /// Takes the in-flight pair back: the way out for a sign-in the
+    /// caller abandoned (the wizard closed while the redirect was still
+    /// pending), so a later begin does not answer InFlight until the
+    /// app restarts.
+    pub(crate) fn cancel_sign_in(&self) -> bool {
+        self.in_flight
+            .lock()
+            .expect("oauth in-flight lock poisoned")
+            .take()
+            .is_some()
+    }
+
+    /// Stands a pair in the in-flight slot without opening a browser:
+    /// the test seam for the refusal and cancellation windows, where
+    /// the product path mints its own pair through begin.
+    #[cfg(test)]
+    pub(crate) fn seed_in_flight_for_test(&self, pair: (String, String)) -> bool {
+        self.in_flight
+            .lock()
+            .expect("oauth in-flight lock poisoned")
+            .replace(InFlight {
+                state: pair.0,
+                verifier: pair.1,
+            })
+            .is_none()
+    }
+
     /// for the exchange beyond it.
     pub(crate) async fn complete_sign_in(
         &self,

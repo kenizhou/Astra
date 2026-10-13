@@ -52,7 +52,10 @@ impl CredentialTransaction {
     }
 
     /// The add path: persists `config_toml` for `account`, rolling the
-    /// add back and answering the error when the store refuses.
+    /// add back and answering the error when the store refuses. First-
+    /// time adds only: the rollback deletes whatever stood for the id,
+    /// so a re-consent (which keeps the account) goes through
+    /// [`rotate`](Self::rotate) instead.
     ///
     /// # Errors
     ///
