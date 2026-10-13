@@ -57,6 +57,11 @@ pub(crate) enum SignInError {
     /// flow that opened the browser can never finish.
     #[error("the deep-link capture closed before the redirect arrived")]
     CaptureClosed,
+    /// The flow this waiter was minted by was cancelled while it held
+    /// the capture; a redirect that arrived meanwhile was handed back
+    /// for the standing flow.
+    #[error("the sign-in was cancelled while its redirect was pending")]
+    Cancelled,
 }
 
 /// The browser the authorization URL opens in: the shell's opener in
@@ -115,6 +120,10 @@ pub(crate) fn forward_oauth_callbacks<R: tauri::Runtime>(
 /// [`SignInSession::complete_sign_in`] spent it, so a second begin can
 /// be refused honestly.
 struct InFlight {
+    /// Which flow this is: minted from the session's counter, so a
+    /// waiter abandoned by a cancel can tell its own redirect from the
+    /// next flow's and hand the latter back rather than steal it.
+    flow: u64,
     /// The client whose flow this is; the completion's exchange runs on
     /// it, so the flow spends the client it was minted by.
     client: Arc<OAuthClient>,
@@ -137,6 +146,12 @@ pub(crate) struct SignInSession {
     /// end is held under an async lock so the in-flight flow's await is
     /// the only reader.
     callbacks: tokio::sync::Mutex<mpsc::UnboundedReceiver<String>>,
+    /// The sending half of the callback channel, held so a displaced
+    /// waiter can requeue a redirect that belongs to a later flow.
+    callback_tx: mpsc::UnboundedSender<String>,
+    /// Which flow the in-flight pair belongs to, minting one id per
+    /// begin so a displaced waiter can recognise itself.
+    flow_seq: std::sync::atomic::AtomicU64,
     /// The one in-flight flow, if any.
     in_flight: Mutex<Option<InFlight>>,
 }
@@ -148,10 +163,13 @@ impl SignInSession {
     pub(crate) fn new(
         browser: Arc<dyn SystemBrowser>,
         callbacks: mpsc::UnboundedReceiver<String>,
+        callback_tx: mpsc::UnboundedSender<String>,
     ) -> Self {
         Self {
             browser,
             callbacks: tokio::sync::Mutex::new(callbacks),
+            flow_seq: std::sync::atomic::AtomicU64::new(0),
+            callback_tx,
             in_flight: Mutex::new(None),
         }
     }
@@ -175,10 +193,14 @@ impl SignInSession {
         &self,
         client: &Arc<OAuthClient>,
         login_hint: Option<&str>,
-    ) -> Result<(), SignInError> {
+    ) -> Result<u64, SignInError> {
         // Reserve the single slot before anything else: the refusal a
         // second begin meets is the flow that already stands, not a race
         // that both flowed through.
+        let flow = self
+            .flow_seq
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1;
         let request = {
             let mut in_flight = self.in_flight.lock().expect("the in-flight lock stands");
             if in_flight.is_some() {
@@ -186,6 +208,7 @@ impl SignInSession {
             }
             let request = client.begin(login_hint);
             *in_flight = Some(InFlight {
+                flow,
                 client: Arc::clone(client),
                 state: request.state.clone(),
                 verifier: request.pkce.verifier().to_owned(),
@@ -201,7 +224,7 @@ impl SignInSession {
                 .take();
             return Err(SignInError::Browser(err));
         }
-        Ok(())
+        Ok(flow)
     }
 
     /// Waits for the deep-link redirect of the flow [`begin_sign_in`]
@@ -213,13 +236,29 @@ impl SignInSession {
     ///
     /// Returns [`SignInError::CaptureClosed`] when the capture went away
     /// before any redirect arrived.
-    pub(crate) async fn wait_for_callback(&self) -> Result<String, SignInError> {
-        self.callbacks
+    pub(crate) async fn wait_for_callback(&self, flow: u64) -> Result<String, SignInError> {
+        let url = self
+            .callbacks
             .lock()
             .await
             .recv()
             .await
-            .ok_or(SignInError::CaptureClosed)
+            .ok_or(SignInError::CaptureClosed)?;
+        // The flow this waiter was minted by may have been cancelled
+        // while it held the channel: a redirect that arrives now belongs
+        // to whichever flow stands, so hand it back and answer the
+        // cancellation instead of completing a stranger's flow.
+        let standing = self
+            .in_flight
+            .lock()
+            .expect("the in-flight lock stands")
+            .as_ref()
+            .map(|in_flight| in_flight.flow);
+        if standing != Some(flow) {
+            let _ = self.callback_tx.send(url);
+            return Err(SignInError::Cancelled);
+        }
+        Ok(url)
     }
 
     /// Completes the in-flight flow from the raw redirect URL: spends
@@ -281,6 +320,10 @@ impl SignInSession {
             .lock()
             .expect("oauth in-flight lock poisoned")
             .replace(InFlight {
+                flow: self
+                    .flow_seq
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                    + 1,
                 client: Arc::clone(client),
                 state: pair.0,
                 verifier: pair.1,

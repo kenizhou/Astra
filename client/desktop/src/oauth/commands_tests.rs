@@ -110,9 +110,11 @@ fn surface(
     browser: &Arc<CountingBrowser>,
     callbacks: mpsc::UnboundedReceiver<String>,
 ) -> Arc<SignInSurface> {
+    let tx = mpsc::unbounded_channel().0;
     Arc::new(SignInSurface::with_clients(
         as_seam(browser),
         callbacks,
+        tx,
         clients,
     ))
 }
@@ -420,4 +422,67 @@ fn cancel_takes_the_flow_back_and_a_later_begin_starts_fresh() {
         !cancel_with(&desk),
         "a cancel with nothing standing says so"
     );
+}
+
+/// The crossed wire: a waiter displaced by a cancel must not complete the
+/// NEXT flow's redirect under its own provider. The first flow's wait
+/// holds the capture; the cancel takes its pair; the second begin stands;
+/// the redirect that arrives belongs to the second flow, and the first
+/// waiter hands it back and emits nothing, while the second waiter
+/// completes under its own provider.
+#[test]
+fn a_displaced_waiter_hands_the_next_flow_s_redirect_back() {
+    let rt = crate::runtime::build_runtime().expect("the test runtime builds");
+    rt.block_on(|| async {
+        let browser = CountingBrowser::opening();
+        let (capture_tx, capture_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let clients = vec![
+            (ProviderKind::Microsoft, client()),
+            (ProviderKind::Google, client()),
+        ];
+        // One channel for both halves, as the boot wiring holds it: the
+        // capture feeds the receiving end and a displaced waiter requeues
+        // into the same stream, never a second channel.
+        let surface = Arc::new(SignInSurface::with_clients(
+            as_seam(&browser),
+            capture_rx,
+            capture_tx.clone(),
+            clients,
+        ));
+
+        // The first flow: begun, its waiter spawned, then cancelled.
+        let (_, first_rx, first_emit) = emit_seam();
+        crate::oauth::commands::begin_with(
+            &surface,
+            &rt,
+            first_emit,
+            ProviderKind::Microsoft,
+            None,
+        )
+        .expect("the first begin opens the browser");
+        assert!(surface.session().cancel_sign_in(), "the flow is taken back");
+
+        // The second flow stands; its redirect arrives.
+        let (_, second_rx, second_emit) = emit_seam();
+        crate::oauth::commands::begin_with(&surface, &rt, second_emit, ProviderKind::Google, None)
+            .expect("the second begin opens the browser");
+        let _ = capture_tx.send(
+            "com.kenizhou.astra://oauth?error=access_denied&error_description=next".to_owned(),
+        );
+
+        // The second flow's result arrives; the first emitted nothing.
+        let second = second_rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the second flow's waiter completes its own redirect");
+        assert_eq!(
+            second.provider,
+            ProviderKind::Google,
+            "the displaced waiter never steals the next flow's result"
+        );
+        assert!(
+            first_rx.try_recv().is_err(),
+            "the displaced waiter emitted nothing at all",
+        );
+    });
+    rt.shutdown_timeout(std::time::Duration::from_secs(5));
 }

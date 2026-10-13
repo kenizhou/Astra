@@ -91,6 +91,20 @@ fn as_seam(browser: &Arc<CountingBrowser>) -> Arc<dyn SystemBrowser> {
 
 /// Feeds one raw callback into a fresh capture channel, handing back the
 /// session's receiving end.
+fn fake_tx() -> mpsc::UnboundedSender<String> {
+    mpsc::unbounded_channel().0
+}
+
+fn fed_pair() -> (
+    mpsc::UnboundedSender<String>,
+    mpsc::UnboundedReceiver<String>,
+) {
+    let (tx, rx) = mpsc::unbounded_channel();
+    let _ = tx.send(RAW_CALLBACK.to_owned());
+    (tx, rx)
+}
+
+#[allow(dead_code)] // the quiet sites below keep their plain receivers
 fn fed_capture() -> mpsc::UnboundedReceiver<String> {
     let (tx, rx) = mpsc::unbounded_channel();
     tx.send(RAW_CALLBACK.to_owned())
@@ -147,15 +161,23 @@ fn a_begin_opens_the_browser_once_and_the_wait_hands_the_raw_url_back_whole() {
         .expect("the test runtime builds")
         .block_on(|| async {
             let browser = CountingBrowser::opening();
-            let session = SignInSession::new(as_seam(&browser), fed_capture());
+            let session = SignInSession::new(
+                as_seam(&browser),
+                {
+                    let (tx, rx) = fed_pair();
+                    std::mem::forget(tx);
+                    rx
+                },
+                fake_tx(),
+            );
 
-            session
+            let flow = session
                 .begin_sign_in(&client(), None)
                 .expect("the browser opened for the flow");
             assert_eq!(browser.opens(), 1, "the browser opens exactly once");
 
             let handed_back = session
-                .wait_for_callback()
+                .wait_for_callback(flow)
                 .await
                 .expect("the fed delivery completes the wait");
             assert_eq!(
@@ -171,16 +193,24 @@ fn a_second_begin_refuses_while_one_is_in_flight() {
         .expect("the test runtime builds")
         .block_on(|| async {
             let browser = CountingBrowser::opening();
-            let session = SignInSession::new(as_seam(&browser), fed_capture());
+            let session = SignInSession::new(
+                as_seam(&browser),
+                {
+                    let (tx, rx) = fed_pair();
+                    std::mem::forget(tx);
+                    rx
+                },
+                fake_tx(),
+            );
 
-            session
+            let flow = session
                 .begin_sign_in(&client(), None)
                 .expect("the browser opened for the flow");
             // The fed delivery resolves the wait, but the flow it began
             // stands until its completion spends it: exactly the window
             // in which a second begin must refuse.
             let first = session
-                .wait_for_callback()
+                .wait_for_callback(flow)
                 .await
                 .expect("the fed delivery completes the wait");
             assert_eq!(first, RAW_CALLBACK);
@@ -204,7 +234,7 @@ fn a_second_begin_refuses_while_one_is_in_flight() {
 fn a_failed_browser_open_leaves_nothing_in_flight() {
     let browser = CountingBrowser::refusing();
     let (_tx, rx) = mpsc::unbounded_channel::<String>();
-    let session = SignInSession::new(as_seam(&browser), rx);
+    let session = SignInSession::new(as_seam(&browser), rx, fake_tx());
 
     let refused = session
         .begin_sign_in(&client(), None)
@@ -234,13 +264,13 @@ fn a_closed_capture_ends_the_wait() {
             let browser = CountingBrowser::opening();
             let (tx, rx) = mpsc::unbounded_channel::<String>();
             drop(tx);
-            let session = SignInSession::new(as_seam(&browser), rx);
+            let session = SignInSession::new(as_seam(&browser), rx, fake_tx());
 
-            session
+            let flow = session
                 .begin_sign_in(&client(), None)
                 .expect("the browser opened for the flow");
             let ended = session
-                .wait_for_callback()
+                .wait_for_callback(flow)
                 .await
                 .expect_err("a capture with no sender never delivers");
             assert!(
@@ -257,12 +287,20 @@ fn completion_refuses_a_forged_state() {
         .expect("the test runtime builds")
         .block_on(|| async {
             let browser = CountingBrowser::opening();
-            let session = SignInSession::new(as_seam(&browser), fed_capture());
-            session
+            let session = SignInSession::new(
+                as_seam(&browser),
+                {
+                    let (tx, rx) = fed_pair();
+                    std::mem::forget(tx);
+                    rx
+                },
+                fake_tx(),
+            );
+            let flow = session
                 .begin_sign_in(&client(), None)
                 .expect("the browser opened for the flow");
             let raw = session
-                .wait_for_callback()
+                .wait_for_callback(flow)
                 .await
                 .expect("the fed delivery completes the wait");
 
@@ -291,8 +329,16 @@ fn completion_carries_a_provider_refusal_through_the_parser() {
         .expect("the test runtime builds")
         .block_on(|| async {
             let browser = CountingBrowser::opening();
-            let session = SignInSession::new(as_seam(&browser), fed_capture());
-            session
+            let session = SignInSession::new(
+                as_seam(&browser),
+                {
+                    let (tx, rx) = fed_pair();
+                    std::mem::forget(tx);
+                    rx
+                },
+                fake_tx(),
+            );
+            let _flow = session
                 .begin_sign_in(&client(), None)
                 .expect("the browser opened for the flow");
 
@@ -320,7 +366,7 @@ fn completion_without_a_sign_in_refuses() {
         .block_on(|| async {
             let browser = CountingBrowser::opening();
             let (_tx, rx) = mpsc::unbounded_channel::<String>();
-            let session = SignInSession::new(as_seam(&browser), rx);
+            let session = SignInSession::new(as_seam(&browser), rx, fake_tx());
 
             match session
                 .complete_sign_in(RAW_CALLBACK, OffsetDateTime::UNIX_EPOCH)
@@ -341,7 +387,7 @@ fn cancel_takes_the_in_flight_pair_back_so_a_later_begin_starts_fresh() {
     // A capture nobody feeds: the flow below stands in flight, exactly
     // the abandoned wizard's shape.
     let (_tx, rx) = tokio::sync::mpsc::unbounded_channel();
-    let session = SignInSession::new(as_seam(&browser), rx);
+    let session = SignInSession::new(as_seam(&browser), rx, fake_tx());
 
     let seeded =
         session.seed_in_flight_for_test(&client(), ("state-1".to_owned(), "verifier-1".to_owned()));

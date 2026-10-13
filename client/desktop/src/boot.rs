@@ -339,10 +339,11 @@ pub(crate) fn setup_host(app: &mut tauri::App) -> Result<(), Box<dyn std::error:
     // shell's opener. Registered here, once, before the state the sign-in
     // commands read stands.
     let (oauth_tx, oauth_rx) = tokio::sync::mpsc::unbounded_channel();
-    crate::oauth::session::forward_oauth_callbacks(app.handle(), oauth_tx);
+    crate::oauth::session::forward_oauth_callbacks(app.handle(), oauth_tx.clone());
     let oauth = Arc::new(crate::oauth::commands::SignInSurface::new(
         crate::oauth::commands::opener_browser(app.handle()),
         oauth_rx,
+        oauth_tx,
     ));
     let state = assemble_state(&data_dir, observer, agent_sink, draft_sink, oauth)?;
 

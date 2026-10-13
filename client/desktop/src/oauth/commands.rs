@@ -235,8 +235,9 @@ impl SignInSurface {
     pub(crate) fn new(
         browser: Arc<dyn SystemBrowser>,
         callbacks: mpsc::UnboundedReceiver<String>,
+        callback_tx: mpsc::UnboundedSender<String>,
     ) -> Self {
-        Self::with_clients(browser, callbacks, registered_clients())
+        Self::with_clients(browser, callbacks, callback_tx, registered_clients())
     }
 
     /// The surface over given clients: the test seam that drives the
@@ -245,10 +246,11 @@ impl SignInSurface {
     pub(crate) fn with_clients(
         browser: Arc<dyn SystemBrowser>,
         callbacks: mpsc::UnboundedReceiver<String>,
+        callback_tx: mpsc::UnboundedSender<String>,
         clients: Vec<(ProviderKind, Arc<OAuthClient>)>,
     ) -> Self {
         Self {
-            session: SignInSession::new(browser, callbacks),
+            session: SignInSession::new(browser, callbacks, callback_tx),
             clients,
         }
     }
@@ -311,9 +313,9 @@ fn complete_outcome(result: Result<TokenSet, OAuthError>) -> SignInOutcome {
 /// the [`SignInResult`] to `emit`, which the command wires to the
 /// [`SIGN_IN_RESULT_EVENT`] event.
 ///
-/// A cancelled flow's spawned half ends silently: a redirect that
-/// arrives for it is refused by the completion's own no-flight check,
-/// and the wizard ignores results for flows it did not begin.
+/// A cancelled flow's spawned half ends silently: its wait recognises
+/// itself as displaced, hands any redirect that arrived meanwhile back
+/// for the standing flow, and emits nothing.
 ///
 /// # Errors
 ///
@@ -334,11 +336,11 @@ where
     let client = surface
         .client(provider)
         .ok_or(OAuthCommandError::NotOffered(provider))?;
-    surface
+    let flow = surface
         .session()
         .begin_sign_in(&client, login_hint)
         .map_err(|err| match err {
-            SignInError::InFlight => OAuthCommandError::InFlight,
+            SignInError::InFlight | SignInError::Cancelled => OAuthCommandError::InFlight,
             SignInError::Browser(sentence) => OAuthCommandError::Browser(sentence),
             // The wait owns the capture's own failures; begin answers
             // before any wait runs.
@@ -348,7 +350,11 @@ where
         })?;
     let desk = Arc::clone(surface);
     runtime.spawn(async move {
-        let outcome = match desk.session().wait_for_callback().await {
+        let outcome = match desk.session().wait_for_callback(flow).await {
+            // The flow was cancelled while its redirect was pending; the
+            // redirect itself was handed back for whichever flow stands,
+            // and a cancelled flow owes the surface nothing.
+            Err(SignInError::Cancelled) => return,
             Err(err) => wait_outcome(&err),
             Ok(raw) => {
                 let finished = desk
@@ -452,8 +458,8 @@ pub(crate) fn opener_browser(handle: &tauri::AppHandle) -> Arc<dyn SystemBrowser
 /// that never delivers, so no sign-in can begin there.
 #[must_use]
 pub(crate) fn offline_surface() -> Arc<SignInSurface> {
-    let (_tx, rx) = mpsc::unbounded_channel();
-    Arc::new(SignInSurface::new(Arc::new(RefusingBrowser), rx))
+    let (tx, rx) = mpsc::unbounded_channel();
+    Arc::new(SignInSurface::new(Arc::new(RefusingBrowser), rx, tx))
 }
 
 /// A browser no host can open.
