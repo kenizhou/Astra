@@ -43,6 +43,11 @@ export * from './sending';
 // commands the setup flow dials), under the same re-export and split.
 export * from './setup';
 
+// The oauth half (the provider offer, the begin and cancel calls, and
+// the subscription the sign-in completion arrives on), under the same
+// re-export and split.
+export * from './oauth';
+
 // The calendar half (the snapshot mirror, the intent family's
 // constructors, the snapshot pull, and the meeting brief call), under the
 // same re-export and split.

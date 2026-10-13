@@ -1,0 +1,41 @@
+[package]
+name = "astra-oauth"
+description = "Astra Mail's OAuth 2.0 Authorization-Code-with-PKCE client: the PKCE pair and CSRF state, the token exchanges, the Microsoft and Google provider configs, the grant-refusal vocabulary, and the RFC 9728/8414/7591 discovery and registration for servers with no pre-registered client."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# base64url, unpadded: the PKCE verifier and challenge, and the CSRF state.
+base64 = { workspace = true }
+# The shared TLS trust policy behind the discovery client and OAuthClient's
+# HTTP client: the same policy every other network path in the product uses,
+# so OAuth trusts exactly what sync trusts.
+engine-tls = { workspace = true, features = ["reqwest"] }
+# The HTTP client the token exchanges ride on. The caller injects it (and so
+# owns the TLS policy); the unit tests drive it against scripted responses.
+reqwest = { workspace = true }
+# The S256 challenge's SHA-256 digest and the system CSPRNG that mints the
+# verifier and the state.
+ring = { workspace = true }
+# The token endpoint's success and error bodies.
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+# `expires_in` resolves to an absolute expiry against the caller's clock.
+time = { workspace = true }
+# The authorization request URL is built and percent-encoded through `Url`.
+url = { workspace = true }
+
+[dev-dependencies]
+# The mock endpoint's client needs a rustls crypto provider installed: the
+# workspace reqwest builds with `rustls-no-provider`, and the tests install
+# the ring provider, the same one the workspace's rustls links.
+rustls = { workspace = true }
+# The token-exchange tests are `#[tokio::test]`s against a one-shot TCP mock
+# endpoint on a background thread.
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

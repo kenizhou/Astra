@@ -4,22 +4,30 @@
 // anything is stored, offer a rejected certificate's fingerprint for a
 // one-server exception, then add the account and start its first sync.
 // Nothing is persisted until the test passes, and detection failing only ever
-// lands on the manual form.
+// lands on the manual form. Where the build carries a provider
+// registration, the provider sign-in sits beside the password form.
 
-import { useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 
 import {
   addAccount,
   dispatch,
   imapTestConnection,
   intents,
+  oauthBegin,
+  oauthCancel,
+  oauthOffer,
+  onOauthSignInResult,
   type AccountSetup,
+  type OAuthProvider,
   type RecommendationView,
   type RejectedCertificateView,
 } from '@/services/ipc';
+import { isTauri } from '@/events/surfaceEvents';
 import { useUiStore } from '@/stores/uiStore';
 import { buildAccountToml } from './accountToml';
 import { DetectStep } from './DetectStep';
+import { OAuthOffer, type OAuthFlowState } from './OAuthOffer';
 import { RecommendationPanel } from './RecommendationPanel';
 import {
   detectFallbackNote,
@@ -28,6 +36,7 @@ import {
   manualDefaults,
   manualPrefill,
   missNote,
+  type MissReason,
   type SetupFields,
 } from './detection';
 
@@ -66,6 +75,71 @@ export function AccountSetupFlow() {
   const [accepted, setAccepted] = useState<RejectedCertificateView | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [miss, setMiss] = useState<MissReason | null>(null);
+  const [offer, setOffer] = useState<OAuthProvider[]>([]);
+  const [oauthFlow, setOauthFlow] = useState<OAuthFlowState>({ status: 'idle' });
+
+  // The offer is pulled once per open: the providers this build carries a
+  // registration for, and nothing when it carries none. A refused pull
+  // offers nothing rather than failing the wizard.
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    let live = true;
+    oauthOffer().then(
+      (answered) => {
+        if (live) {
+          setOffer(answered.providers);
+        }
+      },
+      (err) => {
+        console.error('account-setup: the oauth offer failed to pull', err);
+      },
+    );
+    return () => {
+      live = false;
+      setOffer([]);
+      setOauthFlow({ status: 'idle' });
+    };
+  }, [open]);
+
+  // The completion subscription stands while the wizard is open, so it
+  // is registered before any begin can return and no completion can
+  // precede it. A result only lands on the flow it names: one the wizard
+  // did not begin (a cancelled flow's late redirect) changes nothing.
+  useEffect(() => {
+    if (!open || !isTauri) {
+      return;
+    }
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    onOauthSignInResult((result) => {
+      setOauthFlow((flow) =>
+        flow.status === 'browser-open' && flow.provider === result.provider
+          ? { status: 'result', provider: result.provider, result }
+          : flow,
+      );
+    }).then(
+      (teardown) => {
+        if (disposed) {
+          // The wizard closed while the subscription was in flight; tear
+          // the late registration down immediately.
+          teardown();
+        } else {
+          unlisten = teardown;
+        }
+      },
+      (err) => {
+        console.error('account-setup: the sign-in result listener failed to register', err);
+      },
+    );
+    return () => {
+      disposed = true;
+      unlisten?.();
+      unlisten = null;
+    };
+  }, [open]);
 
   if (!open) {
     return null;
@@ -75,21 +149,27 @@ export function AccountSetupFlow() {
     // Every detect still in flight belongs to a session that just ended;
     // its settlement must not touch whatever the next open shows.
     detectEpoch.current += 1;
+    if (oauthFlow.status === 'browser-open') {
+      void oauthCancel();
+    }
     setStep('detect');
     setDetectBusy(false);
     setView(null);
     setNote(null);
+    setMiss(null);
     setFields(EMPTY_FIELDS);
     setTested(null);
     setCertificate(null);
     setAccepted(null);
     setError(null);
+    setOauthFlow({ status: 'idle' });
     useUiStore.getState().setAccountSetupOpen(false);
   };
 
   const goManual = (prefill: SetupFields, fallbackNote: string | null) => {
     setFields(prefill);
     setNote(fallbackNote);
+    setMiss(null);
     setStep('manual');
   };
 
@@ -102,7 +182,12 @@ export function AccountSetupFlow() {
         return;
       }
       if ('Manual' in answered.recommendation) {
-        goManual(manualDefaults(email), missNote(answered.recommendation.Manual.reason));
+        // The miss reason is kept, not its sentence: the oauth-only miss
+        // words itself by whether this build offers a provider sign-in,
+        // and the offer can land after this click, so the note derives
+        // at render from the reason.
+        goManual(manualDefaults(email), null);
+        setMiss(answered.recommendation.Manual.reason);
       } else {
         setView(answered);
         setStep('recommendation');
@@ -117,6 +202,25 @@ export function AccountSetupFlow() {
         setDetectBusy(false);
       }
     }
+  };
+
+  const onOAuthSignIn = (provider: OAuthProvider) => {
+    setOauthFlow({ status: 'browser-open', provider });
+    const hint = fields.username.trim();
+    oauthBegin(provider, hint === '' ? undefined : hint).catch((err) => {
+      // The browser never opened, so the flow never started: the state
+      // comes home and the sentence shows beside the buttons.
+      setOauthFlow((flow) =>
+        flow.status === 'browser-open' && flow.provider === provider
+          ? { status: 'idle', error: errorText(err) }
+          : flow,
+      );
+    });
+  };
+
+  const onOAuthCancel = () => {
+    void oauthCancel();
+    setOauthFlow({ status: 'idle' });
   };
 
   const onManualFromDetect = (email: string) => goManual(manualDefaults(email), null);
@@ -222,11 +326,19 @@ export function AccountSetupFlow() {
 
         {step === 'manual' && (
           <>
-            {note !== null && (
+            {(miss !== null || note !== null) && (
               <p role="status" className="mb-3 text-xs text-muted-foreground">
-                {note}
+                {miss !== null ? missNote(miss, offer.length > 0) : note}
               </p>
             )}
+            <div className="mb-3">
+              <OAuthOffer
+                offer={offer}
+                flow={oauthFlow}
+                onSignIn={onOAuthSignIn}
+                onCancel={onOAuthCancel}
+              />
+            </div>
             <form onSubmit={onTest} className="grid gap-3">
               <label className="grid gap-1 text-xs text-muted-foreground">
                 Mail server

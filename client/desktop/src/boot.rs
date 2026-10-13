@@ -41,6 +41,7 @@ pub(crate) fn assemble_state(
     observer: Arc<dyn astra_app::AppObserver>,
     agent_sink: Arc<dyn AgentEventSink>,
     draft_sink: Arc<dyn astra_app::DraftPoolSink>,
+    oauth: Arc<crate::oauth::commands::SignInSurface>,
 ) -> Result<AppState, Box<dyn std::error::Error>> {
     std::fs::create_dir_all(data_dir)?;
     let runtime = build_runtime()?;
@@ -124,6 +125,7 @@ pub(crate) fn assemble_state(
             .with_file_name(format!("{ENGINE_STORE_FILE}.blobs"))
             .join("contact-photos"),
         credential_store: credentials,
+        oauth,
         runtime,
     })
 }
@@ -332,7 +334,18 @@ pub(crate) fn setup_host(app: &mut tauri::App) -> Result<(), Box<dyn std::error:
     let agent_sink: Arc<dyn AgentEventSink> = Arc::new(crate::agent::TauriAgentSink::new(handle));
     let draft_sink: Arc<dyn astra_app::DraftPoolSink> =
         Arc::new(crate::ai::DraftPoolEventSink::new(app.handle().clone()));
-    let state = assemble_state(&data_dir, observer, agent_sink, draft_sink)?;
+    // The OAuth capture: the deep-link plugin's OAuth-scheme URLs are
+    // forwarded whole into the sign-in surface, whose browser is the
+    // shell's opener. Registered here, once, before the state the sign-in
+    // commands read stands.
+    let (oauth_tx, oauth_rx) = tokio::sync::mpsc::unbounded_channel();
+    crate::oauth::session::forward_oauth_callbacks(app.handle(), oauth_tx.clone());
+    let oauth = Arc::new(crate::oauth::commands::SignInSurface::new(
+        crate::oauth::commands::opener_browser(app.handle()),
+        oauth_rx,
+        oauth_tx,
+    ));
+    let state = assemble_state(&data_dir, observer, agent_sink, draft_sink, oauth)?;
 
     log::info!(
         "boot: the app core is up over {} account(s)",

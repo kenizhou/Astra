@@ -1,0 +1,490 @@
+// SPDX-License-Identifier: GPL-3.0-only
+//! The wizard's sign-in command surface: the offer (which providers this
+//! build carries a registration for), the begin/cancel pair, and the
+//! completion notification the wizard subscribes to. Everything here is
+//! a thin shape over the session and the pure client; the refusal
+//! vocabulary is the ported classification, never a sentence matched at
+//! a call site.
+//!
+//! # How the completion reaches the wizard
+//!
+//! The completion crosses as **one event**, `oauth_sign_in_result`
+//! ([`SIGN_IN_RESULT_EVENT`]), emitted with the whole
+//! [`SignInResult`] payload. That is the agent-panel and draft-pool
+//! pattern (the host emits a typed payload for an occurrence that is
+//! host-side; the owning surface subscribes while it lives), chosen
+//! over the surface_changed pull loop honestly: that loop serves
+//! immutable snapshots the **app core** publishes, and the sign-in
+//! result is not one. The app core carries no OAuth type at all (the
+//! oauth module's placement record), so there is no core surface to
+//! signal and no core snapshot to pull; the flow completes inside the
+//! host, and the host says so. A polled `oauth_sign_in_result` command
+//! would need a client-side timer, a pattern nothing in the client
+//! uses, for a completion that can take minutes while a person is in
+//! the browser. The ordering is safe by construction: the wizard
+//! subscribes while it is open, the browser cannot open before begin
+//! returns, and the redirect cannot arrive before the browser opened,
+//! so no completion can precede the subscription.
+//!
+//! # What a success means today
+//!
+//! No account type consumes the floor yet (the spec's known gaps): a
+//! successful exchange mints a [`TokenSet`] nothing persists and no
+//! account consumes, because the account kinds that would (Graph,
+//! Google) are the provider slices' work. The result still crosses as
+//! [`SignInOutcome::SignedIn`] and the wizard's success sentence says
+//! what that honestly is: the sign-in worked, this build cannot finish
+//! adding the account, the account type arrives with the next update.
+//! Recording the success end to end is what keeps the provider slices
+//! from re-plumbing the notification.
+//!
+//! # The wiring this module owns
+//!
+//! Three pieces the session module named as its deferrals: the
+//! [`forward_oauth_callbacks`] registration (called by the boot hook),
+//! the Windows argv forwarding in the single-instance callback
+//! ([`forward_launch_arguments`], without which a running app on that
+//! platform never sees its own redirect), and the opener-backed
+//! [`SystemBrowser`] ([`opener_browser`]). The two Tauri-touching
+//! adapters have no unit-test shape: they need a running app, their
+//! behaviour is a one-line delegation, and the filter and refusal
+//! contracts under them are pinned by the session and command tests.
+//!
+//! [`forward_oauth_callbacks`]: super::session::forward_oauth_callbacks
+
+use std::sync::Arc;
+
+use serde::{Deserialize, Serialize};
+use tauri::State;
+use time::OffsetDateTime;
+use tokio::sync::mpsc;
+
+use astra_oauth::{
+    credentials, GrantRefusal, OAuthClient, OAuthError, OAuthProviderConfig, TokenSet,
+    GOOGLE_SCOPES, MICROSOFT_GRAPH_SCOPES,
+};
+
+use crate::runtime::AppRuntime;
+use crate::AppState;
+
+use super::session::{SignInError, SignInSession, SystemBrowser, OAUTH_REDIRECT_URI};
+
+/// A provider whose sign-in this build can offer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ProviderKind {
+    /// Microsoft's identity platform over Graph.
+    Microsoft,
+    /// Google's identity platform.
+    Google,
+}
+
+impl core::fmt::Display for ProviderKind {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Self::Microsoft => "Microsoft",
+            Self::Google => "Google",
+        })
+    }
+}
+
+/// The offer: which providers this build can sign in with.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct OAuthOfferView {
+    /// The providers carrying a registration, in the enum's order.
+    pub(crate) providers: Vec<ProviderKind>,
+}
+
+/// What `oauth_begin` answers once the browser opened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct BrowserOpened {
+    /// The provider whose authorization page the browser opened.
+    pub(crate) provider: ProviderKind,
+}
+
+/// Why a sign-in refused, as the ported classification reads it: the
+/// word the wizard's refusal sentences hang off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum RefusalKind {
+    /// The grant is dead: expired, revoked, or withdrawn.
+    Dead,
+    /// The grant lives but lacks a scope this build asked for.
+    Underscoped,
+    /// Nothing was learned about any standing grant.
+    Indeterminate,
+}
+
+impl From<GrantRefusal> for RefusalKind {
+    fn from(refusal: GrantRefusal) -> Self {
+        match refusal {
+            GrantRefusal::Dead => Self::Dead,
+            GrantRefusal::Underscoped => Self::Underscoped,
+            GrantRefusal::Indeterminate => Self::Indeterminate,
+        }
+    }
+}
+
+/// How one begun sign-in ended.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum SignInOutcome {
+    /// The provider issued a token set. Nothing consumes it yet; see the
+    /// module's "what a success means today" record.
+    SignedIn,
+    /// The flow refused, with the classification word and the host's own
+    /// sentence as the diagnostic detail.
+    Refused {
+        /// The ported classification of the refusal.
+        refusal: RefusalKind,
+        /// The host's own sentence, for the surface to show beside its
+        /// typed one.
+        detail: String,
+    },
+}
+
+/// The completion notification's payload: the provider and how its
+/// sign-in ended.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SignInResult {
+    /// The provider the begun flow signed in with.
+    pub(crate) provider: ProviderKind,
+    /// How the flow ended.
+    pub(crate) outcome: SignInOutcome,
+}
+
+/// A command failure, serialised to the webview as its display string.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum OAuthCommandError {
+    /// The named provider carries no registration in this build, so its
+    /// sign-in is not offered at all.
+    #[error("this build carries no {0} registration; its sign-in is not offered")]
+    NotOffered(ProviderKind),
+    /// A sign-in already stands; one at a time.
+    #[error("a sign-in is already in flight; one sign-in at a time")]
+    InFlight,
+    /// The system browser could not be opened, so nothing started.
+    #[error("the system browser could not be opened: {0}")]
+    Browser(String),
+}
+
+impl Serialize for OAuthCommandError {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+/// The OAuth clients this build's registrations carry, one per provider
+/// with a registration: the offer is exactly these keys, so a build
+/// given no registration offers nothing and the wizard's provider routes
+/// never render. A registration whose client cannot be built (its TLS
+/// stack refused) is dropped with a warning rather than offered broken.
+///
+/// Google's registration documents a Desktop client whose redirect is a
+/// loopback port; the foundation carries exactly one capture (the custom
+/// scheme), so the Google flow rides [`OAUTH_REDIRECT_URI`] and the
+/// client-type decision belongs to the Google slice that first signs a
+/// real account in.
+fn registered_clients() -> Vec<(ProviderKind, Arc<OAuthClient>)> {
+    let mut clients = Vec::new();
+    if let Some(client_id) = credentials::microsoft_client_id() {
+        match OAuthClient::new(OAuthProviderConfig::microsoft(
+            &client_id,
+            "common",
+            OAUTH_REDIRECT_URI,
+            MICROSOFT_GRAPH_SCOPES,
+        )) {
+            Ok(client) => clients.push((ProviderKind::Microsoft, Arc::new(client))),
+            Err(err) => {
+                log::warn!("oauth: the microsoft client could not be built; its sign-in is not offered: {err}");
+            }
+        }
+    }
+    if let Some(google) = credentials::google() {
+        match OAuthClient::new(OAuthProviderConfig::google(
+            google.client_id,
+            google.client_secret,
+            OAUTH_REDIRECT_URI,
+            GOOGLE_SCOPES,
+        )) {
+            Ok(client) => clients.push((ProviderKind::Google, Arc::new(client))),
+            Err(err) => {
+                log::warn!("oauth: the google client could not be built; its sign-in is not offered: {err}");
+            }
+        }
+    }
+    clients
+}
+
+/// The host's OAuth surface: the sign-in session over the injected
+/// browser and capture, beside the registered clients. One value, built
+/// once at boot, held by the managed state.
+pub(crate) struct SignInSurface {
+    /// The session every sign-in runs on: one flow at a time, whichever
+    /// provider began it.
+    session: SignInSession,
+    /// The registered clients the offer answers from.
+    clients: Vec<(ProviderKind, Arc<OAuthClient>)>,
+}
+
+impl SignInSurface {
+    /// The production surface over `browser` and the capture's receiving
+    /// end: the providers whose registration this build carries, and no
+    /// others.
+    #[must_use]
+    pub(crate) fn new(
+        browser: Arc<dyn SystemBrowser>,
+        callbacks: mpsc::UnboundedReceiver<String>,
+        callback_tx: mpsc::UnboundedSender<String>,
+    ) -> Self {
+        Self::with_clients(browser, callbacks, callback_tx, registered_clients())
+    }
+
+    /// The surface over given clients: the test seam that drives the
+    /// command pair without a build-time registration.
+    #[must_use]
+    pub(crate) fn with_clients(
+        browser: Arc<dyn SystemBrowser>,
+        callbacks: mpsc::UnboundedReceiver<String>,
+        callback_tx: mpsc::UnboundedSender<String>,
+        clients: Vec<(ProviderKind, Arc<OAuthClient>)>,
+    ) -> Self {
+        Self {
+            session: SignInSession::new(browser, callbacks, callback_tx),
+            clients,
+        }
+    }
+
+    /// The offer: exactly the providers with a client.
+    #[must_use]
+    pub(crate) fn offer(&self) -> OAuthOfferView {
+        OAuthOfferView {
+            providers: self.clients.iter().map(|(kind, _)| *kind).collect(),
+        }
+    }
+
+    /// The registered client for `provider`.
+    fn client(&self, provider: ProviderKind) -> Option<Arc<OAuthClient>> {
+        self.clients
+            .iter()
+            .find(|(kind, _)| *kind == provider)
+            .map(|(_, client)| Arc::clone(client))
+    }
+
+    /// The session the commands drive.
+    #[must_use]
+    pub(crate) fn session(&self) -> &SignInSession {
+        &self.session
+    }
+}
+
+/// Maps the redirect wait's failure to the outcome the surface shows: a
+/// capture that closed learned nothing about any grant, so the refusal is
+/// indeterminate whatever the wait's own sentence says.
+fn wait_outcome(err: &SignInError) -> SignInOutcome {
+    SignInOutcome::Refused {
+        refusal: RefusalKind::Indeterminate,
+        detail: err.to_string(),
+    }
+}
+
+/// Maps the completion's answer to the outcome the surface shows: a token
+/// set is the success; a refusal carries the ported classification word
+/// beside the core's own sentence. A consent withdrawn at the provider
+/// (`access_denied` on the front channel) is neither of the two
+/// grant-refusal codes, so it crosses as indeterminate with the code in
+/// the detail; the consent-again wording for it belongs to the provider
+/// slices that first meet a real refusal screen.
+fn complete_outcome(result: Result<TokenSet, OAuthError>) -> SignInOutcome {
+    match result {
+        Ok(_) => SignInOutcome::SignedIn,
+        Err(err) => SignInOutcome::Refused {
+            refusal: RefusalKind::from(err.refusal()),
+            detail: err.to_string(),
+        },
+    }
+}
+
+/// Begins one provider sign-in: reserves the single flight, mints the
+/// request over the provider's registered client, opens the system
+/// browser, and returns the browser-opened answer once the browser is
+/// open. The completion runs on the runtime: the spawned half waits for
+/// the deep-link redirect, spends it on the core's complete, and hands
+/// the [`SignInResult`] to `emit`, which the command wires to the
+/// [`SIGN_IN_RESULT_EVENT`] event.
+///
+/// A cancelled flow's spawned half ends silently: its wait recognises
+/// itself as displaced, hands any redirect that arrived meanwhile back
+/// for the standing flow, and emits nothing.
+///
+/// # Errors
+///
+/// Returns [`OAuthCommandError::NotOffered`] when the provider carries
+/// no registration, [`OAuthCommandError::InFlight`] when a sign-in
+/// already stands, and [`OAuthCommandError::Browser`] when the browser
+/// refused to open; each leaves nothing new in flight.
+pub(crate) fn begin_with<E>(
+    surface: &Arc<SignInSurface>,
+    runtime: &AppRuntime,
+    emit: E,
+    provider: ProviderKind,
+    login_hint: Option<&str>,
+) -> Result<BrowserOpened, OAuthCommandError>
+where
+    E: FnOnce(SignInResult) + Send + 'static,
+{
+    let client = surface
+        .client(provider)
+        .ok_or(OAuthCommandError::NotOffered(provider))?;
+    let flow = surface
+        .session()
+        .begin_sign_in(&client, login_hint)
+        .map_err(|err| match err {
+            SignInError::InFlight | SignInError::Cancelled => OAuthCommandError::InFlight,
+            SignInError::Browser(sentence) => OAuthCommandError::Browser(sentence),
+            // The wait owns the capture's own failures; begin answers
+            // before any wait runs.
+            SignInError::CaptureClosed => OAuthCommandError::Browser(
+                "the deep-link capture closed before the flow could begin".to_owned(),
+            ),
+        })?;
+    let desk = Arc::clone(surface);
+    runtime.spawn(async move {
+        let outcome = match desk.session().wait_for_callback(flow).await {
+            // The flow was cancelled while its redirect was pending; the
+            // redirect itself was handed back for whichever flow stands,
+            // and a cancelled flow owes the surface nothing.
+            Err(SignInError::Cancelled) => return,
+            Err(err) => wait_outcome(&err),
+            Ok(raw) => {
+                let finished = desk
+                    .session()
+                    .complete_sign_in(&raw, OffsetDateTime::now_utc())
+                    .await;
+                complete_outcome(finished)
+            }
+        };
+        emit(SignInResult { provider, outcome });
+    });
+    Ok(BrowserOpened { provider })
+}
+
+/// Cancels the standing sign-in, whichever provider began it: the
+/// in-flight pair comes back so a later begin starts fresh. Answers
+/// whether a flow stood.
+pub(crate) fn cancel_with(surface: &SignInSurface) -> bool {
+    surface.session().cancel_sign_in()
+}
+
+/// The event the completion notification arrives on, the name the web
+/// subscribes to.
+pub(crate) const SIGN_IN_RESULT_EVENT: &str = "oauth_sign_in_result";
+
+/// Pulls the offer: which providers this build can sign in with.
+// Tauri's command macro hands `State` by value; the wrapper only reads through it.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) fn oauth_offer(state: State<'_, AppState>) -> OAuthOfferView {
+    state.oauth.offer()
+}
+
+/// Begins one provider sign-in: mints, opens the system browser, and
+/// answers the browser-opened state. The completion arrives later, as
+/// the [`SIGN_IN_RESULT_EVENT`] event.
+///
+/// # Errors
+///
+/// Returns [`OAuthCommandError`] when the provider carries no
+/// registration, a sign-in already stands, or the browser refused to
+/// open; each leaves nothing new in flight.
+// Tauri's command macro hands `State` by value; the wrapper reads through it.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) fn oauth_begin(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    provider: ProviderKind,
+    login_hint: Option<String>,
+) -> Result<BrowserOpened, OAuthCommandError> {
+    let emit = move |result: SignInResult| {
+        use tauri::Emitter;
+        let _ = app.emit(SIGN_IN_RESULT_EVENT, result);
+    };
+    begin_with(
+        &state.oauth,
+        &state.runtime,
+        emit,
+        provider,
+        login_hint.as_deref(),
+    )
+}
+
+/// Cancels the standing sign-in, whichever provider began it.
+// Tauri's command macro hands `State` by value; the wrapper reads through it.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) fn oauth_cancel(state: State<'_, AppState>) {
+    cancel_with(&state.oauth);
+}
+
+/// The system browser over the shell's opener: the production seam the
+/// sign-in wiring installs. The opener hands the URL to the platform,
+/// which picks the default browser; the call is synchronous on desktop.
+struct OpenerBrowser {
+    /// The shell handle the opener plugin reads.
+    handle: tauri::AppHandle,
+}
+
+impl SystemBrowser for OpenerBrowser {
+    fn open(&self, url: &str) -> Result<(), String> {
+        use tauri_plugin_opener::OpenerExt;
+        self.handle
+            .opener()
+            .open_url(url, None::<&str>)
+            .map_err(|err| err.to_string())
+    }
+}
+
+/// The opener-backed browser the app setup installs.
+#[must_use]
+pub(crate) fn opener_browser(handle: &tauri::AppHandle) -> Arc<dyn SystemBrowser> {
+    Arc::new(OpenerBrowser {
+        handle: handle.clone(),
+    })
+}
+
+/// The surface for hosts with no browser and no capture (the headless
+/// host, the command-test fakes): a browser that refuses and a capture
+/// that never delivers, so no sign-in can begin there.
+#[must_use]
+pub(crate) fn offline_surface() -> Arc<SignInSurface> {
+    let (tx, rx) = mpsc::unbounded_channel();
+    Arc::new(SignInSurface::new(Arc::new(RefusingBrowser), rx, tx))
+}
+
+/// A browser no host can open.
+struct RefusingBrowser;
+
+impl SystemBrowser for RefusingBrowser {
+    fn open(&self, _url: &str) -> Result<(), String> {
+        Err("this host has no system browser".to_owned())
+    }
+}
+
+/// Hands the single-instance callback's argv to the deep-link plugin: on
+/// Windows a deep link that arrives while the app runs reaches the first
+/// instance as a launch argument, and without this hand-off the plugin
+/// never emits it, so a running app never sees the redirect its own
+/// sign-in opened. The plugin itself checks the argument against the
+/// configured schemes, so a plain relaunch's arguments reach nothing.
+pub(crate) fn forward_launch_arguments<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    argv: &[String],
+) {
+    use tauri_plugin_deep_link::DeepLinkExt;
+    app.deep_link().handle_cli_arguments(argv.iter());
+}
+
+#[cfg(test)]
+#[path = "commands_tests.rs"]
+mod tests;

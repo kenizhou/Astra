@@ -13,6 +13,10 @@ import {
   type SetupRecommendation,
 } from '@/services/ipc';
 
+// The miss reason, re-exported so the flow keeps its one import point;
+// the note derives from it at render, not at the click that recorded it.
+export type { MissReason };
+
 /** The fields the manual form collects, shared with the flow that renders it. */
 export interface SetupFields {
   host: string;
@@ -65,12 +69,14 @@ export function detectFallbackNote(err: unknown): string {
 }
 
 /** The note for a detection that answered with a manual miss. */
-export function missNote(reason: MissReason): string {
+export function missNote(reason: MissReason, providerSignIn: boolean): string {
   switch (reason) {
     case 'NetworkError':
       return 'Detection could not reach the network; enter the server by hand.';
     case 'OauthOnlyProvider':
-      return 'This provider only offers browser sign-in, which this build does not offer yet; enter the server by hand.';
+      return providerSignIn
+        ? 'This provider only offers browser sign-in; sign in with the provider, or enter the server by hand.'
+        : 'This provider only offers browser sign-in, which this build does not offer yet; enter the server by hand.';
     default:
       return 'No settings were found for this address; enter the server by hand.';
   }
