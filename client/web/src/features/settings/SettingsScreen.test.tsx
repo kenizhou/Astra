@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The settings screen: the modal over the shell with the category source
-// list beside the detail panel, the desktop pattern; the categories render
-// exactly what ships, Escape and the Close return to the shell wherever
-// the focus stands (the gear that opened it included), the dialog is
-// caged (the focus moves in on open, the modal names itself), the detail
-// switches with the source list, and the surface pull hydrates on open.
+// The settings screen: the centred modal over the shell with the vertical
+// tab rail beside the detail panel and the footer under both, the desktop
+// pattern; the categories render exactly what ships, Escape, the Close,
+// and the Done return to the shell wherever the focus stands (the gear
+// that opened it included), the dialog is caged (the focus moves in on
+// open, the modal names itself), the detail switches with the rail and the
+// rail marks the standing category, and the surface pull hydrates on open.
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -66,7 +67,7 @@ describe('the settings screen', () => {
     expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull();
   });
 
-  it('renders the seven categories that ship and no others', () => {
+  it('renders the eight categories that ship and no others', () => {
     render(<SettingsScreen />);
     const list = screen.getByLabelText('Settings categories');
     const labels = Array.from(list.querySelectorAll('button')).map((b) => b.textContent);
@@ -75,24 +76,43 @@ describe('the settings screen', () => {
       'Calendar',
       'Reading',
       'Composing',
+      'Shortcuts',
       'Accounts',
       'Advanced',
       'About',
     ]);
   });
 
-  it('switches the detail panel with the source list', () => {
+  it('switches the detail panel with the tab rail and marks the selection', () => {
     render(<SettingsScreen />);
     const detail = screen.getByLabelText('Settings detail');
 
+    expect(screen.getByRole('button', { name: 'General' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    );
+
     fireEvent.click(screen.getByRole('button', { name: 'About' }));
     expect(detail.textContent).toContain('0.1.0');
+    expect(screen.getByRole('button', { name: 'About' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: 'General' }).getAttribute('aria-pressed')).toBe(
+      'false',
+    );
 
     fireEvent.click(screen.getByRole('button', { name: 'General' }));
     expect(screen.getByLabelText('Theme')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Advanced' }));
     expect(screen.getByLabelText('AI assistant access')).toBeTruthy();
+  });
+
+  it('lists the wired shortcuts on the Shortcuts page', () => {
+    render(<SettingsScreen />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Shortcuts' }));
+
+    const detail = screen.getByLabelText('Settings detail');
+    expect(detail.textContent).toContain('Ctrl+K');
+    expect(detail.textContent).toContain('Open the search island');
   });
 
   it('returns to the shell from Close and from Escape', () => {
@@ -105,6 +125,14 @@ describe('the settings screen', () => {
       useUiStore.getState().setSettingsOpen(true);
     });
     fireEvent.keyDown(screen.getByRole('dialog', { name: 'Settings' }), { key: 'Escape' });
+    expect(useUiStore.getState().settingsOpen).toBe(false);
+  });
+
+  it('closes from the footer Done and says the changes apply on their own', () => {
+    render(<SettingsScreen />);
+
+    expect(screen.getByText('Changes are applied automatically.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
     expect(useUiStore.getState().settingsOpen).toBe(false);
   });
 

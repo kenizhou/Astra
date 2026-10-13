@@ -1,0 +1,103 @@
+/*
+ * Accent-only colour skins, ported from kylins. A skin swaps the accent
+ * pair alone; --primary, --ring, and the tinted surfaces derive from it,
+ * while the neutral --series-* scale stays untouched so text, borders, and
+ * surfaces read the same in every skin. The attribute sits on the document
+ * root beside the .light/.dark class; appearance.ts owns it.
+ */
+
+/* ---------- Iris (default: periwinkle blue-violet, distinct from indigo) ---------- */
+[data-skin='iris'] {
+  --series-accent: oklch(0.52 0.21 282);
+  --series-accent-hover: oklch(0.46 0.2 282);
+}
+
+.dark[data-skin='iris'] {
+  --series-accent: oklch(0.7 0.15 285);
+  --series-accent-hover: oklch(0.62 0.18 284);
+}
+
+/* ---------- Blue ---------- */
+[data-skin='blue'] {
+  --series-accent: #0a59f7;
+  --series-accent-hover: #0848cc;
+}
+
+.dark[data-skin='blue'] {
+  --series-accent: #5c93ff;
+  --series-accent-hover: #3d7dff;
+}
+
+/* ---------- Indigo ---------- */
+[data-skin='indigo'] {
+  --series-accent: #4f46e5;
+  --series-accent-hover: #4338ca;
+}
+
+.dark[data-skin='indigo'] {
+  --series-accent: #818cf8;
+  --series-accent-hover: #6366f1;
+  --primary-foreground: var(--series-50);
+}
+
+/* ---------- Rose ---------- */
+[data-skin='rose'] {
+  --series-accent: #e11d48;
+  --series-accent-hover: #be123c;
+}
+
+.dark[data-skin='rose'] {
+  --series-accent: #fb7185;
+  --series-accent-hover: #f43f5e;
+  --primary-foreground: var(--series-50);
+}
+
+/* ---------- Emerald ---------- */
+[data-skin='emerald'] {
+  --series-accent: #059669;
+  --series-accent-hover: #047857;
+}
+
+.dark[data-skin='emerald'] {
+  --series-accent: #34d399;
+  --series-accent-hover: #10b981;
+  --primary-foreground: var(--series-50);
+}
+
+/* ---------- Amber ---------- */
+[data-skin='amber'] {
+  --series-accent: #d97706;
+  --series-accent-hover: #b45309;
+  --primary-foreground: var(--series-950);
+}
+
+.dark[data-skin='amber'] {
+  --series-accent: #fbbf24;
+  --series-accent-hover: #f59e0b;
+  --primary-foreground: var(--series-50);
+}
+
+/* ---------- Violet ---------- */
+[data-skin='violet'] {
+  --series-accent: #7c3aed;
+  --series-accent-hover: #6d28d9;
+}
+
+.dark[data-skin='violet'] {
+  --series-accent: #a78bfa;
+  --series-accent-hover: #8b5cf6;
+  --primary-foreground: var(--series-50);
+}
+
+/* ---------- Orange ---------- */
+[data-skin='orange'] {
+  --series-accent: #ea580c;
+  --series-accent-hover: #c2410c;
+  --primary-foreground: var(--series-950);
+}
+
+.dark[data-skin='orange'] {
+  --series-accent: #fb923c;
+  --series-accent-hover: #f97316;
+  --primary-foreground: var(--series-50);
+}

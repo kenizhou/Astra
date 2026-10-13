@@ -24,6 +24,7 @@ export type SettingsCategory =
   | 'calendar'
   | 'reading'
   | 'composing'
+  | 'shortcuts'
   | 'accounts'
   | 'advanced'
   | 'about';

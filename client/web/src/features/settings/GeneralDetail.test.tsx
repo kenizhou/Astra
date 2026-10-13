@@ -2,7 +2,9 @@
 // The General detail: the theme picker (follow host, Light, Dark) and the
 // clock picker (24 or 12 hour), each dispatching its intent and reflecting
 // the snapshot's persisted truth, never local optimism, and the persist
-// failure's sentence under the controls.
+// failure's sentence under the controls. The appearance choices (accent,
+// contrast, font size) are device-local: they write localStorage and the
+// document-root attributes and dispatch no intent.
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -15,10 +17,17 @@ vi.mock('@/services/ipc', async (importOriginal) => ({
 
 import { GeneralDetail } from './GeneralDetail';
 import { useSettingsStore } from './settingsStore';
+import { useAppearanceStore } from '@/services/appearance';
 
 beforeEach(() => {
   ipc.dispatch.mockReset();
   ipc.dispatch.mockResolvedValue(undefined);
+  localStorage.clear();
+  const root = document.documentElement;
+  delete root.dataset.skin;
+  delete root.dataset.contrast;
+  delete root.dataset.fontSize;
+  useAppearanceStore.setState({ skin: 'iris', contrast: 'default', fontSize: 'default' });
   useSettingsStore.getState().applySnapshot({
     settings: {
       theme: 'follow_host',
@@ -34,7 +43,10 @@ beforeEach(() => {
   });
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  localStorage.clear();
+});
 
 describe('the General detail', () => {
   it('dispatches the theme intent from the picker', () => {
@@ -93,5 +105,43 @@ describe('the General detail', () => {
     render(<GeneralDetail />);
 
     expect(screen.getByRole('alert').textContent).toContain('could not be saved');
+  });
+
+  it('marks the standing accent and moves the mark on a click', () => {
+    render(<GeneralDetail />);
+
+    expect(screen.getByRole('button', { name: 'Iris accent' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Emerald accent' }));
+
+    expect(screen.getByRole('button', { name: 'Emerald accent' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    );
+    expect(document.documentElement.dataset.skin).toBe('emerald');
+    expect(localStorage.getItem('astra.skin')).toBe('emerald');
+    // Device-local: no intent crosses the wire.
+    expect(ipc.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('applies the contrast choice to the document root and the store', () => {
+    render(<GeneralDetail />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'High' }));
+
+    expect(document.documentElement.dataset.contrast).toBe('high');
+    expect(localStorage.getItem('astra.contrast')).toBe('high');
+    expect(ipc.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('applies the font-size step to the document root and the store', () => {
+    render(<GeneralDetail />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Large' }));
+
+    expect(document.documentElement.dataset.fontSize).toBe('large');
+    expect(localStorage.getItem('astra.fontSize')).toBe('large');
+    expect(ipc.dispatch).not.toHaveBeenCalled();
   });
 });

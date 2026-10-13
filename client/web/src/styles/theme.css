@@ -215,3 +215,133 @@
     0 4px 8px -4px color-mix(in srgb, var(--shadow-color) 45%, transparent),
     0 12px 24px -6px color-mix(in srgb, var(--shadow-color) 45%, transparent);
 }
+
+/* High contrast, ported from kylins and adapted to this file's token set:
+   pure black on white with evenly spaced grays, every tint and shadow
+   flattened so edges stay crisp. The attribute sits on the document root
+   beside .light; appearance.ts owns it. */
+[data-contrast='high'],
+[data-contrast='high'].light {
+  --series-50: #ffffff;
+  --series-100: #f0f0f0;
+  --series-200: #e0e0e0;
+  --series-300: #c0c0c0;
+  --series-400: #a0a0a0;
+  --series-500: #808080;
+  --series-600: #606060;
+  --series-700: #404040;
+  --series-800: #202020;
+  --series-900: #000000;
+  --series-950: #000000;
+
+  --background: #ffffff;
+  --foreground: #000000;
+  --surface: #ffffff;
+  --chrome: color-mix(in srgb, var(--primary) 8%, #f0f0f0);
+  --card: #ffffff;
+  --muted: #ffffff;
+  --muted-foreground: #000000;
+  --text: #000000;
+  --muted-text: #000000;
+  --border: #000000;
+  --input: #ffffff;
+  --ring: #0000ff;
+  --primary: #0000ff;
+  --primary-foreground: #ffffff;
+  --secondary: #ffffff;
+  --secondary-foreground: #000000;
+  --hover: color-mix(in srgb, var(--primary) 25%, #ffffff);
+  --selected: color-mix(in srgb, var(--primary) 45%, #ffffff);
+  --link: #0000ff;
+  --link-hover: #000080;
+  --destructive: #ff0000;
+  --success: #008000;
+  --warning: #ff8c00;
+  --error: #ff0000;
+  --backdrop: rgb(0 0 0 / 0.6);
+
+  /* High contrast disables the glass sheen for readability. */
+  --chrome-glass: var(--chrome);
+
+  /* Surface depth flattens with the shadows. */
+  --surface-elevated: var(--surface);
+  --surface-floating: var(--card);
+  --chrome-tint: var(--chrome);
+  --primary-muted: var(--selected);
+  --border-subtle: var(--border);
+  --shadow-sm: none;
+  --shadow: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+}
+
+[data-contrast='high'].dark {
+  --series-50: #000000;
+  --series-100: #0a0a0a;
+  --series-200: #141414;
+  --series-300: #1f1f1f;
+  --series-400: #333333;
+  --series-500: #555555;
+  --series-600: #777777;
+  --series-700: #999999;
+  --series-800: #bbbbbb;
+  --series-900: #ffffff;
+  --series-950: #ffffff;
+
+  --background: #000000;
+  --foreground: #ffffff;
+  --surface: #000000;
+  --chrome: color-mix(in srgb, var(--primary) 12%, #1a1a1a);
+  --card: #000000;
+  --muted: #000000;
+  --muted-foreground: #ffffff;
+  --text: #ffffff;
+  --muted-text: #ffffff;
+  --border: #ffffff;
+  --input: #000000;
+  --ring: #00ffff;
+  --primary: #00ffff;
+  --primary-foreground: #000000;
+  --secondary: #000000;
+  --secondary-foreground: #ffffff;
+  --hover: color-mix(in srgb, var(--primary) 20%, #000000);
+  --selected: color-mix(in srgb, var(--primary) 35%, #000000);
+  --link: #00ffff;
+  --link-hover: #80ffff;
+  --destructive: #ff6666;
+  --success: #00ff00;
+  --warning: #ffd700;
+  --error: #ff6666;
+  --backdrop: rgb(0 0 0 / 0.75);
+
+  --chrome-glass: var(--chrome);
+
+  --surface-elevated: var(--surface);
+  --surface-floating: var(--card);
+  --chrome-tint: var(--chrome);
+  --primary-muted: var(--selected);
+  --border-subtle: var(--border);
+  --shadow-sm: none;
+  --shadow: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+}
+
+/* The font-size steps scale the body's base size; the fixed pixel sizes
+   in the typography tokens above stay as they are. */
+[data-font-size='small'] {
+  --text-base: 13px;
+}
+
+[data-font-size='default'] {
+  --text-base: 14px;
+}
+
+[data-font-size='large'] {
+  --text-base: 16px;
+}
+
+html[data-font-size] body,
+html[data-font-size] #root {
+  font-size: var(--text-base);
+}
