@@ -16,6 +16,7 @@ this row ports.
 | Accounts | Settings accounts page lists every account, with per-service toggles, relinking, sign-in again, server editing, and removal | 🚧 | the page lists every account with its dialled legs, the dav section editor, and a confirmed removal; no per-service toggles, relinking, sign-in again, or server editing; settings.md |
 | Accounts | Outgoing name per account, asked once at connect, editable in settings, kept in step with the provider | ⬜ | sending.md |
 | Accounts | Untrusted server certificates shown with a fingerprint and accepted once per server; verification is never switched off | 🚧 | certificate-exceptions.md |
+| Accounts | OAuth sign-in foundation: the browser PKCE client, the credential transaction, standards discovery, and the refusal classification | 🚧 | the pure client, the host sign-in session and credential transaction, the env-gated registrations (none shipped, so no OAuth route is offered), and the live discovery proof against the harness all ship; no account type consumes the floor yet, SP2m first; provider-oauth.md |
 | Accounts | Microsoft 365 accounts: browser OAuth sign-in (PKCE), mail read and actions, send, calendar read and write | ⬜ | |
 | Accounts | Microsoft reconnect banner when a permission is missing; one tap re-grants the full scope set | ⬜ | provider-oauth.md |
 | Accounts | Expired or revoked sign-ins reported as such with an offer to sign in again, across Microsoft, Google, JMAP, and password accounts | ⬜ | provider-oauth.md |

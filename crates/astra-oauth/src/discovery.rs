@@ -487,3 +487,7 @@ async fn fetch_json<T: serde::de::DeserializeOwned>(
 #[cfg(test)]
 #[path = "discovery_tests.rs"]
 mod discovery_tests;
+
+#[cfg(test)]
+#[path = "discovery_live.rs"]
+mod discovery_live;
