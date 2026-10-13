@@ -9,6 +9,8 @@ import {
   ArchiveIcon as ArchiveIconData,
   Calendar03Icon,
   Cancel01Icon,
+  ChevronLeftIcon as ChevronLeftIconData,
+  ChevronRightIcon as ChevronRightIconData,
   Delete02Icon,
   Flag02Icon,
   Folder01Icon,
@@ -25,6 +27,7 @@ import {
   Robot01Icon,
   Search01Icon,
   SentIcon as SentIconData,
+  Settings02Icon,
   SpamIcon,
   SparklesIcon,
   Sun03Icon,
@@ -66,3 +69,6 @@ export const ReplyIcon = makeIcon(MailReply01Icon);
 export const ReplyAllIcon = makeIcon(MailReplyAll01Icon);
 export const ForwardIcon = makeIcon(Forward01Icon);
 export const CloseIcon = makeIcon(Cancel01Icon);
+export const ChevronLeftIcon = makeIcon(ChevronLeftIconData);
+export const ChevronRightIcon = makeIcon(ChevronRightIconData);
+export const SettingsIcon = makeIcon(Settings02Icon);

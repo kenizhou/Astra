@@ -6,6 +6,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 
+import { ChevronLeftIcon, ChevronRightIcon, PlusIcon } from '@/components/icons';
 import { dispatch, intents } from '@/services/ipc';
 
 import { addDays, addMonths, zoneToday } from './calendarRange';
@@ -133,30 +134,30 @@ export function CalendarToolbar({ onCreate, onBriefs }: CalendarToolbarProps) {
   };
 
   return (
-    <div className="flex shrink-0 items-center gap-2 border-b border-border bg-surface px-3 py-1.5">
+    <div className="flex h-[var(--pane-header-h)] shrink-0 items-center gap-2 border-b border-border-subtle bg-surface px-3">
       <button
         type="button"
         onClick={today}
-        className="rounded-[var(--radius)] border border-border px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="rounded-[var(--radius-xs)] border border-border-subtle px-2 py-0.5 text-xs font-medium text-foreground transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         Today
       </button>
-      <div className="flex overflow-hidden rounded-[var(--radius)] border border-border">
+      <div className="flex items-center overflow-hidden rounded-md border border-border-subtle">
         <button
           type="button"
           aria-label="Previous period"
           onClick={() => anchor !== null && go(step(view, anchor, -1), view)}
-          className="border-r border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex h-6 w-6 items-center justify-center border-r border-border-subtle text-muted-text transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          ‹
+          <ChevronLeftIcon size={14} />
         </button>
         <button
           type="button"
           aria-label="Next period"
           onClick={() => anchor !== null && go(step(view, anchor, 1), view)}
-          className="px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex h-6 w-6 items-center justify-center text-muted-text transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          ›
+          <ChevronRightIcon size={14} />
         </button>
       </div>
       <h2 className="ml-1 text-sm font-semibold text-foreground">{title}</h2>
@@ -168,12 +169,12 @@ export function CalendarToolbar({ onCreate, onBriefs }: CalendarToolbarProps) {
             aria-label="Calendars"
             onClick={() => setManagerOpen((open) => !open)}
             aria-expanded={managerOpen}
-            className="rounded-[var(--radius)] border border-border px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="rounded-[var(--radius-xs)] border border-border-subtle px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             Calendars
           </button>
           {managerOpen && (
-            <div className="absolute right-0 top-full z-[var(--z-dropdown)] mt-1 w-56 rounded-[var(--radius)] border border-border bg-surface-floating p-1 shadow-[var(--shadow-md)]">
+            <div className="absolute right-0 top-full z-[var(--z-dropdown)] mt-1 w-56 rounded-lg border border-border-subtle bg-surface-floating p-1 shadow-[var(--shadow-md)]">
               <CalendarManagerRows />
             </div>
           )}
@@ -181,23 +182,25 @@ export function CalendarToolbar({ onCreate, onBriefs }: CalendarToolbarProps) {
         <button
           type="button"
           onClick={onBriefs}
-          className="rounded-[var(--radius)] border border-border px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="rounded-[var(--radius-xs)] border border-border-subtle px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           Briefs
         </button>
-        <div className="flex overflow-hidden rounded-[var(--radius)] border border-border" role="group" aria-label="Calendar view">
+        <div
+          role="group"
+          aria-label="Calendar view"
+          className="flex items-center gap-0.5 rounded-md bg-muted p-0.5"
+        >
           {VIEWS.map(({ id, label }) => (
             <button
               key={id}
               type="button"
               aria-pressed={view === id}
               onClick={() => go(null, id)}
-              className={`px-2.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                id === 'month' ? '' : 'border-l border-border'
-              } ${
+              className={`rounded-[var(--radius-xs)] px-2 py-0.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                 view === id
-                  ? 'bg-selected font-medium text-selected-text'
-                  : 'text-muted-foreground hover:bg-hover hover:text-foreground'
+                  ? 'bg-background font-medium text-foreground shadow-[var(--shadow-sm)]'
+                  : 'text-muted-text hover:text-foreground'
               }`}
             >
               {label}
@@ -207,8 +210,9 @@ export function CalendarToolbar({ onCreate, onBriefs }: CalendarToolbarProps) {
         <button
           type="button"
           onClick={onCreate}
-          className="rounded-[var(--radius)] bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground transition-colors hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex items-center gap-1 rounded-[var(--radius-xs)] bg-primary px-2 py-1 text-xs font-medium text-primary-foreground shadow-[var(--shadow-sm)] transition-colors hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
+          <PlusIcon size={12} />
           New event
         </button>
       </div>

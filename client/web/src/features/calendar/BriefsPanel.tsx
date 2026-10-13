@@ -11,6 +11,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { calendarBriefGenerate } from '@/services/ipc';
 import type { MeetingBriefView } from '@/services/ipc';
 
+import { CloseIcon } from '@/components/icons';
+
 import { useCalendarStore } from './calendarStore';
 import { dayKeyOf, minutesInZone } from './calendarRange';
 import { clockLabel } from './dayLabels';
@@ -32,7 +34,7 @@ interface BriefsPanelProps {
 function MeetingRow({ row, zone }: { row: NonNullable<MeetingBriefView['meetings']>[number]; zone: string }) {
   const twentyFour = useSettingsStore((s) => s.settings.twenty_four_clock);
   return (
-    <li className="flex flex-col gap-0.5 rounded-[var(--radius-xs)] border border-border px-2 py-1.5">
+    <li className="flex flex-col gap-0.5 rounded-[var(--radius)] border border-border-subtle px-2 py-1.5">
       <span className="flex items-center gap-2 text-xs font-medium text-foreground">
         <span className="tabular-nums text-muted-foreground">
           {row.all_day
@@ -92,17 +94,17 @@ export function BriefsPanel({ open, onClose }: BriefsPanelProps) {
   return (
     <section
       aria-label="Briefs"
-      className="absolute bottom-[var(--status-h)] right-3 z-[var(--z-modal)] flex max-h-[70%] w-[380px] flex-col overflow-hidden rounded-[var(--radius)] border border-border bg-surface-floating shadow-[var(--shadow-lg)]"
+      className="absolute bottom-[var(--status-h)] right-3 z-[var(--z-modal)] flex max-h-[70%] w-[380px] flex-col overflow-hidden rounded-xl border border-border-subtle bg-card shadow-[var(--shadow-lg)]"
     >
-      <header className="flex shrink-0 items-center justify-between border-b border-border px-3 py-2">
+      <header className="flex shrink-0 items-center justify-between border-b border-border-subtle px-3 py-2">
         <h2 className="text-xs font-semibold text-foreground">Meeting brief</h2>
         <button
           type="button"
           aria-label="Close briefs"
           onClick={onClose}
-          className="rounded-[var(--radius-xs)] p-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+          className="flex h-6 w-6 items-center justify-center rounded-[var(--radius-xs)] text-muted-text transition-colors hover:bg-hover hover:text-foreground"
         >
-          ×
+          <CloseIcon size={14} />
         </button>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto p-3 text-xs">
@@ -113,7 +115,7 @@ export function BriefsPanel({ open, onClose }: BriefsPanelProps) {
             <button
               type="button"
               onClick={() => void ask()}
-              className="self-start rounded-[var(--radius)] border border-border px-2.5 py-1 text-xs text-foreground transition-colors hover:bg-hover"
+              className="self-start rounded-[var(--radius)] border border-border-subtle px-2.5 py-1 text-xs text-foreground transition-colors hover:bg-hover"
             >
               Try again
             </button>

@@ -50,7 +50,7 @@ export function PersonDetailPane({ detail, onEdit }: PersonDetailPaneProps) {
       )}
 
       {(detail.values ?? []).length > 0 && (
-        <ul className="flex flex-col divide-y divide-border rounded-[var(--radius)] border border-border">
+        <ul className="flex flex-col divide-y divide-border-subtle rounded-xl border border-border-subtle bg-card">
           {(detail.values ?? []).map((value, at) => (
             <li key={`${value.kind}-${at}`} className="flex flex-col gap-0.5 px-3 py-2">
               <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -71,7 +71,7 @@ export function PersonDetailPane({ detail, onEdit }: PersonDetailPaneProps) {
         <button
           type="button"
           onClick={onEdit}
-          className="self-start rounded-[var(--radius)] border border-border px-2.5 py-1 text-xs text-foreground transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="self-start rounded-[var(--radius)] border border-border-subtle px-2.5 py-1 text-xs text-foreground transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           Edit
         </button>

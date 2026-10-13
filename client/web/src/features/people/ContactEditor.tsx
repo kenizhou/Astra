@@ -229,7 +229,7 @@ export function ContactEditor({
       <div
         role="dialog"
         aria-label={mode === 'create' ? 'New contact' : 'Edit contact'}
-        className="flex max-h-full w-[420px] flex-col overflow-y-auto rounded-[var(--radius)] border border-border bg-surface-floating p-4 shadow-[var(--shadow-lg)]"
+        className="flex max-h-full w-[420px] flex-col overflow-y-auto rounded-xl border border-border-subtle bg-card p-5 shadow-[var(--shadow-lg)]"
       >
         <h2 className="mb-3 text-sm font-semibold text-foreground">
           {mode === 'create' ? 'New contact' : 'Edit contact'}
@@ -252,11 +252,11 @@ export function ContactEditor({
                 {card.account}
               </label>
             ))}
-            <div className="mt-3 flex justify-end gap-2 border-t border-border pt-3">
+            <div className="mt-3 flex justify-end gap-2 border-t border-border-subtle pt-3">
               <button
                 type="button"
                 onClick={onClose}
-                className="rounded-[var(--radius)] border border-border px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+                className="rounded-[var(--radius)] border border-border-subtle px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
               >
                 Cancel
               </button>
@@ -271,7 +271,7 @@ export function ContactEditor({
                     setChosenCard(card);
                   }
                 }}
-                className="rounded-[var(--radius)] bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-[var(--radius)] bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground shadow-[var(--shadow-sm)] transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Continue
               </button>
@@ -370,18 +370,18 @@ export function ContactEditor({
               </p>
             )}
 
-            <div className="flex justify-end gap-2 border-t border-border pt-3">
+            <div className="flex justify-end gap-2 border-t border-border-subtle pt-3">
               <button
                 type="button"
                 onClick={onClose}
-                className="rounded-[var(--radius)] border border-border px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+                className="rounded-[var(--radius)] border border-border-subtle px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={mode === 'edit' ? !changed : !findable}
-                className="rounded-[var(--radius)] bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-[var(--radius)] bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground shadow-[var(--shadow-sm)] transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Save
               </button>

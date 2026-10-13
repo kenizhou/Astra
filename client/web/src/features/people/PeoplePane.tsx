@@ -9,6 +9,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { dispatch, intents } from '@/services/ipc';
+import { PlusIcon, SearchIcon } from '@/components/icons';
 import { SEARCH_DEBOUNCE_MS } from '@/components/layout/TitleBar';
 
 import { ContactEditor } from './ContactEditor';
@@ -32,7 +33,7 @@ function WriteStatuses() {
       className={`flex shrink-0 items-center justify-between gap-2 border-b px-3 py-1.5 text-xs ${
         failed
           ? 'border-[var(--warning)]/40 bg-[var(--warning)]/10 text-warning-foreground'
-          : 'border-border bg-surface text-muted-foreground'
+          : 'border-border-subtle bg-surface text-muted-foreground'
       }`}
     >
       {failed ? (
@@ -42,7 +43,7 @@ function WriteStatuses() {
             type="button"
             aria-label="Retry"
             onClick={() => void dispatch(intents.refreshPeople())}
-            className="rounded-[var(--radius)] border border-border px-2 py-0.5 text-xs text-foreground transition-colors hover:bg-hover"
+            className="rounded-[var(--radius-xs)] border border-border-subtle px-2 py-0.5 text-xs text-foreground transition-colors hover:bg-hover"
           >
             Retry
           </button>
@@ -83,24 +84,29 @@ function PeopleSearch() {
   };
 
   return (
-    <input
-      type="text"
-      aria-label="Search people"
-      placeholder="Search people"
-      value={text}
-      onChange={onChange}
-      onKeyDown={(event) => {
-        if (event.key === 'Escape') {
-          if (timer.current !== null) {
-            clearTimeout(timer.current);
-            timer.current = null;
+    <div className="relative flex w-full items-center">
+      <span className="pointer-events-none absolute left-2.5 flex items-center text-muted-text">
+        <SearchIcon size={13} />
+      </span>
+      <input
+        type="text"
+        aria-label="Search people"
+        placeholder="Search people"
+        value={text}
+        onChange={onChange}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            if (timer.current !== null) {
+              clearTimeout(timer.current);
+              timer.current = null;
+            }
+            setText('');
+            void dispatch(intents.searchPeople(''));
           }
-          setText('');
-          void dispatch(intents.searchPeople(''));
-        }
-      }}
-      className="h-7 w-full rounded-[var(--radius-xs)] border border-input bg-background px-2 text-xs text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-ring"
-    />
+        }}
+        className="h-7 w-full rounded-full border border-border-subtle bg-card pl-7 pr-2 text-xs text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-ring"
+      />
+    </div>
   );
 }
 
@@ -126,9 +132,9 @@ export function PeoplePane() {
   return (
     <section
       aria-label="People"
-      className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-background"
+      className="relative flex min-w-0 flex-1 flex-col overflow-hidden"
     >
-      <div className="flex h-[var(--pane-header-h)] shrink-0 items-center gap-2 border-b border-border bg-surface px-3">
+      <div className="flex h-[var(--pane-header-h)] shrink-0 items-center gap-2 border-b border-border-subtle bg-surface px-3">
         <div className="w-[220px]">
           <PeopleSearch />
         </div>
@@ -137,8 +143,9 @@ export function PeoplePane() {
           <button
             type="button"
             onClick={() => setEditing('create')}
-            className="rounded-[var(--radius-xs)] bg-primary px-2 py-1 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex items-center gap-1 rounded-[var(--radius-xs)] bg-primary px-2 py-1 text-xs font-medium text-primary-foreground shadow-[var(--shadow-sm)] transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
+            <PlusIcon size={12} />
             New contact
           </button>
         )}
@@ -146,17 +153,18 @@ export function PeoplePane() {
       <div className="flex min-h-0 flex-1">
         <aside
           aria-label="People list"
-          className="flex w-[320px] shrink-0 flex-col border-r border-border bg-surface"
+          className="flex w-[320px] shrink-0 flex-col border-r border-border-subtle bg-surface"
         >
           <WriteStatuses />
           <PeopleList
             rows={rows}
+            selectedPerson={detail?.person ?? null}
             onOpen={(person) => void dispatch(intents.openPerson(person))}
           />
         </aside>
         {detail !== null && (
-          <aside aria-label="Person detail" className="flex min-w-0 flex-1 flex-col bg-background">
-            <div className="flex h-[var(--pane-header-h)] shrink-0 items-center justify-end border-b border-border bg-surface px-2">
+          <aside aria-label="Person detail" className="flex min-w-0 flex-1 flex-col">
+            <div className="flex h-[var(--pane-header-h)] shrink-0 items-center justify-end border-b border-border-subtle bg-surface px-2">
               <button
                 type="button"
                 aria-label="Close person"

@@ -262,7 +262,7 @@ export function EventDialog({ row, onClose }: EventDialogProps) {
       <div
         role="dialog"
         aria-label={title}
-        className="flex max-h-full w-[420px] flex-col overflow-y-auto rounded-[var(--radius)] border border-border bg-surface-floating p-4 shadow-[var(--shadow-lg)]"
+        className="flex max-h-full w-[420px] flex-col overflow-y-auto rounded-xl border border-border-subtle bg-card p-5 shadow-[var(--shadow-lg)]"
       >
         <h2 className="mb-3 text-sm font-semibold text-foreground">{title}</h2>
 
@@ -419,7 +419,7 @@ export function EventDialog({ row, onClose }: EventDialogProps) {
             </label>
 
             {scopeable && (
-              <fieldset className="flex gap-3 border-t border-border pt-2 text-xs text-foreground">
+              <fieldset className="flex gap-3 border-t border-border-subtle pt-2 text-xs text-foreground">
                 <legend className="sr-only">Edit scope</legend>
                 <label className="flex items-center gap-1.5">
                   <input
@@ -447,7 +447,7 @@ export function EventDialog({ row, onClose }: EventDialogProps) {
               <p className="text-xs text-[var(--warning)]">There is no calendar you can write to.</p>
             )}
 
-            <div className="flex items-center justify-between gap-2 border-t border-border pt-3">
+            <div className="flex items-center justify-between gap-2 border-t border-border-subtle pt-3">
               {editing ? (
                 <button
                   type="button"
@@ -467,7 +467,7 @@ export function EventDialog({ row, onClose }: EventDialogProps) {
                 <button
                   type="button"
                   onClick={onClose}
-                  className="rounded-[var(--radius)] border border-border px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+                  className="rounded-[var(--radius)] border border-border-subtle px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
                 >
                   Cancel
                 </button>
@@ -477,7 +477,7 @@ export function EventDialog({ row, onClose }: EventDialogProps) {
                   // With no writable calendar there is nothing to save into:
                   // the note says so rather than a save that silently no-ops.
                   disabled={!editing && writable.length === 0}
-                  className="rounded-[var(--radius)] bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-[var(--radius)] bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground shadow-[var(--shadow-sm)] transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Save
                 </button>

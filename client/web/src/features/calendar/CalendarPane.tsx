@@ -35,7 +35,7 @@ function WriteBanners() {
       className={`flex shrink-0 items-center justify-between gap-2 border-b px-3 py-1.5 text-xs ${
         failed
           ? 'border-[var(--warning)]/40 bg-[var(--warning)]/10 text-warning-foreground'
-          : 'border-border bg-surface text-muted-foreground'
+          : 'border-border-subtle bg-surface text-muted-foreground'
       }`}
     >
       {failed ? (
@@ -45,7 +45,7 @@ function WriteBanners() {
             type="button"
             aria-label="Retry"
             onClick={() => void dispatch(intents.refreshCalendar())}
-            className="rounded-[var(--radius)] border border-border px-2 py-0.5 text-xs text-foreground transition-colors hover:bg-hover"
+            className="rounded-[var(--radius-xs)] border border-border-subtle px-2 py-0.5 text-xs text-foreground transition-colors hover:bg-hover"
           >
             Retry
           </button>
@@ -94,7 +94,7 @@ export function CalendarPane() {
   return (
     <section
       aria-label="Calendar"
-      className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-background"
+      className="relative flex min-w-0 flex-1 flex-col overflow-hidden"
     >
       <CalendarToolbar onCreate={() => setCreating(true)} onBriefs={() => setBriefsOpen(true)} />
       <WriteBanners />

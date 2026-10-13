@@ -15,7 +15,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
-import { MoonIcon, PlusIcon, SunIcon } from '@/components/icons';
+import { MoonIcon, PlusIcon, SettingsIcon, SunIcon } from '@/components/icons';
 import { WindowTitleControls } from '@/components/ui/WindowTitleControls';
 import { dispatch, intents } from '@/services/ipc';
 import { useListStore } from '@/stores/listStore';
@@ -185,9 +185,9 @@ export function TitleBar() {
         onClick={openSettings}
         title="Settings"
         aria-label="Settings"
-        className="mr-1 rounded-[var(--radius-xs)] px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className={TITLE_ICON_CLASS}
       >
-        Settings
+        <SettingsIcon size={16} />
       </button>
       <button
         type="button"

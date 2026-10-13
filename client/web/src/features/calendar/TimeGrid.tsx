@@ -87,7 +87,7 @@ function Block({
         transform: ghostShift === 0 ? undefined : `translateY(${ghostShift}px)`,
         ...colorStyling(calendarColor, hold),
       }}
-      className={`overflow-hidden rounded-[var(--radius-xs)] border px-1 py-0.5 text-left text-[11px] leading-tight transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${holdClass(hold)} ${
+      className={`overflow-hidden rounded-[var(--radius)] border px-1 py-0.5 text-left text-[11px] leading-tight transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${holdClass(hold)} ${
         block.row.can_move ? 'cursor-grab' : 'cursor-pointer'
       }`}
     >
@@ -147,7 +147,7 @@ function DayColumn({
   return (
     <div
       aria-label={`Day column, ${fullDayLabel(dayKey)}`}
-      className="relative min-w-0 flex-1 border-l border-border"
+      className="relative min-w-0 flex-1 border-l border-border-subtle"
     >
       {Array.from({ length: 24 }, (_, hour) => (
         <div key={hour} style={{ height: HOUR_H }} className="border-b border-border/40" />
@@ -175,10 +175,10 @@ function DayColumn({
       {now !== null && nowDay === dayKey && (
         <div
           aria-label="Now"
-          className="pointer-events-none absolute left-0 right-0 z-10 border-t-2 border-[var(--destructive)]"
+          className="pointer-events-none absolute left-0 right-0 z-10 border-t-2 border-[var(--primary)]"
           style={{ top: minuteTop(minutesInZone(now, zone)) }}
         >
-          <span className="absolute -left-1 -top-[3px] h-1.5 w-1.5 rounded-full bg-[var(--destructive)]" />
+          <span className="absolute -left-1 -top-[3px] h-1.5 w-1.5 rounded-full bg-[var(--primary)]" />
         </div>
       )}
     </div>
@@ -227,24 +227,32 @@ export function TimeGrid({ days, ariaLabel, onOpenEvent }: TimeGridProps) {
 
   return (
     <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="flex shrink-0 border-b border-border bg-surface">
+      <div className="flex shrink-0 border-b border-border-subtle bg-surface">
         <div style={{ width: GUTTER_W }} className="shrink-0" />
         {days.map((dayKey) => (
           <div
             key={dayKey}
-            className={`min-w-0 flex-1 border-l border-border px-2 py-1 text-xs ${
-              nowDay === dayKey ? 'font-semibold text-primary' : 'text-muted-foreground'
+            className={`min-w-0 flex-1 border-l border-border-subtle px-2 py-1 text-xs ${
+              nowDay === dayKey ? 'font-semibold text-primary' : 'text-muted-text'
             }`}
           >
-            <span className="mr-1">{weekdayShortLabel(dayKey)}</span>
-            <span className="tabular-nums">{dayNumber(dayKey)}</span>
+            <span className="mr-1 text-[10px] font-medium uppercase tracking-wide">
+              {weekdayShortLabel(dayKey)}
+            </span>
+            {nowDay === dayKey ? (
+              <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold tabular-nums text-primary-foreground">
+                {dayNumber(dayKey)}
+              </span>
+            ) : (
+              <span className="tabular-nums">{dayNumber(dayKey)}</span>
+            )}
           </div>
         ))}
       </div>
-      <div className="flex shrink-0 border-b border-border bg-surface">
+      <div className="flex shrink-0 border-b border-border-subtle bg-surface">
         <div
           style={{ width: GUTTER_W }}
-          className="shrink-0 px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground"
+          className="shrink-0 px-2 py-1 text-[10px] uppercase tracking-wide text-muted-text"
         >
           All day
         </div>
@@ -252,7 +260,7 @@ export function TimeGrid({ days, ariaLabel, onOpenEvent }: TimeGridProps) {
           <div
             key={dayKey}
             aria-label={`All day, ${fullDayLabel(dayKey)}`}
-            className="flex min-h-[24px] min-w-0 flex-1 flex-col gap-0.5 border-l border-border px-1 py-0.5"
+            className="flex min-h-[24px] min-w-0 flex-1 flex-col gap-0.5 border-l border-border-subtle px-1 py-0.5"
           >
             {dayBlocks(laidOut, dayKey, zone).allDay.map((row) => (
               <button
@@ -261,7 +269,7 @@ export function TimeGrid({ days, ariaLabel, onOpenEvent }: TimeGridProps) {
                 data-hold={isHold(row)}
                 onClick={() => onOpenEvent(row)}
                 title={row.title === '' ? '(no title)' : row.title}
-                className={`flex items-center gap-1 truncate rounded-[var(--radius-xs)] border px-1 text-left text-[11px] ${holdClass(isHold(row))}`}
+                className={`flex items-center gap-1 truncate rounded-[var(--radius)] border px-1 text-left text-[11px] ${holdClass(isHold(row))}`}
                 style={colorStyling(colorOf(row), isHold(row))}
               >
                 {row.recurring && (
@@ -287,7 +295,7 @@ export function TimeGrid({ days, ariaLabel, onOpenEvent }: TimeGridProps) {
             <div
               key={hour}
               style={{ height: HOUR_H }}
-              className="relative border-b border-border/40 text-right text-[10px] text-muted-foreground"
+              className="relative border-b border-border/40 text-right text-[10px] text-muted-text"
             >
               <span className="absolute -top-1.5 right-1">{clockLabel(hour * 60, twentyFour)}</span>
             </div>
