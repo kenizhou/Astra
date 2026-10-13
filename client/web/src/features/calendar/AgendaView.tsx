@@ -21,12 +21,12 @@ function Row({
   row,
   zone,
   color,
-  onOpenEvent,
+  onSelectEvent,
 }: {
   row: OccurrenceRow;
   zone: string;
   color: string | undefined;
-  onOpenEvent: (row: OccurrenceRow) => void;
+  onSelectEvent: (row: OccurrenceRow) => void;
 }) {
   const twentyFour = useSettingsStore((s) => s.settings.twenty_four_clock);
   const hold = isHold(row);
@@ -54,7 +54,7 @@ function Row({
       )}
       <button
         type="button"
-        onClick={() => onOpenEvent(row)}
+        onClick={() => onSelectEvent(row)}
         className={`min-w-0 flex-1 truncate text-left ${hold ? 'text-muted-foreground' : 'text-foreground'}`}
         title={hold ? `${title} awaits your answer` : title}
       >
@@ -65,7 +65,7 @@ function Row({
 }
 
 /** The chronological day-grouped list over the whole window. */
-export function AgendaView({ onOpenEvent }: { onOpenEvent: (row: OccurrenceRow) => void }) {
+export function AgendaView({ onSelectEvent }: { onSelectEvent: (row: OccurrenceRow) => void }) {
   const occurrences = useCalendarStore((s) => s.occurrences);
   const calendars = useCalendarStore((s) => s.calendars);
   const nowData = useCalendarStore((s) => s.nowData);
@@ -116,7 +116,7 @@ export function AgendaView({ onOpenEvent }: { onOpenEvent: (row: OccurrenceRow) 
                 row={row}
                 zone={zone}
                 color={colorOf(row)}
-                onOpenEvent={onOpenEvent}
+                onSelectEvent={onSelectEvent}
               />
             ))}
           </ul>

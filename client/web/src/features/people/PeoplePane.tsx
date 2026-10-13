@@ -1,16 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The people page: the search box debouncing its query into the Search
-// intent, the write statuses beside the list (never inside the detail
-// pane), the unified list and the open person's detail beside it, the
-// create affordance standing only where a writable book exists, the contact
-// editor the create and edit affordances open, and the refresh on entry and
-// on focus regain.
+// intent, then a resizable two-card row: the list card (the write statuses
+// above the unified list, never inside the detail card) and the detail
+// card, which shows the mail-calendar placeholder while nobody is open.
+// The create affordance stands only where a writable book exists, the
+// contact editor the create and edit affordances open, and the refresh on
+// entry and on focus regain.
 
 import { useEffect, useRef, useState } from 'react';
 
+import { Group, Panel, Separator } from 'react-resizable-panels';
+
 import { dispatch, intents } from '@/services/ipc';
-import { PlusIcon, SearchIcon } from '@/components/icons';
+import { PeopleIcon, PlusIcon, SearchIcon } from '@/components/icons';
 import { SEARCH_DEBOUNCE_MS } from '@/components/layout/TitleBar';
+import { pct } from '@/components/layout/panelSizes';
 
 import { ContactEditor } from './ContactEditor';
 import { PeopleList } from './PeopleList';
@@ -110,6 +114,25 @@ function PeopleSearch() {
   );
 }
 
+/** One pane card: a rounded, subtly bordered surface filling its panel. */
+function PaneCard({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex h-full flex-col overflow-hidden rounded-xl border border-border-subtle bg-card">
+      {children}
+    </div>
+  );
+}
+
+/** The detail card before a person is picked: never a blank half-window. */
+function PersonPlaceholder() {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground">
+      <PeopleIcon size={36} />
+      <p className="text-sm">People</p>
+    </div>
+  );
+}
+
 /** The people page the shell's view switch mounts. */
 export function PeoplePane() {
   const rows = usePeopleStore((s) => s.rows);
@@ -150,36 +173,46 @@ export function PeoplePane() {
           </button>
         )}
       </div>
-      <div className="flex min-h-0 flex-1">
-        <aside
-          aria-label="People list"
-          className="flex w-[320px] shrink-0 flex-col border-r border-border-subtle bg-surface"
-        >
-          <WriteStatuses />
-          <PeopleList
-            rows={rows}
-            selectedPerson={detail?.person ?? null}
-            onOpen={(person) => void dispatch(intents.openPerson(person))}
-          />
-        </aside>
-        {detail !== null && (
-          <aside aria-label="Person detail" className="flex min-w-0 flex-1 flex-col">
-            <div className="flex h-[var(--pane-header-h)] shrink-0 items-center justify-end border-b border-border-subtle bg-surface px-2">
-              <button
-                type="button"
-                aria-label="Close person"
-                onClick={() => void dispatch(intents.closePerson())}
-                className="rounded-[var(--radius-xs)] px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                Close
-              </button>
-            </div>
-            <PersonDetailPane
-              detail={detail}
-              onEdit={() => setEditing('edit')}
-            />
-          </aside>
-        )}
+      <div className="min-h-0 flex-1 p-2">
+        <Group orientation="horizontal" className="h-full">
+          <Panel id="people-list" defaultSize={pct(32)} minSize={pct(24)}>
+            <PaneCard>
+              <aside aria-label="People list" className="flex h-full min-w-0 flex-col">
+                <WriteStatuses />
+                <PeopleList
+                  rows={rows}
+                  selectedPerson={detail?.person ?? null}
+                  onOpen={(person) => void dispatch(intents.openPerson(person))}
+                />
+              </aside>
+            </PaneCard>
+          </Panel>
+          <Separator className="mx-1 w-1.5 rounded-full bg-border transition-colors hover:bg-primary" />
+          <Panel id="person-detail" defaultSize={pct(68)} minSize={pct(40)}>
+            <PaneCard>
+              {detail === null ? (
+                <PersonPlaceholder />
+              ) : (
+                <aside aria-label="Person detail" className="flex h-full min-w-0 flex-col">
+                  <div className="flex h-[var(--pane-header-h)] shrink-0 items-center justify-end border-b border-border-subtle px-2">
+                    <button
+                      type="button"
+                      aria-label="Close person"
+                      onClick={() => void dispatch(intents.closePerson())}
+                      className="rounded-[var(--radius-xs)] px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      Close
+                    </button>
+                  </div>
+                  <PersonDetailPane
+                    detail={detail}
+                    onEdit={() => setEditing('edit')}
+                  />
+                </aside>
+              )}
+            </PaneCard>
+          </Panel>
+        </Group>
       </div>
       {editing !== null && (
         <ContactEditor

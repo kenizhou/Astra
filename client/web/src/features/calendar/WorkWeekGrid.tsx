@@ -12,9 +12,17 @@ import { useCalendarStore } from './calendarStore';
 import { dayMonthLabel, firstDayIndex } from './dayLabels';
 import { parseDayKey, workWeekOf } from './calendarRange';
 import { TimeGrid } from './TimeGrid';
+import type { CreateSlot } from './useEventDrag';
+
+interface WorkWeekGridProps {
+  /** Picks an event for the detail dock. */
+  onSelectEvent: (row: OccurrenceRow) => void;
+  /** Opens the editor prefilled with a drag-created slot. */
+  onCreateSlot?: (slot: CreateSlot) => void;
+}
 
 /** The work week's grid, anchored on the store's navigation anchor. */
-export function WorkWeekGrid({ onOpenEvent }: { onOpenEvent: (row: OccurrenceRow) => void }) {
+export function WorkWeekGrid({ onSelectEvent, onCreateSlot }: WorkWeekGridProps) {
   const anchor = useCalendarStore((s) => s.anchor);
   const firstDay = firstDayIndex(useSettingsStore((s) => s.settings.first_day_of_week));
 
@@ -23,5 +31,12 @@ export function WorkWeekGrid({ onOpenEvent }: { onOpenEvent: (row: OccurrenceRow
   }
   const days = workWeekOf(anchor, firstDay);
   const label = `Work week grid, ${dayMonthLabel(days[0]!)} to ${dayMonthLabel(days[4]!)} ${parseDayKey(days[0]!).year}`;
-  return <TimeGrid days={days} ariaLabel={label} onOpenEvent={onOpenEvent} />;
+  return (
+    <TimeGrid
+      days={days}
+      ariaLabel={label}
+      onSelectEvent={onSelectEvent}
+      onCreateSlot={onCreateSlot}
+    />
+  );
 }

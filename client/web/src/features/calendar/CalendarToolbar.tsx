@@ -2,14 +2,15 @@
 // The calendar toolbar: the navigation verbs (Today, the period arrows, the
 // view switch), the New event and Briefs actions, and the calendar manager
 // whose colour dots and visibility toggles decide which calendars draw. The
-// chrome is Astra's own; the layout stack is kylins' CalendarToolbar adapted.
+// manager shares its toggle with the rail's checkbox list; the chrome is
+// Astra's own; the layout stack is kylins' CalendarToolbar adapted.
 
 import { useEffect, useRef, useState } from 'react';
 
 import { ChevronLeftIcon, ChevronRightIcon, PlusIcon } from '@/components/icons';
-import { dispatch, intents } from '@/services/ipc';
 
 import { addDays, addMonths, zoneToday } from './calendarRange';
+import { setCalendarVisible } from './calendarVisibility';
 import { useCalendarStore, type CalendarView } from './calendarStore';
 import { monthYearLabel, firstDayIndex } from './dayLabels';
 import { CalendarDot } from './EventMarkers';
@@ -49,17 +50,6 @@ interface CalendarToolbarProps {
 function CalendarManagerRows() {
   const calendars = useCalendarStore((s) => s.calendars);
 
-  const toggle = (account: string, key: string): void => {
-    const without = calendars.filter(
-      (calendar) => !(calendar.account === account && calendar.id === key),
-    );
-    void dispatch(
-      intents.setVisibleCalendars(
-        without.map((calendar) => ({ account: calendar.account, key: calendar.id })),
-      ),
-    );
-  };
-
   return (
     <div className="flex flex-col gap-0.5">
       {calendars.map((calendar) => (
@@ -68,7 +58,9 @@ function CalendarManagerRows() {
           type="button"
           aria-label={`Show ${calendar.name}`}
           aria-pressed={calendar.visible}
-          onClick={() => toggle(calendar.account, calendar.id)}
+          onClick={() =>
+            setCalendarVisible(calendars, calendar.account, calendar.id, !calendar.visible)
+          }
           className="flex items-center gap-2 rounded-[var(--radius-xs)] px-2 py-1 text-left text-xs transition-colors hover:bg-hover"
           title={calendar.visible ? `Hide ${calendar.name}` : `Show ${calendar.name}`}
         >

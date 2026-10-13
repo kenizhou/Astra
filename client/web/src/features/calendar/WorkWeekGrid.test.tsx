@@ -80,7 +80,7 @@ afterEach(cleanup);
 
 describe('the work-week grid', () => {
   it('lays out the five weekdays of the anchor week', () => {
-    render(<WorkWeekGrid onOpenEvent={() => undefined} />);
+    render(<WorkWeekGrid onSelectEvent={() => undefined} />);
 
     screen.getByLabelText('Work week grid, 19 October to 23 October 2026');
     expect(screen.getByText('Mon')).toBeTruthy();
@@ -90,7 +90,7 @@ describe('the work-week grid', () => {
 
   it('honours the first-day setting in the week layout', () => {
     settingsState.settings.first_day_of_week = 'su';
-    render(<WorkWeekGrid onOpenEvent={() => undefined} />);
+    render(<WorkWeekGrid onSelectEvent={() => undefined} />);
 
     screen.getByLabelText('Work week grid, 18 October to 22 October 2026');
     expect(screen.getByText('Sun')).toBeTruthy();
@@ -99,7 +99,7 @@ describe('the work-week grid', () => {
   });
 
   it('places each row in the column of its own day', () => {
-    render(<WorkWeekGrid onOpenEvent={() => undefined} />);
+    render(<WorkWeekGrid onSelectEvent={() => undefined} />);
 
     const monday = screen.getByLabelText('Day column, Monday 19 October 2026');
     const wednesday = screen.getByLabelText('Day column, Wednesday 21 October 2026');
@@ -112,7 +112,7 @@ describe('the work-week grid', () => {
   });
 
   it('crosses a drag between columns as the day delta', () => {
-    render(<WorkWeekGrid onOpenEvent={() => undefined} />);
+    render(<WorkWeekGrid onSelectEvent={() => undefined} />);
 
     const block = screen.getByText('Monday standup').closest('[data-block]')!;
     const grid = screen.getByLabelText('Work week grid, 19 October to 23 October 2026');

@@ -18,7 +18,8 @@ import type {
   OccurrenceRow,
 } from '@/services/ipc';
 
-import { addDays, dayKeyOf, minutesInZone } from './calendarRange';
+import { addDays, dayKeyOf } from './calendarRange';
+import { localDelta, localSlotValue, localValueOf } from './localDateTime';
 import { useCalendarStore } from './calendarStore';
 import { useSettingsStore } from '@/features/settings/settingsStore';
 import { DeleteChoice, SeriesWarning } from './EventDialogSteps';
@@ -32,36 +33,6 @@ const REPEATS: ReadonlyArray<{ id: Frequency | 'none'; label: string }> = [
   { id: 'yearly', label: 'Yearly' },
 ];
 
-/** A datetime-local value as a civil day and minute. */
-function parseLocal(text: string): { day: string; minutes: number } {
-  const [date, clock] = text.split('T');
-  const [hour, minute] = (clock ?? '00:00').split(':').map(Number);
-  return { day: date!, minutes: hour! * 60 + minute! };
-}
-
-/** A civil day as its UTC day number, for day deltas. */
-function dayNumber(day: string): number {
-  const [year, month, date] = day.split('-').map(Number);
-  return Math.floor(Date.UTC(year!, month! - 1, date!) / 86_400_000);
-}
-
-/** The wall-clock delta between two local values, unsnapped. */
-function localDelta(from: string, to: string): { days: number; minutes: number } {
-  const a = parseLocal(from);
-  const b = parseLocal(to);
-  return { days: dayNumber(b.day) - dayNumber(a.day), minutes: b.minutes - a.minutes };
-}
-
-/** A zone-local clock of an instant as a datetime-local value. */
-function localValueOf(instant: string, zone: string): string {
-  const at = new Date(instant);
-  const day = dayKeyOf(at, zone);
-  const minutes = minutesInZone(at, zone);
-  const hh = String(Math.floor(minutes / 60)).padStart(2, '0');
-  const mm = String(minutes % 60).padStart(2, '0');
-  return `${day}T${hh}:${mm}`;
-}
-
 /** The field chrome every input shares. */
 function fieldClass(): string {
   return 'h-7 w-full rounded-[var(--radius-xs)] border border-input bg-background px-2 text-xs text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-ring';
@@ -70,12 +41,14 @@ function fieldClass(): string {
 interface EventDialogProps {
   /** The occurrence being edited, or null to create. */
   row: OccurrenceRow | null;
+  /** The slot a drag-create claimed, prefilling a create's day and clocks. */
+  slot?: { day: string; startMinutes: number; endMinutes: number } | null;
   /** Closes the dialog. */
   onClose: () => void;
 }
 
 /** The create and edit dialog over one event. */
-export function EventDialog({ row, onClose }: EventDialogProps) {
+export function EventDialog({ row, slot = null, onClose }: EventDialogProps) {
   const calendars = useCalendarStore((s) => s.calendars);
   const anchor = useCalendarStore((s) => s.anchor);
   const nowData = useCalendarStore((s) => s.nowData);
@@ -114,13 +87,22 @@ export function EventDialog({ row, onClose }: EventDialogProps) {
         ? `${defaultCalendar.account}:${defaultCalendar.id}`
         : '',
   );
-  const day = row !== null ? dayKeyOf(new Date(row.start), zone) : (anchor ?? '2026-01-01');
+  const day =
+    row !== null ? dayKeyOf(new Date(row.start), zone) : (slot?.day ?? anchor ?? '2026-01-01');
   const [allDay, setAllDay] = useState(row?.all_day ?? false);
   const [startText, setStartText] = useState(
-    row !== null ? localValueOf(row.start, zone) : `${day}T09:00`,
+    row !== null
+      ? localValueOf(row.start, zone)
+      : slot !== null
+        ? localSlotValue(slot.day, slot.startMinutes)
+        : `${day}T09:00`,
   );
   const [endText, setEndText] = useState(
-    row !== null ? localValueOf(row.end, zone) : `${day}T10:00`,
+    row !== null
+      ? localValueOf(row.end, zone)
+      : slot !== null
+        ? localSlotValue(slot.day, slot.endMinutes)
+        : `${day}T10:00`,
   );
   const [dateText, setDateText] = useState(day);
   const [repeat, setRepeat] = useState<Frequency | 'none'>('none');

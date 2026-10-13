@@ -2,7 +2,9 @@
 // The day grid: rows placed by their zone-local clock, the all-day lane, the
 // now line drawn from the snapshot's now data and advanced by the host clock
 // between publishes, holds drawn distinct from commitments, and the drag
-// approximation: a pointer sequence whose payload the calendarRange math pins.
+// gestures: a drag from a block crosses as the move intent, a drag over
+// empty time previews and claims a create slot, and a press that never
+// leaves its slot is a click.
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -24,6 +26,7 @@ vi.mock('@/features/settings/settingsStore', () => ({
 import { DayGrid } from './DayGrid';
 import { useCalendarStore } from './calendarStore';
 import type { OccurrenceRow } from '@/services/ipc';
+import type { CreateSlot } from './useEventDrag';
 
 /** A timed occurrence row at 09:00 zone time on 19 October 2026. */
 function row(over: Partial<OccurrenceRow> = {}): OccurrenceRow {
@@ -75,7 +78,7 @@ afterEach(cleanup);
 describe('the day grid', () => {
   it('places a row by its zone-local clock', () => {
     seedStore([row()]);
-    render(<DayGrid onOpenEvent={() => undefined} />);
+    render(<DayGrid onSelectEvent={() => undefined} />);
 
     const block = screen.getByText('Standup').closest('[data-block]');
     // 09:00 to 09:30 zone time: 540 minutes of 44px hours, half an hour tall.
@@ -87,7 +90,7 @@ describe('the day grid', () => {
   it('renders the hour gutter in 12 hour form per the clock setting', () => {
     settingsState.settings.twenty_four_clock = false;
     seedStore([]);
-    render(<DayGrid onOpenEvent={() => undefined} />);
+    render(<DayGrid onSelectEvent={() => undefined} />);
 
     expect(screen.getByText('1 PM')).toBeTruthy();
     expect(screen.queryByText('13:00')).toBeNull();
@@ -96,7 +99,7 @@ describe('the day grid', () => {
 
   it('rides an all-day row in its own lane above the grid', () => {
     seedStore([row({ all_day: true, start: '2026-10-18T22:00:00Z', end: '2026-10-19T22:00:00Z', accuracy: 'all_day' })]);
-    render(<DayGrid onOpenEvent={() => undefined} />);
+    render(<DayGrid onSelectEvent={() => undefined} />);
 
     const lane = screen.getByLabelText('All day, Monday 19 October 2026');
     expect(lane.textContent).toContain('Standup');
@@ -107,7 +110,7 @@ describe('the day grid', () => {
       row({ event: 'hold', title: 'Hold me', participation: 'needs_action' }),
       row({ event: 'kept', title: 'Committed' }),
     ]);
-    render(<DayGrid onOpenEvent={() => undefined} />);
+    render(<DayGrid onSelectEvent={() => undefined} />);
 
     const hold = screen.getByText('Hold me').closest('[data-block]');
     const kept = screen.getByText('Committed').closest('[data-block]');
@@ -120,7 +123,7 @@ describe('the day grid', () => {
     vi.setSystemTime(new Date('2026-10-19T08:12:00Z'));
     try {
       seedStore([row()]);
-      render(<DayGrid onOpenEvent={() => undefined} />);
+      render(<DayGrid onSelectEvent={() => undefined} />);
 
       // 10:12 in Amsterdam: 612 minutes down the 44px hours.
       let line = screen.getByLabelText('Now');
@@ -145,7 +148,7 @@ describe('the day grid', () => {
     vi.setSystemTime(new Date('2026-10-19T09:12:00Z'));
     try {
       seedStore([row()]);
-      render(<DayGrid onOpenEvent={() => undefined} />);
+      render(<DayGrid onSelectEvent={() => undefined} />);
 
       // The line stands where the snapshot placed it (10:12 in Amsterdam)
       // and the skew does not displace it; only elapsed host time moves it.
@@ -160,7 +163,7 @@ describe('the day grid', () => {
     seedStore([row()]);
     useCalendarStore.getState().setAnchor('2026-10-20');
 
-    render(<DayGrid onOpenEvent={() => undefined} />);
+    render(<DayGrid onSelectEvent={() => undefined} />);
 
     expect(screen.queryByLabelText('Now')).toBeNull();
   });
@@ -173,7 +176,7 @@ describe('the day grid', () => {
         event: '/dav/cal/work/default/standup.ics',
       }),
     ]);
-    render(<DayGrid onOpenEvent={() => undefined} />);
+    render(<DayGrid onSelectEvent={() => undefined} />);
 
     const block = screen.getByText('Standup').closest('[data-block]')!;
     const grid = screen.getByLabelText('Day grid, Monday 19 October 2026');
@@ -191,7 +194,7 @@ describe('the day grid', () => {
 
   it('moves a whole series when the row carries no occurrence token', () => {
     seedStore([row({ event: '/dav/cal/work/default/one.ics' })]);
-    render(<DayGrid onOpenEvent={() => undefined} />);
+    render(<DayGrid onSelectEvent={() => undefined} />);
 
     const block = screen.getByText('Standup').closest('[data-block]')!;
     const grid = screen.getByLabelText('Day grid, Monday 19 October 2026');
@@ -206,7 +209,7 @@ describe('the day grid', () => {
 
   it('holds the dragged position optimistically until the next publish', () => {
     seedStore([row()]);
-    render(<DayGrid onOpenEvent={() => undefined} />);
+    render(<DayGrid onSelectEvent={() => undefined} />);
 
     const grid = screen.getByLabelText('Day grid, Monday 19 October 2026');
     fireEvent.pointerDown(screen.getByText('Standup').closest('[data-block]')!, {
@@ -241,7 +244,7 @@ describe('the day grid', () => {
     const theRow = row();
     seedStore([theRow]);
     const opened: OccurrenceRow[] = [];
-    render(<DayGrid onOpenEvent={(r) => opened.push(r)} />);
+    render(<DayGrid onSelectEvent={(r) => opened.push(r)} />);
 
     const block = screen.getByText('Standup').closest('[data-block]')!;
     fireEvent.keyDown(block, { key: 'Enter' });
@@ -252,7 +255,7 @@ describe('the day grid', () => {
 
   it('never drags a block the calendar says is not movable', () => {
     seedStore([row({ event: 'no-move', title: 'Theirs', can_move: false })]);
-    render(<DayGrid onOpenEvent={() => undefined} />);
+    render(<DayGrid onSelectEvent={() => undefined} />);
 
     const block = screen.getByText('Theirs').closest('[data-block]')!;
     const grid = screen.getByLabelText('Day grid, Monday 19 October 2026');
@@ -260,5 +263,68 @@ describe('the day grid', () => {
     fireEvent.pointerUp(grid, { pointerId: 1, clientX: 60, clientY: 407 });
 
     expect(ipc.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('asks for a prefilled create from a drag over empty time', () => {
+    seedStore([]);
+    const slots: CreateSlot[] = [];
+    render(
+      <DayGrid onSelectEvent={() => undefined} onCreateSlot={(slot) => slots.push(slot)} />,
+    );
+
+    const grid = screen.getByLabelText('Day grid, Monday 19 October 2026');
+    // Down at 09:00, out at 10:00: the slot the editor opens prefilled with.
+    fireEvent.pointerDown(grid, { pointerId: 1, clientX: 60, clientY: 396 });
+    fireEvent.pointerMove(grid, { pointerId: 1, clientX: 60, clientY: 440 });
+    fireEvent.pointerUp(grid, { pointerId: 1, clientX: 60, clientY: 440 });
+
+    expect(slots).toEqual([{ day: '2026-10-19', startMinutes: 540, endMinutes: 600 }]);
+    expect(ipc.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('claims at least the anchor hour on the shortest real drag', () => {
+    seedStore([]);
+    const slots: CreateSlot[] = [];
+    render(
+      <DayGrid onSelectEvent={() => undefined} onCreateSlot={(slot) => slots.push(slot)} />,
+    );
+
+    const grid = screen.getByLabelText('Day grid, Monday 19 October 2026');
+    // Down at 09:00, up one slot later: the slot still spans the whole hour.
+    fireEvent.pointerDown(grid, { pointerId: 1, clientX: 60, clientY: 396 });
+    fireEvent.pointerUp(grid, { pointerId: 1, clientX: 60, clientY: 407 });
+
+    expect(slots).toEqual([{ day: '2026-10-19', startMinutes: 540, endMinutes: 600 }]);
+  });
+
+  it('creates nothing from a press that never leaves its slot', () => {
+    seedStore([]);
+    const slots: CreateSlot[] = [];
+    render(
+      <DayGrid onSelectEvent={() => undefined} onCreateSlot={(slot) => slots.push(slot)} />,
+    );
+
+    const grid = screen.getByLabelText('Day grid, Monday 19 October 2026');
+    fireEvent.pointerDown(grid, { pointerId: 1, clientX: 60, clientY: 396 });
+    fireEvent.pointerUp(grid, { pointerId: 1, clientX: 60, clientY: 396 });
+
+    expect(slots).toEqual([]);
+  });
+
+  it('draws the preview band while a create drag runs', () => {
+    seedStore([]);
+    render(<DayGrid onSelectEvent={() => undefined} onCreateSlot={() => undefined} />);
+
+    const grid = screen.getByLabelText('Day grid, Monday 19 October 2026');
+    fireEvent.pointerDown(grid, { pointerId: 1, clientX: 60, clientY: 396 });
+    fireEvent.pointerMove(grid, { pointerId: 1, clientX: 60, clientY: 407 });
+
+    const ghost = document.querySelector('[data-create-ghost]');
+    expect(ghost).not.toBeNull();
+    expect(ghost!.getAttribute('style')).toContain('top: 396px');
+    expect(ghost!.getAttribute('style')).toContain('height: 44px');
+
+    fireEvent.pointerUp(grid, { pointerId: 1, clientX: 60, clientY: 407 });
+    expect(document.querySelector('[data-create-ghost]')).toBeNull();
   });
 });

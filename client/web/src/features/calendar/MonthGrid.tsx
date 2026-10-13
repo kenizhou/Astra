@@ -19,11 +19,11 @@ const MAX_CHIPS = 3;
 function Chip({
   row,
   color,
-  onOpenEvent,
+  onSelectEvent,
 }: {
   row: OccurrenceRow;
   color: string | undefined;
-  onOpenEvent: (row: OccurrenceRow) => void;
+  onSelectEvent: (row: OccurrenceRow) => void;
 }) {
   const hold = isHold(row);
   const title = row.title === '' ? '(no title)' : row.title;
@@ -33,7 +33,7 @@ function Chip({
       data-chip=""
       data-hold={hold}
       title={title}
-      onClick={() => onOpenEvent(row)}
+      onClick={() => onSelectEvent(row)}
       className={`flex w-full items-center gap-1 truncate rounded-[var(--radius)] border px-1 text-left text-[10px] leading-4 ${holdClass(hold)}`}
       style={
         hold
@@ -58,12 +58,12 @@ function Chip({
 /** The month grid over the anchor month. */
 export function MonthGrid({
   onPickDay,
-  onOpenEvent,
+  onSelectEvent,
 }: {
   /** Navigates the anchor to a day (the day header and the overflow). */
   onPickDay: (dayKey: string) => void;
-  /** Opens an event's editor from a chip. */
-  onOpenEvent: (row: OccurrenceRow) => void;
+  /** Picks an event for the detail dock from a chip. */
+  onSelectEvent: (row: OccurrenceRow) => void;
 }) {
   const anchor = useCalendarStore((s) => s.anchor);
   const occurrences = useCalendarStore((s) => s.occurrences);
@@ -130,7 +130,7 @@ export function MonthGrid({
                   key={`${row.account}:${row.event}:${row.start}`}
                   row={row}
                   color={colorOf(row)}
-                  onOpenEvent={onOpenEvent}
+                  onSelectEvent={onSelectEvent}
                 />
               ))}
               {overflow > 0 && (

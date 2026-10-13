@@ -56,7 +56,7 @@ afterEach(cleanup);
 
 describe('the month grid', () => {
   it('renders the six weeks of the anchor month with dimmed neighbours', () => {
-    render(<MonthGrid onPickDay={pickDay} onOpenEvent={() => undefined} />);
+    render(<MonthGrid onPickDay={pickDay} onSelectEvent={() => undefined} />);
 
     // October 2026 opens on a Thursday: the grid runs 28 September to
     // 8 November, and the neighbouring months render as their own kind.
@@ -78,7 +78,7 @@ describe('the month grid', () => {
         row({ event: 'c', title: 'Past midnight', start: '2026-10-19T22:30:00Z', end: '2026-10-19T23:00:00Z' }),
       ],
     });
-    render(<MonthGrid onPickDay={pickDay} onOpenEvent={() => undefined} />);
+    render(<MonthGrid onPickDay={pickDay} onSelectEvent={() => undefined} />);
 
     const nineteenth = screen.getByLabelText('Monday 19 October 2026');
     const twentieth = screen.getByLabelText('Tuesday 20 October 2026');
@@ -93,7 +93,7 @@ describe('the month grid', () => {
         row({ event: `e${n}`, title: `Event ${n}`, start: '2026-10-20T07:00:00Z', end: '2026-10-20T08:00:00Z' }),
       ),
     });
-    render(<MonthGrid onPickDay={pickDay} onOpenEvent={() => undefined} />);
+    render(<MonthGrid onPickDay={pickDay} onSelectEvent={() => undefined} />);
 
     const twentieth = screen.getByLabelText('Tuesday 20 October 2026');
     expect(twentieth.textContent).toContain('Event 1');
@@ -110,7 +110,7 @@ describe('the month grid', () => {
         row({ event: 'h', title: 'Unanswered', participation: 'needs_action' }),
       ],
     });
-    render(<MonthGrid onPickDay={pickDay} onOpenEvent={() => undefined} />);
+    render(<MonthGrid onPickDay={pickDay} onSelectEvent={() => undefined} />);
 
     expect(screen.getByTitle('Weekly repeats')).toBeTruthy();
     const hold = screen.getByText('Unanswered').closest('[data-chip]');
@@ -118,7 +118,7 @@ describe('the month grid', () => {
   });
 
   it('answers a click on a day header with that day', () => {
-    render(<MonthGrid onPickDay={pickDay} onOpenEvent={() => undefined} />);
+    render(<MonthGrid onPickDay={pickDay} onSelectEvent={() => undefined} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Go to Thursday 22 October 2026' }));
 
