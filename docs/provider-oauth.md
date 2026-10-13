@@ -208,13 +208,17 @@ more, so token acquisition and refresh never cross `engine-api`.
    nothing persists.
 
 11. **A sign-in abandoned in the browser never wedges the surface.**
-   Closing the browser tab is undetectable, so a flow waits out its cap
-   and a second request must supersede the first rather than queue behind
-   it: the session holds one in-flight slot, a fresh begin cancels the
-   outstanding flow and starts a new one, and the flow's id check keeps a
-   displaced waiter from stealing the next flow's redirect (a stranger's
-   redirect is handed back to the channel, and the displaced waiter
-   answers Cancelled without emitting anything).
+   Closing the browser tab is undetectable, so the way out is explicit:
+   the session holds one in-flight slot, a fresh begin REFUSES while a
+   flow stands (the surface always carries the cancel: the wizard's
+   Cancel button and its close path both take the pair back, and the
+   waiter a cancel displaces parks until a redirect or capture close,
+   never blocking a later flow: the flow's id check hands a stranger's
+   redirect back to the channel and the displaced waiter answers
+   Cancelled without emitting anything). The cost of a cancel with no
+   redirect: one parked waiter per abandoned flow, released at the next
+   redirect or shutdown. A cap-and-supersede shape (mail-calendar's
+   waiting-out) is a recorded gap, not shipped behaviour.
 
 12. **The client registrations are injected at build time, and a build
    without one does not offer that route.** Google's and Microsoft's
@@ -278,7 +282,7 @@ partial · ⬜ planned (the consuming slice named).
 | Discovery fail-closed (HTTPS, issuer match, no redirects, S256) | ✅ | pinned offline, plus the live proof below |
 | RFC 7591 dynamic registration | 🚧 | code and tests; unproven against a real server |
 | Registrations injected, absent supported | ✅ | env-gated; none shipped today, the routes not offered |
-| Abandoned sign-in superseded, no crossed waiter | ✅ | pinned, including the displaced-waiter hand-back |
+| Abandoned sign-in cancelled (explicit; the supersede shape is a recorded gap), no crossed waiter | ✅ | pinned, including the displaced-waiter hand-back |
 | Failed sign-in surfaced with its classification | ✅ | the refusal sentences and the honest success sentence |
 
 ## The live discovery proof
