@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The tool rail: the shell's view switch as an icon column down the window's
-// left edge. The view buttons pin the active view with a primary bar; the
-// foot cluster holds the folder drawer toggle (compact windows only) and the
-// agent and AI documents toggles.
+// left edge, running the window's full height. Its empty stretch is a drag
+// region, since the title bar no longer spans this column. The view buttons
+// pin the active view with a primary bar; the foot cluster holds the folder
+// drawer toggle (compact windows only) and the agent and AI documents
+// toggles.
 
 import { AgentStatus } from '@/features/agent/AgentPanel';
 import { AiStatus } from '@/features/ai-panel/AiPanel';
@@ -33,6 +35,7 @@ export function ToolWindowBar() {
   return (
     <nav
       aria-label="Tool windows"
+      data-tauri-drag-region
       className="flex w-[var(--tool-w)] shrink-0 flex-col items-center justify-between border-r border-border-subtle bg-chrome py-2"
     >
       <div className="flex flex-col items-center gap-2">
