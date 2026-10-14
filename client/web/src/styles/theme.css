@@ -236,11 +236,12 @@
 }
 
 [data-texture='warm'].light {
-  /* Honest parchment instead of cool white. */
+  /* Honest parchment, with the working panes grounded in light grey so
+     the reading paper stays the brightest surface. */
   --series-50: oklch(0.975 0.01 90);
   --series-100: oklch(0.955 0.014 90);
   --series-200: oklch(0.918 0.018 90);
-  --background: oklch(0.948 0.017 90);
+  --background: oklch(0.935 0.006 90);
   --surface: oklch(0.925 0.02 90);
   --card: oklch(0.99 0.007 90);
   --paper: var(--card);
