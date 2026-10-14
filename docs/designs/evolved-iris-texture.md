@@ -141,6 +141,32 @@ into the spec.
 - The recording: five moments total spanning helped and lied, in
   docs/dogfood/ (the directory the spec already names).
 
+
+## Texture Execution (approved 2026-10-14, design-shotgun: A3 "Warm, sharper")
+
+The material values, settled by board review against the live-rendered
+variants (the founder rated A 5/5 first, asked for more like it, and
+picked the sharpened execution over the softer one):
+
+- Dark ground: warm graphite, series hue 60 at very low chroma
+  (background oklch 0.205 0.014 60, panel 0.258 0.017 60, paper
+  0.255 0.019 60: the reading pane pushes visibly lighter than the
+  canvas).
+- Hairline: 1px, oklch 0.44 0.018 60 in dark (glanceable structure),
+  oklch 0.78 0.022 90 in light, replacing border-subtle on pane and row
+  separations.
+- Light ground: parchment, background oklch 0.948 0.017 90.
+- Ink: warm off-white oklch 0.94 0.009 60 in dark.
+- Type stops: 380 previews, 450 senders, 560 subjects; the reading
+  pane subject one step prouder at 640 with -0.015em tracking.
+- Accent discipline unchanged: the iris primary, the unread badge, and
+  the selected row only.
+- Reference: the approved render at
+  ~/.gstack/projects/kenizhou-Astra/designs/texture-mail-20261014/shots/texture-a3.jpg
+  (the harness page client/web/.gstack/designs/texture/texture-a3.html).
+- This extends UI1 D2's material section; the texture chapter's tokens
+  are these values, not a rediscovery.
+
 ## Open Questions
 
 - Answered: the warm ground gets the dark-specific answer (warm
