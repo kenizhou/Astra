@@ -103,7 +103,7 @@ function RowWindow({ items, highlight, now, openRow, showMore }: RowWindowProps)
               {entry.kind === 'header' ? (
                 <div
                   role="presentation"
-                  className="border-b border-border-subtle px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-text"
+                  className="px-3 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wide text-muted-text"
                 >
                   {entry.label}
                 </div>
@@ -123,7 +123,7 @@ function RowWindow({ items, highlight, now, openRow, showMore }: RowWindowProps)
         <button
           type="button"
           onClick={() => void dispatch(intents.showMore())}
-          className="w-full border-t border-border px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          className="w-full px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         >
           Show more
         </button>

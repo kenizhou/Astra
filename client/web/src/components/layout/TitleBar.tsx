@@ -7,8 +7,8 @@
 // theme override cycle, the account setup entry, and the settings gear sit
 // on the strip as their own no-drag targets by virtue of being the event's
 // target rather than the region itself. The island holds the strip's centre
-// between two drag regions. The strip wears the glass treatment with no
-// underline: the ribbon's own top edge carries the separation.
+// between two drag regions. The strip wears the glass treatment over a
+// hairline bottom edge, the same rule the panes separate with.
 
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
@@ -48,7 +48,7 @@ export function TitleBar() {
   return (
     <header
       data-tauri-drag-region
-      className="glass relative flex h-[var(--header-h)] shrink-0 select-none items-center pl-3 text-chrome-foreground"
+      className="glass relative flex h-[var(--header-h)] shrink-0 select-none items-center border-b border-border-subtle pl-3 text-chrome-foreground"
     >
       <span
         data-tauri-drag-region

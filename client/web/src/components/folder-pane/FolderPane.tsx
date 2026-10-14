@@ -13,7 +13,7 @@ export function FolderPane() {
   return (
     <nav
       aria-label="Mail folders"
-      className="h-full w-full overflow-y-auto bg-surface py-1"
+      className="h-full w-full overflow-y-auto bg-background py-2"
     >
       {accounts.length === 0 && (
         <p className="px-3 py-2 text-xs text-muted-text">

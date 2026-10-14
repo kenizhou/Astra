@@ -49,29 +49,30 @@ function PanelCard({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** The folder pane's card: squared and bordered only at the sides, so the
- *  tree reads as part of the window's edge rather than a floating card. */
-function FlushCard({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex h-full flex-col overflow-hidden border-x border-border-subtle bg-card">
-      {children}
-    </div>
-  );
-}
-
-/** The pill handle between two panels. */
+/** The pane divider: the A3 hairline between two panes. The grab zone
+ *  reaches three pixels to either side invisibly; hover lifts a quiet wash
+ *  of the ink colour over the line, never the accent, so a drag reads as
+ *  the structure yielding rather than a control lighting up. */
 function VDivider() {
   return (
-    <Separator className="mx-1 w-1.5 rounded-full bg-border transition-colors hover:bg-primary" />
+    <Separator className="group relative w-px shrink-0 cursor-col-resize bg-[var(--hairline)]">
+      <span aria-hidden="true" className="absolute inset-y-0 -right-[3px] -left-[3px]" />
+      <span
+        aria-hidden="true"
+        className="absolute inset-y-0 left-1/2 w-[3px] -translate-x-1/2 rounded-full bg-[var(--muted-text)] opacity-0 transition-opacity duration-[var(--dur-row)] group-hover:opacity-30"
+      />
+    </Separator>
   );
 }
 
 /** The mail view: a resizable row of folder tree, list, and reading panes,
- *  plus the docked agent column. The composer lives in the reading pane's
- *  quick-reply strip and in pop-out windows now, so the row holds no fourth
- *  column. Every conditional panel joins the Group key, so the layout
- *  remounts cleanly when one arrives or leaves. The default sizes sum to
- *  one hundred in each combination. */
+ *  plus the docked agent column, flush against one another with no card
+ *  chrome: hairline dividers part the panes and the reading pane steps up
+ *  to its paper. The composer lives in the reading pane's quick-reply
+ *  strip and in pop-out windows now, so the row holds no fourth column.
+ *  Every conditional panel joins the Group key, so the layout remounts
+ *  cleanly when one arrives or leaves. The default sizes sum to one
+ *  hundred in each combination. */
 function MailRow({ compact }: { compact: boolean }) {
   const agentOpen = useUiStore((s) => s.agentOpen);
 
@@ -82,30 +83,22 @@ function MailRow({ compact }: { compact: boolean }) {
       className="h-full"
     >
       {!compact && (
-        <Panel id="folder-pane" defaultSize={pct(15)} minSize={pct(10)}>
-          <FlushCard>
-            <FolderPane />
-          </FlushCard>
+        <Panel id="folder-pane" defaultSize={pct(17)} minSize={pct(10)}>
+          <FolderPane />
         </Panel>
       )}
       {!compact && <VDivider />}
-      <Panel id="message-list" defaultSize={pct(agentOpen ? 36 : 41)} minSize={pct(25)}>
-        <PanelCard>
-          <MessageList />
-        </PanelCard>
+      <Panel id="message-list" defaultSize={pct(agentOpen ? 35 : 40)} minSize={pct(25)}>
+        <MessageList />
       </Panel>
       <VDivider />
-      <Panel id="reading-pane" defaultSize={pct(agentOpen ? 27 : 44)} minSize={pct(20)}>
-        <PanelCard>
-          <ReadingPane />
-        </PanelCard>
+      <Panel id="reading-pane" defaultSize={pct(agentOpen ? 26 : 43)} minSize={pct(20)}>
+        <ReadingPane />
       </Panel>
       {agentOpen && <VDivider />}
       {agentOpen && (
         <Panel id="agent-dock" defaultSize={pct(22)} minSize={pct(14)} maxSize={pct(40)}>
-          <PanelCard>
-            <AgentPanel />
-          </PanelCard>
+          <AgentPanel />
         </Panel>
       )}
     </Group>
@@ -124,7 +117,9 @@ export function AppShell() {
       <CommandRibbon />
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <ToolWindowBar />
-        <main className="min-w-0 flex-1 bg-surface p-2">
+        {/* The mail view runs flush to the window's edges; the card surface
+            stays for the calendar and people views. */}
+        <main className={shellView === 'mail' ? 'min-w-0 flex-1' : 'min-w-0 flex-1 bg-surface p-2'}>
           <div className="relative h-full">
             {shellView === 'people' ? (
               <PanelCard>

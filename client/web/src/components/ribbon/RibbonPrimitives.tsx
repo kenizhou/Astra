@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The ribbon's building blocks: a group of buttons separated from the next
-// group by a hairline, and the button itself, labelled by text beside its
-// icon or, under the compact breakpoint, by its tooltip alone. A group
-// never wraps: when space runs out the shell clips whole trailing groups.
+// The ribbon's building blocks: a group of buttons spaced from the next
+// group by its padding alone (the A3 chrome draws no separators), and the
+// button itself, labelled by text beside its icon or, under the compact
+// breakpoint, by its tooltip alone. A group never wraps: when space runs
+// out the shell clips whole trailing groups.
 
 import type { ComponentType } from 'react';
 
 import type { IconProps } from '@/components/icons';
 
-/** One cluster of ribbon buttons, hairline-separated from the next. */
+/** One cluster of ribbon buttons; spacing alone parts it from the next. */
 export function RibbonGroup({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex shrink-0 flex-nowrap items-center gap-0.5 border-r border-border-subtle px-1.5 last:border-r-0">
+    <div className="flex shrink-0 flex-nowrap items-center gap-0.5 px-1.5">
       {children}
     </div>
   );

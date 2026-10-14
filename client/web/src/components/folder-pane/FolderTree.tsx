@@ -66,16 +66,12 @@ function FolderTreeRow({ accountId, row, selected }: FolderTreeRowProps) {
       aria-level={row.depth + 1}
       data-depth={row.depth}
       className={`relative flex min-h-[var(--row-h)] items-center gap-2 rounded-lg pr-2 text-[13px] transition-colors ${
-        selected ? 'bg-primary-muted text-[var(--selected-text)]' : 'text-foreground hover:bg-hover'
+        selected
+          ? 'bg-selected font-medium text-[var(--selected-text)]'
+          : 'text-foreground hover:bg-hover'
       }`}
       style={{ paddingLeft: `${12 + row.depth * 14}px` }}
     >
-      {selected && (
-        <span
-          aria-hidden="true"
-          className="absolute bottom-0 left-0 top-0 w-[3px] rounded-r-full iris-line-v"
-        />
-      )}
       {row.has_children ? (
         <button
           type="button"
@@ -125,16 +121,12 @@ function OutboxTreeRow({ accountId }: { accountId: string }) {
       role="treeitem"
       aria-selected={selected}
       aria-level={1}
-      className={`relative flex h-9 items-center gap-2 rounded-lg pl-3 pr-2 text-[13px] transition-colors ${
-        selected ? 'bg-primary-muted text-[var(--selected-text)]' : 'text-foreground hover:bg-hover'
+      className={`relative flex min-h-[var(--row-h)] items-center gap-2 rounded-lg pl-3 pr-2 text-[13px] transition-colors ${
+        selected
+          ? 'bg-selected font-medium text-[var(--selected-text)]'
+          : 'text-foreground hover:bg-hover'
       }`}
     >
-      {selected && (
-        <span
-          aria-hidden="true"
-          className="absolute bottom-0 left-0 top-0 w-[3px] rounded-r-full iris-line-v"
-        />
-      )}
       <span className="h-4 w-4 shrink-0" aria-hidden="true" />
       <span aria-hidden="true" className="flex w-4 shrink-0 items-center justify-center text-muted-text">
         <OutboxIcon size={15} />

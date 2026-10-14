@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The reading header: the subject at the subject type scale, then the sender
-// block with the avatar beside a semibold name over the bare address, and the
-// full UTC stamp right-aligned on that row. The avatar resolves through the
-// people command on the sender's address, the one resolution every surface
-// shares. The stamp derives from the UTC parts the same way the list's does,
-// with the year always shown and the time of day appended in the form the
-// clock setting names.
+// The reading header: the subject at the reading type scale (19px, weight
+// 640, tightened tracking; the A3 voice), then the sender block with the
+// avatar beside a semibold name over the bare address, and the full UTC
+// stamp right-aligned on that row. The pane's close button rides the
+// header's top-right corner. The avatar resolves through the people
+// command on the sender's address, the one resolution every surface
+// shares. The stamp derives from the UTC parts the same way the list's
+// does, with the year always shown and the time of day appended in the
+// form the clock setting names.
 
+import { CloseIcon } from '@/components/icons';
 import { Avatar } from '@/features/people/Avatar';
 import { useSettingsStore } from '@/features/settings/settingsStore';
 
@@ -58,6 +61,8 @@ interface ReadingHeaderProps {
   fromAddress: string;
   /** When the message was sent, as a whole-second UTC instant string. */
   sentAt: string;
+  /** Closes the pane; the button rides the header's top-right corner. */
+  onClose?: () => void;
   /** When set and a sender stands, the header offers an add-contact chip. */
   onAddContact?: () => void;
 }
@@ -67,6 +72,7 @@ export function ReadingHeader({
   fromName,
   fromAddress,
   sentAt,
+  onClose,
   onAddContact,
 }: ReadingHeaderProps) {
   const twentyFour = useSettingsStore((s) => s.settings.twenty_four_clock);
@@ -74,10 +80,20 @@ export function ReadingHeader({
   const displayName = fromName === '' ? fromAddress : fromName;
   const date = formatReadingDate(sentAt, twentyFour);
   return (
-    <div className="shrink-0 border-b border-border-subtle px-4 pb-3 pt-4">
-      <h2 className="truncate [font:var(--text-subject)] text-foreground">
+    <div className="relative shrink-0 border-b border-[var(--hairline)] px-7 pb-3.5 pt-5">
+      <h2 className="truncate pr-8 text-[19px] font-[640] leading-[1.3] tracking-[-0.015em] text-foreground">
         {subject === '' ? '(no subject)' : subject}
       </h2>
+      {onClose !== undefined && (
+        <button
+          type="button"
+          aria-label="Close reading pane"
+          onClick={onClose}
+          className="absolute right-4 top-4 inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-text transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <CloseIcon size={16} />
+        </button>
+      )}
       {hasSender ? (
         <div className="mt-2.5 flex items-center gap-3">
           {fromAddress !== '' && <Avatar address={fromAddress} size={36} />}
