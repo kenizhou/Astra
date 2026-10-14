@@ -1,21 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The desktop shell: the left column (the tool rail beside the folder pane
-// in the mail view) runs the window's full height, and the frameless title
-// bar, the command ribbon, the content, and the status bar stack over the
-// remaining width, all coloured through the theme tokens. The ribbon stands
-// in the mail view only. The content is the active view: the mail view is a
-// resizable panel row (message list and reading pane, the quick-reply strip
-// docked at the reading pane's bottom, and the agent panel docked right
-// when the rail's toggle opens it), the calendar and people views fill one
-// card each. Under the compact breakpoint the folder pane leaves the column
-// and rides the drawer the rail opens. Compose starts from the ribbon's New
-// Email, which opens the pop-out composer window; the app start resume
-// opens the stored draft into the strip, a landed compose request opens a
-// pop-out window hydrated from it, the AI documents panel rides above the
-// status bar's corner when the rail's toggle opens it, the send-result
-// toast says when a queued send has gone out, the settings screen rides
-// above the shell when the title bar's gear opens it, and the account setup
-// flow rides above everything when it is open.
+// The desktop shell: the frameless title bar spans the top, the status bar
+// spans the bottom, and the middle row is the left column (the tool rail
+// beside the folder pane in the mail view) next to the right zone (the
+// command ribbon over the content). The right zone rounds its two left
+// corners into the column, so the junctions read as one carved surface.
+// The ribbon stands in the mail view only. The content is the active view:
+// the mail view is a resizable panel row (message list and reading pane,
+// the quick-reply strip docked at the reading pane's bottom, and the agent
+// panel docked right when the rail's toggle opens it), the calendar and
+// people views fill one card each. Under the compact breakpoint the folder
+// pane leaves the column and rides the drawer the rail opens. Compose
+// starts from the ribbon's New Email, which opens the pop-out composer
+// window; the app start resume opens the stored draft into the strip, a
+// landed compose request opens a pop-out window hydrated from it, the AI
+// documents panel rides above the status bar's corner when the rail's
+// toggle opens it, the send-result toast says when a queued send has gone
+// out, the settings screen rides above the shell when the title bar's gear
+// opens it, and the account setup flow rides above everything when it is
+// open.
 
 import { Group, Panel, Separator } from 'react-resizable-panels';
 
@@ -107,51 +109,51 @@ export function AppShell() {
   useComposeRequestHydration();
 
   return (
-    <div className="relative flex h-full overflow-hidden bg-background font-ui text-foreground">
-      {/* The left column runs the window's full height: the tool rail,
-          then the folder pane while the mail view stands. */}
-      <ToolWindowBar />
-      {shellView === 'mail' && !compact && (
-        <div className="w-[var(--folders-w)] shrink-0 border-r border-[var(--hairline)]">
-          <FolderPane />
-        </div>
-      )}
-      {/* The right stack rounds its left corners where it meets the left
-          column at the title bar and the status bar: the junction reads as
-          one carved surface, not two abutting frames. */}
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-l-[16px]">
-        <TitleBar />
-        <CommandRibbon />
-        {/* The mail view runs flush; the card surface stays for the
-            calendar and people views. */}
-        <main
-          className={
-            shellView === 'mail'
-              ? 'min-h-0 min-w-0 flex-1'
-              : 'min-h-0 min-w-0 flex-1 bg-surface p-2'
-          }
-        >
-          <div className="relative h-full">
-            {shellView === 'people' ? (
-              <PanelCard>
-                <PeoplePane />
-              </PanelCard>
-            ) : shellView === 'calendar' ? (
-              <PanelCard>
-                <CalendarPane />
-              </PanelCard>
-            ) : (
-              <MailRow />
-            )}
-            {shellView === 'mail' && compact && (
-              <FolderPaneDrawer>
-                <FolderPane />
-              </FolderPaneDrawer>
-            )}
+    <div className="relative flex h-full flex-col overflow-hidden bg-background font-ui text-foreground">
+      <TitleBar />
+      <div className="flex min-h-0 flex-1">
+        <ToolWindowBar />
+        {shellView === 'mail' && !compact && (
+          <div className="w-[var(--folders-w)] shrink-0 border-r border-[var(--hairline)]">
+            <FolderPane />
           </div>
-        </main>
-        <StatusBar />
+        )}
+        {/* The right zone rounds its two left corners into the column: the
+            junctions at the title bar and the status bar read as one carved
+            surface, not two abutting frames. */}
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-l-xl">
+          <CommandRibbon />
+          {/* The mail view runs flush; the card surface stays for the
+              calendar and people views. */}
+          <main
+            className={
+              shellView === 'mail'
+                ? 'min-h-0 min-w-0 flex-1'
+                : 'min-h-0 min-w-0 flex-1 bg-surface p-2'
+            }
+          >
+            <div className="relative h-full">
+              {shellView === 'people' ? (
+                <PanelCard>
+                  <PeoplePane />
+                </PanelCard>
+              ) : shellView === 'calendar' ? (
+                <PanelCard>
+                  <CalendarPane />
+                </PanelCard>
+              ) : (
+                <MailRow />
+              )}
+              {shellView === 'mail' && compact && (
+                <FolderPaneDrawer>
+                  <FolderPane />
+                </FolderPaneDrawer>
+              )}
+            </div>
+          </main>
+        </div>
       </div>
+      <StatusBar />
       <AiPanel />
       <SendResultToast />
       <SettingsScreen />
