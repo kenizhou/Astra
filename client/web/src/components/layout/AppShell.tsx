@@ -111,11 +111,18 @@ export function AppShell() {
   return (
     <div className="relative flex h-full flex-col overflow-hidden bg-background font-ui text-foreground">
       <TitleBar />
-      <div className="flex min-h-0 flex-1">
+      {/* The middle row carries the folder pane's tone, so the right
+          zone's carved corners fill with the left column's colour. */}
+      <div className={`flex min-h-0 flex-1 ${shellView === 'mail' ? 'bg-surface' : ''}`}>
         <ToolWindowBar />
         {shellView === 'mail' && !compact && (
-          <div className="w-[var(--folders-w)] shrink-0 border-r border-[var(--hairline)]">
-            <FolderPane />
+          /* The folder pane stands flush in the column (no padding around
+             it), bordered, its left corners rounding against the rail's
+             chrome the way the right zone rounds against the column. */
+          <div className="w-[var(--folders-w)] shrink-0 bg-chrome">
+            <div className="h-full overflow-hidden rounded-l-xl border border-border-subtle bg-surface">
+              <FolderPane />
+            </div>
           </div>
         )}
         {/* The right zone rounds its two left corners into the column: the
