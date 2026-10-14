@@ -193,7 +193,7 @@ export function MessageList() {
   return (
     <section
       aria-label="Message list"
-      className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background"
+      className="flex min-w-0 flex-1 flex-col overflow-hidden border-b border-[var(--hairline)] bg-background"
     >
       <ListToolbar
         folderName={folderDisplayName(accounts, folder)}

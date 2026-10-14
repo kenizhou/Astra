@@ -25,7 +25,7 @@ export function CommandRibbon() {
   return (
     <nav
       aria-label="Command ribbon"
-      className="flex h-[var(--ribbon-h)] shrink-0 items-stretch border-b border-border-subtle bg-chrome px-1 py-1"
+      className="flex h-[var(--ribbon-h)] shrink-0 items-stretch border-b border-[var(--hairline)] bg-chrome px-1 py-1"
     >
       <div className="flex min-w-0 flex-nowrap items-stretch overflow-hidden">
         {composing ? <ComposeRibbon iconOnly={iconOnly} /> : <ReadRibbon iconOnly={iconOnly} />}
