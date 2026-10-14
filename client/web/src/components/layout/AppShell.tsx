@@ -153,13 +153,12 @@ export function AppShell() {
         {shellView === 'mail' && !compact ? (
           /* The folder pane resizes against the right zone through the
              flush handle; it stands flush in its column on the window's
-             ground (the message list's own fill), bordered top, left, and
-             bottom only, its left corners rounding against the rail's
-             chrome. */
+             ground (the message list's own fill), bordered on every side,
+             its left corners rounding against the rail's chrome. */
           <Group orientation="horizontal" className="min-w-0 flex-1">
             <Panel id="folder-pane" defaultSize={pct(18)} minSize={pct(12)} maxSize={pct(36)}>
               <div className="h-full bg-chrome">
-                <div className="h-full overflow-hidden rounded-l-xl border-y border-l border-border-subtle bg-background">
+                <div className="h-full overflow-hidden rounded-l-xl border border-border-subtle bg-background">
                   <FolderPane />
                 </div>
               </div>
