@@ -13,14 +13,14 @@ export function FolderPane() {
   return (
     <nav
       aria-label="Mail folders"
-      className="h-full w-full overflow-y-auto bg-background py-2"
+      className="h-full w-full overflow-y-auto py-2"
     >
       {accounts.length === 0 && (
         <p className="px-3 py-2 text-xs text-muted-text">
           No account yet. Add one from the title bar.
         </p>
       )}
-      <div role="tree" aria-label="Accounts" className="space-y-1 px-1.5">
+      <div role="tree" aria-label="Accounts" className="space-y-1 px-3">
         <UnifiedInboxRow accounts={accounts} />
         {accounts.map((account, index) => (
           <FolderTree key={account.account_id} account={account} paletteIndex={index % 8} />

@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The tool rail's button shape, shared by the rail's own buttons and the
-// outbox, agent, and AI documents toggles that ride it.
+// outbox, agent, and AI documents toggles that ride it. The block stays
+// small inside the rail so a highlight floats with air on both sides.
 
 export const RAIL_BUTTON_CLASS =
-  'relative grid h-12 w-12 place-items-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+  'relative grid h-10 w-10 place-items-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
 /** The rail button's idle and active colour pairings. */
 export function railButtonColours(active: boolean): string {
