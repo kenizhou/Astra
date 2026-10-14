@@ -74,7 +74,7 @@ import { useReadingStore } from '@/stores/readingStore';
 import { useSendingStore } from '@/stores/sendingStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useAgentStore } from '@/features/agent/agentStore';
-import { useComposerStore, mintCompositionId } from '@/features/composer/composerStore';
+import { useComposerStore } from '@/features/composer/composerStore';
 import { documentToEditor } from '@/features/composer/documentWire';
 import { useSendResultStore } from '@/features/outbox/sendResult';
 import type { MailboxListSnapshot } from '@/services/surfaces';
@@ -152,26 +152,28 @@ describe('the mail row layout', () => {
     remote_image_count: 0,
   };
 
-  it('lets the message list fill the row while no message is open', () => {
+  it('keeps the reading pane standing on its empty state while nothing is open', () => {
     render(<AppShell />);
 
-    expect(screen.queryByRole('complementary', { name: 'Reading pane' })).toBeNull();
+    const pane = screen.getByRole('complementary', { name: 'Reading pane' });
+    expect(within(pane).getByText(/Select a message/)).toBeTruthy();
   });
 
-  it('opens the reading pane when a reading snapshot lands', () => {
+  it('fills the message list pane to the full height of the row', () => {
+    render(<AppShell />);
+
+    const list = screen.getByRole('region', { name: 'Message list' });
+    expect(list.className).toContain('h-full');
+  });
+
+  it('opens the message in the reading pane when a reading snapshot lands', () => {
     render(<AppShell />);
     act(() => {
       useReadingStore.getState().applySnapshot(SNAPSHOT);
     });
 
-    expect(screen.getByRole('complementary', { name: 'Reading pane' })).toBeTruthy();
-  });
-
-  it('keeps the reading pane while a composition stands in the strip', () => {
-    useComposerStore.setState({ open: true, composition: mintCompositionId() });
-    render(<AppShell />);
-
-    expect(screen.getByRole('complementary', { name: 'Reading pane' })).toBeTruthy();
+    const pane = screen.getByRole('complementary', { name: 'Reading pane' });
+    expect(within(pane).getByText('Quarterly report')).toBeTruthy();
   });
 });
 
