@@ -5,7 +5,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import calendarFixture from './calendar_snapshot.json';
-import { invoke, listen } from './harness';
+import cjkThread from './cjk_thread.json';
+import { invoke, listen, pushFixtureEvent, resetFixtures, setFixtureResponse } from './harness';
 import mailboxListFixture from './mailbox_list.json';
 import mcpStatusFixture from './mcp_status.json';
 import peopleFixture from './people_snapshot.json';
@@ -59,5 +60,57 @@ describe('fixture harness', () => {
     expect(typeof unlisten).toBe('function');
     expect(() => unlisten()).not.toThrow();
     expect(handler).not.toHaveBeenCalled();
+  });
+});
+
+describe('fixture harness event injection', () => {
+  it('delivers a pushed event to every registered listener, deep cloned', async () => {
+    const received: unknown[] = [];
+    const unA = await listen('surface_changed', (e) => received.push(e.payload));
+    const unB = await listen('surface_changed', (e) => received.push(e.payload));
+    const payload = { surface: 'reading' };
+    pushFixtureEvent('surface_changed', payload);
+    payload.surface = 'mailbox_list'; // mutating the caller's object after the push
+    expect(received).toEqual([{ surface: 'reading' }, { surface: 'reading' }]);
+    unA();
+    unB();
+    pushFixtureEvent('surface_changed', { surface: 'calendar' });
+    expect(received).toHaveLength(2); // both unlistened: no delivery
+  });
+
+  it('applies pushes in dispatch order', async () => {
+    const order: string[] = [];
+    const un = await listen('surface_changed', (e) => order.push((e.payload as { surface: string }).surface));
+    pushFixtureEvent('surface_changed', { surface: 'reading' });
+    pushFixtureEvent('surface_changed', { surface: 'calendar' });
+    pushFixtureEvent('surface_changed', { surface: 'people' });
+    expect(order).toEqual(['reading', 'calendar', 'people']);
+    un();
+  });
+
+  it('swaps a pull answer with setFixtureResponse, and resetFixtures restores it', async () => {
+    await expect(invoke('reading')).resolves.toBeNull();
+    setFixtureResponse('reading', { subject: 'swapped' });
+    await expect(invoke('reading')).resolves.toEqual({ subject: 'swapped' });
+    resetFixtures();
+    await expect(invoke('reading')).resolves.toBeNull();
+  });
+
+  it('serves the CJK thread for the bi-font verification', async () => {
+    setFixtureResponse('reading', cjkThread);
+    const snapshot = (await invoke('reading')) as { subject: string; plain: string };
+    expect(snapshot.subject).toBe('季度报告');
+    expect(snapshot.plain).toContain('董事会');
+    resetFixtures();
+  });
+});
+
+describe('the production bundle never carries the harness', () => {
+  it('aliases the Tauri bridge only in fixtures mode', async () => {
+    const { tauriBridgeAliases } = await import('../../../fixture-alias');
+    expect(tauriBridgeAliases('fixtures', '/cfg')['@tauri-apps/api/core']).toContain('harness.ts');
+    expect(tauriBridgeAliases('fixtures', '/cfg')['@tauri-apps/api/event']).toContain('harness.ts');
+    expect(tauriBridgeAliases('production', '/cfg')).toEqual({});
+    expect(tauriBridgeAliases('test', '/cfg')).toEqual({});
   });
 });

@@ -5,10 +5,14 @@
 // the recorded snapshots in this directory. Design-review and QA skills
 // drive that server; no Tauri host and no live account is involved.
 //
-// The harness is read-only by contract: pulls resolve with the recorded
-// snapshot (a fresh copy each time), mutating commands settle as null and
-// say so once per command, and no event ever fires, so every surface shows
-// its at-rest state. Setting the `__TAURI_INTERNALS__` sentinel at module
+// The harness is read-only at rest: pulls resolve with the recorded
+// snapshot (a fresh copy each time), and mutating commands settle as null
+// and say so once per command. Event injection (the CAND-1 contract) makes
+// the other states reachable: a driver calls `setFixtureResponse` to swap
+// what a pull answers and `pushFixtureEvent` to emit a fixture event;
+// pushes are deep clones delivered in dispatch order, and unlisten
+// semantics match the Tauri bridge's. Setting the `__TAURI_INTERNALS__`
+// sentinel at module
 // load is what lets the hydration path run: surfaceEvents reads it as its
 // Tauri presence guard.
 
@@ -43,6 +47,9 @@ const announced = new Set<string>();
 
 /** The `invoke` the aliased core module serves. */
 export function invoke<T>(cmd: string, _args?: Record<string, unknown>): Promise<T> {
+  if (overrides.has(cmd)) {
+    return Promise.resolve(structuredClone(overrides.get(cmd)) as T);
+  }
   if (cmd in SNAPSHOTS) {
     return Promise.resolve(structuredClone(SNAPSHOTS[cmd]) as T);
   }
@@ -53,10 +60,60 @@ export function invoke<T>(cmd: string, _args?: Record<string, unknown>): Promise
   return Promise.resolve(null as T);
 }
 
-/** The `listen` the aliased event module serves: inert, no event ever fires. */
+type FixtureListener = (event: { payload: unknown }) => void;
+
+const listeners = new Map<string, Set<FixtureListener>>();
+const overrides = new Map<string, unknown>();
+
+/**
+ * The `listen` the aliased event module serves. Inert until a driver pushes
+ * a fixture event; the returned unlisten removes the handler, matching the
+ * Tauri bridge's cleanup semantics.
+ */
 export function listen<T>(
-  _event: string,
-  _handler: (event: { payload: T }) => void,
+  event: string,
+  handler: (event: { payload: T }) => void,
 ): Promise<() => void> {
-  return Promise.resolve(() => undefined);
+  let set = listeners.get(event);
+  if (!set) {
+    set = new Set();
+    listeners.set(event, set);
+  }
+  const entry = handler as FixtureListener;
+  set.add(entry);
+  return Promise.resolve(() => {
+    set.delete(entry);
+    if (set.size === 0) {
+      listeners.delete(event);
+    }
+  });
+}
+
+/**
+ * Pushes one fixture event to every listener registered for it, in dispatch
+ * order, each receiving a deep clone of the payload (never a reference into
+ * the caller's or the recorded JSON).
+ */
+export function pushFixtureEvent<T>(event: string, payload: T): void {
+  const set = listeners.get(event);
+  if (!set) {
+    return;
+  }
+  for (const handler of [...set]) {
+    handler({ payload: structuredClone(payload) });
+  }
+}
+
+/**
+ * Swaps what one pull command answers, so a driver can walk a surface
+ * through its states: set the response, then push the surface_changed event
+ * and the app re-pulls the new snapshot.
+ */
+export function setFixtureResponse(cmd: string, value: unknown): void {
+  overrides.set(cmd, value);
+}
+
+/** Restores every pull to its recorded answer. */
+export function resetFixtures(): void {
+  overrides.clear();
 }

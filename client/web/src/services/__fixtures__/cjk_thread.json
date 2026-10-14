@@ -1,0 +1,9 @@
+{
+  "message": { "account": "work", "key": "imap:v1:cjk1" },
+  "subject": "季度报告",
+  "from_name": "林晓梅",
+  "from_address": "lin@example.test",
+  "sent_at": "2026-10-09T08:30:00Z",
+  "plain": "你好:\n\n第三季度的数据已经附上。收入环比增长百分之十四,服务业务首次超过授权业务,这是我们四月份的押注。第二节需要你在周五前签字;董事会材料周一早上发出。\n\n有两处值得你亲自过目:第六页的流失脚注,以及招聘表。\n\n谢谢,\n晓梅",
+  "remote_image_count": 0
+}
