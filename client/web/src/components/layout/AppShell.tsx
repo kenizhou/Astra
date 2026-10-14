@@ -159,7 +159,13 @@ export function AppShell() {
           <Group orientation="horizontal" className="min-w-0 flex-1">
             <Panel id="folder-pane" defaultSize={pct(18)} minSize={pct(12)} maxSize={pct(36)}>
               <div className="h-full bg-chrome">
-                <div className="h-full overflow-hidden rounded-l-xl border-y border-l border-border-subtle bg-background">
+                <div className="flex h-full flex-col overflow-hidden rounded-l-xl border-y border-l border-border-subtle bg-background">
+                  {/* The pane's title strip joins the ribbon's band across
+                      the left column: the same height, the same tint, its
+                      bottom rule aligning with the ribbon's own. */}
+                  <div className="flex h-[var(--ribbon-h)] shrink-0 items-center border-b border-border-subtle bg-[var(--chrome-tint)] px-3">
+                    <span className="text-[13px] font-semibold text-foreground">Folders</span>
+                  </div>
                   <FolderPane />
                 </div>
               </div>
