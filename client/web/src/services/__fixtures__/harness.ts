@@ -41,6 +41,15 @@ const SNAPSHOTS: Record<string, unknown> = {
   mcp_status: mcpStatusSnapshot,
   agent_status: { state: 'idle', model: null },
   split_map: [],
+  /* The AI read pulls a mounted surface can fire: empty, never null, so a
+     chips strip or a suggestion list renders empty instead of crashing on
+     a null it never typed. */
+  draft_chips: [],
+  knowledge_list: [],
+  snippet_list: [],
+  snippet_search: [],
+  people_suggestions: [],
+  style_profile: null,
 };
 
 const announced = new Set<string>();
@@ -117,3 +126,9 @@ export function setFixtureResponse(cmd: string, value: unknown): void {
 export function resetFixtures(): void {
   overrides.clear();
 }
+
+/* The driver-facing API on the app's own module instance: vite resolves the
+   aliased import (`@tauri-apps/api/event`) and a driver's direct path import
+   to different instances, so a driver that imports the file by path would
+   push into a void. The window handle is the one channel both sides share. */
+marker.__ASTRA_FIXTURES__ = { pushFixtureEvent, resetFixtures, setFixtureResponse };

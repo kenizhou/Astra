@@ -114,3 +114,29 @@ describe('the production bundle never carries the harness', () => {
     expect(tauriBridgeAliases('test', '/cfg')).toEqual({});
   });
 });
+
+describe('mounted AI surfaces never read null', () => {
+  it('answers the AI read pulls with their empty shapes, so a chips strip renders empty instead of crashing', async () => {
+    await expect(invoke('draft_chips')).resolves.toEqual([]);
+    await expect(invoke('knowledge_list')).resolves.toEqual([]);
+    await expect(invoke('snippet_list')).resolves.toEqual([]);
+    await expect(invoke('snippet_search')).resolves.toEqual([]);
+    await expect(invoke('people_suggestions')).resolves.toEqual([]);
+    await expect(invoke('style_profile')).resolves.toBeNull();
+  });
+});
+
+describe('the driver API', () => {
+  it('lives on the window, so a driver shares the app instance', async () => {
+    const api = (window as unknown as Record<string, { pushFixtureEvent: typeof pushFixtureEvent }>).__ASTRA_FIXTURES__;
+    if (!api) {
+      throw new Error('the fixture API is missing from the window');
+    }
+    expect(typeof api.pushFixtureEvent).toBe('function');
+    const received: unknown[] = [];
+    const un = await listen('surface_changed', (e) => received.push(e.payload));
+    api.pushFixtureEvent('surface_changed', { surface: 'people' });
+    expect(received).toEqual([{ surface: 'people' }]);
+    un();
+  });
+});
