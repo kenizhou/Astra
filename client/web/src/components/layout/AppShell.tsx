@@ -49,6 +49,16 @@ function PanelCard({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** The folder pane's card: squared and bordered only at the sides, so the
+ *  tree reads as part of the window's edge rather than a floating card. */
+function FlushCard({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex h-full flex-col overflow-hidden border-x border-border-subtle bg-card">
+      {children}
+    </div>
+  );
+}
+
 /** The pill handle between two panels. */
 function VDivider() {
   return (
@@ -72,20 +82,20 @@ function MailRow({ compact }: { compact: boolean }) {
       className="h-full"
     >
       {!compact && (
-        <Panel id="folder-pane" defaultSize={pct(18)} minSize={pct(12)}>
-          <PanelCard>
+        <Panel id="folder-pane" defaultSize={pct(15)} minSize={pct(10)}>
+          <FlushCard>
             <FolderPane />
-          </PanelCard>
+          </FlushCard>
         </Panel>
       )}
       {!compact && <VDivider />}
-      <Panel id="message-list" defaultSize={pct(agentOpen ? 34 : 38)} minSize={pct(25)}>
+      <Panel id="message-list" defaultSize={pct(agentOpen ? 36 : 41)} minSize={pct(25)}>
         <PanelCard>
           <MessageList />
         </PanelCard>
       </Panel>
       <VDivider />
-      <Panel id="reading-pane" defaultSize={pct(agentOpen ? 26 : 44)} minSize={pct(20)}>
+      <Panel id="reading-pane" defaultSize={pct(agentOpen ? 27 : 44)} minSize={pct(20)}>
         <PanelCard>
           <ReadingPane />
         </PanelCard>
