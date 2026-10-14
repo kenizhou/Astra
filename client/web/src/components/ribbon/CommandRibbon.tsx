@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The command ribbon: the 44px strip under the title bar, in the mail view
+// The command ribbon: the 52px strip under the title bar, in the mail view
 // only, wearing chrome-tint so it steps visibly off the title bar's chrome
 // in both themes. Its mode follows the inline composer: read mode while the
 // strip is collapsed, compose mode while a quick reply stands open in it.
@@ -26,7 +26,7 @@ export function CommandRibbon() {
   return (
     <nav
       aria-label="Command ribbon"
-      className="flex h-[var(--ribbon-h)] shrink-0 items-stretch border-b border-border-subtle bg-[var(--chrome-tint)] px-1 py-1"
+      className="flex h-[var(--ribbon-h)] shrink-0 items-stretch border-b border-border-subtle bg-[var(--chrome-tint)] px-1 py-2"
     >
       <div className="flex min-w-0 flex-nowrap items-stretch overflow-hidden">
         {composing ? <ComposeRibbon iconOnly={iconOnly} /> : <ReadRibbon iconOnly={iconOnly} />}
