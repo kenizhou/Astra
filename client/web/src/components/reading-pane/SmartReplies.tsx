@@ -8,29 +8,10 @@
 
 import { useEffect } from 'react';
 
+import { AiChip } from '@/components/ui/AiChip';
 import { composeFromDraft } from '@/services/ai';
 import { useAiChipsStore } from '@/stores/aiChipsStore';
 import { useReadingStore } from '@/stores/readingStore';
-
-/** A stroke-drawn reply arrow for a chip's accept affordance. */
-function ReplyGlyph() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width="12"
-      height="12"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M9 14 4 9l5-5" />
-      <path d="M4 9h10a6 6 0 0 1 6 6v4" />
-    </svg>
-  );
-}
 
 /** A stroke-drawn cross for the strip's dismissal. */
 function CrossGlyph() {
@@ -81,20 +62,14 @@ export function SmartReplies() {
     >
       <span className="text-xs text-muted-foreground">Suggested replies</span>
       {chips.map((chip, index) => (
-        <div
+        <AiChip
           key={`${chip.preview}-${index}`}
-          className="flex items-center gap-1 rounded-[var(--radius)] border border-border px-2 py-1"
-        >
-          <span className="max-w-[180px] truncate text-xs text-foreground">{chip.preview}</span>
-          <button
-            type="button"
-            aria-label={`Reply with: ${chip.preview}`}
-            onClick={() => void composeFromDraft(message, chip.reply)}
-            className={GLYPH_BUTTON}
-          >
-            <ReplyGlyph />
-          </button>
-        </div>
+          label={chip.preview}
+          provenance="from this thread"
+          state="approve"
+          onApprove={() => void composeFromDraft(message, chip.reply)}
+          approveLabel={`Reply with: ${chip.preview}`}
+        />
       ))}
       <button
         type="button"

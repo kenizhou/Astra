@@ -9,7 +9,7 @@
 // attributes through the appearance store and stay on this device.
 
 import { dispatch, intents } from '@/services/ipc';
-import { SKINS, useAppearanceStore, type ContrastMode, type FontSizeStep } from '@/services/appearance';
+import { SKINS, useAppearanceStore, type ContrastMode, type DensityMode, type FontSizeStep } from '@/services/appearance';
 
 import { useSettingsStore } from './settingsStore';
 
@@ -31,6 +31,12 @@ const FONT_SIZES: ReadonlyArray<{ id: FontSizeStep; label: string }> = [
   { id: 'small', label: 'Small' },
   { id: 'default', label: 'Default' },
   { id: 'large', label: 'Large' },
+];
+
+/** The density steps: comfortable is the default; compact tightens the axis. */
+const DENSITIES: ReadonlyArray<{ id: DensityMode; label: string }> = [
+  { id: 'comfortable', label: 'Comfortable' },
+  { id: 'compact', label: 'Compact' },
 ];
 
 /** The sentence a refused persist draws. */
@@ -155,6 +161,8 @@ export function GeneralDetail() {
   const setContrast = useAppearanceStore((s) => s.setContrast);
   const fontSize = useAppearanceStore((s) => s.fontSize);
   const setFontSize = useAppearanceStore((s) => s.setFontSize);
+  const density = useAppearanceStore((s) => s.density);
+  const setDensity = useAppearanceStore((s) => s.setDensity);
 
   return (
     <section aria-label="General settings" className="flex flex-col gap-4">
@@ -185,6 +193,7 @@ export function GeneralDetail() {
       <SkinSwatches />
       <Segmented label="Contrast" value={contrast} options={CONTRASTS} onChange={setContrast} />
       <Segmented label="Font size" value={fontSize} options={FONT_SIZES} onChange={setFontSize} />
+      <Segmented label="Density" value={density} options={DENSITIES} onChange={setDensity} />
     </section>
   );
 }

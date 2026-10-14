@@ -145,3 +145,23 @@ describe('the General detail', () => {
     expect(ipc.dispatch).not.toHaveBeenCalled();
   });
 });
+
+describe('the density control', () => {
+  it('writes the density through the appearance store from the segmented row', () => {
+    render(<GeneralDetail />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Compact' }));
+
+    expect(useAppearanceStore.getState().density).toBe('compact');
+    expect(localStorage.getItem('astra.density')).toBe('compact');
+    expect(document.documentElement.dataset.density).toBe('compact');
+  });
+
+  it('renders the persisted density as pressed', () => {
+    useAppearanceStore.getState().setDensity('compact');
+    render(<GeneralDetail />);
+
+    expect(screen.getByRole('button', { name: 'Compact' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Comfortable' }).getAttribute('aria-pressed')).toBe('false');
+  });
+});

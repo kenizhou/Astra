@@ -114,7 +114,7 @@ export function MonthGrid({
               type="button"
               aria-label={`Go to ${fullDayLabel(dayKey)}`}
               onClick={() => onPickDay(dayKey)}
-              className={`flex h-5 w-5 items-center justify-center self-end rounded-full text-[11px] tabular-nums transition-colors hover:bg-hover ${
+              className={`flex min-h-[var(--hit)] min-w-[var(--hit)] items-center justify-center self-end rounded-full text-[11px] tabular-nums transition-colors hover:bg-hover ${
                 isToday
                   ? 'bg-primary font-semibold text-primary-foreground'
                   : inMonth

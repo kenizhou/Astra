@@ -24,6 +24,9 @@ export type ContrastMode = 'default' | 'high';
 
 export type FontSizeStep = 'small' | 'default' | 'large';
 
+/** The density steps: the UI1 axis (comfortable 28px rows, compact 24px). */
+export type DensityMode = 'comfortable' | 'compact';
+
 /** The swatch catalogue the General page renders; swatch is the preview dot. */
 export const SKINS: ReadonlyArray<{ id: SkinId; label: string; swatch: string }> = [
   { id: 'iris', label: 'Iris', swatch: '#7a6ff0' },
@@ -40,6 +43,7 @@ const KEYS = {
   skin: 'astra.skin',
   contrast: 'astra.contrast',
   fontSize: 'astra.fontSize',
+  density: 'astra.density',
 } as const;
 
 function readSkin(): SkinId {
@@ -56,27 +60,37 @@ function readFontSize(): FontSizeStep {
   return raw === 'small' || raw === 'large' ? raw : 'default';
 }
 
+function readDensity(): DensityMode {
+  return localStorage.getItem(KEYS.density) === 'compact' ? 'compact' : 'comfortable';
+}
+
 interface AppearanceState {
   skin: SkinId;
   contrast: ContrastMode;
   fontSize: FontSizeStep;
+  density: DensityMode;
   setSkin: (skin: SkinId) => void;
   setContrast: (contrast: ContrastMode) => void;
   setFontSize: (step: FontSizeStep) => void;
+  setDensity: (density: DensityMode) => void;
 }
 
-/** Writes the three attributes onto the document root. */
-function applyAttributes(state: Pick<AppearanceState, 'skin' | 'contrast' | 'fontSize'>): void {
+/** Writes the four attributes onto the document root. */
+function applyAttributes(
+  state: Pick<AppearanceState, 'skin' | 'contrast' | 'fontSize' | 'density'>,
+): void {
   const root = document.documentElement;
   root.dataset.skin = state.skin;
   root.dataset.contrast = state.contrast;
   root.dataset.fontSize = state.fontSize;
+  root.dataset.density = state.density;
 }
 
 export const useAppearanceStore = create<AppearanceState>((set) => ({
   skin: readSkin(),
   contrast: readContrast(),
   fontSize: readFontSize(),
+  density: readDensity(),
 
   setSkin: (skin) => {
     localStorage.setItem(KEYS.skin, skin);
@@ -93,6 +107,12 @@ export const useAppearanceStore = create<AppearanceState>((set) => ({
   setFontSize: (fontSize) => {
     localStorage.setItem(KEYS.fontSize, fontSize);
     set({ fontSize });
+    applyAttributes(useAppearanceStore.getState());
+  },
+
+  setDensity: (density) => {
+    localStorage.setItem(KEYS.density, density);
+    set({ density });
     applyAttributes(useAppearanceStore.getState());
   },
 }));

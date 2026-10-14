@@ -350,3 +350,43 @@ html[data-font-size] body,
 html[data-font-size] #root {
   font-size: var(--text-base);
 }
+
+/* The density axis (the UI1 slice): one document-root attribute drives row
+   heights, hit floors, and pane padding. Comfortable is the default,
+   including before the attribute lands. Rows are floors: content taller
+   than the step grows the row, never truncates it. */
+:root:not([data-density]),
+[data-density='comfortable'] {
+  --row-h: 28px;
+  --hit: 28px;
+  --pane-pad: 12px;
+}
+
+[data-density='compact'] {
+  --row-h: 24px;
+  --hit: 24px;
+  --pane-pad: 8px;
+}
+
+/* The motion scale: the only durations. --ease-spring belongs to the
+   command palette alone; nothing else may ease with it. */
+:root {
+  --dur-fast: 100ms;
+  --dur-row: 120ms;
+  --dur-view: 140ms;
+  --dur-panel: 160ms;
+}
+
+/* The account palette (UI1 D4): the eight defaults, assigned in rotation
+   over the account order; the extension policy lives in
+   docs/design-system.md. The hues mirror the skin swatches. */
+:root {
+  --account-1: #7a6ff0;
+  --account-2: #0a59f7;
+  --account-3: #6366f1;
+  --account-4: #f43f5e;
+  --account-5: #10b981;
+  --account-6: #f59e0b;
+  --account-7: #8b5cf6;
+  --account-8: #f97316;
+}

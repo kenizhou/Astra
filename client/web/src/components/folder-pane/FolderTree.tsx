@@ -65,7 +65,7 @@ function FolderTreeRow({ accountId, row, selected }: FolderTreeRowProps) {
       aria-expanded={row.has_children ? row.expanded : undefined}
       aria-level={row.depth + 1}
       data-depth={row.depth}
-      className={`relative flex h-9 items-center gap-2 rounded-lg pr-2 text-[13px] transition-colors ${
+      className={`relative flex min-h-[var(--row-h)] items-center gap-2 rounded-lg pr-2 text-[13px] transition-colors ${
         selected ? 'bg-primary-muted text-[var(--selected-text)]' : 'text-foreground hover:bg-hover'
       }`}
       style={{ paddingLeft: `${12 + row.depth * 14}px` }}
@@ -81,7 +81,7 @@ function FolderTreeRow({ accountId, row, selected }: FolderTreeRowProps) {
           type="button"
           onClick={onToggle}
           aria-label={row.expanded ? `Collapse ${row.name}` : `Expand ${row.name}`}
-          className="flex h-4 w-4 shrink-0 items-center justify-center rounded-[2px] text-muted-text hover:bg-hover hover:text-foreground"
+          className="flex min-w-[var(--hit)] shrink-0 items-center justify-center self-stretch rounded-[2px] text-muted-text hover:bg-hover hover:text-foreground"
         >
           {row.expanded ? '▾' : '▸'}
         </button>
@@ -153,7 +153,13 @@ function OutboxTreeRow({ accountId }: { accountId: string }) {
 
 /** One account group: its header row, the folder rows beneath it, and the
  * Outbox row closing the group. */
-export function FolderTree({ account }: { account: AccountFolderRow }) {
+export function FolderTree({
+  account,
+  paletteIndex,
+}: {
+  account: AccountFolderRow;
+  paletteIndex: number;
+}) {
   const selected = useFolderStore((s) => s.selected);
   const rows = visibleFolders(account);
 
@@ -177,10 +183,16 @@ export function FolderTree({ account }: { account: AccountFolderRow }) {
             account.expanded ? `Collapse ${account.display_name}` : `Expand ${account.display_name}`
           }
           aria-expanded={account.expanded}
-          className="flex h-4 w-4 shrink-0 items-center justify-center rounded-[2px] text-muted-text hover:bg-hover hover:text-foreground"
+          className="flex min-w-[var(--hit)] shrink-0 items-center justify-center self-stretch rounded-[2px] text-muted-text hover:bg-hover hover:text-foreground"
         >
           {account.expanded ? '▾' : '▸'}
         </button>
+        <span
+          aria-hidden="true"
+          data-account-dot
+          className="h-2 w-2 shrink-0 rounded-full"
+          style={{ background: `var(--account-${paletteIndex + 1})` }}
+        />
         <span className="truncate text-[11px] uppercase tracking-wide text-muted-text">
           {account.display_name}
         </span>

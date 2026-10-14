@@ -18,6 +18,9 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 
 import { ListToolbar } from '@/components/message-list/ListToolbar';
 import { MessageRow } from '@/components/message-list/MessageRow';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { STATE_CONTENT } from '@/components/ui/stateContent';
+import { MailIcon } from '@/components/icons';
 import {
   HEADER_ROW_PX,
   flatItems,
@@ -205,16 +208,16 @@ export function MessageList() {
         <OutboxQueue account={outboxAccount} />
       ) : searching ? (
         search.rows.length === 0 ? (
-          <p className="p-4 text-sm text-muted-foreground">No results.</p>
+          <EmptyState glyph={<MailIcon size={24} />} message={STATE_CONTENT.searchEmpty!.message} />
         ) : (
           <RowWindow items={flatItems(search.rows)} highlight={highlight} now={now} openRow={openRow} showMore={false} />
         )
       ) : folder === null ? (
-        <p className="p-4 text-sm text-muted-foreground">Select a folder to read its mail.</p>
+        <EmptyState glyph={<MailIcon size={24} />} message={STATE_CONTENT.listNoFolder!.message} />
       ) : !showRows ? (
-        <p className="p-4 text-sm text-muted-foreground">No messages in this folder.</p>
+        <EmptyState glyph={<MailIcon size={24} />} message={STATE_CONTENT.listEmptyFolder!.message} />
       ) : shownRows.length === 0 ? (
-        <p className="p-4 text-sm text-muted-foreground">No messages on this side.</p>
+        <EmptyState glyph={<MailIcon size={24} />} message={STATE_CONTENT.listEmptySide!.message} />
       ) : (
         <RowWindow items={withDateHeaders(shownRows, now)} highlight={highlight} now={now} openRow={openRow} showMore={windowIsFull} />
       )}

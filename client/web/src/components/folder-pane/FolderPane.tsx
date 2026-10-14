@@ -4,6 +4,7 @@
 // scroll; the tree underneath renders what the core last published.
 
 import { FolderTree } from './FolderTree';
+import { UnifiedInboxRow } from './UnifiedInboxRow';
 import { useFolderStore } from '@/stores/folderStore';
 
 export function FolderPane() {
@@ -20,8 +21,9 @@ export function FolderPane() {
         </p>
       )}
       <div role="tree" aria-label="Accounts" className="space-y-1 px-1.5">
-        {accounts.map((account) => (
-          <FolderTree key={account.account_id} account={account} />
+        <UnifiedInboxRow accounts={accounts} />
+        {accounts.map((account, index) => (
+          <FolderTree key={account.account_id} account={account} paletteIndex={index % 8} />
         ))}
       </div>
     </nav>

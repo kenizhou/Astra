@@ -18,6 +18,8 @@ import { ReadingHeader } from '@/components/reading-pane/ReadingHeader';
 import { SmartReplies } from '@/components/reading-pane/SmartReplies';
 import { SummaryBlock } from '@/components/reading-pane/SummaryBlock';
 import { TranslateBlock } from '@/components/reading-pane/TranslateBlock';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { STATE_CONTENT } from '@/components/ui/stateContent';
 import { CloseIcon, MailIcon } from '@/components/icons';
 import { dispatch, intents } from '@/services/ipc';
 import { usePeopleStore } from '@/features/people/peopleStore';
@@ -35,12 +37,7 @@ export function ReadingPane() {
         aria-label="Reading pane"
         className="flex h-full w-full flex-col bg-background"
       >
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 p-4">
-          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-primary-muted text-primary">
-            <MailIcon size={24} />
-          </span>
-          <p className="text-sm text-muted-text">Select a message to read it.</p>
-        </div>
+        <EmptyState glyph={<MailIcon size={24} />} message={STATE_CONTENT.readingEmpty!.message} />
         {/* The strip's expanded state stands even with nothing open: the app
             start resume opens its draft here. */}
         <QuickReplyStrip />
