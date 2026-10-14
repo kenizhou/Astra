@@ -25,7 +25,6 @@ import { ComposerFields } from './ComposerFields';
 import { ComposerStatusBar } from './ComposerStatusBar';
 import { Editor } from './Editor';
 import { EditorToolbar } from './EditorToolbar';
-import { openNewMessageComposer } from './composeWindow';
 import {
   fingerprintOf,
   mintCompositionId,
@@ -71,22 +70,6 @@ export function useDraftResumeAtStart(): void {
         console.error('compose: the draft resume pull failed', err);
       });
   }, [accounts]);
-}
-
-/** The floating New message action, anchored over the shell's corner. */
-export function NewMessageAction({ disabled }: { disabled: boolean }) {
-  return (
-    <button
-      type="button"
-      aria-label="New message"
-      onClick={() => void openNewMessageComposer()}
-      disabled={disabled}
-      title={disabled ? 'Add an account first' : 'New message'}
-      className="absolute right-3 bottom-[48px] rounded-[var(--radius-sm)] bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground shadow-lg transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-50"
-    >
-      New message
-    </button>
-  );
 }
 
 interface ComposerPaneProps {

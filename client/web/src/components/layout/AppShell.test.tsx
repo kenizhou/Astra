@@ -142,46 +142,6 @@ afterEach(cleanup);
 describe('the shell composer wiring', () => {
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-  it('opens the pop-out composer window from the new message action', async () => {
-    render(<AppShell />);
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'New message' }));
-      await Promise.resolve();
-    });
-
-    expect(windows.openNewMessageComposer).toHaveBeenCalledTimes(1);
-    // Nothing opens inline: the strip keeps its affordance.
-    expect(screen.queryByRole('region', { name: 'Composer' })).toBeNull();
-  });
-
-  it('keeps the new message action inert without an account', async () => {
-    useAccountStore.setState({ accounts: [] });
-    render(<AppShell />);
-
-    const action = screen.getByRole('button', { name: 'New message' }) as HTMLButtonElement;
-    expect(action.disabled).toBe(true);
-
-    await act(async () => {
-      action.click();
-      await Promise.resolve();
-    });
-
-    expect(windows.openNewMessageComposer).not.toHaveBeenCalled();
-    expect(screen.queryByRole('region', { name: 'Composer' })).toBeNull();
-  });
-
-  it('keeps the new message action inert over the people view', () => {
-    render(<AppShell />);
-
-    act(() => {
-      fireEvent.click(screen.getByRole('button', { name: 'People' }));
-    });
-
-    const action = screen.getByRole('button', { name: 'New message' }) as HTMLButtonElement;
-    expect(action.disabled).toBe(true);
-  });
-
   it('resumes the stored draft into the strip at app start', async () => {
     const view: ResumeView = {
       account: 'work',

@@ -7,11 +7,11 @@
 // pane, the quick-reply strip docked at the reading pane's bottom, and the
 // agent panel docked right when the rail's toggle opens it), the calendar
 // and people views fill one card each. Under the compact breakpoint the
-// folder panel leaves the row and rides the drawer the rail opens. The New
-// message action floats over the panes' corner and opens the pop-out
-// composer window, the app start resume opens the stored draft into the
-// strip, a landed compose request opens a pop-out window hydrated from it,
-// the AI documents panel rides above
+// folder panel leaves the row and rides the drawer the rail opens. Compose
+// starts from the ribbon's New Email, which opens the pop-out composer
+// window; the app start resume opens the stored draft into the strip, a
+// landed compose request opens a pop-out window hydrated from it, the AI
+// documents panel rides above
 // the status bar's corner when the rail's toggle opens it, the
 // send-result toast says when a queued send has gone out, the settings
 // screen rides above the shell when the title bar's gear opens it, and the
@@ -23,14 +23,13 @@ import { AccountSetupFlow } from '@/features/account-setup/AccountSetupFlow';
 import { AiPanel } from '@/features/ai-panel/AiPanel';
 import { AgentPanel } from '@/features/agent/AgentPanel';
 import { CalendarPane } from '@/features/calendar/CalendarPane';
-import { NewMessageAction, useDraftResumeAtStart } from '@/features/composer/Composer';
+import { useDraftResumeAtStart } from '@/features/composer/Composer';
 import { useComposeRequestHydration } from '@/features/composer/useComposeRequest';
 import { SendResultToast } from '@/features/outbox/SendResultToast';
 import { PeoplePane } from '@/features/people/PeoplePane';
 import { SettingsScreen } from '@/features/settings/SettingsScreen';
 import { FolderPane } from '@/components/folder-pane/FolderPane';
 import { useIsCompact } from '@/hooks/useWindowSize';
-import { useAccountStore } from '@/stores/accountStore';
 import { useUiStore } from '@/stores/uiStore';
 import { CommandRibbon } from '@/components/ribbon/CommandRibbon';
 import { FolderPaneDrawer } from './FolderPaneDrawer';
@@ -104,7 +103,6 @@ function MailRow({ compact }: { compact: boolean }) {
 }
 
 export function AppShell() {
-  const accountCount = useAccountStore((s) => s.accounts.length);
   const shellView = useUiStore((s) => s.shellView);
   const compact = useIsCompact();
   useDraftResumeAtStart();
@@ -138,9 +136,6 @@ export function AppShell() {
         </main>
       </div>
       <StatusBar />
-      {/* The composer pane mounts only in the mail view, so the action
-          stands nowhere over the calendar or people panes. */}
-      <NewMessageAction disabled={accountCount === 0 || shellView !== 'mail'} />
       <AiPanel />
       <SendResultToast />
       <SettingsScreen />
