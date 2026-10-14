@@ -236,18 +236,20 @@
 }
 
 [data-texture='warm'].light {
-  /* Honest parchment, with the working panes grounded in light grey so
-     the reading paper stays the brightest surface. */
+  /* Honest parchment, with the working panes grounded in a light grey
+     field bright enough for the rules to read against it. */
   --series-50: oklch(0.975 0.01 90);
   --series-100: oklch(0.955 0.014 90);
   --series-200: oklch(0.918 0.018 90);
-  --background: oklch(0.935 0.006 90);
+  --background: oklch(0.96 0.004 90);
   --surface: oklch(0.925 0.02 90);
   --card: oklch(0.99 0.007 90);
   --paper: var(--card);
-  /* The two-level border language: the derived --border-subtle stays faint
-     on the chrome; --hairline marks only rows and pane separations. */
-  --hairline: oklch(0.78 0.022 90);
+  /* The two-level border language, darkened for the bright field: a faint
+     --border-subtle on the chrome, the sharper --hairline on rows and
+     pane separations. */
+  --border-subtle: oklch(0.85 0.012 90);
+  --hairline: oklch(0.72 0.018 90);
 }
 
 [data-texture='warm'].dark {
