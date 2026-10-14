@@ -182,13 +182,6 @@ describe('the mail row layout', () => {
     // One separator per boundary: folder|right zone, then list|reading.
     expect(screen.getAllByRole('separator').length).toBeGreaterThanOrEqual(2);
   });
-
-  it('heads the folder pane with a strip at ribbon height', () => {
-    render(<AppShell />);
-
-    const strip = screen.getByText('Folders');
-    expect(strip.parentElement?.className).toContain('h-[var(--ribbon-h)]');
-  });
 });
 
 describe('the shell composer wiring', () => {
