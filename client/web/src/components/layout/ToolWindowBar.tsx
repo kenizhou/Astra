@@ -33,7 +33,7 @@ export function ToolWindowBar() {
   return (
     <nav
       aria-label="Tool windows"
-      className="flex w-[var(--tool-w)] shrink-0 flex-col items-center justify-between border-r border-border-subtle bg-chrome py-2"
+      className="flex w-[var(--tool-w)] shrink-0 flex-col items-center justify-between bg-chrome py-2"
     >
       <div className="flex flex-col items-center gap-2">
         {VIEWS.map(({ id, label, Icon }) => {
