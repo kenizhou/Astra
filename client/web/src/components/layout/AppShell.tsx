@@ -2,8 +2,8 @@
 // The desktop shell: the frameless title bar spans the top, the status bar
 // spans the bottom, and the middle row is the left column (the tool rail
 // beside the folder pane in the mail view) next to the right zone (the
-// command ribbon over the content). The right zone rounds its two left
-// corners into the column, so the junctions read as one carved surface.
+// command ribbon over the content). The folder pane alone rounds its two
+// left corners against the rail's chrome.
 // The ribbon stands in the mail view only. The content is the active view:
 // the mail view is a resizable panel row (message list and reading pane,
 // the quick-reply strip docked at the reading pane's bottom, and the agent
@@ -111,24 +111,19 @@ export function AppShell() {
   return (
     <div className="relative flex h-full flex-col overflow-hidden bg-background font-ui text-foreground">
       <TitleBar />
-      {/* The middle row carries the folder pane's tone, so the right
-          zone's carved corners fill with the left column's colour. */}
-      <div className={`flex min-h-0 flex-1 ${shellView === 'mail' ? 'bg-surface' : ''}`}>
+      <div className="flex min-h-0 flex-1">
         <ToolWindowBar />
         {shellView === 'mail' && !compact && (
           /* The folder pane stands flush in the column (no padding around
              it), bordered, its left corners rounding against the rail's
-             chrome the way the right zone rounds against the column. */
+             chrome. */
           <div className="w-[var(--folders-w)] shrink-0 bg-chrome">
             <div className="h-full overflow-hidden rounded-l-xl border border-border-subtle bg-surface">
               <FolderPane />
             </div>
           </div>
         )}
-        {/* The right zone rounds its two left corners into the column: the
-            junctions at the title bar and the status bar read as one carved
-            surface, not two abutting frames. */}
-        <div className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-l-xl">
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <CommandRibbon />
           {/* The mail view runs flush; the card surface stays for the
               calendar and people views. */}
