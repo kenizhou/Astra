@@ -175,6 +175,13 @@ describe('the mail row layout', () => {
     const pane = screen.getByRole('complementary', { name: 'Reading pane' });
     expect(within(pane).getByText('Quarterly report')).toBeTruthy();
   });
+
+  it('offers a drag handle between the folder pane and the list', () => {
+    render(<AppShell />);
+
+    // One separator per boundary: folder|right zone, then list|reading.
+    expect(screen.getAllByRole('separator').length).toBeGreaterThanOrEqual(2);
+  });
 });
 
 describe('the shell composer wiring', () => {

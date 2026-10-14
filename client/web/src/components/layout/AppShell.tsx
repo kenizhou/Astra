@@ -67,6 +67,22 @@ function VDivider() {
   );
 }
 
+/** The folder pane's resize handle: zero width, since the message list's
+ *  own left border already draws the line. The grab zone reaches four
+ *  pixels to either side invisibly, and hover lifts the same quiet ink
+ *  wash over the boundary. */
+function FlushDivider() {
+  return (
+    <Separator className="group relative w-0 shrink-0 cursor-col-resize">
+      <span aria-hidden="true" className="absolute inset-y-0 -right-[4px] -left-[4px]" />
+      <span
+        aria-hidden="true"
+        className="absolute inset-y-0 -left-px w-[3px] rounded-full bg-[var(--muted-text)] opacity-0 transition-opacity duration-[var(--dur-row)] group-hover:opacity-30"
+      />
+    </Separator>
+  );
+}
+
 /** The mail view: a resizable row of the message list and the reading
  *  pane, plus the docked agent column, flush against one another with no
  *  card chrome: hairline dividers part the panes and the reading pane
@@ -108,53 +124,70 @@ export function AppShell() {
   useDraftResumeAtStart();
   useComposeRequestHydration();
 
+  const viewContent = (
+    <div className="relative h-full">
+      {shellView === 'people' ? (
+        <PanelCard>
+          <PeoplePane />
+        </PanelCard>
+      ) : shellView === 'calendar' ? (
+        <PanelCard>
+          <CalendarPane />
+        </PanelCard>
+      ) : (
+        <MailRow />
+      )}
+      {shellView === 'mail' && compact && (
+        <FolderPaneDrawer>
+          <FolderPane />
+        </FolderPaneDrawer>
+      )}
+    </div>
+  );
+
   return (
     <div className="relative flex h-full flex-col overflow-hidden bg-background font-ui text-foreground">
       <TitleBar />
       <div className="flex min-h-0 flex-1">
         <ToolWindowBar />
-        {shellView === 'mail' && !compact && (
-          /* The folder pane stands flush in the column on the window's
+        {shellView === 'mail' && !compact ? (
+          /* The folder pane resizes against the right zone through the
+             flush handle; it stands flush in its column on the window's
              ground (the message list's own fill), bordered top, left, and
              bottom only, its left corners rounding against the rail's
-             chrome; the right edge stays open into the list. */
-          <div className="w-[var(--folders-w)] shrink-0 bg-chrome">
-            <div className="h-full overflow-hidden rounded-l-xl border-y border-l border-border-subtle bg-background">
-              <FolderPane />
-            </div>
+             chrome. */
+          <Group orientation="horizontal" className="min-w-0 flex-1">
+            <Panel id="folder-pane" defaultSize={pct(18)} minSize={pct(12)} maxSize={pct(36)}>
+              <div className="h-full bg-chrome">
+                <div className="h-full overflow-hidden rounded-l-xl border-y border-l border-border-subtle bg-background">
+                  <FolderPane />
+                </div>
+              </div>
+            </Panel>
+            <FlushDivider />
+            <Panel id="mail-right" defaultSize={pct(82)} minSize={pct(40)}>
+              <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+                <CommandRibbon />
+                <main className="min-h-0 min-w-0 flex-1">{viewContent}</main>
+              </div>
+            </Panel>
+          </Group>
+        ) : (
+          <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+            <CommandRibbon />
+            {/* The mail view runs flush; the card surface stays for the
+                calendar and people views. */}
+            <main
+              className={
+                shellView === 'mail'
+                  ? 'min-h-0 min-w-0 flex-1'
+                  : 'min-h-0 min-w-0 flex-1 bg-surface p-2'
+              }
+            >
+              {viewContent}
+            </main>
           </div>
         )}
-        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <CommandRibbon />
-          {/* The mail view runs flush; the card surface stays for the
-              calendar and people views. */}
-          <main
-            className={
-              shellView === 'mail'
-                ? 'min-h-0 min-w-0 flex-1'
-                : 'min-h-0 min-w-0 flex-1 bg-surface p-2'
-            }
-          >
-            <div className="relative h-full">
-              {shellView === 'people' ? (
-                <PanelCard>
-                  <PeoplePane />
-                </PanelCard>
-              ) : shellView === 'calendar' ? (
-                <PanelCard>
-                  <CalendarPane />
-                </PanelCard>
-              ) : (
-                <MailRow />
-              )}
-              {shellView === 'mail' && compact && (
-                <FolderPaneDrawer>
-                  <FolderPane />
-                </FolderPaneDrawer>
-              )}
-            </div>
-          </main>
-        </div>
       </div>
       <StatusBar />
       <AiPanel />
