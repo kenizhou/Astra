@@ -37,7 +37,7 @@ export function StatusBar() {
     selected !== null ? selected.key : outboxAccount !== null ? 'Outbox' : 'No folder selected';
 
   return (
-    <footer className="flex h-[var(--status-h)] shrink-0 select-none items-center justify-between border-t border-border-subtle bg-chrome px-3 text-xs text-muted-foreground">
+    <footer className="flex h-[var(--status-h)] shrink-0 select-none items-center justify-between bg-chrome px-3 text-xs text-muted-foreground">
       <div className="flex min-w-0 items-center gap-4">
         {engineState === 'starting' ? (
           <span className="inline-flex items-center gap-1.5">
