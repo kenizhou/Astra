@@ -114,11 +114,12 @@ export function AppShell() {
       <div className="flex min-h-0 flex-1">
         <ToolWindowBar />
         {shellView === 'mail' && !compact && (
-          /* The folder pane stands flush in the column (no padding around
-             it), bordered, its left corners rounding against the rail's
-             chrome. */
+          /* The folder pane stands flush in the column on the window's
+             ground (the message list's own fill), bordered top, left, and
+             bottom only, its left corners rounding against the rail's
+             chrome; the right edge stays open into the list. */
           <div className="w-[var(--folders-w)] shrink-0 bg-chrome">
-            <div className="h-full overflow-hidden rounded-l-xl border border-border-subtle bg-surface">
+            <div className="h-full overflow-hidden rounded-l-xl border-y border-l border-border-subtle bg-background">
               <FolderPane />
             </div>
           </div>
