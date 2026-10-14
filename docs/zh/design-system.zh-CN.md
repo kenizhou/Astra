@@ -16,6 +16,17 @@ UI1 切片铸造的规则的常驻家园。`theme.css` 持有令牌;本页持有
 (compact、normal、comfortable;44/56/72px 含预览行)仍是每个表面
 的内容选择;密度轴治理的是外壳。
 
+## 质感轴
+
+文档根上的 `data-texture`,由 `appearance.ts` 与其余外观属性并列持
+有。三档:warm(默认值;已批准的 A3 执行,深色为 hue 60 的暖石墨,
+浅色为羊皮纸)、calm(hue 260 的姊妹档:真中性石墨、冷瓷白)与
+classic(质感之前的冷石板色,即基础文件自身的值)。数值以属性作用
+域覆盖块的形式住在 `theme.css`,位于高对比度章节之前,因此高对比
+度始终压平质感。`--paper` 令牌让阅读窗格比画布轻一个安静的台阶;
+阅读窗格直接消费它。设置 General 页在 Accent 旁暴露该轴。数值及其
+证据记录于 `docs/designs/evolved-iris-texture.md`。
+
 ## 动效
 
 时长标尺为 100/120/140/160ms(`--dur-fast`、`--dur-row`,

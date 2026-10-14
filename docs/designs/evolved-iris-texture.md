@@ -104,6 +104,12 @@ real-day export of the founder's inbox into the fixture format, a recorded
 triage session in both themes and densities, and only the survivors written
 into the spec.
 
+Update (2026-10-14): the texture shipped ahead of the rest of UI1 as the
+texture axis: `data-texture` on the document root with warm (A3, the
+default), calm (the hue-260 sibling), and classic (the pre-texture cool
+slate), chosen on the General settings page. The fixtures-mode override
+file is retired; theme.css carries both texture blocks.
+
 
 ## Texture Material Values (approved 2026-10-14, plan-design-review D2)
 

@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The device-local appearance choices: the accent skin, the contrast mode,
-// and the font-size step. They are presentation only; the persisted
-// settings block has no fields for them, so they never cross the settings
-// intents. Instead they live in localStorage and land as attributes on the
-// document root (data-skin, data-contrast, data-font-size), which
+// the font-size step, the density axis, and the texture axis. They are
+// presentation only; the persisted settings block has no fields for them,
+// so they never cross the settings intents. Instead they live in
+// localStorage and land as attributes on the document root (data-skin,
+// data-contrast, data-font-size, data-density, data-texture), which
 // skins.css and theme.css read. The store hydrates from localStorage at
 // module load, and applyAppearance re-asserts the attributes at startup.
 
@@ -27,6 +28,10 @@ export type FontSizeStep = 'small' | 'default' | 'large';
 /** The density steps: the UI1 axis (comfortable 28px rows, compact 24px). */
 export type DensityMode = 'comfortable' | 'compact';
 
+/** The texture steps: warm is the adopted A3 execution and the default,
+ *  calm is its hue-260 sibling, classic the pre-texture cool slate. */
+export type TextureMode = 'warm' | 'calm' | 'classic';
+
 /** The swatch catalogue the General page renders; swatch is the preview dot. */
 export const SKINS: ReadonlyArray<{ id: SkinId; label: string; swatch: string }> = [
   { id: 'iris', label: 'Iris', swatch: '#7a6ff0' },
@@ -44,6 +49,7 @@ const KEYS = {
   contrast: 'astra.contrast',
   fontSize: 'astra.fontSize',
   density: 'astra.density',
+  texture: 'astra.texture',
 } as const;
 
 function readSkin(): SkinId {
@@ -64,26 +70,34 @@ function readDensity(): DensityMode {
   return localStorage.getItem(KEYS.density) === 'compact' ? 'compact' : 'comfortable';
 }
 
+function readTexture(): TextureMode {
+  const raw = localStorage.getItem(KEYS.texture);
+  return raw === 'calm' || raw === 'classic' ? raw : 'warm';
+}
+
 interface AppearanceState {
   skin: SkinId;
   contrast: ContrastMode;
   fontSize: FontSizeStep;
   density: DensityMode;
+  texture: TextureMode;
   setSkin: (skin: SkinId) => void;
   setContrast: (contrast: ContrastMode) => void;
   setFontSize: (step: FontSizeStep) => void;
   setDensity: (density: DensityMode) => void;
+  setTexture: (texture: TextureMode) => void;
 }
 
-/** Writes the four attributes onto the document root. */
+/** Writes the five attributes onto the document root. */
 function applyAttributes(
-  state: Pick<AppearanceState, 'skin' | 'contrast' | 'fontSize' | 'density'>,
+  state: Pick<AppearanceState, 'skin' | 'contrast' | 'fontSize' | 'density' | 'texture'>,
 ): void {
   const root = document.documentElement;
   root.dataset.skin = state.skin;
   root.dataset.contrast = state.contrast;
   root.dataset.fontSize = state.fontSize;
   root.dataset.density = state.density;
+  root.dataset.texture = state.texture;
 }
 
 export const useAppearanceStore = create<AppearanceState>((set) => ({
@@ -91,6 +105,7 @@ export const useAppearanceStore = create<AppearanceState>((set) => ({
   contrast: readContrast(),
   fontSize: readFontSize(),
   density: readDensity(),
+  texture: readTexture(),
 
   setSkin: (skin) => {
     localStorage.setItem(KEYS.skin, skin);
@@ -113,6 +128,12 @@ export const useAppearanceStore = create<AppearanceState>((set) => ({
   setDensity: (density) => {
     localStorage.setItem(KEYS.density, density);
     set({ density });
+    applyAttributes(useAppearanceStore.getState());
+  },
+
+  setTexture: (texture) => {
+    localStorage.setItem(KEYS.texture, texture);
+    set({ texture });
     applyAttributes(useAppearanceStore.getState());
   },
 }));

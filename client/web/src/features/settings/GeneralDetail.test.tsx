@@ -27,7 +27,15 @@ beforeEach(() => {
   delete root.dataset.skin;
   delete root.dataset.contrast;
   delete root.dataset.fontSize;
-  useAppearanceStore.setState({ skin: 'iris', contrast: 'default', fontSize: 'default' });
+  delete root.dataset.density;
+  delete root.dataset.texture;
+  useAppearanceStore.setState({
+    skin: 'iris',
+    contrast: 'default',
+    fontSize: 'default',
+    density: 'comfortable',
+    texture: 'warm',
+  });
   useSettingsStore.getState().applySnapshot({
     settings: {
       theme: 'follow_host',
@@ -143,6 +151,35 @@ describe('the General detail', () => {
     expect(document.documentElement.dataset.fontSize).toBe('large');
     expect(localStorage.getItem('astra.fontSize')).toBe('large');
     expect(ipc.dispatch).not.toHaveBeenCalled();
+  });
+});
+
+describe('the texture control', () => {
+  it('writes the texture through the appearance store from the segmented row', () => {
+    render(<GeneralDetail />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Calm' }));
+
+    expect(useAppearanceStore.getState().texture).toBe('calm');
+    expect(localStorage.getItem('astra.texture')).toBe('calm');
+    expect(document.documentElement.dataset.texture).toBe('calm');
+    // Device-local: no intent crosses the wire.
+    expect(ipc.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('renders warm as the default and the persisted texture as pressed', () => {
+    render(<GeneralDetail />);
+
+    expect(screen.getByRole('button', { name: 'Warm' }).getAttribute('aria-pressed')).toBe('true');
+    cleanup();
+
+    useAppearanceStore.getState().setTexture('classic');
+    render(<GeneralDetail />);
+
+    expect(screen.getByRole('button', { name: 'Classic' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'Warm' }).getAttribute('aria-pressed')).toBe('false');
   });
 });
 

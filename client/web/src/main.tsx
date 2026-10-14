@@ -9,13 +9,6 @@ import { ComposerWindow } from './features/composer/ComposerWindow';
 import { readComposerParam } from './features/composer/composeWindow';
 import './styles/globals.css';
 
-// The texture theme (the A3 execution under review) layers over theme.css
-// only in fixtures mode: the proof runs on the harness, and the production
-// bundle never loads the override.
-if (import.meta.env.MODE === 'fixtures') {
-  void import('./services/__fixtures__/theme.texture.css');
-}
-
 const composition = readComposerParam(window.location.search);
 
 createRoot(document.getElementById('root')!).render(

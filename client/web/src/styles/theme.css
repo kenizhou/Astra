@@ -221,6 +221,85 @@
     0 12px 24px -6px color-mix(in srgb, var(--shadow-color) 45%, transparent);
 }
 
+/* The texture axis (the UI1 texture chapter): the adopted A3 "Warm,
+   sharper" execution is the default, calm its hue-260 sibling, and
+   classic the pre-texture cool slate (the base file's own values, so it
+   carries no override block). appearance.ts owns the document-root
+   attribute; the General settings page exposes the choice. The paper
+   step keeps the reading pane visibly lighter than the canvas. These
+   blocks sit ahead of the high-contrast overrides so high contrast
+   always flattens the texture. */
+:root {
+  --paper: var(--background);
+}
+
+[data-texture='warm'].light {
+  /* Honest parchment instead of cool white. */
+  --series-50: oklch(0.975 0.01 90);
+  --series-100: oklch(0.955 0.014 90);
+  --series-200: oklch(0.918 0.018 90);
+  --background: oklch(0.948 0.017 90);
+  --surface: oklch(0.925 0.02 90);
+  --card: oklch(0.99 0.007 90);
+  --paper: var(--card);
+  --hairline: oklch(0.78 0.022 90);
+  --border-subtle: var(--hairline);
+}
+
+[data-texture='warm'].dark {
+  /* Warm graphite: the neutral series shifts from hue 258 to hue 60 at
+     very low chroma (warm, never brown). */
+  --series-50: oklch(0.165 0.01 60);
+  --series-100: oklch(0.205 0.014 60);
+  --series-200: oklch(0.258 0.017 60);
+  --series-300: oklch(0.335 0.019 60);
+  --series-400: oklch(0.455 0.02 60);
+  --series-500: oklch(0.56 0.022 60);
+  --series-600: oklch(0.712 0.018 60);
+  --series-700: oklch(0.8 0.015 60);
+  --series-800: oklch(0.88 0.011 60);
+  --series-900: oklch(0.94 0.009 60);
+  --series-950: oklch(0.975 0.005 60);
+
+  --paper: oklch(0.255 0.019 60);
+  --hairline: oklch(0.44 0.018 60);
+  --border: var(--hairline);
+  --border-subtle: var(--hairline);
+}
+
+[data-texture='calm'].light {
+  /* Cool porcelain: the warmth dialled out, the same quiet steps. */
+  --series-50: oklch(0.978 0.003 260);
+  --series-100: oklch(0.96 0.004 260);
+  --series-200: oklch(0.925 0.005 260);
+  --background: oklch(0.96 0.004 260);
+  --surface: oklch(0.935 0.005 260);
+  --card: oklch(0.99 0.002 260);
+  --paper: var(--card);
+  --hairline: oklch(0.8 0.006 260);
+  --border-subtle: var(--hairline);
+}
+
+[data-texture='calm'].dark {
+  /* True-neutral graphite at hue 260: precision carries the register. */
+  --series-50: oklch(0.165 0.004 260);
+  --series-100: oklch(0.205 0.005 260);
+  --series-200: oklch(0.258 0.006 260);
+  --series-300: oklch(0.335 0.007 260);
+  --series-400: oklch(0.455 0.008 260);
+  --series-500: oklch(0.56 0.009 260);
+  --series-600: oklch(0.712 0.008 260);
+  --series-700: oklch(0.8 0.007 260);
+  --series-800: oklch(0.88 0.005 260);
+  --series-900: oklch(0.93 0.004 260);
+  --series-950: oklch(0.972 0.003 260);
+
+  --paper: oklch(0.25 0.006 260);
+  --hairline: oklch(0.42 0.006 260);
+  --border: var(--hairline);
+  --border-subtle: var(--hairline);
+}
+
 /* High contrast, ported from kylins and adapted to this file's token set:
    pure black on white with evenly spaced grays, every tint and shadow
    flattened so edges stay crisp. The attribute sits on the document root
@@ -242,6 +321,7 @@
   --background: #ffffff;
   --foreground: #000000;
   --surface: #ffffff;
+  --paper: #ffffff;
   --chrome: color-mix(in srgb, var(--primary) 8%, #f0f0f0);
   --card: #ffffff;
   --muted: #ffffff;
@@ -296,6 +376,7 @@
   --background: #000000;
   --foreground: #ffffff;
   --surface: #000000;
+  --paper: #000000;
   --chrome: color-mix(in srgb, var(--primary) 12%, #1a1a1a);
   --card: #000000;
   --muted: #000000;

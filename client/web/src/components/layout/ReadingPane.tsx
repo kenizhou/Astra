@@ -35,7 +35,7 @@ export function ReadingPane() {
     return (
       <aside
         aria-label="Reading pane"
-        className="flex h-full w-full flex-col bg-background"
+        className="flex h-full w-full flex-col bg-[var(--paper)]"
       >
         <EmptyState glyph={<MailIcon size={24} />} message={STATE_CONTENT.readingEmpty!.message} />
         {/* The strip's expanded state stands even with nothing open: the app
@@ -48,7 +48,7 @@ export function ReadingPane() {
   return (
     <aside
       aria-label="Reading pane"
-      className="flex h-full w-full flex-col overflow-hidden bg-background"
+      className="flex h-full w-full flex-col overflow-hidden bg-[var(--paper)]"
     >
       <div className="flex h-[var(--pane-header-h)] shrink-0 items-center justify-end gap-2 border-b border-border-subtle bg-surface px-3">
         <button
