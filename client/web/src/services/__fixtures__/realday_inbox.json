@@ -1,0 +1,112 @@
+{
+  "account_folders": [
+    {
+      "account_id": "astra1@example.test@127.0.0.1",
+      "display_name": "astra1@example.test@127.0.0.1",
+      "expanded": true,
+      "folders": [
+        {
+          "key": "INBOX",
+          "name": "INBOX",
+          "role": "inbox",
+          "unread": 3,
+          "depth": 0,
+          "has_children": false,
+          "expanded": false
+        },
+        {
+          "key": "Drafts",
+          "name": "Drafts",
+          "role": "drafts",
+          "unread": 0,
+          "depth": 0,
+          "has_children": false,
+          "expanded": false
+        },
+        {
+          "key": "Sent Items",
+          "name": "Sent Items",
+          "unread": 0,
+          "depth": 0,
+          "has_children": false,
+          "expanded": false
+        },
+        {
+          "key": "Junk Mail",
+          "name": "Junk Mail",
+          "unread": 0,
+          "depth": 0,
+          "has_children": false,
+          "expanded": false
+        },
+        {
+          "key": "Deleted Items",
+          "name": "Deleted Items",
+          "unread": 0,
+          "depth": 0,
+          "has_children": false,
+          "expanded": false
+        },
+        {
+          "key": "Projects",
+          "name": "Projects",
+          "unread": 0,
+          "depth": 0,
+          "has_children": false,
+          "expanded": false
+        }
+      ]
+    }
+  ],
+  "rows": [
+    {
+      "key": {
+        "message": {
+          "account": "astra1@example.test@127.0.0.1",
+          "key": "imap:v2714444225:u3@INBOX"
+        }
+      },
+      "account_id": "astra1@example.test@127.0.0.1",
+      "sender_name": "Astra Two",
+      "sender_address": "astra2@example.test",
+      "subject": "Harness note three",
+      "sent_at": "2026-10-12T02:30:18Z",
+      "unread": true,
+      "flagged": false,
+      "has_attachments": false
+    },
+    {
+      "key": {
+        "message": {
+          "account": "astra1@example.test@127.0.0.1",
+          "key": "imap:v2714444225:u2@INBOX"
+        }
+      },
+      "account_id": "astra1@example.test@127.0.0.1",
+      "sender_name": "Astra Two",
+      "sender_address": "astra2@example.test",
+      "subject": "Harness note two",
+      "sent_at": "2026-10-12T02:30:16Z",
+      "unread": true,
+      "flagged": false,
+      "has_attachments": false
+    },
+    {
+      "key": {
+        "message": {
+          "account": "astra1@example.test@127.0.0.1",
+          "key": "imap:v2714444225:u1@INBOX"
+        }
+      },
+      "account_id": "astra1@example.test@127.0.0.1",
+      "sender_name": "Astra Two",
+      "sender_address": "astra2@example.test",
+      "subject": "Harness note one",
+      "sent_at": "2026-10-12T02:30:15Z",
+      "unread": true,
+      "flagged": false,
+      "has_attachments": false
+    }
+  ],
+  "visible_limit": 3
+}
