@@ -26,12 +26,14 @@ import { AiPanel } from '@/features/ai-panel/AiPanel';
 import { AgentPanel } from '@/features/agent/AgentPanel';
 import { CalendarPane } from '@/features/calendar/CalendarPane';
 import { useDraftResumeAtStart } from '@/features/composer/Composer';
+import { useComposerStore } from '@/features/composer/composerStore';
 import { useComposeRequestHydration } from '@/features/composer/useComposeRequest';
 import { SendResultToast } from '@/features/outbox/SendResultToast';
 import { PeoplePane } from '@/features/people/PeoplePane';
 import { SettingsScreen } from '@/features/settings/SettingsScreen';
 import { FolderPane } from '@/components/folder-pane/FolderPane';
 import { useIsCompact } from '@/hooks/useWindowSize';
+import { useReadingStore } from '@/stores/readingStore';
 import { useUiStore } from '@/stores/uiStore';
 import { CommandRibbon } from '@/components/ribbon/CommandRibbon';
 import { FolderPaneDrawer } from './FolderPaneDrawer';
@@ -71,27 +73,38 @@ function VDivider() {
  *  pane, plus the docked agent column, flush against one another with no
  *  card chrome: hairline dividers part the panes and the reading pane
  *  steps up to its paper. The folder pane is the shell's left column, not
- *  a panel here. The composer lives in the reading pane's quick-reply
- *  strip and in pop-out windows now, so the row holds no third column.
- *  The agent dock joins the Group key, so the layout remounts cleanly
- *  when it arrives or leaves. The default sizes sum to one hundred in
- *  each combination. */
+ *  a panel here. The reading pane joins the row only while it has something
+ *  to show (an open message, or the strip's standing composition); until
+ *  then the list fills the row. The composer lives in the reading pane's
+ *  quick-reply strip and in pop-out windows now, so the row holds no third
+ *  column. Every conditional panel joins the Group key, so the layout
+ *  remounts cleanly when one arrives or leaves. The default sizes sum to
+ *  one hundred in each combination. */
 function MailRow() {
   const agentOpen = useUiStore((s) => s.agentOpen);
+  const messageOpen = useReadingStore((s) => s.snapshot !== null);
+  const composing = useComposerStore((s) => s.open && s.composition !== null);
+  const readingOpen = messageOpen || composing;
 
   return (
     <Group
-      key={agentOpen ? 'agent' : 'solo'}
+      key={`${agentOpen ? 'agent' : 'solo'}-${readingOpen ? 'reading' : 'full'}`}
       orientation="horizontal"
       className="h-full"
     >
-      <Panel id="message-list" defaultSize={pct(agentOpen ? 38 : 47)} minSize={pct(25)}>
+      <Panel
+        id="message-list"
+        defaultSize={pct(readingOpen ? (agentOpen ? 38 : 47) : agentOpen ? 72 : 100)}
+        minSize={pct(25)}
+      >
         <MessageList />
       </Panel>
-      <VDivider />
-      <Panel id="reading-pane" defaultSize={pct(agentOpen ? 34 : 53)} minSize={pct(20)}>
-        <ReadingPane />
-      </Panel>
+      {readingOpen && <VDivider />}
+      {readingOpen && (
+        <Panel id="reading-pane" defaultSize={pct(agentOpen ? 34 : 53)} minSize={pct(20)}>
+          <ReadingPane />
+        </Panel>
+      )}
       {agentOpen && <VDivider />}
       {agentOpen && (
         <Panel id="agent-dock" defaultSize={pct(28)} minSize={pct(14)} maxSize={pct(40)}>

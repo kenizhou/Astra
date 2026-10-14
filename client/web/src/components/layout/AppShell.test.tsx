@@ -70,10 +70,11 @@ import type { ComposeRequestSnapshot, ResumeView } from '@/services/ipc';
 import { useAccountStore } from '@/stores/accountStore';
 import { useComposeRequestStore } from '@/stores/composeRequestStore';
 import { useFolderStore } from '@/stores/folderStore';
+import { useReadingStore } from '@/stores/readingStore';
 import { useSendingStore } from '@/stores/sendingStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useAgentStore } from '@/features/agent/agentStore';
-import { useComposerStore } from '@/features/composer/composerStore';
+import { useComposerStore, mintCompositionId } from '@/features/composer/composerStore';
 import { documentToEditor } from '@/features/composer/documentWire';
 import { useSendResultStore } from '@/features/outbox/sendResult';
 import type { MailboxListSnapshot } from '@/services/surfaces';
@@ -119,6 +120,7 @@ beforeEach(() => {
   useComposeRequestStore.setState({ snapshot: null });
   useSendingStore.getState().applySnapshot({ rows: [] });
   useFolderStore.setState({ accounts: [], selected: null, outboxAccount: null });
+  useReadingStore.getState().applySnapshot(null);
   useUiStore.getState().setAgentOpen(false);
   useUiStore.getState().setFolderDrawerOpen(false);
   useSendResultStore.getState().dismiss();
@@ -138,6 +140,40 @@ beforeEach(() => {
 });
 
 afterEach(cleanup);
+
+describe('the mail row layout', () => {
+  const SNAPSHOT = {
+    message: { account: 'work', key: 'imap:v1:q3' },
+    subject: 'Quarterly report',
+    from_name: 'Ada Lovelace',
+    from_address: 'ada@example.test',
+    sent_at: '2026-10-09T08:30:00Z',
+    plain: 'Hi',
+    remote_image_count: 0,
+  };
+
+  it('lets the message list fill the row while no message is open', () => {
+    render(<AppShell />);
+
+    expect(screen.queryByRole('complementary', { name: 'Reading pane' })).toBeNull();
+  });
+
+  it('opens the reading pane when a reading snapshot lands', () => {
+    render(<AppShell />);
+    act(() => {
+      useReadingStore.getState().applySnapshot(SNAPSHOT);
+    });
+
+    expect(screen.getByRole('complementary', { name: 'Reading pane' })).toBeTruthy();
+  });
+
+  it('keeps the reading pane while a composition stands in the strip', () => {
+    useComposerStore.setState({ open: true, composition: mintCompositionId() });
+    render(<AppShell />);
+
+    expect(screen.getByRole('complementary', { name: 'Reading pane' })).toBeTruthy();
+  });
+});
 
 describe('the shell composer wiring', () => {
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
