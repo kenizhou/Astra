@@ -33,6 +33,7 @@ Web client (React/Vite, in `client/web`):
 npm --prefix client/web ci          # esbuild postinstall approval is committed in package.json allowScripts
 npm --prefix client/web run test:run
 npm --prefix client/web run build
+npm --prefix client/web run dev:fixtures   # the real UI in a plain browser against fixture snapshots (design reviews, QA)
 ```
 
 Sidecar: `npm --prefix sidecar test` runs its e2e against `dist/index.cjs`; build first.
@@ -75,7 +76,3 @@ Astra Mail is a desktop mail client being ported, slice by slice, from the mail-
 A contract is decided once in its document under `docs/` and binds the whole product. Changing one takes the doc update, the implementation on every shipping surface, the `docs/capabilities.md` row, and a changelog fragment in `docs/changelog/unreleased/<slug>.md` (`Platforms:` and `Bump:` tags), all in the same change. `docs/zh/**` holds non-normative Chinese review copies that change in the same commit as their English source. Feature work follows specs/plans in `docs/superpowers/specs/` and `docs/superpowers/plans/`.
 
 PRs merge with squash, subject "PR title (#number)", branch deleted after; no merge commits.
-
-## Quality workflow
-
-`docs/quality-workflow.md` is the runbook wiring the gstack skill suite (design, security, eval, audit skills) into the slice cadence: what runs per slice, per PR, and per milestone, and the fixture-backed design harness the visual skills stand on.
