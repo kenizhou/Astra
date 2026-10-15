@@ -43,9 +43,15 @@ under `prefers-reduced-motion`, the skeleton shimmer included.
 ## Typography
 
 Tabular numerals (`font-feature-settings: 'tnum'`) on every count,
-timestamp, and duration. The bundled face (UI1 D2) ships with the weight
-stops 380/450/560 used as: light previews, medium senders, semibold
-subjects.
+timestamp, and duration. The bundled face (UI1 D2) is Inter Variable,
+vendored as a single latin-subset woff2 under
+`client/web/public/fonts/inter/` (OFL, under the 400KB budget the
+`font-budget` gate check enforces) and declared once in `theme.css`
+with `font-display: swap`. It leads `--font-ui`, so the weight stops
+380/450/560 resolve on every platform offline: light previews, medium
+senders, semibold subjects. CJK falls through to the system stack
+(`PingFang SC`, `Microsoft YaHei`, `Noto Sans SC`), which Inter's latin
+subset deliberately leaves alone.
 
 ## The state family
 

@@ -5,6 +5,7 @@ pub(crate) mod british_english;
 pub(crate) mod dash_hygiene;
 pub(crate) mod doc_sync;
 pub(crate) mod file_length;
+pub(crate) mod font_budget;
 pub(crate) mod license_headers;
 pub(crate) mod paths_ascii;
 pub(crate) mod version_sync;
@@ -46,6 +47,10 @@ pub(crate) fn all() -> Vec<Check> {
         Check {
             name: "doc-sync",
             run: crate::checks::doc_sync::check,
+        },
+        Check {
+            name: "font-budget",
+            run: crate::checks::font_budget::check,
         },
     ]
 }

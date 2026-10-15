@@ -4,17 +4,30 @@
  * never by raw colour, so the shell restyles entirely through this file.
  */
 
+/* The bundled UI face: Inter Variable, latin subset, one woff2 covering the
+   whole weight axis so the 380/450/560 stops resolve everywhere, not only on
+   Windows. Vendored from @fontsource-variable/inter 5.3.0 (OFL); sha256 of
+   the file: 3100e775e8616cd2611beecfa23a4263d7037586789b43f035236a2e6fbd4c62.
+   The xtask font-budget check keeps this file under 400KB. */
+@font-face {
+  font-family: 'Inter Variable';
+  src: url('/fonts/inter/inter-latin-wght-normal.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root,
 .light {
   /* Native widgets (scrollbars, checkboxes, form controls) follow the theme. */
   color-scheme: light;
 
-  /* Typography; system stacks only, the app runs fully offline. Segoe UI
-     Variable Text leads so the 380/450/560 weight stops resolve on
-     Windows; elsewhere the stack falls through to the system face. */
+  /* Typography: the bundled Inter leads, so the 380/450/560 weight stops
+     resolve on every platform offline. CJK falls through to the system
+     stack (Inter's latin subset carries no CJK glyphs). */
   --font-ui:
-    'Segoe UI Variable Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
-    'Microsoft YaHei', 'Noto Sans SC', system-ui, sans-serif;
+    'Inter Variable', 'Segoe UI Variable Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', system-ui, sans-serif;
   --font-serif: Georgia, Cambria, 'Times New Roman', serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Courier New', monospace;
 

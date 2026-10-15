@@ -37,8 +37,13 @@ classic(质感之前的冷石板色,即基础文件自身的值)。数值以属�
 ## 字体排印
 
 表格数字(`font-feature-settings: 'tnum'`)用于每一处计数、时间戳
-与时长。打包字体(UI1 D2)随 380/450/560 字重档位发布:细预览、中
-等发件人、半粗主题。
+与时长。打包字体(UI1 D2)为 Inter Variable,以单个拉丁子集 woff2
+存放于 `client/web/public/fonts/inter/`(OFL 许可,受 `font-budget`
+门控检查的 400KB 预算约束),并在 `theme.css` 中声明一次,采用
+`font-display: swap`。它领衔 `--font-ui`,因此 380/450/560 字重档
+位在每个平台上离线可用:细预览、中等发件人、半粗主题。中文则回退到
+系统字体栈(`PingFang SC`、`Microsoft YaHei`、`Noto Sans SC`),
+Inter 的拉丁子集有意不含中文字形。
 
 ## 状态族
 
