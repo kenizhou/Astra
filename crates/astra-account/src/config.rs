@@ -8,6 +8,7 @@
 
 use std::{fmt, path::Path, sync::Arc};
 
+use astra_oauth::OAuthProviderConfig;
 use engine_api::AccountId;
 use provider_imap::{CredentialSource, Credentials, ImapConfig};
 use serde::{Deserialize, Serialize};
@@ -57,10 +58,11 @@ pub enum ConnectionSecurity {
     StartTls,
 }
 
-/// One account's connection config: an IMAP mailbox with optional SMTP submission. The
-/// stored document can also name sections a later build reads (a calendar endpoint, a
-/// sign-in grant); this build loads the mail half and leaves the rest for the build that
-/// connects it.
+/// One account's connection config: an IMAP mailbox with optional SMTP
+/// submission, the DAV endpoints of its calendar and contacts legs, and
+/// the Microsoft section of an account that signs in through Microsoft
+/// rather than dialling servers itself. Every section is optional, so a
+/// stored document carries what its account's kind needs.
 #[derive(Debug, Clone, Deserialize)]
 pub struct AccountConfig {
     /// The IMAP mail endpoint. A stored account always names one; a config that does not
@@ -76,6 +78,13 @@ pub struct AccountConfig {
     /// account was before this section existed.
     #[serde(default)]
     pub dav: Option<DavAccount>,
+    /// The Microsoft account section, when the account signs in through
+    /// Microsoft rather than dialling servers itself: the app registration
+    /// its tokens mint through, the refresh token those mints start from,
+    /// and the scope set the server last granted. Absent for every account
+    /// stored before this section existed.
+    #[serde(default)]
+    pub graph: Option<GraphAccount>,
     /// Server certificates this account's owner accepted although they did not verify.
     /// Empty for every account that never met one, which is nearly all of them.
     #[serde(default, rename = "certificate_exception")]
@@ -84,6 +93,60 @@ pub struct AccountConfig {
     /// sections, read by the loader from there.
     #[serde(skip)]
     pub shape: AccountShape,
+}
+
+/// The `[graph]` section of a stored Microsoft account: the app
+/// registration its access tokens mint through, the long-lived refresh
+/// token those mints start from, and the scope set the server last
+/// granted for it.
+///
+/// The short-lived access token is never stored; the token source mints
+/// one on demand at connect. Like the rest of the config, the refresh
+/// token redacts itself in `Debug`, so a config holding it is safe to
+/// log.
+#[derive(Debug, Clone, Deserialize)]
+pub struct GraphAccount {
+    /// The account's own email address (Graph `/me`), which names the
+    /// account.
+    pub email: String,
+    /// The registered application (client) id of the product's Azure app.
+    /// Not a secret.
+    pub client_id: String,
+    /// The tenant the app authenticates against (`common`,
+    /// `organizations`, `consumers`, or a tenant id).
+    pub tenant: String,
+    /// The redirect URI the OAuth flow returns to (a custom scheme the
+    /// shell captures).
+    pub redirect_uri: String,
+    /// The delegated scopes the sign-in asks for.
+    pub scopes: Vec<String>,
+    /// The OAuth refresh token: the section's only secret.
+    pub refresh_token: Secret,
+    /// The scopes the server actually granted, which may be fewer than
+    /// were asked for: a person can untick one on the consent screen, or
+    /// withdraw one later. A copy of the last token response that named
+    /// them, written at sign-in and overwritten by any refresh that names
+    /// a different set. `None` for a grant stored before this was
+    /// recorded, which is read as withholding nothing until a refresh
+    /// says otherwise.
+    #[serde(default)]
+    pub granted_scopes: Option<Vec<String>>,
+}
+
+impl GraphAccount {
+    /// Builds the `astra-oauth` provider config this section's
+    /// registration names, so the token source can refresh its access
+    /// token.
+    #[must_use]
+    pub fn provider_config(&self) -> OAuthProviderConfig {
+        let scopes: Vec<&str> = self.scopes.iter().map(String::as_str).collect();
+        OAuthProviderConfig::microsoft(
+            self.client_id.clone(),
+            &self.tenant,
+            self.redirect_uri.clone(),
+            &scopes,
+        )
+    }
 }
 
 /// An IMAP endpoint: the `host:port` to dial, the TLS server name, and credentials.
@@ -189,6 +252,28 @@ impl AccountConfig {
                 section.insert("password".into(), password.expose().to_owned().into());
             }
             root.insert("dav".into(), section.into());
+        }
+        if let Some(graph) = &self.graph {
+            let mut section = toml::Table::new();
+            section.insert("email".into(), graph.email.clone().into());
+            section.insert("client_id".into(), graph.client_id.clone().into());
+            section.insert("tenant".into(), graph.tenant.clone().into());
+            section.insert("redirect_uri".into(), graph.redirect_uri.clone().into());
+            section.insert(
+                "scopes".into(),
+                toml::Value::Array(graph.scopes.iter().cloned().map(Into::into).collect()),
+            );
+            section.insert(
+                "refresh_token".into(),
+                graph.refresh_token.expose().to_owned().into(),
+            );
+            if let Some(granted) = &graph.granted_scopes {
+                section.insert(
+                    "granted_scopes".into(),
+                    toml::Value::Array(granted.iter().cloned().map(Into::into).collect()),
+                );
+            }
+            root.insert("graph".into(), section.into());
         }
         if !self.certificate_exceptions.is_empty() {
             let exceptions: Vec<toml::Value> = self
@@ -331,11 +416,11 @@ pub fn load(path: impl AsRef<Path>) -> Result<AccountConfig, ConfigError> {
 ///
 /// # Errors
 ///
-/// Returns [`ConfigError`] if the text is not valid config, or names no `[imap]`
-/// section.
+/// Returns [`ConfigError`] if the text is not valid config, or names no
+/// server at all (no `[imap]` section and no `[graph]` section).
 pub fn load_str(text: &str) -> Result<AccountConfig, ConfigError> {
     let mut config: AccountConfig = toml::from_str(text)?;
-    if config.imap.is_none() {
+    if config.imap.is_none() && config.graph.is_none() {
         return Err(ConfigError::NoEndpoint);
     }
     if let Some(dav) = &config.dav {
@@ -357,8 +442,9 @@ pub enum ConfigError {
     /// A required account-setup field was empty.
     #[error("missing required field: {0}")]
     Incomplete(&'static str),
-    /// The config names no server: an account needs an `[imap]` section.
-    #[error("the account names no server: it needs an [imap] section")]
+    /// The config names no server: an account needs an `[imap]` section or
+    /// a `[graph]` section.
+    #[error("the account names no server: it needs an [imap] or [graph] section")]
     NoEndpoint,
     /// The `[dav]` section names no server: a dav section needs a
     /// `caldav_url`, a `carddav_url`, or both.

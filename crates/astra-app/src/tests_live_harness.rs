@@ -196,6 +196,7 @@ fn account(
             security: ConnectionSecurity::ImplicitTls,
         }),
         certificate_exceptions: exceptions,
+        graph: None,
         dav: None,
         shape: AccountShape::default(),
     }

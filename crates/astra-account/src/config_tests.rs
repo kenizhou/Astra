@@ -176,6 +176,113 @@ fn a_pinned_id_survives_edits_of_the_settings_it_was_derived_from() {
     assert_eq!(reloaded.account_id().expect("an id").as_str(), "pinned-id");
 }
 
+/// A stored Microsoft account: the `[graph]` section a sign-in writes,
+/// beside whatever else an account carries.
+const GRAPH_SAMPLE: &str = r#"
+[graph]
+email = "alice@example.com"
+client_id = "client-abc"
+tenant = "common"
+redirect_uri = "com.kenizhou.astra://oauth"
+scopes = ["offline_access", "https://graph.microsoft.com/Mail.ReadWrite"]
+refresh_token = "graph-refresh-secret"
+"#;
+
+#[test]
+fn a_graph_section_round_trips_through_the_stored_form() {
+    let config = load_str(GRAPH_SAMPLE).expect("valid config");
+    let graph = config.graph.as_ref().expect("graph present");
+    assert_eq!(graph.email, "alice@example.com");
+    assert_eq!(graph.client_id, "client-abc");
+    assert_eq!(graph.tenant, "common");
+    assert_eq!(graph.redirect_uri, "com.kenizhou.astra://oauth");
+    assert_eq!(graph.scopes.len(), 2);
+    assert_eq!(graph.refresh_token.expose(), "graph-refresh-secret");
+    // The granted-set cache starts absent: a grant stored before a refresh
+    // named its scopes withholds nothing.
+    assert_eq!(graph.granted_scopes, None);
+
+    let stored = config.to_toml().expect("serialisable config");
+    assert!(stored.contains("[graph]"), "{stored}");
+    assert!(!stored.contains("granted_scopes"), "{stored}");
+    let parsed = load_str(&stored).expect("round-trips");
+    let graph = parsed.graph.as_ref().expect("graph present");
+    assert_eq!(graph.refresh_token.expose(), "graph-refresh-secret");
+    assert_eq!(
+        graph.scopes,
+        vec![
+            "offline_access".to_owned(),
+            "https://graph.microsoft.com/Mail.ReadWrite".to_owned(),
+        ]
+    );
+    assert_eq!(graph.granted_scopes, None);
+}
+
+#[test]
+fn the_granted_scope_cache_round_trips_once_recorded() {
+    let mut config = load_str(GRAPH_SAMPLE).expect("valid config");
+    let granted = vec![
+        "offline_access".to_owned(),
+        "https://graph.microsoft.com/Mail.ReadWrite".to_owned(),
+    ];
+    config.graph.as_mut().expect("graph").granted_scopes = Some(granted.clone());
+
+    let stored = config.to_toml().expect("serialisable config");
+    let parsed = load_str(&stored).expect("round-trips");
+    assert_eq!(
+        parsed.graph.as_ref().expect("graph").granted_scopes,
+        Some(granted)
+    );
+}
+
+#[test]
+fn an_old_document_without_a_graph_section_loads_clean() {
+    // A document stored before the section existed loads exactly as it did,
+    // and its serialised form grows no graph section.
+    let config = load_str(SAMPLE).expect("valid config");
+    assert!(config.graph.is_none());
+    let stored = config.to_toml().expect("serialisable config");
+    assert!(!stored.contains("graph"), "{stored}");
+}
+
+#[test]
+fn a_graph_account_needs_no_imap_section() {
+    // A Microsoft account has no dialable IMAP endpoint: the graph section
+    // alone is a whole stored account, not a refused document.
+    let config = load_str(GRAPH_SAMPLE).expect("valid config");
+    assert!(config.imap.is_none());
+    assert!(config.graph.is_some());
+}
+
+#[test]
+fn the_graph_sections_debug_never_leaks_the_refresh_token() {
+    let config = load_str(GRAPH_SAMPLE).expect("valid config");
+    let dump = format!("{config:?}");
+    assert!(!dump.contains("graph-refresh-secret"), "{dump}");
+    assert_eq!(
+        format!("{:?}", config.graph.as_ref().expect("graph").refresh_token),
+        "Secret(<redacted>)"
+    );
+}
+
+#[test]
+fn the_graph_section_builds_the_microsoft_endpoints_for_its_tenant() {
+    let config = load_str(GRAPH_SAMPLE).expect("valid config");
+    let provider = config.graph.as_ref().expect("graph").provider_config();
+    assert!(provider
+        .authorize_endpoint
+        .contains("/common/oauth2/v2.0/authorize"));
+    assert!(provider
+        .token_endpoint
+        .contains("/common/oauth2/v2.0/token"));
+    assert_eq!(provider.client_id, "client-abc");
+    assert_eq!(provider.redirect_uri, "com.kenizhou.astra://oauth");
+    assert_eq!(
+        provider.scopes,
+        config.graph.as_ref().expect("graph").scopes
+    );
+}
+
 #[test]
 fn certificate_exceptions_round_trip_and_reach_the_engine() {
     let certificate = engine_tls::CertificateDer::from(b"a certificate".to_vec());

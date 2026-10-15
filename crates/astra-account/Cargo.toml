@@ -40,6 +40,11 @@ provider-imap.workspace = true
 # here (calendar reads beside the mail providers, contacts as the installed
 # leg) rather than each host dialing its own.
 provider-caldav.workspace = true
+# The Graph adapters the optional graph section of a stored Microsoft account
+# dials over the token source (GraphClient, GraphProvider,
+# GraphCalendarProvider, MailboxPrincipal): an extension of SP1's design
+# decision 4 list, recorded here the way SP2l's engine-tls one was.
+provider-graph.workspace = true
 # Implementing the engine's async `Provider` trait for the reconnecting IMAP wrapper.
 async-trait.workspace = true
 # Builds the reconnecting wrapper's retried provider streams.

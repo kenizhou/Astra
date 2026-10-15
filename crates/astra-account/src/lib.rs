@@ -26,12 +26,15 @@ mod tls;
 
 pub use autodetect::{recommend, MissReason, OauthRoutes, ServerSummary, SetupRecommendation};
 pub use config::{
-    load, load_str, AccountConfig, AccountShape, ConfigError, ConnectionSecurity, ImapAccount,
-    Secret, SmtpAccount,
+    load, load_str, AccountConfig, AccountShape, ConfigError, ConnectionSecurity, GraphAccount,
+    ImapAccount, Secret, SmtpAccount,
 };
 pub use credentials::imap_credential_source;
 pub use dav::{connect_dav_providers, DavAccount, DavProviders};
-pub use graph::{CredentialOrigin, GraphTokenSource, TokenSink};
+pub use graph::{
+    connect_graph_calendar_providers, connect_graph_folder, connect_graph_mail_providers,
+    dial_microsoft_account, CredentialOrigin, GraphTokenSource, MicrosoftProviders, TokenSink,
+};
 pub use imap::{connect_imap_mailbox, connect_mail_providers, ImapConnections};
 pub use log_handle::account_log_handle;
 pub use pass_folders::pass_syncs;
@@ -69,6 +72,15 @@ pub enum AccountError {
     /// mistakes a dead grant for an outage.
     #[error("graph: {0}")]
     Graph(String),
+    /// The Graph calendar leg was refused for lack of the calendar scope
+    /// (a scope-denied `403` on the calendar-list probe): the account's
+    /// grant predates `Calendars.ReadWrite`, so the calendar arrives only
+    /// after a fresh sign-in. Apart from [`Self::Graph`] because it is the
+    /// one Graph failure a caller answers with a re-consent prompt rather
+    /// than an outage badge, and because it costs only the calendar leg:
+    /// the account's mail stands.
+    #[error("calendar access denied: {0}")]
+    CalendarAccessDenied(String),
     /// The IMAP connection or login failed.
     #[error("imap: {0}")]
     Imap(#[from] provider_imap::ImapError),
