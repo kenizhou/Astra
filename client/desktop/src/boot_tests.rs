@@ -403,3 +403,10 @@ fn a_graph_dial_that_fails_skips_the_account_without_blocking_the_boot() {
 // file for the 500-line cap.
 #[path = "boot_tests/graph_refusal_tests.rs"]
 mod graph_refusals;
+
+// The offline end-to-end proof of the Microsoft account's whole life over
+// the scripted seams: the sign-in through the real lookup and source, the
+// rotation landing, the boot re-dial, and the dead grant's row. Split
+// from this file for the 500-line cap.
+#[path = "boot_tests/graph_lifecycle_tests.rs"]
+mod graph_lifecycle;

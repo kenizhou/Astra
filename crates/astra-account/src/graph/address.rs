@@ -30,13 +30,14 @@ pub async fn fetch_primary_address(access_token: &str) -> Result<String, Account
     fetch_primary_address_at(GRAPH_V1_ROOT, access_token).await
 }
 
-/// The lookup against a chosen Graph root: the seam the offline tests
-/// drive against a stand-in server, everything else identical.
+/// The lookup against a chosen Graph root: the seam the offline proofs
+/// drive against a stand-in server, everything else identical to the
+/// constant-root call the completion makes.
 ///
 /// # Errors
 ///
 /// As [`fetch_primary_address`].
-pub(crate) async fn fetch_primary_address_at(
+pub async fn fetch_primary_address_at(
     base: &str,
     access_token: &str,
 ) -> Result<String, AccountError> {

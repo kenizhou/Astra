@@ -33,8 +33,8 @@ pub use credentials::imap_credential_source;
 pub use dav::{connect_dav_providers, DavAccount, DavProviders};
 pub use graph::{
     connect_graph_calendar_providers, connect_graph_folder, connect_graph_mail_providers,
-    dial_microsoft_account, fetch_primary_address, CredentialOrigin, GraphTokenSource,
-    MicrosoftProviders, TokenSink,
+    dial_microsoft_account, fetch_primary_address, fetch_primary_address_at, CredentialOrigin,
+    GraphTokenSource, MicrosoftProviders, TokenSink,
 };
 pub use imap::{connect_imap_mailbox, connect_mail_providers, ImapConnections};
 pub use log_handle::account_log_handle;
