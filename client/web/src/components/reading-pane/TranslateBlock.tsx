@@ -114,7 +114,7 @@ export function TranslateBlock() {
   };
 
   return (
-    <section aria-label="Translate" className="shrink-0 border-b border-border px-4 py-2">
+    <section aria-label="Translate" className="shrink-0 border-b border-border-subtle px-4 py-2">
       {phase === 'error' && (
         <p role="alert" className="mb-1 text-xs text-muted-foreground">
           {error === ''
