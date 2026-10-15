@@ -1,0 +1,428 @@
+// SPDX-License-Identifier: GPL-3.0-only
+//! Tests for [`super::GraphTokenSource`]: the refresh single-flight, the
+//! shared-failure memo, and the reach classification that decides whether
+//! re-presenting a refresh token is safe or is a replay. Its own file so the
+//! production type stays under the 500-line cap.
+
+use std::{
+    io::{Read, Write},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Mutex,
+    },
+};
+
+use super::{
+    test_support::{
+        dead_grant_token_endpoint, flaky_token_endpoint, mock_token_endpoint,
+        ratcheting_token_endpoint, refused_token_endpoint, source_at,
+    },
+    *,
+};
+
+/// Every caller queued behind a failed refresh takes that failure instead of
+/// posting its own request with the same refresh token. Each request after
+/// the first is a replay of a token that may already be spent, and a
+/// ratcheting server revokes the grant over exactly that, so one failure
+/// must remain one request however many providers were waiting.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_failed_refresh_is_shared_with_queued_callers_and_never_reposted() {
+    // Fails every request it sees, so any second request is a real second request.
+    let (endpoint, hits) = flaky_token_endpoint(usize::MAX);
+    let source = source_at(endpoint, None);
+
+    let mut tasks = tokio::task::JoinSet::new();
+    for _ in 0..8 {
+        let source = Arc::clone(&source);
+        tasks.spawn(async move { source.access_token().await });
+    }
+    let results = tasks.join_all().await;
+
+    assert!(
+        results.iter().all(Result::is_err),
+        "the endpoint failed every request, so no caller can hold a token: {results:?}",
+    );
+    assert_eq!(
+        hits.load(Ordering::SeqCst),
+        1,
+        "each queued caller re-presented the same refresh token, that is the replay a \
+         ratcheting server revokes the grant over",
+    );
+}
+
+/// The classification that decides whether a retry is safe, driven end to
+/// end. A connection nothing accepts fails before a byte of the request is
+/// written, so no server saw the refresh token and it is still good; it must
+/// carry the short cool-down or the account parks itself over failures that
+/// never left the device.
+#[tokio::test]
+async fn a_refusal_is_recorded_as_safe_to_retry_soon() {
+    let source = source_at(refused_token_endpoint(), None);
+    assert!(source.access_token().await.is_err());
+    assert_eq!(
+        source.last_failure(),
+        Some((
+            FailureKind::Unanswered(TokenRequestReach::NotSent),
+            NOT_SENT_COOLDOWN.whole_seconds(),
+        )),
+    );
+}
+
+/// Its opposite: the request was delivered and then the conversation died.
+/// The server may have refreshed and answered into a void, spending the
+/// token presented, so this one must back off far longer and must not be
+/// reported as an expired sign-in, which would put a re-authentication
+/// prompt in front of the person over a dropped packet.
+#[tokio::test]
+async fn a_delivered_request_that_dies_backs_off_without_prompting_a_reauth() {
+    let (endpoint, _hits) = flaky_token_endpoint(usize::MAX);
+    let source = source_at(endpoint, None);
+
+    let err = source.access_token().await.unwrap_err();
+    assert!(
+        matches!(err, AccountError::Graph(_)),
+        "a possibly-processed refresh is not proof of a dead grant: {err:?}",
+    );
+    assert_eq!(
+        source.last_failure(),
+        Some((
+            FailureKind::Unanswered(TokenRequestReach::MaybeProcessed),
+            MAYBE_PROCESSED_COOLDOWN.whole_seconds(),
+        )),
+    );
+}
+
+/// The cool-down releases, rather than wedging the account until it is
+/// restarted.
+#[tokio::test]
+async fn the_account_recovers_by_itself_once_the_cooldown_passes() {
+    // One failure, then a healthy server.
+    let (endpoint, hits) = flaky_token_endpoint(1);
+    let source = source_at(endpoint, None);
+
+    assert!(source.access_token().await.is_err());
+    assert_eq!(hits.load(Ordering::SeqCst), 1);
+
+    // Still inside the cool-down: no second request, and no user-visible change.
+    assert!(source.access_token().await.is_err());
+    assert_eq!(
+        hits.load(Ordering::SeqCst),
+        1,
+        "retried inside the cool-down"
+    );
+
+    source.backdate_failure(MAYBE_PROCESSED_COOLDOWN + Duration::seconds(1));
+    assert_eq!(
+        source.access_token().await.unwrap(),
+        "AT-OK",
+        "the account never retried and stayed broken until a restart",
+    );
+    assert_eq!(hits.load(Ordering::SeqCst), 2);
+    assert!(
+        source.last_failure().is_none(),
+        "a success must clear the remembered failure",
+    );
+}
+
+/// Every provider on an OAuth account shares one token source, and they sync
+/// concurrently. Without the single-flight, each one that finds the access
+/// token stale reads the same refresh token and posts its own refresh;
+/// against a server that **ratchets** the replay revokes the whole grant,
+/// and the account is dead at the next launch after working all session on
+/// the access token that was already cached. Concurrent callers must produce
+/// exactly one refresh request.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_callers_refresh_once_and_never_replay_a_rotated_token() {
+    let (endpoint, hits) = ratcheting_token_endpoint("initial-refresh");
+    let source = source_at(endpoint, None);
+
+    let mut tasks = tokio::task::JoinSet::new();
+    for _ in 0..8 {
+        let source = Arc::clone(&source);
+        tasks.spawn(async move { source.access_token().await });
+    }
+    let results = tasks.join_all().await;
+
+    for result in &results {
+        assert!(
+            result.is_ok(),
+            "a concurrent caller replayed the refresh token and the server revoked the \
+             grant: {result:?}",
+        );
+    }
+    assert_eq!(
+        hits.load(Ordering::SeqCst),
+        1,
+        "one refresh must serve every waiting caller",
+    );
+}
+
+/// The sibling property: once a rotation has happened, a later refresh must
+/// present the rotated token, not the one the source was built with.
+/// Without this the very next refresh is itself a replay.
+#[tokio::test]
+async fn a_later_refresh_presents_the_rotated_token() {
+    let (endpoint, hits) = ratcheting_token_endpoint("initial-refresh");
+    let source = source_at(endpoint, None);
+
+    assert_eq!(source.access_token().await.unwrap(), "AT-1");
+    // Expire the cache so the next call must go back to the server.
+    source.seed_access_token(String::new(), OffsetDateTime::UNIX_EPOCH);
+    assert_eq!(
+        source.access_token().await.unwrap(),
+        "AT-2",
+        "the second refresh presented a stale token and was rejected as a replay",
+    );
+    assert_eq!(hits.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn access_token_refreshes_once_then_serves_from_cache() {
+    let body = r#"{"token_type":"Bearer","expires_in":3600,"access_token":"AT"}"#;
+    let (endpoint, hits) = mock_token_endpoint(vec![body.to_owned()]);
+    let source = source_at(endpoint, None);
+
+    assert_eq!(source.access_token().await.unwrap(), "AT");
+    // A fresh token (1h) is cached: the second call must not hit the endpoint again.
+    assert_eq!(source.access_token().await.unwrap(), "AT");
+    assert_eq!(hits.load(Ordering::SeqCst), 1);
+}
+
+/// What a sink was told: each rotated refresh token, and each scope set a
+/// refresh named.
+#[derive(Default)]
+struct Recorder {
+    rotated: Mutex<Vec<String>>,
+    granted: Mutex<Vec<Vec<String>>>,
+}
+
+#[async_trait]
+impl TokenSink for Recorder {
+    async fn refresh_token_rotated(&self, _account: &AccountId, new_refresh_token: &str) {
+        self.rotated
+            .lock()
+            .unwrap()
+            .push(new_refresh_token.to_owned());
+    }
+
+    async fn scopes_granted(&self, _account: &AccountId, granted: &astra_oauth::GrantedScopes) {
+        self.granted
+            .lock()
+            .unwrap()
+            .push(granted.as_slice().to_vec());
+    }
+}
+
+/// Refreshes once against a token endpoint answering `body`, and returns
+/// what the sink heard.
+async fn refresh_answered_by(body: &str) -> Arc<Recorder> {
+    let recorder = Arc::new(Recorder::default());
+    let (endpoint, _hits) = mock_token_endpoint(vec![body.to_owned()]);
+    let source = source_at(endpoint, Some(Arc::clone(&recorder) as Arc<dyn TokenSink>));
+    source.access_token().await.unwrap();
+    recorder
+}
+
+#[tokio::test]
+async fn a_rotated_refresh_token_is_reported_to_the_sink() {
+    let recorder = refresh_answered_by(
+        r#"{"token_type":"Bearer","expires_in":3600,"access_token":"AT","refresh_token":"ROTATED"}"#,
+    )
+    .await;
+    assert_eq!(recorder.rotated.lock().unwrap().as_slice(), ["ROTATED"]);
+}
+
+/// Consent withdrawn at the provider reaches this app only as a narrower
+/// `scope` on the next refresh, so every refresh that names one hands it
+/// on, rotation or not.
+#[tokio::test]
+async fn the_scope_a_refresh_names_is_reported_to_the_sink() {
+    let recorder = refresh_answered_by(
+        r#"{"token_type":"Bearer","expires_in":3600,"access_token":"AT","scope":"Mail.Read offline_access"}"#,
+    )
+    .await;
+    assert!(recorder.rotated.lock().unwrap().is_empty());
+    assert_eq!(
+        recorder.granted.lock().unwrap().as_slice(),
+        [vec!["Mail.Read".to_owned(), "offline_access".to_owned()]]
+    );
+}
+
+#[tokio::test]
+async fn a_refresh_that_names_no_scope_reports_none() {
+    let recorder =
+        refresh_answered_by(r#"{"token_type":"Bearer","expires_in":3600,"access_token":"AT"}"#)
+            .await;
+    assert!(recorder.granted.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn an_invalid_grant_refresh_is_a_reauth_signal() {
+    let body = r#"{"error":"invalid_grant","error_description":"revoked"}"#;
+    // A 200 wrapper won't do: the endpoint must be non-2xx for an error body.
+    let hits = Arc::new(AtomicUsize::new(0));
+    let hits_thread = Arc::clone(&hits);
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    std::thread::spawn(move || {
+        if let Ok((mut stream, _)) = listener.accept() {
+            let mut buf = [0u8; 8192];
+            let _ = stream.read(&mut buf);
+            hits_thread.fetch_add(1, Ordering::SeqCst);
+            let resp = format!(
+                "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = stream.write_all(resp.as_bytes());
+        }
+    });
+    let source = source_at(format!("http://{addr}/token"), None);
+    let err = source.access_token().await.unwrap_err();
+    assert!(matches!(err, AccountError::SigninRejected(_)));
+}
+
+/// A grant that predates a scope this build wants is refused the same way,
+/// and must reach the same prompt. A refresh names no scope
+/// ([`astra_oauth::refresh`]), so a server raising `invalid_scope` here is
+/// the classification's business, not the request's: it is the
+/// classification that decides what a caller does.
+#[tokio::test]
+async fn an_invalid_scope_refresh_is_a_reauth_signal_too_not_something_to_retry() {
+    let body = r#"{"error":"invalid_scope","error_description":"unable to issue scope Mail.Send"}"#;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    std::thread::spawn(move || {
+        if let Ok((mut stream, _)) = listener.accept() {
+            let mut buf = [0u8; 8192];
+            let _ = stream.read(&mut buf);
+            let resp = format!(
+                "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = stream.write_all(resp.as_bytes());
+        }
+    });
+    let source = source_at(format!("http://{addr}/token"), None);
+    let err = source.access_token().await.unwrap_err();
+    assert!(
+        matches!(err, AccountError::SigninRejected(_)),
+        "an under-scoped grant needs consent, not a retry; got {err:?}"
+    );
+}
+
+/// A grant the server has refused is not asked about again, and every caller
+/// behind the memo still learns the sign-in is dead. The second half is why
+/// the memo carries a kind rather than only a reach: a memo that flattened a
+/// dead grant into a transient error would make the "sign in again" prompt
+/// appear only for whichever caller happened to reach the server first, and
+/// every other one would report an outage over a credential that is dead.
+#[tokio::test]
+async fn a_dead_grant_is_not_asked_about_again_and_still_reads_as_an_expired_signin() {
+    let (endpoint, hits) = dead_grant_token_endpoint();
+    let source = source_at(endpoint, None);
+
+    let first = source.access_token().await.unwrap_err();
+    assert!(
+        matches!(first, AccountError::SigninRejected(_)),
+        "{first:?}"
+    );
+    assert_eq!(hits.load(Ordering::SeqCst), 1);
+
+    for _ in 0..3 {
+        let err = source.access_token().await.unwrap_err();
+        assert!(
+            matches!(err, AccountError::SigninRejected(_)),
+            "a remembered dead grant must keep raising the re-authentication prompt rather than \
+             degrading to an outage: {err:?}",
+        );
+    }
+
+    assert_eq!(
+        hits.load(Ordering::SeqCst),
+        1,
+        "the account re-presented a refresh token the server had already refused",
+    );
+    assert_eq!(
+        source.last_failure(),
+        Some((FailureKind::DeadGrant, DEAD_GRANT_COOLDOWN.whole_seconds())),
+    );
+}
+
+/// Signing back in clears the memo, which is the only reason a 30-minute
+/// cool-down on a dead grant is safe to hold. The recovery paths either
+/// build a whole new token source or seed this one with the freshly
+/// exchanged access token; if the second did not clear the failure, a
+/// person who had just re-authenticated would watch a stale mailbox for
+/// half an hour with nothing to do about it.
+#[tokio::test]
+async fn seeding_a_fresh_sign_in_clears_a_remembered_dead_grant() {
+    let (endpoint, hits) = dead_grant_token_endpoint();
+    let source = source_at(endpoint, None);
+    assert!(source.access_token().await.is_err());
+    assert!(source.last_failure().is_some());
+
+    // What every OAuth completion path does with the access token the code exchange returned.
+    source.seed_access_token(
+        "AT-FRESH".to_owned(),
+        OffsetDateTime::now_utc() + Duration::hours(1),
+    );
+
+    assert_eq!(
+        source.access_token().await.unwrap(),
+        "AT-FRESH",
+        "a re-authenticated account is still parked behind the cool-down of the credential it \
+         replaced",
+    );
+    assert_eq!(
+        hits.load(Ordering::SeqCst),
+        1,
+        "the seeded token is used as-is, nothing needs refreshing yet",
+    );
+    assert!(source.last_failure().is_none());
+}
+
+/// A server that refuses a token before its stated expiry (revoked, or
+/// clocks that disagree) is asked again with a new one, not the cached one
+/// it just turned down.
+#[tokio::test]
+async fn a_refused_token_is_replaced_before_its_stated_expiry() {
+    let (endpoint, hits) = ratcheting_token_endpoint("initial-refresh");
+    let source = source_at(endpoint, None);
+
+    assert_eq!(source.access_token().await.unwrap(), "AT-1");
+    assert_eq!(source.access_token_replacing("AT-1").await.unwrap(), "AT-2");
+    assert_eq!(hits.load(Ordering::SeqCst), 2);
+}
+
+/// A refusal of a token that has already been replaced costs nothing: the
+/// replacement is served from the cache, so a connection renewing late
+/// never presents the refresh token again.
+#[tokio::test]
+async fn renewing_a_token_already_replaced_takes_the_replacement() {
+    let (endpoint, hits) = ratcheting_token_endpoint("initial-refresh");
+    let source = source_at(endpoint, None);
+
+    source.access_token().await.unwrap();
+    source.access_token_replacing("AT-1").await.unwrap();
+    assert_eq!(source.access_token_replacing("AT-1").await.unwrap(), "AT-2");
+    assert_eq!(hits.load(Ordering::SeqCst), 2);
+}
+
+/// Several connections refused with the same token renew it with one
+/// refresh between them.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_renewals_of_one_refused_token_refresh_once() {
+    let (endpoint, hits) = ratcheting_token_endpoint("initial-refresh");
+    let source = source_at(endpoint, None);
+    source.access_token().await.unwrap();
+
+    let mut tasks = tokio::task::JoinSet::new();
+    for _ in 0..6 {
+        let source = Arc::clone(&source);
+        tasks.spawn(async move { source.access_token_replacing("AT-1").await });
+    }
+    for result in tasks.join_all().await {
+        assert_eq!(result.unwrap(), "AT-2");
+    }
+    assert_eq!(hits.load(Ordering::SeqCst), 2);
+}

@@ -153,6 +153,7 @@ name = "astra-account"
 version = "0.1.0"
 dependencies = [
  "astra-autodetect",
+ "astra-oauth",
  "async-stream",
  "async-trait",
  "engine-api",
@@ -168,6 +169,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+ "time",
  "tokio",
  "tokio-rustls",
  "toml 1.1.7+spec-1.1.0",

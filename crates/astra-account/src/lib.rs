@@ -14,11 +14,14 @@ mod autodetect;
 mod config;
 mod credentials;
 mod dav;
+mod graph;
 mod imap;
+mod log_handle;
 mod pass_folders;
 mod reconnect;
 mod setup;
 mod setup_choices;
+mod throttle;
 mod tls;
 
 pub use autodetect::{recommend, MissReason, OauthRoutes, ServerSummary, SetupRecommendation};
@@ -28,7 +31,9 @@ pub use config::{
 };
 pub use credentials::imap_credential_source;
 pub use dav::{connect_dav_providers, DavAccount, DavProviders};
+pub use graph::{CredentialOrigin, GraphTokenSource, TokenSink};
 pub use imap::{connect_imap_mailbox, connect_mail_providers, ImapConnections};
+pub use log_handle::account_log_handle;
 pub use pass_folders::pass_syncs;
 pub use reconnect::{ReconnectingImapProvider, Redial};
 pub use setup::{
@@ -58,6 +63,12 @@ pub enum AccountError {
     /// Listing the account's folders failed (the dial needs it to bind them).
     #[error("listing mailboxes: {0}")]
     MailboxList(String),
+    /// A Microsoft Graph call failed: a token refresh, or a Graph endpoint
+    /// the account wiring reads. A refusal the account cannot recover from
+    /// arrives as [`Self::SigninRejected`] instead, so a caller never
+    /// mistakes a dead grant for an outage.
+    #[error("graph: {0}")]
+    Graph(String),
     /// The IMAP connection or login failed.
     #[error("imap: {0}")]
     Imap(#[from] provider_imap::ImapError),
