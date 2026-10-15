@@ -8,7 +8,7 @@
 // first; the repeat rule is read-only (the snapshot carries no rule to seed
 // an editor with, and a rule half-seen is a rule silently rewritten).
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import { dispatch, intents } from '@/services/ipc';
 import type {
@@ -22,6 +22,7 @@ import { addDays, dayKeyOf } from './calendarRange';
 import { localDelta, localSlotValue, localValueOf } from './localDateTime';
 import { useCalendarStore } from './calendarStore';
 import { useSettingsStore } from '@/features/settings/settingsStore';
+import { useDialogFocus } from '@/components/ui/useDialogFocus';
 import { DeleteChoice, SeriesWarning } from './EventDialogSteps';
 
 /** The repeat choices a create offers. */
@@ -241,14 +242,8 @@ export function EventDialog({ row, slot = null, onClose }: EventDialogProps) {
 
   // The dialog owns its dismissal: Escape closes it here and never bubbles
   // to the pane's clearSelection, and a click on the backdrop's own ground
-  // closes it. The focus moves into the dialog on open and back to what
-  // opened it on close.
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    dialogRef.current?.focus();
-    return () => previous?.focus();
-  }, []);
+  // closes it. The focus discipline rides the shared hook.
+  const dialogRef = useDialogFocus<HTMLDivElement>();
 
   return (
     <div

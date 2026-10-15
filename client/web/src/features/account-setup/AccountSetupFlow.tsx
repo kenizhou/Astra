@@ -25,6 +25,7 @@ import {
 } from '@/services/ipc';
 import { isTauri } from '@/events/surfaceEvents';
 import { useUiStore } from '@/stores/uiStore';
+import { useDialogFocus } from '@/components/ui/useDialogFocus';
 import { buildAccountToml } from './accountToml';
 import { DetectStep } from './DetectStep';
 import { OAuthOffer, type OAuthFlowState } from './OAuthOffer';
@@ -142,16 +143,8 @@ export function AccountSetupFlow() {
   }, [open]);
 
   // The dialog owns its dismissal: Escape and a click on the backdrop's own
-  // ground close it, and the focus moves in on open and back out on close.
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    dialogRef.current?.focus();
-    return () => previous?.focus();
-  }, [open]);
+  // ground close it; the focus discipline rides the shared hook.
+  const dialogRef = useDialogFocus<HTMLDivElement>(open);
 
   if (!open) {
     return null;
