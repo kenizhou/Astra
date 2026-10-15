@@ -58,7 +58,14 @@ pub(crate) fn all() -> Vec<Check> {
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const SKIP_DIRS: &[&str] = &[".git", "target", "node_modules", "dist", ".superpowers", ".gstack"];
+const SKIP_DIRS: &[&str] = &[
+    ".git",
+    "target",
+    "node_modules",
+    "dist",
+    ".superpowers",
+    ".gstack",
+];
 
 /// Every file under `root` whose name ends with one of `exts` (all files when
 /// `exts` is empty), skipping build output and the Chinese review copies.

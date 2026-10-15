@@ -18,7 +18,11 @@ pub(crate) fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
             ));
         }
     }
-    if bad.is_empty() { Ok(()) } else { Err(bad) }
+    if bad.is_empty() {
+        Ok(())
+    } else {
+        Err(bad)
+    }
 }
 
 #[cfg(test)]
