@@ -49,13 +49,13 @@ export function RibbonButton({
       title={title ?? label}
       disabled={disabled}
       onClick={onClick}
-      className={`my-auto flex h-9 items-center gap-1.5 rounded-md text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-50 ${
+      className={`flex h-7 items-center gap-1.5 rounded-[var(--radius-xs)] text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-50 ${
         primary
           ? 'bg-primary px-2.5 font-medium text-primary-foreground hover:bg-primary-hover disabled:hover:bg-primary'
           : 'px-2 text-muted-text hover:bg-hover hover:text-foreground disabled:hover:bg-transparent disabled:hover:text-muted-text'
-      } ${iconOnly ? 'w-9 justify-center px-0' : ''}`}
+      } ${iconOnly ? 'w-7 justify-center px-0' : ''}`}
     >
-      <Icon size={16} />
+      <Icon size={14} />
       <span className={`whitespace-nowrap ${iconOnly ? 'sr-only' : ''}`}>{label}</span>
     </button>
   );
