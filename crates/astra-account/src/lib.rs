@@ -35,7 +35,8 @@ pub use credentials::imap_credential_source;
 pub use dav::{connect_dav_providers, DavAccount, DavProviders};
 pub use google::{
     connect_google_calendar_providers, connect_google_folder, connect_google_mail_providers,
-    google_token_source, requested_scopes, withheld,
+    dial_google_account, fetch_google_address, fetch_google_address_at, google_token_source,
+    requested_scopes, withheld, GoogleProviders,
 };
 pub use graph::{
     connect_graph_calendar_providers, connect_graph_folder, connect_graph_mail_providers,

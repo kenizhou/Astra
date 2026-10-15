@@ -73,6 +73,12 @@
 //! [`SystemBrowser`]: session::SystemBrowser
 
 pub(crate) mod commands;
+/// The completion dispatch: one begun flow's success runs the account
+/// half its provider names.
+pub(crate) mod completion;
+/// The completion's Google account half: what a Google sign-in's token
+/// set becomes once the exchange answered.
+pub(crate) mod google_add;
 /// The standing grant refusals: the map of Microsoft accounts whose OAuth
 /// grant needs the person to act, the state the refusal surfaces render.
 pub(crate) mod grant_refusals;

@@ -342,7 +342,14 @@ fn the_sign_in_completes_the_rotation_lands_and_the_next_boot_dials_the_advanced
         let dial = boot_dial(Arc::clone(&boot_grants), BootAnswer::Healthy);
         let refusals = Arc::clone(&host.refusals);
         host.runtime.block_on(move || async move {
-            super::super::dial_stored(&dials, &store, dial, &refusals).await
+            super::super::stored::dial_stored(
+                &dials,
+                &store,
+                dial,
+                super::google_boot::unused_dial(),
+                &refusals,
+            )
+            .await
         })
     };
     assert_eq!(dialled.len(), 1, "the stored account dialled at boot");
@@ -408,7 +415,14 @@ fn a_dead_grant_s_classification_reaches_the_accounts_row_and_a_re_sign_in_clear
         let dial = boot_dial(Arc::new(Mutex::new(Vec::new())), BootAnswer::DeadGrant);
         let refusals = Arc::clone(&host.refusals);
         host.runtime.block_on(move || async move {
-            super::super::dial_stored(&dials, &store, dial, &refusals).await
+            super::super::stored::dial_stored(
+                &dials,
+                &store,
+                dial,
+                super::google_boot::unused_dial(),
+                &refusals,
+            )
+            .await
         })
     };
     assert!(dialled.is_empty(), "the account never joins the app");

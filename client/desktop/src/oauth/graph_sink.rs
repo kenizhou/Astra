@@ -1,21 +1,36 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! The desktop's [`TokenSink`]: the host half every Graph token source
-//! reports a rotation or a moved scope set to. One sink serves every
-//! account, keyed by the id it is handed; the boot's restore and the
-//! sign-in's completion build it over the same two stores (the dial table
-//! and the credential transaction), so both paths land their writes in the
-//! same places.
+//! The desktop's [`TokenSink`]: the host half every OAuth token source
+//! reports a rotation or a moved scope set to, whichever family the
+//! account's grant belongs to (`[graph]` or `[google]`). One sink serves
+//! every account, keyed by the id it is handed; the boot's restore and
+//! the sign-in's completion build it over the same two stores (the dial
+//! table and the credential transaction), so both paths land their
+//! writes in the same places.
 
 use std::sync::Arc;
 
 use astra_oauth::GrantedScopes;
 use engine_api::AccountId;
 
-use astra_account::{Secret, TokenSink};
+use astra_account::{AccountConfig, Secret, TokenSink};
 
 use crate::dial_table::AccountDials;
 
 use super::transaction::CredentialTransaction;
+
+/// The entry's OAuth section, whichever family the account dials: both
+/// carry the same two fields the sink advances (the stored grant and the
+/// granted set), so one sink serves a Google account exactly as it serves
+/// a Microsoft one.
+fn oauth_grant_mut(config: &mut AccountConfig) -> Option<(&mut Secret, &mut Option<Vec<String>>)> {
+    if let Some(graph) = config.graph.as_mut() {
+        Some((&mut graph.refresh_token, &mut graph.granted_scopes))
+    } else if let Some(google) = config.google.as_mut() {
+        Some((&mut google.refresh_token, &mut google.granted_scopes))
+    } else {
+        None
+    }
+}
 
 /// The sink over the dial table and the credential transaction: the boot's
 /// restore and the sign-in's completion both build one.
@@ -54,12 +69,12 @@ impl TokenSink for DialTableTokenSink {
             );
             return;
         };
-        let Some(graph) = config.graph.as_mut() else {
+        let Some((refresh, _)) = oauth_grant_mut(&mut config) else {
             // Registered, but with no grant to advance: a stored-secret
             // account handed a rotation it cannot use is silent.
             return;
         };
-        graph.refresh_token = Secret::new(new_refresh_token.to_owned());
+        *refresh = Secret::new(new_refresh_token.to_owned());
         let document = match config.to_toml() {
             Ok(document) => document,
             Err(err) => {
@@ -92,19 +107,18 @@ impl TokenSink for DialTableTokenSink {
         let Some((mut config, _)) = self.dials.of(account.as_str()) else {
             return;
         };
-        let Some(graph) = config.graph.as_mut() else {
+        let Some((_, granted_slot)) = oauth_grant_mut(&mut config) else {
             return;
         };
         // The response is what the provider grants now; consent withdrawn
         // since the last one shows up nowhere else.
-        if graph
-            .granted_scopes
+        if granted_slot
             .as_ref()
             .is_some_and(|stored| granted.same_as(stored))
         {
             return;
         }
-        graph.granted_scopes = Some(granted.as_slice().to_vec());
+        *granted_slot = Some(granted.as_slice().to_vec());
         let Ok(document) = config.to_toml() else {
             log::warn!(
                 "oauth: [{handle}] the provider now grants this account a different permission \

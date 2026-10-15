@@ -22,11 +22,15 @@
 //! JMAP shape, not Graph's per-folder fan-out). The calendar binds one
 //! provider to the account's primary calendar.
 
+mod address;
 mod calendar;
+mod dial;
 mod provider;
 mod token_source;
 
+pub use address::{fetch_google_address, fetch_google_address_at};
 pub use calendar::connect_google_calendar_providers;
+pub use dial::{dial_google_account, GoogleProviders};
 use provider::RefreshingGmailProvider;
 pub use token_source::google_token_source;
 

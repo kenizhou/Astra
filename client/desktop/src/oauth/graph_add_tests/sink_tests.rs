@@ -124,3 +124,109 @@ fn the_sink_leaves_an_unchanged_scope_set_alone() {
         "a set that did not move writes nothing"
     );
 }
+
+/// A stored google document with the granted set already recorded, the
+/// google-section twin of the graph fixture above: one sink serves every
+/// account, whichever family its grant belongs to.
+fn stored_google_config_for(email: &str) -> AccountConfig {
+    astra_account::load_str(&format!(
+        concat!(
+            "[google]\n",
+            "email = \"{email}\"\n",
+            "client_id = \"google-client\"\n",
+            "client_secret = \"gsecret\"\n",
+            "redirect_uri = \"http://127.0.0.1:45001/\"\n",
+            "scopes = [\"https://mail.google.com/\"]\n",
+            "refresh_token = \"old-refresh\"\n",
+            "granted_scopes = [\"https://mail.google.com/\"]\n",
+        ),
+        email = email,
+    ))
+    .expect("the stored google fixture loads")
+}
+
+/// Registers a stored google document under the account `email` names.
+fn register_stored_google(host: &Host, email: &str) -> String {
+    let id = format!("{}@google", email.trim().to_lowercase());
+    let account = AccountId::try_from(id.as_str()).unwrap();
+    host.dials
+        .register(
+            &account,
+            stored_google_config_for(email),
+            astra_account::ImapConnections::new(),
+        )
+        .expect("the google account registers");
+    id
+}
+
+/// The stored document's `[google]` section, parsed back.
+fn stored_google(host: &Host, id: &str) -> astra_account::GoogleAccount {
+    let document = host
+        .store
+        .stored(id)
+        .unwrap_or_else(|| panic!("the store holds the document for [{id}]"));
+    astra_account::load_str(&document)
+        .expect("the stored document loads")
+        .google
+        .expect("the document is a google one")
+}
+
+#[test]
+fn the_sink_persists_a_rotation_for_a_registered_google_entry() {
+    let host = Host::new("google-sink-rotation");
+    let id = register_stored_google(&host, "alice@example.test");
+    let sink = graph_token_sink(Arc::clone(&host.dials), host.store.clone());
+    let account = AccountId::try_from(id.as_str()).unwrap();
+
+    host.runtime.block_on(|| {
+        let sink = Arc::clone(&sink);
+        let account = account.clone();
+        async move {
+            sink.refresh_token_rotated(&account, "rotated-9").await;
+        }
+    });
+
+    let google = stored_google(&host, &id);
+    assert_eq!(
+        google.refresh_token.expose(),
+        "rotated-9",
+        "the rotation advanced the stored google grant"
+    );
+    let entry = host.dials.of(&id).expect("the entry stands").0;
+    assert_eq!(
+        entry.google.expect("the grant").refresh_token.expose(),
+        "rotated-9",
+        "and the dial table's entry with it"
+    );
+}
+
+#[test]
+fn the_sink_records_a_moved_scope_set_for_a_google_entry() {
+    let host = Host::new("google-sink-scopes");
+    let id = register_stored_google(&host, "alice@example.test");
+    let sink = graph_token_sink(Arc::clone(&host.dials), host.store.clone());
+    let account = AccountId::try_from(id.as_str()).unwrap();
+    let granted = GrantedScopes::from_stored(vec![
+        "https://mail.google.com/".to_owned(),
+        "https://www.googleapis.com/auth/calendar".to_owned(),
+    ]);
+
+    host.runtime.block_on(|| {
+        let sink = Arc::clone(&sink);
+        let account = account.clone();
+        let granted = granted.clone();
+        async move {
+            sink.scopes_granted(&account, &granted).await;
+        }
+    });
+
+    let google = stored_google(&host, &id);
+    assert_eq!(
+        google.granted_scopes,
+        Some(vec![
+            "https://mail.google.com/".to_owned(),
+            "https://www.googleapis.com/auth/calendar".to_owned(),
+        ]),
+        "a moved scope set is recorded over the stored one for a google grant too"
+    );
+}

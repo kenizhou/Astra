@@ -440,7 +440,7 @@ pub(crate) fn oauth_begin(
         use tauri::Emitter;
         let _ = app.emit(SIGN_IN_RESULT_EVENT, result);
     };
-    let complete = super::graph_add::outcome_completion(&state, &state.runtime, provider);
+    let complete = super::completion::outcome_completion(&state, &state.runtime, provider);
     begin_with(
         &state.oauth,
         &state.runtime,

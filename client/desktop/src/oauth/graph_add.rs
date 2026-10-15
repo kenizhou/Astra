@@ -425,66 +425,11 @@ pub(crate) async fn complete_microsoft_signin(
     })
 }
 
-/// The completion the spawned sign-in half runs for a token set: the
-/// future it answers, boxed once so the wiring can name it.
-pub(crate) type SignInCompletion = Box<
-    dyn FnOnce(
-            TokenSet,
-            OAuthProviderConfig,
-        ) -> Pin<Box<dyn Future<Output = super::commands::SignInOutcome> + Send>>
-        + Send,
->;
-
-/// The completion a begun flow's success runs, wired for one provider: a
-/// Microsoft sign-in becomes the real add over the production seams;
-/// every other provider answers the bare signed-in word until its slice
-/// lands.
-#[must_use]
-pub(crate) fn outcome_completion(
-    state: &crate::AppState,
-    runtime: &crate::runtime::AppRuntime,
-    provider: super::commands::ProviderKind,
-) -> SignInCompletion {
-    use super::commands::{ProviderKind, SignInOutcome};
-    match provider {
-        ProviderKind::Microsoft => {
-            let wiring = GraphAccountWiring::from_state(state, runtime);
-            let lookup = production_lookup();
-            let dial = production_dial();
-            let source = production_source();
-            Box::new(move |tokens, provider_config| {
-                Box::pin(async move {
-                    match complete_microsoft_signin(
-                        wiring,
-                        tokens,
-                        provider_config,
-                        lookup,
-                        dial,
-                        source,
-                    )
-                    .await
-                    {
-                        Ok(added) => SignInOutcome::Added {
-                            address: added.address,
-                            calendar_withheld: added.calendar_withheld,
-                        },
-                        Err(failure) => SignInOutcome::Refused {
-                            refusal: failure.refusal,
-                            detail: failure.detail,
-                        },
-                    }
-                })
-            })
-        }
-        ProviderKind::Google => Box::new(move |tokens, _provider_config| {
-            Box::pin(async move {
-                let _ = tokens;
-                SignInOutcome::SignedIn
-            })
-        }),
-    }
-}
-
+/// The completion the spawned sign-in half runs for a token set lives in
+/// [`super::completion`], the provider-neutral dispatch over this
+/// module's Microsoft half and the Google half beside it.
+///
+/// [`super::completion`]: super::completion
 #[cfg(test)]
 #[path = "graph_add_tests.rs"]
 mod tests;
