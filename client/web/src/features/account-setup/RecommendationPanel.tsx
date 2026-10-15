@@ -1,51 +1,88 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The recommendation panel: what detection found for the address, the uses it
-// offers as toggles, and the one way this build continues, onto the manual
-// form carrying whatever the recommendation could prefill. A recommendation
-// discovered over an unencrypted hop continues only after explicit approval.
+// The recommendation step: the found settings as the headline, and the trust
+// decision named beside them when the discovery crossed an unencrypted hop.
+// The approve action is the primary button. The trust rule itself stands: an
+// untrusted discovery's settings reach the form only through the approve
+// click; entering servers by hand never carries them.
 
 import { useState } from 'react';
 
 import type { RecommendationView, ServerSummary, SetupChoice } from '@/services/ipc';
 
+import { recommendationEmail } from './detection';
+
 interface RecommendationPanelProps {
   view: RecommendationView;
-  onCancel: () => void;
+  /** Returns to the email step. */
+  onBack: () => void;
+  /** Opens the manual form on the bare defaults, nothing discovered carried. */
+  onByHand: () => void;
+  /** Continues with the discovered settings onto the manual form. */
   onManual: () => void;
 }
 
-function ServerRow({ server }: { server: ServerSummary }) {
+const secondaryClass =
+  'shrink-0 whitespace-nowrap rounded-[var(--radius-xs)] px-3 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+const primaryClass =
+  'shrink-0 whitespace-nowrap rounded-[var(--radius-xs)] bg-primary px-3 py-1.5 text-[13px] text-primary-foreground transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+
+/** The discovery strategies as the sub-line names them. */
+const SOURCE_WORDS: Record<string, string> = {
+  JmapWellKnown: "the server's well-known document",
+  JmapSrv: "the domain's SRV records",
+  Autoconfig: "the provider's own records",
+  AutoconfigWellKnown: "the provider's own records",
+  Ispdb: 'the Mozilla ISP database',
+  ImapSrv: "the domain's SRV records",
+  MxAutoconfig: 'a lookup from the MX record',
+  MxIspdb: 'a lookup from the MX record',
+};
+
+/** One detection row: what it is, what was found, the wire detail. */
+function DetectRow({ label, value, right }: { label: string; value: string; right?: string }) {
   return (
     <div className="flex items-baseline justify-between gap-2 rounded-[var(--radius-xs)] border border-border bg-background px-3 py-2">
-      <span className="text-xs text-muted-foreground">{server.protocol}</span>
-      <span className="flex items-baseline gap-2 text-[13px]">
-        <span className="font-mono">{server.hostname}</span>
-        <span>{server.port}</span>
-        <span className="text-muted-foreground">{server.security}</span>
-      </span>
+      <span className="w-16 shrink-0 text-xs text-muted-foreground">{label}</span>
+      <span className="min-w-0 flex-1 truncate font-mono text-[13px] text-foreground">{value}</span>
+      {right !== undefined && (
+        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{right}</span>
+      )}
     </div>
   );
 }
 
-/** The one line each recommendation route shows for what it found. */
-function FoundLine({ view }: { view: RecommendationView }) {
+function serverRight(server: ServerSummary): string {
+  return `${server.protocol} · ${server.port} · ${server.security}`;
+}
+
+/** The rows one recommendation shows for what it found. */
+function FoundRows({ view }: { view: RecommendationView }) {
   const rec = view.recommendation;
   if ('Imap' in rec) {
     const imap = rec.Imap;
     return (
       <div className="grid gap-1">
-        <ServerRow server={imap.incoming} />
-        {imap.outgoing !== undefined && <ServerRow server={imap.outgoing} />}
+        <DetectRow
+          label="Incoming"
+          value={imap.incoming.hostname}
+          right={serverRight(imap.incoming)}
+        />
+        {imap.outgoing !== undefined && (
+          <DetectRow
+            label="Outgoing"
+            value={imap.outgoing.hostname}
+            right={serverRight(imap.outgoing)}
+          />
+        )}
+        <DetectRow
+          label="Username"
+          value={imap.incoming.username === '' ? imap.email : imap.incoming.username}
+        />
       </div>
     );
   }
   if ('Jmap' in rec) {
-    return (
-      <p className="text-[13px]">
-        <span className="text-muted-foreground">JMAP</span>{' '}
-        <span className="font-mono">{rec.Jmap.server_url}</span>
-      </p>
-    );
+    return <DetectRow label="JMAP" value={rec.Jmap.server_url} />;
   }
   if ('Microsoft' in rec) {
     return <p className="text-[13px]">Microsoft account</p>;
@@ -54,6 +91,15 @@ function FoundLine({ view }: { view: RecommendationView }) {
     return <p className="text-[13px]">Google account</p>;
   }
   return <p className="text-[13px]">Calendar and contacts</p>;
+}
+
+/** The unencrypted hop, named from the discovery's own source. */
+function hopName(source: string): string {
+  try {
+    return `the settings document from ${new URL(source).host}`;
+  } catch {
+    return source === '' ? 'the discovery lookup' : `the ${source} lookup`;
+  }
 }
 
 function ChoiceRow({ choice, onToggle }: { choice: SetupChoice; onToggle: () => void }) {
@@ -75,15 +121,26 @@ function ChoiceRow({ choice, onToggle }: { choice: SetupChoice; onToggle: () => 
   );
 }
 
-export function RecommendationPanel({ view, onCancel, onManual }: RecommendationPanelProps) {
+export function RecommendationPanel({ view, onBack, onByHand, onManual }: RecommendationPanelProps) {
   const [choices, setChoices] = useState<SetupChoice[]>(() =>
     view.choices.map((choice) => ({ ...choice })),
   );
-  const [approved, setApproved] = useState(false);
 
   const rec = view.recommendation;
-  const needsApproval = 'Imap' in rec && !rec.Imap.is_trusted;
-  const canContinue = !needsApproval || approved;
+  const isImap = 'Imap' in rec;
+  const needsApproval = isImap && !rec.Imap.is_trusted;
+  const email = recommendationEmail(view);
+  const sourceKind = view.detected.source_kind;
+  const headline =
+    'Google' in rec
+      ? 'This address signs in with Google'
+      : 'Microsoft' in rec
+        ? 'This address signs in with Microsoft'
+        : 'We found your settings';
+  const subline =
+    sourceKind !== null && sourceKind in SOURCE_WORDS
+      ? `${email} · discovered from ${SOURCE_WORDS[sourceKind]}`
+      : email;
 
   const toggle = (index: number) => () => {
     setChoices((prev) =>
@@ -93,24 +150,21 @@ export function RecommendationPanel({ view, onCancel, onManual }: Recommendation
 
   return (
     <div className="grid gap-3">
-      <p className="text-xs text-muted-foreground">Recommended setup</p>
-      <FoundLine view={view} />
+      <div className="grid gap-0.5">
+        <h3 className="text-sm font-semibold text-foreground">{headline}</h3>
+        <p className="text-xs text-muted-foreground">{subline}</p>
+      </div>
+      <FoundRows view={view} />
 
-      {needsApproval && (
-        <div className="grid gap-2 rounded-[var(--radius-xs)] border border-warning bg-accent p-3 text-xs">
-          <p className="font-medium text-warning">
-            These settings were discovered over an unencrypted connection and must be approved
-            before use.
+      {needsApproval && 'Imap' in rec && (
+        <div className="grid gap-1.5 rounded-[var(--radius-xs)] border border-warning bg-accent p-3 text-xs">
+          <p className="text-foreground">
+            One lookup ({hopName(rec.Imap.source)}) came back over an unencrypted connection.
           </p>
-          <label className="flex items-center gap-2 text-[13px] text-foreground">
-            <input
-              type="checkbox"
-              checked={approved}
-              onChange={() => setApproved((prev) => !prev)}
-              className="size-4 accent-[var(--primary)]"
-            />
-            I trust these settings
-          </label>
+          <p className="text-foreground">
+            The mail servers themselves are encrypted end to end.{' '}
+            <span className="font-medium">Continue with these settings?</span>
+          </p>
         </div>
       )}
 
@@ -124,26 +178,25 @@ export function RecommendationPanel({ view, onCancel, onManual }: Recommendation
       )}
 
       <p className="text-xs text-muted-foreground">
-        The manual form carries these settings over; the connection is still tested before
-        anything is stored.
+        The next step collects the password and tests the connection before anything is stored.
       </p>
 
       <div className="mt-1 flex items-center justify-between gap-2">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="rounded-[var(--radius-xs)] px-3 py-1.5 text-[13px] text-muted-foreground hover:bg-hover hover:text-foreground"
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          onClick={onManual}
-          disabled={!canContinue}
-          className="rounded-[var(--radius-xs)] bg-primary px-3 py-1.5 text-[13px] text-primary-foreground hover:opacity-90 disabled:opacity-40"
-        >
-          Set up manually
-        </button>
+        {isImap ? (
+          <button type="button" onClick={onByHand} className={secondaryClass}>
+            Enter servers by hand
+          </button>
+        ) : (
+          <span />
+        )}
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={onBack} className={secondaryClass}>
+            Back
+          </button>
+          <button type="button" onClick={onManual} className={primaryClass}>
+            {needsApproval ? 'Approve and continue' : 'Continue'}
+          </button>
+        </div>
       </div>
     </div>
   );

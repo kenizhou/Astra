@@ -80,6 +80,15 @@ describe('the manual setup flow', () => {
     expect(useUiStore.getState().accountSetupOpen).toBe(false);
   });
 
+  it('assures the password goes to the system keychain', () => {
+    render(<AccountSetupFlow />);
+    fireEvent.click(screen.getByRole('button', { name: 'Set up manually' }));
+
+    expect(
+      screen.getByText('Your password goes to the system keychain, never to a log file.'),
+    ).toBeTruthy();
+  });
+
   it('closes on a click on the backdrop, but not on one inside the dialog', () => {
     const { container } = render(<AccountSetupFlow />);
     const backdrop = container.firstChild as HTMLElement;

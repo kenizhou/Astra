@@ -28,6 +28,7 @@ import { useUiStore } from '@/stores/uiStore';
 import { useDialogFocus } from '@/components/ui/useDialogFocus';
 import { buildAccountToml } from './accountToml';
 import { DetectStep } from './DetectStep';
+import { CertificateOffer } from './CertificateOffer';
 import { OAuthOffer, type OAuthFlowState } from './OAuthOffer';
 import { RecommendationPanel } from './RecommendationPanel';
 import {
@@ -37,6 +38,7 @@ import {
   manualDefaults,
   manualPrefill,
   missNote,
+  recommendationEmail,
   type MissReason,
   type SetupFields,
 } from './detection';
@@ -236,6 +238,14 @@ export function AccountSetupFlow() {
     }
   };
 
+  // The by-hand route carries only the address: nothing discovered crosses,
+  // so an untrusted lookup's settings never reach the form through it.
+  const onByHandFromRecommendation = () => {
+    if (view !== null) {
+      goManual(manualDefaults(recommendationEmail(view)), null);
+    }
+  };
+
   const set = (key: keyof SetupFields) => (value: string) => {
     setFields((prev) => ({ ...prev, [key]: value }));
     setTested(null);
@@ -341,7 +351,12 @@ export function AccountSetupFlow() {
         )}
 
         {step === 'recommendation' && view !== null && (
-          <RecommendationPanel view={view} onCancel={close} onManual={onManualFromRecommendation} />
+          <RecommendationPanel
+            view={view}
+            onBack={() => setStep('detect')}
+            onByHand={onByHandFromRecommendation}
+            onManual={onManualFromRecommendation}
+          />
         )}
 
         {step === 'manual' && (
@@ -414,33 +429,11 @@ export function AccountSetupFlow() {
                   className="rounded-full border border-input bg-background px-3 py-1.5 text-[13px] text-foreground outline-none transition-colors focus-visible:border-primary"
                 />
               </label>
+              <p className="-mt-2 text-[11px] text-muted-foreground">
+                Your password goes to the system keychain, never to a log file.
+              </p>
 
-              {certificate !== null && (
-                <div className="rounded-[var(--radius-xs)] border border-warning bg-accent p-3 text-xs">
-                  <p className="font-medium text-foreground">
-                    The server&apos;s certificate could not be verified
-                  </p>
-                  <dl className="mt-2 grid gap-1">
-                    <div className="flex justify-between gap-2">
-                      <dt className="text-muted-foreground">Server</dt>
-                      <dd className="font-mono">{certificate.server_name}</dd>
-                    </div>
-                    <div className="flex justify-between gap-2">
-                      <dt className="text-muted-foreground">Fingerprint</dt>
-                      <dd className="break-all font-mono">{certificate.sha256}</dd>
-                    </div>
-                    {certificate.subject_common_name !== null && (
-                      <div className="flex justify-between gap-2">
-                        <dt className="text-muted-foreground">Claims to be</dt>
-                        <dd className="font-mono">{certificate.subject_common_name}</dd>
-                      </div>
-                    )}
-                  </dl>
-                  <p className="mt-2 text-muted-foreground">
-                    Accepting trusts this one certificate for this one server, and only here.
-                  </p>
-                </div>
-              )}
+              {certificate !== null && <CertificateOffer certificate={certificate} />}
 
               {error !== null && (
                 <p role="alert" className="text-xs text-error">

@@ -158,7 +158,8 @@ async function detectEmail(view: RecommendationView, email = 'user@example.test'
   render(<AccountSetupFlow />);
   fireEvent.change(screen.getByLabelText('Email address'), { target: { value: email } });
   fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-  await screen.findByText('Recommended setup');
+  // Every recommendation route, whatever its headline, stands behind Back.
+  await screen.findByRole('button', { name: 'Back' });
 }
 
 /** Types the one address and submits it, on whatever step the wizard shows. */
@@ -200,15 +201,17 @@ describe('the account discovery step', () => {
     await act(async () => {
       answer(imapView);
     });
-    expect(await screen.findByText('Recommended setup')).toBeTruthy();
+    expect(await screen.findByText('We found your settings')).toBeTruthy();
   });
 
   it('renders the detected servers and the choice toggles', async () => {
     await detectEmail(imapView);
 
+    expect(screen.getByText('Incoming')).toBeTruthy();
     expect(screen.getByText('imap.example.test')).toBeTruthy();
-    expect(screen.getByText('993')).toBeTruthy();
-    expect(screen.getByText('SSL/TLS')).toBeTruthy();
+    expect(screen.getByText('IMAP · 993 · SSL/TLS')).toBeTruthy();
+    expect(screen.getByText('Username')).toBeTruthy();
+    expect(screen.getByText(/discovered from the provider's own records/)).toBeTruthy();
     expect(screen.getByLabelText('Mail')).toHaveProperty('checked', true);
     expect(screen.getByLabelText('Calendar')).toHaveProperty('checked', false);
     expect(screen.getAllByText('not found')).toHaveLength(2);
@@ -219,18 +222,18 @@ describe('the account discovery step', () => {
 
   it('opens the manual form prefilled with a found imap recommendation', async () => {
     await detectEmail(imapView);
-    fireEvent.click(screen.getByRole('button', { name: 'Set up manually' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 
     expect(screen.getByLabelText('Mail server')).toHaveProperty('value', 'imap.example.test');
     expect(screen.getByLabelText('Port')).toHaveProperty('value', '993');
     expect(screen.getByLabelText('Email address')).toHaveProperty('value', 'user@example.test');
     expect(screen.getByLabelText('Connection security')).toHaveProperty('value', 'implicit_tls');
-    expect(screen.queryByText('Recommended setup')).toBeNull();
+    expect(screen.queryByText('We found your settings')).toBeNull();
   });
 
   it('maps a start_tls recommendation onto the form it prefills', async () => {
     await detectEmail(startTlsView);
-    fireEvent.click(screen.getByRole('button', { name: 'Set up manually' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 
     expect(screen.getByLabelText('Port')).toHaveProperty('value', '143');
     expect(screen.getByLabelText('Connection security')).toHaveProperty('value', 'start_tls');
@@ -239,7 +242,7 @@ describe('the account discovery step', () => {
   it('keeps manual defaults behind a non-imap recommendation', async () => {
     await detectEmail(googleView, 'user@gmail.example');
     expect(screen.getByText('Google account')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Set up manually' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 
     expect(screen.getByLabelText('Mail server')).toHaveProperty('value', '');
     expect(screen.getByLabelText('Port')).toHaveProperty('value', '993');
@@ -311,7 +314,7 @@ describe('the account discovery step', () => {
     });
     const reopen = screen.getByRole('button', { name: 'Continue' });
     expect(reopen).toHaveProperty('disabled', false);
-    expect(screen.queryByText('Recommended setup')).toBeNull();
+    expect(screen.queryByText('We found your settings')).toBeNull();
     expect(screen.queryByText(/enter the server by hand/)).toBeNull();
   });
 
@@ -335,7 +338,7 @@ describe('the account discovery step', () => {
       answers[0]!(imapView);
     });
     expect(screen.getByRole('button', { name: 'Looking up the settings…' })).toBeTruthy();
-    expect(screen.queryByText('Recommended setup')).toBeNull();
+    expect(screen.queryByText('We found your settings')).toBeNull();
 
     await act(async () => {
       answers[1]!(googleView);
@@ -389,27 +392,29 @@ describe('the account discovery step', () => {
 });
 
 describe('the untrusted-approval gate', () => {
-  it('discloses an untrusted imap recommendation and withholds the form until it is approved', async () => {
+  it('names the unencrypted hop and the encrypted legs, approve the primary action', async () => {
     await detectEmail(untrustedImapView);
 
+    expect(screen.getByText(/came back over an unencrypted connection/)).toBeTruthy();
     expect(
-      screen.getByText(
-        'These settings were discovered over an unencrypted connection and must be approved before use.',
-      ),
+      screen.getByText(/The mail servers themselves are encrypted end to end/),
     ).toBeTruthy();
-    expect(screen.getByLabelText('I trust these settings')).toHaveProperty('checked', false);
+    expect(screen.getByText('Continue with these settings?')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Approve and continue' })).toBeTruthy();
+  });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Set up manually' }));
+  it('keeps the untrusted settings off the by-hand form', async () => {
+    await detectEmail(untrustedImapView);
+    fireEvent.click(screen.getByRole('button', { name: 'Enter servers by hand' }));
 
-    expect(screen.getByText('Recommended setup')).toBeTruthy();
-    expect(screen.queryByLabelText('Mail server')).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Test connection' })).toBeNull();
+    expect(screen.getByLabelText('Mail server')).toHaveProperty('value', '');
+    expect(screen.getByLabelText('Email address')).toHaveProperty('value', 'user@example.test');
+    expect(screen.queryByText('We found your settings')).toBeNull();
   });
 
   it('an approved untrusted recommendation hands the discovered host onto the form', async () => {
     await detectEmail(untrustedImapView);
-    fireEvent.click(screen.getByLabelText('I trust these settings'));
-    fireEvent.click(screen.getByRole('button', { name: 'Set up manually' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Approve and continue' }));
 
     expect(screen.getByLabelText('Mail server')).toHaveProperty('value', 'imap.example.test');
     expect(screen.getByLabelText('Port')).toHaveProperty('value', '993');
@@ -419,10 +424,18 @@ describe('the untrusted-approval gate', () => {
   it('a trusted recommendation shows no disclosure and continues immediately', async () => {
     await detectEmail(imapView);
 
-    expect(screen.queryByText(/discovered over an unencrypted connection/)).toBeNull();
+    expect(screen.queryByText(/unencrypted connection/)).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Set up manually' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 
     expect(screen.getByLabelText('Mail server')).toHaveProperty('value', 'imap.example.test');
+  });
+
+  it('backs out to the email step', async () => {
+    await detectEmail(imapView);
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+
+    expect(screen.queryByText('We found your settings')).toBeNull();
+    expect(screen.getByLabelText('Email address')).toHaveProperty('value', '');
   });
 });
