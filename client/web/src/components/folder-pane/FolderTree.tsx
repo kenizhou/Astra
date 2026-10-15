@@ -21,8 +21,10 @@ import {
 } from '@/components/icons';
 import { dispatch, intents, type FolderRef } from '@/services/ipc';
 import type { AccountFolderRow, FolderRow, FolderRole } from '@/services/surfaces';
+import { useSettingsStore } from '@/features/settings/settingsStore';
 import { useFolderStore, visibleFolders } from '@/stores/folderStore';
 import { useSendingStore } from '@/stores/sendingStore';
+import { useUiStore } from '@/stores/uiStore';
 
 /** One icon per role; a folder with no role draws the plain folder icon. */
 const ROLE_ICON: Record<FolderRole, ComponentType<IconProps>> = {
@@ -143,6 +145,36 @@ function OutboxTreeRow({ accountId }: { accountId: string }) {
   );
 }
 
+/** The per-account refusal badge: a Microsoft account whose calendar the
+ * grant withholds, named on its group header. One tap opens the accounts
+ * page, where the reconnect banner offers the fresh sign-in. */
+function RefusalBadge({ accountId, displayName }: { accountId: string; displayName: string }) {
+  const grant = useSettingsStore(
+    (s) => s.accounts.find((row) => row.account === accountId)?.grant,
+  );
+
+  if (grant !== 'calendar_withheld') {
+    return null;
+  }
+
+  const onReconnect = () => {
+    useSettingsStore.getState().requestCategory('accounts');
+    useUiStore.getState().setSettingsOpen(true);
+  };
+
+  return (
+    <button
+      type="button"
+      aria-label={`Reconnect ${displayName}`}
+      title="The calendar permission is missing; reconnect this account"
+      onClick={onReconnect}
+      className="ml-auto shrink-0 rounded-full border border-[var(--warning)]/50 px-1.5 py-0.5 text-[10px] leading-none text-[var(--warning)] transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      calendar
+    </button>
+  );
+}
+
 /** One account group: its header row, the folder rows beneath it, and the
  * Outbox row closing the group. */
 export function FolderTree({
@@ -188,6 +220,7 @@ export function FolderTree({
         <span className="truncate text-[11px] uppercase tracking-wide text-muted-text">
           {account.display_name}
         </span>
+        <RefusalBadge accountId={account.account_id} displayName={account.display_name} />
         {collapsedUnread > 0 && (
           <span className="ml-auto shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-[11px] font-medium tabular-nums leading-none text-primary-foreground">
             {collapsedUnread}

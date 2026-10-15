@@ -434,6 +434,10 @@ pub(crate) struct AppState {
     /// wizard's sign-in commands drive it; a build carrying no
     /// registration offers nothing.
     pub(crate) oauth: Arc<crate::oauth::commands::SignInSurface>,
+    /// The standing grant refusals: what the boot dial and the sign-in
+    /// completions learn about every Microsoft account's grant, read by
+    /// the host account store the settings rows render through.
+    pub(crate) refusals: Arc<crate::oauth::grant_refusals::GrantRefusals>,
     /// The app's async runtime: dispatches, first syncs and blocking dials run on it.
     pub(crate) runtime: AppRuntime,
 }

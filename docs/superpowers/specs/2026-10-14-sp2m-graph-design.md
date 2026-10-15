@@ -47,7 +47,13 @@ missing, the expired-sign-in row) arrive with it.
   expired-sign-in row (a grant gone: reported as such with the offer to
   sign in again, never badged as a server outage). Both read the token
   source's classification; both surface on the accounts page and the
-  folder pane's per-account badge.
+  folder pane's per-account badge. The channel is decided: a standing
+  refusal state is **snapshot data**, an additive `grant` field on the
+  settings snapshot's account rows, sourced through the host account-info
+  seam from the boot dial and the sign-in's completion (the classification
+  is born host-side); the SP2l completion event stays the wizard's one-shot
+  channel, because a surface that mounts late or a relaunch must pull
+  standing state, never catch an emission.
 - **D5 (the scope set)**: `MICROSOFT_GRAPH_SCOPES` (already ported in
   SP2l's provider.rs) asked at authorisation for what the account is used
   for (mail + calendar first; contacts and the directory ride their

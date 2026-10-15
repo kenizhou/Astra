@@ -112,7 +112,11 @@ fn store(dials: &Arc<AccountDials>) -> (HostAccountStore, Arc<FakeStore>) {
 /// own.
 fn ops_over(dials: &Arc<AccountDials>, credentials: &Arc<FakeStore>) -> HostAccountStore {
     let credentials = Arc::clone(credentials) as Arc<dyn AccountCredentialStore>;
-    HostAccountStore::new(Arc::clone(dials), credentials)
+    HostAccountStore::new(
+        Arc::clone(dials),
+        credentials,
+        Arc::new(crate::oauth::grant_refusals::GrantRefusals::new()),
+    )
 }
 
 /// The newest document the credential store holds for `id`.
@@ -331,7 +335,11 @@ fn a_failed_re_dial_answers_err_and_the_stored_config_still_stands() {
 #[test]
 fn a_persist_refusal_answers_err_and_nothing_stored_moves() {
     let dials = table("persist-refused");
-    let ops = HostAccountStore::new(Arc::clone(&dials), FakeStore::refusing());
+    let ops = HostAccountStore::new(
+        Arc::clone(&dials),
+        FakeStore::refusing(),
+        Arc::new(crate::oauth::grant_refusals::GrantRefusals::new()),
+    );
     let account = work();
 
     let sentence = crate::runtime::build_runtime()
@@ -476,6 +484,12 @@ fn an_account_the_table_does_not_hold_is_refused() {
         "the refusal names what is missing"
     );
 }
+
+// The graph-refusal half, split into its own file the same way: the info
+// rows a stored grant answers (the Microsoft kind, the address, the
+// standing refusal state) and the removal's refusal bookkeeping.
+#[path = "account_ops_graph_tests.rs"]
+mod graph;
 
 // The removal half, split into its own file so this one stays under the
 // line cap.

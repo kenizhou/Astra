@@ -320,7 +320,8 @@ fn graph_dial(answer: Result<(), &'static str>) -> crate::oauth::graph_add::Grap
 }
 
 /// Runs one boot's stored-account dial over `dials` with the given graph
-/// dial, on a test runtime.
+/// dial, on a test runtime. The refusal map is its own throwaway: what
+/// the dial records is the child module's tests.
 fn boot_dials(
     dials: &std::sync::Arc<crate::AccountDials>,
     dial: crate::oauth::graph_add::GraphDial,
@@ -328,11 +329,10 @@ fn boot_dials(
     let runtime = crate::runtime::build_runtime().expect("the test runtime builds");
     let store: std::sync::Arc<dyn crate::credential_store::AccountCredentialStore> =
         crate::commands_fakes::FakeStore::accepting();
-    runtime.block_on(move || {
-        let dials = std::sync::Arc::clone(dials);
-        let store = std::sync::Arc::clone(&store);
-        async move { super::dial_stored(&dials, &store, dial).await }
-    })
+    let refusals = std::sync::Arc::new(crate::oauth::grant_refusals::GrantRefusals::new());
+    let dials = std::sync::Arc::clone(dials);
+    runtime
+        .block_on(move || async move { super::dial_stored(&dials, &store, dial, &refusals).await })
 }
 
 #[test]
@@ -397,3 +397,9 @@ fn a_graph_dial_that_fails_skips_the_account_without_blocking_the_boot() {
         "one dead grant skips the account, not the boot"
     );
 }
+
+// The graph refusal bookkeeping: what the stored-account dial leaves in
+// the refusal map, and the assembly's settings priming. Split from this
+// file for the 500-line cap.
+#[path = "boot_tests/graph_refusal_tests.rs"]
+mod graph_refusals;

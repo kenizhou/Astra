@@ -66,6 +66,11 @@ impl<P: Provider> App<P> {
     pub async fn add_new_account_deferred(&self, account: Account<P>) {
         self.install_account(account).await;
         self.rebuild_snapshot().await;
+        // The settings rows join the account set, so an add republishes the
+        // settings surface beside the list: an accounts page that stands
+        // open while a sign-in completes reads the new row without a second
+        // ask.
+        self.rebuild_settings().await;
     }
 
     /// Puts `account` into the pane; replacing an existing entry **in place**, else

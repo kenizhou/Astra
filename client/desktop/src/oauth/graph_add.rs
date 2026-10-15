@@ -47,6 +47,8 @@ use crate::dial_table::AccountDials;
 use crate::runtime::AppRuntime;
 
 use super::commands::RefusalKind;
+use super::grant_refusals::indeterminate;
+pub(crate) use super::grant_refusals::GraphAddFailure;
 use super::transaction::CredentialTransaction;
 
 /// The account half's success: what the wizard's success sentence shows.
@@ -60,30 +62,11 @@ pub(crate) struct SignedInAccount {
     pub(crate) calendar_withheld: bool,
 }
 
-/// Why the completion refused: the ported classification word beside the
-/// host's own sentence, the shape [`super::commands::SignInOutcome`]'s
-/// refusal arm carries to the surface.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct GraphAddFailure {
-    /// The ported classification of the refusal.
-    pub(crate) refusal: RefusalKind,
-    /// The host's own sentence.
-    pub(crate) detail: String,
-}
-
-/// A refusal nothing was learned from: the rollback guarantees nothing
-/// changed about any grant that stands.
-fn indeterminate(detail: String) -> GraphAddFailure {
-    GraphAddFailure {
-        refusal: RefusalKind::Indeterminate,
-        detail,
-    }
-}
-
 /// The host halves the completion drives: the app core the account joins,
 /// the dial table the sink reads and the pre-register writes, the secure
-/// store the grant persists through, and the runtime handle the first sync
-/// spawns on.
+/// store the grant persists through, the runtime handle the first sync
+/// spawns on, and the standing grant refusals the dial's answer records
+/// into for the surfaces.
 pub(crate) struct GraphAccountWiring {
     /// The app core: the account joins it without syncing.
     pub(crate) app: Arc<dyn AppPort>,
@@ -95,6 +78,10 @@ pub(crate) struct GraphAccountWiring {
     pub(crate) credentials: Arc<dyn crate::credential_store::AccountCredentialStore>,
     /// The runtime handle the first sync spawns on.
     pub(crate) spawner: tokio::runtime::Handle,
+    /// The standing grant refusals: what the dialled grant bears lands
+    /// here, so the refusal surfaces read the newest state the same pull
+    /// that reads the new account's row.
+    pub(crate) refusals: Arc<super::grant_refusals::GrantRefusals>,
 }
 
 impl GraphAccountWiring {
@@ -107,6 +94,7 @@ impl GraphAccountWiring {
             dials: Arc::clone(&state.connections),
             credentials: Arc::clone(&state.credential_store),
             spawner: runtime.handle(),
+            refusals: Arc::clone(&state.refusals),
         }
     }
 }
@@ -271,6 +259,7 @@ pub(crate) async fn complete_microsoft_signin(
         dials,
         credentials,
         spawner,
+        refusals,
     } = wiring;
 
     // The address lookup names the account; the derived id keys everything.
@@ -398,6 +387,10 @@ pub(crate) async fn complete_microsoft_signin(
     // The account joins the app without syncing, and the first sync runs
     // in the background: the same assembly the boot performs.
     let calendar_withheld = dialled.calendar_reauth_required;
+    // What the new grant bears is the standing state the surfaces read: a
+    // withheld calendar records the reconnect state, a healthy grant
+    // clears whatever stood, because a dial that answered proves it wrong.
+    refusals.record_dialled(id.as_str(), calendar_withheld);
     if let Some(err) = &dialled.calendar_error {
         if calendar_withheld {
             log::warn!(

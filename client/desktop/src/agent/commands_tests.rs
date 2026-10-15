@@ -28,6 +28,7 @@ fn stub_state(name: &str, mode: &str) -> (crate::AppState, Arc<CollectingSink>) 
         photo_root: scratch(name).join("photos"),
         credential_store: FakeStore::accepting(),
         oauth: crate::oauth::commands::offline_surface(),
+        refusals: Arc::new(crate::oauth::grant_refusals::GrantRefusals::new()),
         runtime: crate::runtime::build_runtime().expect("the test runtime builds"),
     };
     (app_state, sink)

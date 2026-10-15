@@ -10,7 +10,7 @@ const invoke = vi.hoisted(() => vi.fn());
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke }));
 
-import type { SettingsSnapshot } from './settings';
+import type { AccountSettingsRow, SettingsSnapshot } from './settings';
 import { settingsIntents } from './settings';
 import fixtureJson from './__fixtures__/settings_snapshot.json';
 
@@ -60,6 +60,23 @@ describe('the settings snapshot wire', () => {
     expect(dav).toBeDefined();
     expect(Object.keys(dav!)).not.toContain('password');
     expect(dav!.dav_password_set).toBe(true);
+  });
+
+  it('carries the grant refusal words and no key for a healthy account', () => {
+    // The words the refusal surfaces branch on, pinned against the JSON
+    // astra-viewmodel's settings tests assert.
+    const withheld = JSON.parse(
+      '{"account":"work","address":"a@e.test","kind":"microsoft","legs":{"calendar":false,"contacts":false},"grant":"calendar_withheld"}',
+    ) as AccountSettingsRow;
+    expect(withheld.grant).toBe('calendar_withheld');
+    const expired = JSON.parse(
+      '{"account":"work","address":"a@e.test","kind":"microsoft","legs":{"calendar":false,"contacts":false},"grant":"sign_in_expired"}',
+    ) as AccountSettingsRow;
+    expect(expired.grant).toBe('sign_in_expired');
+    const healthy = JSON.parse(
+      '{"account":"work","address":"a@e.test","kind":"microsoft","legs":{"calendar":false,"contacts":false}}',
+    ) as AccountSettingsRow;
+    expect(healthy.grant).toBeUndefined();
   });
 
   it('crosses an at-rest snapshot with no accounts and no error key', () => {

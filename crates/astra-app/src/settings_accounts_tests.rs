@@ -5,12 +5,12 @@
 
 use std::sync::{Arc, Mutex};
 
-use astra_viewmodel::{AccountKind, AccountLegs, DavSectionRow};
+use astra_viewmodel::{AccountKind, AccountLegs, DavSectionRow, GrantState};
 
 use crate::calendar_fakes::CalendarFake;
 use crate::protocol::SettingsIntent;
 use crate::settings_fakes::{mail_half, settings_app, FakeAccountOps};
-use crate::{Intent, Surface};
+use crate::{settings_fakes, Intent, Surface};
 
 /// Builds an in-memory app over the given `(id, providers)` pairs, with the
 /// scripted store installed and the surfaces recorded.
@@ -156,4 +156,94 @@ async fn an_info_for_an_account_the_app_does_not_hold_renders_no_row() {
     let rows = app.settings().accounts;
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].account.as_str(), "held");
+}
+
+#[tokio::test]
+async fn a_withheld_calendar_rides_the_running_account_s_row() {
+    let ops = FakeAccountOps::new()
+        .describing("work")
+        .with_grant("work", GrantState::CalendarWithheld);
+    let (app, _surfaces) = over(vec![("work", vec![mail_half()])], ops);
+
+    app.dispatch(Intent::Settings(SettingsIntent::Refresh))
+        .await
+        .unwrap();
+
+    let rows = app.settings().accounts;
+    assert_eq!(
+        rows[0].grant,
+        Some(GrantState::CalendarWithheld),
+        "the row carries the standing refusal state the host answered"
+    );
+    // The healthy account beside it crosses no grant key: the absence is
+    // the state.
+    let ops = FakeAccountOps::new().describing("plain");
+    let (app, _surfaces) = over(vec![("plain", vec![mail_half()])], ops);
+    app.dispatch(Intent::Settings(SettingsIntent::Refresh))
+        .await
+        .unwrap();
+    let wire = serde_json::to_value(&app.settings().accounts[0]).unwrap();
+    assert!(
+        wire.get("grant").is_none(),
+        "healthy crosses no key: {wire}"
+    );
+}
+
+#[tokio::test]
+async fn a_dead_grant_renders_the_expired_row_for_an_account_the_app_does_not_hold() {
+    // The one exception to the join rule: an account whose grant the host
+    // reports dead never dialled, so the app does not hold it, and the row
+    // it still renders is the only surface that can offer the re-grant.
+    let ops = FakeAccountOps::new()
+        .describing("held")
+        .describing_as("gone", "gone@example.test", AccountKind::Microsoft)
+        .with_grant("gone", GrantState::SignInExpired);
+    let (app, _surfaces) = over(vec![("held", vec![mail_half()])], ops);
+
+    app.dispatch(Intent::Settings(SettingsIntent::Refresh))
+        .await
+        .unwrap();
+
+    let rows = app.settings().accounts;
+    assert_eq!(rows.len(), 2, "the running account, then the expired row");
+    assert_eq!(rows[0].account.as_str(), "held");
+    let expired = &rows[1];
+    assert_eq!(expired.account.as_str(), "gone");
+    assert_eq!(expired.address, "gone@example.test", "the host's address");
+    assert_eq!(expired.kind, AccountKind::Microsoft);
+    assert_eq!(
+        expired.legs,
+        AccountLegs {
+            calendar: false,
+            contacts: false
+        },
+        "a dead grant dials no leg at all"
+    );
+    assert_eq!(expired.grant, Some(GrantState::SignInExpired));
+}
+
+#[tokio::test]
+async fn an_added_account_s_row_publishes_without_a_settings_dispatch() {
+    // The rows join the app's account set, so an add must republish the
+    // settings surface beside the list: the accounts page that stands open
+    // while a sign-in completes reads the new row without a second ask.
+    let ops = FakeAccountOps::new();
+    let surfaces = Arc::new(Mutex::new(Vec::new()));
+    let accounts = Vec::new();
+    let app = settings_app(accounts, Arc::new(ops), None, &surfaces);
+
+    app.add_new_account_deferred(settings_fakes::account("late", vec![mail_half()]))
+        .await;
+
+    assert!(
+        surfaces.lock().unwrap().contains(&Surface::Settings),
+        "the settings surface republishes with the account set"
+    );
+    assert!(
+        app.settings()
+            .accounts
+            .iter()
+            .any(|row| row.account.as_str() == "late"),
+        "the new account's row stands without a settings dispatch"
+    );
 }

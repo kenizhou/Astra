@@ -33,6 +33,8 @@ use super::{
 
 #[path = "graph_add_tests/document_tests.rs"]
 mod document_tests;
+#[path = "graph_add_tests/refusal_tests.rs"]
+mod refusal_tests;
 #[path = "graph_add_tests/rotation_tests.rs"]
 mod rotation_tests;
 #[path = "graph_add_tests/sink_tests.rs"]
@@ -173,6 +175,7 @@ struct Host {
     app: Arc<FakeApp>,
     store: Arc<FakeStore>,
     dials: Arc<AccountDials>,
+    refusals: Arc<crate::oauth::grant_refusals::GrantRefusals>,
     runtime: crate::runtime::AppRuntime,
 }
 
@@ -183,6 +186,7 @@ impl Host {
             app: FakeApp::new(),
             store: FakeStore::accepting(),
             dials: Arc::new(AccountDials::empty(&scratch(name))),
+            refusals: Arc::new(crate::oauth::grant_refusals::GrantRefusals::new()),
             runtime: crate::runtime::build_runtime().expect("the test runtime builds"),
         }
     }
@@ -194,6 +198,7 @@ impl Host {
             dials: Arc::clone(&self.dials),
             credentials: self.store.clone(),
             spawner: self.runtime.handle(),
+            refusals: Arc::clone(&self.refusals),
         }
     }
 }

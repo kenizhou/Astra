@@ -44,6 +44,11 @@ pub(crate) struct FakeAccountOps {
     removals: Mutex<Vec<String>>,
     /// The kind a fresh account's info carries.
     kind: astra_viewmodel::AccountKind,
+    /// The address a fresh account's info carries.
+    address: String,
+    /// The standing grant refusal states the infos answer, keyed by
+    /// account id.
+    grants: BTreeMap<String, astra_viewmodel::GrantState>,
 }
 
 /// The sentence a merged section that names no origin answers, the host's
@@ -123,6 +128,8 @@ impl FakeAccountOps {
             fail_removal: Mutex::new(false),
             removals: Mutex::new(Vec::new()),
             kind: astra_viewmodel::AccountKind::ImapSmtp,
+            address: "info@test.local".to_owned(),
+            grants: BTreeMap::new(),
         }
     }
 
@@ -133,9 +140,33 @@ impl FakeAccountOps {
             AccountInfo {
                 id: AccountId::try_from(id).unwrap(),
                 kind: self.kind,
+                address: self.address.clone(),
+                grant: None,
                 dav: None,
             },
         );
+        self
+    }
+
+    /// Describes one account under one address and kind, the shape the
+    /// refusal-row tests name a dead grant with.
+    pub(crate) fn describing_as(
+        mut self,
+        id: &str,
+        address: &str,
+        kind: astra_viewmodel::AccountKind,
+    ) -> Self {
+        self.address = address.to_owned();
+        self.kind = kind;
+        self.describing(id)
+    }
+
+    /// States the standing grant refusal the account's info answers.
+    pub(crate) fn with_grant(mut self, id: &str, grant: astra_viewmodel::GrantState) -> Self {
+        if let Some(info) = self.infos.lock().unwrap().get_mut(id) {
+            info.grant = Some(grant);
+        }
+        self.grants.insert(id.to_owned(), grant);
         self
     }
 
@@ -219,7 +250,15 @@ fn dialled_contacts() -> PeopleFake {
 #[async_trait]
 impl HostAccountOps<CalendarFake> for FakeAccountOps {
     async fn account_infos(&self) -> Vec<AccountInfo> {
-        self.infos.lock().unwrap().values().cloned().collect()
+        // The refusal states overlay at read time, so a `with_grant`
+        // scripted before or after the `describing` it names reads the
+        // same.
+        let grants = self.grants.clone();
+        let mut infos: Vec<AccountInfo> = self.infos.lock().unwrap().values().cloned().collect();
+        for info in &mut infos {
+            info.grant = grants.get(info.id.as_str()).copied();
+        }
+        infos
     }
 
     async fn store_dav(

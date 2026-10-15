@@ -38,13 +38,20 @@ export interface SettingsBlock {
 }
 
 /** An account's kind; crosses as a snake_case word. */
-export type AccountKind = 'imap_smtp' | 'jmap' | 'dav';
+export type AccountKind = 'imap_smtp' | 'jmap' | 'dav' | 'microsoft';
 
 /** Which of an account's legs are standing. */
 export interface AccountLegs {
   calendar: boolean;
   contacts: boolean;
 }
+
+/**
+ * Why a Microsoft account's grant needs the person to act; crosses as a
+ * snake_case word. A withheld calendar and a dead sign-in are different
+ * prompts with the same remedy, a fresh sign-in.
+ */
+export type GrantStateWord = 'calendar_withheld' | 'sign_in_expired';
 
 /**
  * The dav section an account's row echoes back: the editor's shape minus
@@ -67,6 +74,11 @@ export interface AccountSettingsRow {
   dav?: DavSectionRow;
   dav_error?: string;
   refresh_error?: string;
+  /**
+   * The standing grant refusal the row carries, when the account's OAuth
+   * grant needs the person to act. Absent is the healthy state.
+   */
+  grant?: GrantStateWord;
 }
 
 /** The About block: the version and the attributions. */

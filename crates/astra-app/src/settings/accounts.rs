@@ -57,6 +57,14 @@ pub struct AccountInfo {
     pub id: AccountId,
     /// The account's kind: how its mail half dials.
     pub kind: astra_viewmodel::AccountKind,
+    /// The account's own address, as the host's stored config names it. The
+    /// row's address while the account runs comes from the app's own
+    /// identity; this one serves the row an account whose grant never
+    /// dialled renders on.
+    pub address: String,
+    /// The standing grant refusal the host answers for the account, when
+    /// its OAuth grant needs the person to act. Absent is healthy.
+    pub grant: Option<astra_viewmodel::GrantState>,
     /// The stored dav section's echo, when the account carries one. The
     /// credential never crosses this seam; the echo answers whether one is
     /// stored.

@@ -11,7 +11,8 @@
 //!   app is generic over its mail provider and cannot see the stored
 //!   configs, so the host installs one port at assembly and the settings
 //!   surface drives it. The **read half** answers one [`AccountInfo`] per
-//!   configured account (its kind and its dav section's masked echo); the
+//!   configured account (its kind, its address, its standing grant refusal
+//!   state, and its dav section's masked echo); the
 //!   rebuild joins that against the app's own account set, which stays the
 //!   authority on what is configured, and the address and the legs flags
 //!   come from the app's own facts (the identity, the providers'
@@ -19,8 +20,11 @@
 //!   moment a re-dial installs anything. An account with no host info
 //!   renders the mail-only shape (`imap_smtp`, no dav row); an info naming
 //!   an account the app does not hold renders no row, because a config the
-//!   app is not running is not an account the page can act on. The **write
-//!   halves** are [`SetDav`](SettingsIntent::SetDav) and
+//!   app is not running is not an account the page can act on, **except**
+//!   when the info carries a grant refusal state: an account whose grant
+//!   the host reports dead never dialled, and the row it renders anyway is
+//!   the only surface that can offer the re-grant. The **write halves** are
+//!   [`SetDav`](SettingsIntent::SetDav) and
 //!   [`RemoveAccount`](SettingsIntent::RemoveAccount); see [`accounts`].
 //! - **One error channel, typed**: the snapshot's `error` names why the
 //!   newest total write refused or failed
@@ -277,28 +281,55 @@ impl<P: Provider> App<P> {
             .expect("settings mutex poisoned")
             .refresh_errors
             .clone();
-        let accounts =
-            self.account_handles()
-                .await
-                .into_iter()
-                .map(|handle| {
-                    let info = infos.iter().find(|info| info.id == handle.id);
-                    astra_viewmodel::AccountSettingsRow {
+        let accounts = {
+            let handles = self.account_handles().await;
+            let mut accounts = Vec::with_capacity(handles.len());
+            for handle in &handles {
+                let info = infos.iter().find(|info| info.id == handle.id);
+                accounts.push(astra_viewmodel::AccountSettingsRow {
+                    legs: astra_viewmodel::AccountLegs {
+                        calendar: handle
+                            .providers
+                            .iter()
+                            .any(|provider| provider.connection_info().capabilities.calendars()),
+                        contacts: !self.people_legs(&handle.id).is_empty(),
+                    },
+                    account: handle.id.clone(),
+                    address: handle.identity.email.clone(),
+                    kind: info.map_or(astra_viewmodel::AccountKind::ImapSmtp, |info| info.kind),
+                    dav: info.and_then(|info| info.dav.clone()),
+                    dav_error: dav_errors.get(&handle.id).cloned(),
+                    refresh_error: refresh_errors.get(&handle.id).cloned(),
+                    grant: info.and_then(|info| info.grant),
+                });
+            }
+            // The one exception to the join rule: an account whose grant the
+            // host reports dead never dialled, so no handle stands for it,
+            // and the row it renders anyway is the only surface that can
+            // offer the re-grant. Its address comes from the info the host
+            // answered; its legs stand on nothing.
+            for info in infos {
+                if handles.iter().any(|handle| handle.id == info.id) {
+                    continue;
+                }
+                if let Some(grant) = info.grant {
+                    accounts.push(astra_viewmodel::AccountSettingsRow {
                         legs: astra_viewmodel::AccountLegs {
-                            calendar: handle.providers.iter().any(|provider| {
-                                provider.connection_info().capabilities.calendars()
-                            }),
-                            contacts: !self.people_legs(&handle.id).is_empty(),
+                            calendar: false,
+                            contacts: false,
                         },
-                        account: handle.id.clone(),
-                        address: handle.identity.email.clone(),
-                        kind: info.map_or(astra_viewmodel::AccountKind::ImapSmtp, |info| info.kind),
-                        dav: info.and_then(|info| info.dav.clone()),
-                        dav_error: dav_errors.get(&handle.id).cloned(),
-                        refresh_error: refresh_errors.get(&handle.id).cloned(),
-                    }
-                })
-                .collect();
+                        account: info.id.clone(),
+                        address: info.address.clone(),
+                        kind: info.kind,
+                        dav: info.dav.clone(),
+                        dav_error: dav_errors.get(&info.id).cloned(),
+                        refresh_error: refresh_errors.get(&info.id).cloned(),
+                        grant: Some(grant),
+                    });
+                }
+            }
+            accounts
+        };
         let error = self
             .settings_state
             .lock()

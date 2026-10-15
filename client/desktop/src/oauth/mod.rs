@@ -68,6 +68,9 @@
 //! [`SystemBrowser`]: session::SystemBrowser
 
 pub(crate) mod commands;
+/// The standing grant refusals: the map of Microsoft accounts whose OAuth
+/// grant needs the person to act, the state the refusal surfaces render.
+pub(crate) mod grant_refusals;
 /// The completion's account half: what a Microsoft sign-in's token set
 /// becomes, and the sink every Graph token source reports rotations
 /// through.
