@@ -85,7 +85,7 @@ export function ListToolbar({ folderName, viewMode, splitFilter, splitCounts, on
           <div
             role="group"
             aria-label="Split"
-            className="flex items-center gap-0.5 rounded-md bg-[var(--surface)] p-0.5"
+            className="flex items-center gap-0.5 rounded-md bg-muted p-0.5"
           >
             {SIDES.map(({ id, label }) => (
               <button
@@ -95,7 +95,7 @@ export function ListToolbar({ folderName, viewMode, splitFilter, splitCounts, on
                 onClick={() => onSplitFilter(id)}
                 className={`rounded-[var(--radius-xs)] px-2 py-0.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                   splitFilter === id
-                    ? 'bg-[var(--surface-floating)] font-medium text-foreground shadow-[var(--shadow-sm)]'
+                    ? 'bg-background font-medium text-foreground shadow-[var(--shadow-sm)]'
                     : 'text-muted-text hover:text-foreground'
                 }`}
               >
@@ -107,7 +107,7 @@ export function ListToolbar({ folderName, viewMode, splitFilter, splitCounts, on
         <div
           role="group"
           aria-label="View mode"
-          className="flex items-center gap-0.5 rounded-md bg-[var(--surface)] p-0.5"
+          className="flex items-center gap-0.5 rounded-md bg-muted p-0.5"
         >
           {MODES.map(({ id, label }) => (
             <button
@@ -117,7 +117,7 @@ export function ListToolbar({ folderName, viewMode, splitFilter, splitCounts, on
               onClick={() => switchMode(id)}
               className={`rounded-[var(--radius-xs)] px-2 py-0.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                 viewMode === id
-                  ? 'bg-[var(--surface-floating)] font-medium text-foreground shadow-[var(--shadow-sm)]'
+                  ? 'bg-background font-medium text-foreground shadow-[var(--shadow-sm)]'
                   : 'text-muted-text hover:text-foreground'
               }`}
             >
