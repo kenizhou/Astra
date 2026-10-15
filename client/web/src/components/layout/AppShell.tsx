@@ -2,9 +2,9 @@
 // The desktop shell: the frameless title bar spans the top, the status bar
 // spans the bottom, and the middle row is the tool rail beside the working
 // frame: one div gathering the folder pane, the command ribbon, the message
-// list, and the reading pane, standing off the window's right edge on a
-// small margin, its left corners carved against the rail's chrome. The
-// panes inside draw no outer rules; hairline dividers part them.
+// list, and the reading pane, all four corners carved, standing off the
+// window's right edge on a half-step margin. The panes inside draw no outer
+// rules; hairline dividers part them.
 // The ribbon stands in the mail view only. The content is the active view:
 // the mail view is a resizable panel row (message list and reading pane,
 // the quick-reply strip docked at the reading pane's bottom, and the agent
@@ -138,10 +138,9 @@ export function AppShell() {
         {shellView === 'mail' && !compact ? (
           /* The working frame: one div gathering the folder pane, the
              ribbon, the message list, and the reading pane; no outer rules,
-             the tonal steps and the carved left corners part it from the
-             chrome, and a small right margin stands it off the window's
-             edge. */
-          <div className="mr-2 min-w-0 flex-1 overflow-hidden rounded-l-xl">
+             all four corners carved, a half-step right margin standing it
+             off the window's edge. */
+          <div className="mr-1 min-w-0 flex-1 overflow-hidden rounded-xl">
             <Group orientation="horizontal" className="h-full">
               <Panel id="folder-pane" defaultSize={pct(18)} minSize={pct(12)} maxSize={pct(36)}>
                 <div className="h-full bg-background">
