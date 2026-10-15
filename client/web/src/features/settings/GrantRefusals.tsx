@@ -17,7 +17,7 @@ import type { AccountSettingsRow } from '@/services/ipc';
 /** The begin-and-catch: a refused begin (a sign-in already stands, the
  * browser refused) surfaces its sentence beside the surface that asked,
  * never silently. */
-function useRegant() {
+function useRegrant() {
   const [sentence, setSentence] = useState<string | null>(null);
   const begin = (address: string): void => {
     oauthBegin('microsoft', address).catch((err: unknown) => {
@@ -43,7 +43,7 @@ export function withheldCalendarAccounts(
  * withheld calendar. */
 export function ReconnectBanner({ rows }: { rows: AccountSettingsRow[] }) {
   const withheld = withheldCalendarAccounts(rows);
-  const regant = useRegant();
+  const regrant = useRegrant();
   if (withheld.length === 0) {
     return null;
   }
@@ -64,15 +64,15 @@ export function ReconnectBanner({ rows }: { rows: AccountSettingsRow[] }) {
             <button
               type="button"
               aria-label={`Reconnect the calendar for ${row.address}`}
-              onClick={() => regant.begin(row.address)}
+              onClick={() => regrant.begin(row.address)}
               className="shrink-0 rounded-[var(--radius)] bg-secondary px-2.5 py-1 text-xs text-secondary-foreground transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[var(--hit)]"
             >
               Reconnect
             </button>
           </div>
-          {regant.sentence !== null && (
+          {regrant.sentence !== null && (
             <p role="alert" className="text-xs text-muted-foreground">
-              {regant.sentence}
+              {regrant.sentence}
             </p>
           )}
         </div>
@@ -92,7 +92,7 @@ export function ExpiredSignInRow({
   row: AccountSettingsRow;
   onOpen: () => void;
 }) {
-  const regant = useRegant();
+  const regrant = useRegrant();
   return (
     <div
       role="status"
@@ -107,14 +107,14 @@ export function ExpiredSignInRow({
         <button
           type="button"
           aria-label={`Sign in again as ${row.address}`}
-          onClick={() => regant.begin(row.address)}
+          onClick={() => regrant.begin(row.address)}
           className="rounded-[var(--radius)] bg-secondary px-2.5 py-1 text-xs text-secondary-foreground transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[var(--hit)]"
         >
           Sign in again
         </button>
-        {regant.sentence !== null && (
+        {regrant.sentence !== null && (
           <p role="alert" className="text-xs text-muted-foreground">
-            {regant.sentence}
+            {regrant.sentence}
           </p>
         )}
         <button

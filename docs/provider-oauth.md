@@ -312,13 +312,16 @@ restores the standing entry as it was; a failed dial on a first add rolls
 the whole registration back, leaving nothing registered and no orphaned
 credential in the store.
 
-**The door rule.** A grant the response names no scope for at all is
-refused at the door, before anything registers: an account with no
-permission cannot bear a single capability, and refusing early keeps the
-person on the setup surface rather than walking them through an add that
-ends in an unexplained folder-list refusal. The enforcement is the
-granted-set cache's own word: the response's set when it names one, the
-requested set when it names none.
+**The door rule.** A grant whose granted set is empty is refused at the
+door, before anything registers: an account with no permission cannot
+bear a single capability, and refusing early keeps the person on the
+setup surface rather than walking them through an add that ends in an
+unexplained folder-list refusal. The granted-set cache's own word makes
+the empty case a registration fault rather than a provider answer: the
+response's set when it names one, the requested set when it names none,
+so the door guards the registration's scope list (a response naming no
+scope reads as granted-as-requested, and a provider granting nothing
+names "offline_access" at least).
 
 **The surfaces.** A standing refusal state is snapshot data, not an event:
 an additive `grant` field on the settings snapshot's account rows, sourced

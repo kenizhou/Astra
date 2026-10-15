@@ -97,6 +97,13 @@ missing, the expired-sign-in row) arrive with it.
   being refused (MC's complete_account_consent pins the target and
   refuses the mismatch). The wizard-begun flow has the same shape; the
   pin rides the provider slices' completion rework.
+- The dial is a free function where mail-calendar's is a registry-gated
+  `AccountDial` (constructible only through the registry, which is what
+  made its pre-register ordering unskippable): Astra's dial table stands
+  in, and the ordering is carried by the completion's own sequence and
+  its tests. The per-use capability gating MC derives from the stored
+  grant defers with it; the 403 probe reaches the same re-consent
+  outcome.
 - A grant that dies mid-session is unobserved until a dial runs again:
   the sync pass swallows per-account failures, so the expired row appears
   at the next launch, not the moment the provider revokes (MC rule 12's
