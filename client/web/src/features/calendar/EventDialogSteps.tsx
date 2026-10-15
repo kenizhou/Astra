@@ -20,7 +20,7 @@ export function SeriesWarning({
         <button
           type="button"
           onClick={onBack}
-          className="rounded-[var(--radius)] border border-border-subtle px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+          className="rounded-[var(--radius)] border border-border-subtle px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           Back
         </button>
@@ -51,14 +51,14 @@ export function DeleteChoice({
         <button
           type="button"
           onClick={onBack}
-          className="rounded-[var(--radius)] border border-border-subtle px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+          className="rounded-[var(--radius)] border border-border-subtle px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           Back
         </button>
         <button
           type="button"
           onClick={() => onDelete(true)}
-          className="rounded-[var(--radius)] border border-[var(--destructive)] px-2.5 py-1 text-xs text-destructive transition-colors hover:bg-hover"
+          className="rounded-[var(--radius)] border border-[var(--destructive)] px-2.5 py-1 text-xs text-destructive transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           Delete this event
         </button>

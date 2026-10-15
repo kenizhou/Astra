@@ -61,7 +61,7 @@ function CalendarManagerRows() {
           onClick={() =>
             setCalendarVisible(calendars, calendar.account, calendar.id, !calendar.visible)
           }
-          className="flex items-center gap-2 rounded-[var(--radius-xs)] px-2 py-1 text-left text-xs transition-colors hover:bg-hover"
+          className="flex items-center gap-2 rounded-[var(--radius-xs)] px-2 py-1 text-left text-xs transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           title={calendar.visible ? `Hide ${calendar.name}` : `Show ${calendar.name}`}
         >
           <CalendarDot color={calendar.color} />

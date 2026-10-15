@@ -435,7 +435,7 @@ export function AccountSetupFlow() {
                 <button
                   type="button"
                   onClick={close}
-                  className="rounded-[var(--radius-xs)] px-3 py-1.5 text-[13px] text-muted-foreground hover:bg-hover hover:text-foreground"
+                  className="rounded-[var(--radius-xs)] px-3 py-1.5 text-[13px] text-muted-foreground hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   Cancel
                 </button>
@@ -445,7 +445,7 @@ export function AccountSetupFlow() {
                       type="button"
                       onClick={onAccept}
                       disabled={busy}
-                      className="rounded-[var(--radius-xs)] bg-secondary px-3 py-1.5 text-[13px] text-secondary-foreground hover:bg-hover disabled:opacity-40"
+                      className="rounded-[var(--radius-xs)] bg-secondary px-3 py-1.5 text-[13px] text-secondary-foreground hover:bg-hover disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       Accept and continue
                     </button>
@@ -453,7 +453,7 @@ export function AccountSetupFlow() {
                   <button
                     type="submit"
                     disabled={busy}
-                    className="rounded-[var(--radius-xs)] bg-primary px-3 py-1.5 text-[13px] text-primary-foreground hover:opacity-90 disabled:opacity-40"
+                    className="rounded-[var(--radius-xs)] bg-primary px-3 py-1.5 text-[13px] text-primary-foreground hover:opacity-90 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     Test connection
                   </button>
@@ -461,7 +461,7 @@ export function AccountSetupFlow() {
                     type="button"
                     onClick={onAdd}
                     disabled={busy || tested === null}
-                    className="rounded-[var(--radius-xs)] bg-primary px-3 py-1.5 text-[13px] text-primary-foreground hover:opacity-90 disabled:opacity-40"
+                    className="rounded-[var(--radius-xs)] bg-primary px-3 py-1.5 text-[13px] text-primary-foreground hover:opacity-90 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     Add account
                   </button>

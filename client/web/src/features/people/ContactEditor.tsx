@@ -266,7 +266,7 @@ export function ContactEditor({
               <button
                 type="button"
                 onClick={onClose}
-                className="rounded-[var(--radius)] border border-border-subtle px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+                className="rounded-[var(--radius)] border border-border-subtle px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 Cancel
               </button>
@@ -281,7 +281,7 @@ export function ContactEditor({
                     setChosenCard(card);
                   }
                 }}
-                className="rounded-[var(--radius)] bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground shadow-[var(--shadow-sm)] transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-[var(--radius)] bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground shadow-[var(--shadow-sm)] transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 Continue
               </button>
@@ -384,14 +384,14 @@ export function ContactEditor({
               <button
                 type="button"
                 onClick={onClose}
-                className="rounded-[var(--radius)] border border-border-subtle px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+                className="rounded-[var(--radius)] border border-border-subtle px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={mode === 'edit' ? !changed : !findable}
-                className="rounded-[var(--radius)] bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground shadow-[var(--shadow-sm)] transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-[var(--radius)] bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground shadow-[var(--shadow-sm)] transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 Save
               </button>

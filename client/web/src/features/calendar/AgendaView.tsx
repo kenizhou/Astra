@@ -34,7 +34,7 @@ function Row({
   return (
     <li
       data-hold={hold}
-      className={`flex min-w-0 items-center gap-2 rounded-lg border px-3 py-2 text-[13px] transition-colors hover:bg-hover ${hold ? '' : 'border-border-subtle bg-card'} ${holdClass(hold)}`}
+      className={`flex min-w-0 items-center gap-2 rounded-lg border px-3 py-2 text-[13px] transition-colors hover:bg-hover ${hold ? '' : 'border-border-subtle bg-card'} ${holdClass(hold)} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}
       style={hold ? { borderColor: color ?? 'var(--primary)' } : undefined}
     >
       <span className="w-16 shrink-0 text-right text-xs tabular-nums text-muted-text">

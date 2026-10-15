@@ -90,14 +90,14 @@ export function ReplyPromptDialog({ prompt }: ReplyPromptDialogProps) {
           <button
             type="button"
             onClick={() => answer(false)}
-            className="rounded-[var(--radius)] border border-border-subtle px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+            className="rounded-[var(--radius)] border border-border-subtle px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             Don't send
           </button>
           <button
             type="button"
             onClick={() => answer(true)}
-            className="rounded-[var(--radius)] bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground shadow-[var(--shadow-sm)] transition-colors hover:opacity-90"
+            className="rounded-[var(--radius)] bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground shadow-[var(--shadow-sm)] transition-colors hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             Send
           </button>

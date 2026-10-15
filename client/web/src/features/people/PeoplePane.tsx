@@ -47,7 +47,7 @@ function WriteStatuses() {
             type="button"
             aria-label="Retry"
             onClick={() => void dispatch(intents.refreshPeople())}
-            className="rounded-[var(--radius-xs)] border border-border-subtle px-2 py-0.5 text-xs text-foreground transition-colors hover:bg-hover"
+            className="rounded-[var(--radius-xs)] border border-border-subtle px-2 py-0.5 text-xs text-foreground transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             Retry
           </button>
