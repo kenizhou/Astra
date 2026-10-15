@@ -97,6 +97,7 @@ fn harness_account(
         }),
         certificate_exceptions: exceptions,
         graph: None,
+        google: None,
         dav: None,
         shape: astra_account::AccountShape::default(),
     }

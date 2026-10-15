@@ -45,6 +45,11 @@ provider-caldav.workspace = true
 # GraphCalendarProvider, MailboxPrincipal): an extension of SP1's design
 # decision 4 list, recorded here the way SP2l's engine-tls one was.
 provider-graph.workspace = true
+# The Google adapters the optional google section of a stored Google account
+# dials over the same token source (GoogleClient, GmailProvider,
+# GoogleCalendarProvider, CalendarWindow): under the same decision-4 clause
+# as the graph one above.
+provider-google.workspace = true
 # Implementing the engine's async `Provider` trait for the reconnecting IMAP wrapper.
 async-trait.workspace = true
 # Builds the reconnecting wrapper's retried provider streams.
