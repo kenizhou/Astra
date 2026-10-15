@@ -54,14 +54,14 @@ export function ListToolbar({ folderName, viewMode, splitFilter, splitCounts, on
 
   if (outbox) {
     return (
-      <div className="flex h-[var(--pane-header-h)] shrink-0 items-center justify-between gap-2 border-b border-border-subtle px-3">
+      <div className="flex h-[var(--pane-header-h)] shrink-0 items-center justify-between gap-2 overflow-hidden border-b border-border-subtle px-3">
         <span className="min-w-0 truncate text-[13px] font-semibold text-foreground">Outbox</span>
       </div>
     );
   }
 
   return (
-    <div className="flex h-[var(--pane-header-h)] shrink-0 items-center justify-between gap-2 border-b border-border-subtle px-3">
+    <div className="flex h-[var(--pane-header-h)] shrink-0 items-center justify-between gap-2 overflow-hidden border-b border-border-subtle px-3">
       {search === null ? (
         <span className="min-w-0 truncate text-[13px] font-semibold text-foreground">
           {folderName ?? 'Mail'}
@@ -80,12 +80,12 @@ export function ListToolbar({ folderName, viewMode, splitFilter, splitCounts, on
           )}
         </span>
       )}
-      <div className="flex items-center gap-2">
+      <div className="flex min-w-0 items-center gap-2">
         {search === null && (
           <div
             role="group"
             aria-label="Split"
-            className="flex items-center gap-0.5 rounded-md bg-muted p-0.5"
+            className="flex shrink-0 items-center gap-0.5 rounded-md bg-muted p-0.5"
           >
             {SIDES.map(({ id, label }) => (
               <button
@@ -93,7 +93,7 @@ export function ListToolbar({ folderName, viewMode, splitFilter, splitCounts, on
                 type="button"
                 aria-pressed={splitFilter === id}
                 onClick={() => onSplitFilter(id)}
-                className={`rounded-[var(--radius-xs)] px-2 py-0.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                className={`whitespace-nowrap rounded-[var(--radius-xs)] px-2 py-0.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                   splitFilter === id
                     ? 'bg-background font-medium text-foreground shadow-[var(--shadow-sm)]'
                     : 'text-muted-text hover:text-foreground'
@@ -107,7 +107,7 @@ export function ListToolbar({ folderName, viewMode, splitFilter, splitCounts, on
         <div
           role="group"
           aria-label="View mode"
-          className="flex items-center gap-0.5 rounded-md bg-muted p-0.5"
+          className="flex shrink-0 items-center gap-0.5 rounded-md bg-muted p-0.5"
         >
           {MODES.map(({ id, label }) => (
             <button
@@ -115,7 +115,7 @@ export function ListToolbar({ folderName, viewMode, splitFilter, splitCounts, on
               type="button"
               aria-pressed={viewMode === id}
               onClick={() => switchMode(id)}
-              className={`rounded-[var(--radius-xs)] px-2 py-0.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+              className={`whitespace-nowrap rounded-[var(--radius-xs)] px-2 py-0.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                 viewMode === id
                   ? 'bg-background font-medium text-foreground shadow-[var(--shadow-sm)]'
                   : 'text-muted-text hover:text-foreground'
@@ -129,7 +129,7 @@ export function ListToolbar({ folderName, viewMode, splitFilter, splitCounts, on
           <button
             type="button"
             onClick={exitSearch}
-            className="rounded-[var(--radius-xs)] px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="whitespace-nowrap rounded-[var(--radius-xs)] px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             Exit search
           </button>

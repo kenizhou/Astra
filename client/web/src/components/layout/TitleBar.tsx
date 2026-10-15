@@ -53,7 +53,7 @@ export function TitleBar() {
       <span
         data-tauri-drag-region
         onDoubleClick={toggleMaximise}
-        className="text-[13px] font-semibold"
+        className="whitespace-nowrap text-[13px] font-semibold"
       >
         Astra Mail
       </span>
