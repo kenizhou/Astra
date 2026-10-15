@@ -92,3 +92,16 @@ missing, the expired-sign-in row) arrive with it.
 - The registration's client secret: Microsoft's public client carries
   none; if the registration turns out to require one, the divergence from
   SP2l's credentials shape is escalated in the PR.
+- The banner's re-grant targets by `login_hint` alone: completing the
+  browser flow as a different address adds a second account rather than
+  being refused (MC's complete_account_consent pins the target and
+  refuses the mismatch). The wizard-begun flow has the same shape; the
+  pin rides the provider slices' completion rework.
+- A grant that dies mid-session is unobserved until a dial runs again:
+  the sync pass swallows per-account failures, so the expired row appears
+  at the next launch, not the moment the provider revokes (MC rule 12's
+  sync-side classifier is its own change).
+- An offline relaunch classifies nothing: only a dial that reaches the
+  token endpoint can answer Dead, so the accounts page holds no expired
+  row until the network returns (MC rule 12 binds "not suppressed while
+  offline"; the last classification is not persisted).

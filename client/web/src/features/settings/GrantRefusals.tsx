@@ -8,8 +8,24 @@
 // settings snapshot's account rows carry; a healthy account renders
 // neither.
 
+import { useState } from 'react';
+
 import { oauthBegin } from '@/services/ipc';
 import type { AccountSettingsRow } from '@/services/ipc';
+
+
+/** The begin-and-catch: a refused begin (a sign-in already stands, the
+ * browser refused) surfaces its sentence beside the surface that asked,
+ * never silently. */
+function useRegant() {
+  const [sentence, setSentence] = useState<string | null>(null);
+  const begin = (address: string): void => {
+    oauthBegin('microsoft', address).catch((err: unknown) => {
+      setSentence(String(err));
+    });
+  };
+  return { sentence, begin };
+}
 
 /** The accounts the reconnect banner names: Microsoft accounts whose
  * grant withholds the calendar. The trigger is Microsoft-only: the
@@ -27,6 +43,7 @@ export function withheldCalendarAccounts(
  * withheld calendar. */
 export function ReconnectBanner({ rows }: { rows: AccountSettingsRow[] }) {
   const withheld = withheldCalendarAccounts(rows);
+  const regant = useRegant();
   if (withheld.length === 0) {
     return null;
   }
@@ -37,22 +54,27 @@ export function ReconnectBanner({ rows }: { rows: AccountSettingsRow[] }) {
           key={row.account}
           role="status"
           aria-label="Calendar permission missing"
-          className="flex items-start justify-between gap-3 rounded-[var(--radius-xs)] border border-[var(--warning)]/40 p-3"
+          className="flex flex-col items-start gap-2 rounded-[var(--radius-xs)] border border-[var(--warning)]/40 p-3"
         >
-          <p className="max-w-[420px] text-xs text-foreground">
-            Microsoft reports the calendar permission missing for {row.address}. Mail keeps
-            working; the calendar waits for a fresh sign-in.
-          </p>
-          <button
-            type="button"
-            aria-label={`Reconnect ${row.address}`}
-            onClick={() => {
-              void oauthBegin('microsoft', row.address);
-            }}
-            className="shrink-0 rounded-[var(--radius)] bg-secondary px-2.5 py-1 text-xs text-secondary-foreground transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[var(--hit)]"
-          >
-            Reconnect
-          </button>
+          <div className="flex w-full items-start justify-between gap-3">
+            <p className="max-w-[420px] text-xs text-foreground">
+              Microsoft reports the calendar permission missing for {row.address}. Mail keeps
+              working; the calendar waits for a fresh sign-in.
+            </p>
+            <button
+              type="button"
+              aria-label={`Reconnect the calendar for ${row.address}`}
+              onClick={() => regant.begin(row.address)}
+              className="shrink-0 rounded-[var(--radius)] bg-secondary px-2.5 py-1 text-xs text-secondary-foreground transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[var(--hit)]"
+            >
+              Reconnect
+            </button>
+          </div>
+          {regant.sentence !== null && (
+            <p role="alert" className="text-xs text-muted-foreground">
+              {regant.sentence}
+            </p>
+          )}
         </div>
       ))}
     </div>
@@ -70,6 +92,7 @@ export function ExpiredSignInRow({
   row: AccountSettingsRow;
   onOpen: () => void;
 }) {
+  const regant = useRegant();
   return (
     <div
       role="status"
@@ -84,13 +107,16 @@ export function ExpiredSignInRow({
         <button
           type="button"
           aria-label={`Sign in again as ${row.address}`}
-          onClick={() => {
-            void oauthBegin('microsoft', row.address);
-          }}
+          onClick={() => regant.begin(row.address)}
           className="rounded-[var(--radius)] bg-secondary px-2.5 py-1 text-xs text-secondary-foreground transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[var(--hit)]"
         >
           Sign in again
         </button>
+        {regant.sentence !== null && (
+          <p role="alert" className="text-xs text-muted-foreground">
+            {regant.sentence}
+          </p>
+        )}
         <button
           type="button"
           aria-label={`Open ${row.address}`}

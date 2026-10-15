@@ -116,8 +116,7 @@ fn the_assembly_primes_the_settings_snapshot_for_the_first_pull() {
     // The settings snapshot is pull-based: nothing republishes it until a
     // settings intent lands, so a boot that does not prime it leaves the
     // first pull answering the empty default, refusal states and all.
-    let data_dir =
-        std::env::temp_dir().join(format!("astra-desktop-boot-prime-{}", std::process::id()));
+    let data_dir = crate::commands_fakes::scratch("boot-prime");
     std::fs::create_dir_all(&data_dir).expect("the scratch directory creates");
     let (_relay, agent_sink, _data) =
         crate::agent::testkit::stub_relay("boot-prime", "echo", 3, 50);

@@ -18,6 +18,8 @@ vi.mock('@/services/ipc', async (importOriginal) => ({
 }));
 
 import { AccountsDetail } from './AccountsDetail';
+import { ReconnectBanner } from './GrantRefusals';
+
 import { useSettingsStore } from './settingsStore';
 import type { AccountSettingsRow, SettingsSnapshot } from '@/services/ipc';
 
@@ -113,7 +115,7 @@ describe('the reconnect banner', () => {
     );
     render(<AccountsDetail />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Reconnect ada@outlook.test' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reconnect the calendar for ada@outlook.test' }));
 
     expect(ipc.oauthBegin).toHaveBeenCalledWith('microsoft', 'ada@outlook.test');
   });
@@ -161,3 +163,25 @@ describe('the expired-sign-in row', () => {
     expect(screen.getByRole('button', { name: 'Remove account' })).toBeTruthy();
   });
 });
+
+  it('renders a refused begin beside the banner instead of silently doing nothing', async () => {
+    ipc.oauthBegin.mockRejectedValue(new Error('a sign-in is already in flight'));
+    render(
+      <ReconnectBanner
+        rows={[
+          row({
+            account: 'msft',
+            address: 'ada@outlook.test',
+            kind: 'microsoft',
+            grant: 'calendar_withheld',
+          }),
+        ]}
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Reconnect the calendar for ada@outlook.test' }),
+    );
+    // The refusal's sentence surfaces beside the surface that asked: a
+    // wedged one-tap remedy is never a silent no-op.
+    expect(await screen.findByRole('alert')).toBeTruthy();
+  });
