@@ -137,10 +137,10 @@ export function AppShell() {
         <ToolWindowBar />
         {shellView === 'mail' && !compact ? (
           /* The working frame: one div gathering the folder pane, the
-             ribbon, the message list, and the reading pane; no outer rules,
-             all four corners carved, a half-step right margin standing it
-             off the window's edge. */
-          <div className="mr-1 min-w-0 flex-1 overflow-hidden rounded-xl">
+             ribbon, the message list, and the reading pane; a hairline
+             frame, all four corners carved, a half-step right margin
+             standing it off the window's edge. */
+          <div className="mr-1 min-w-0 flex-1 overflow-hidden rounded-xl border border-[var(--hairline)]">
             <Group orientation="horizontal" className="h-full">
               <Panel id="folder-pane" defaultSize={pct(18)} minSize={pct(12)} maxSize={pct(36)}>
                 <div className="h-full bg-background">
