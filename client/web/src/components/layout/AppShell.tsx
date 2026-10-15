@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The desktop shell: the frameless title bar spans the top, the status bar
-// spans the bottom, and the middle row is the left column (the tool rail
-// beside the folder pane in the mail view) next to the right zone (the
-// command ribbon over the content). The folder pane alone rounds its two
-// left corners against the rail's chrome.
+// spans the bottom, and the middle row is the tool rail beside the working
+// frame: one div gathering the folder pane, the command ribbon, the message
+// list, and the reading pane, standing off the window's right edge on a
+// small margin, its left corners carved against the rail's chrome. The
+// panes inside draw no outer rules; hairline dividers part them.
 // The ribbon stands in the mail view only. The content is the active view:
 // the mail view is a resizable panel row (message list and reading pane,
 // the quick-reply strip docked at the reading pane's bottom, and the agent
@@ -62,22 +63,6 @@ function VDivider() {
       <span
         aria-hidden="true"
         className="absolute inset-y-0 left-1/2 w-[3px] -translate-x-1/2 rounded-full bg-[var(--muted-text)] opacity-0 transition-opacity duration-[var(--dur-row)] group-hover:opacity-30"
-      />
-    </Separator>
-  );
-}
-
-/** The folder pane's resize handle: zero width, since the message list's
- *  own left border already draws the line. The grab zone reaches four
- *  pixels to either side invisibly, and hover lifts the same quiet ink
- *  wash over the boundary. */
-function FlushDivider() {
-  return (
-    <Separator className="group relative w-0 shrink-0 cursor-col-resize">
-      <span aria-hidden="true" className="absolute inset-y-0 -right-[4px] -left-[4px]" />
-      <span
-        aria-hidden="true"
-        className="absolute inset-y-0 -left-px w-[3px] rounded-full bg-[var(--muted-text)] opacity-0 transition-opacity duration-[var(--dur-row)] group-hover:opacity-30"
       />
     </Separator>
   );
@@ -148,29 +133,30 @@ export function AppShell() {
   return (
     <div className="relative flex h-full flex-col overflow-hidden bg-background font-ui text-foreground">
       <TitleBar />
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 bg-chrome">
         <ToolWindowBar />
         {shellView === 'mail' && !compact ? (
-          /* The folder pane resizes against the right zone through the
-             flush handle; it stands flush in its column on the window's
-             ground (the message list's own fill), bordered on every side,
-             its left corners rounding against the rail's chrome. */
-          <Group orientation="horizontal" className="min-w-0 flex-1">
-            <Panel id="folder-pane" defaultSize={pct(18)} minSize={pct(12)} maxSize={pct(36)}>
-              <div className="h-full bg-chrome">
-                <div className="h-full overflow-hidden rounded-l-xl border border-border-subtle bg-background">
+          /* The working frame: one div gathering the folder pane, the
+             ribbon, the message list, and the reading pane; no outer rules,
+             the tonal steps and the carved left corners part it from the
+             chrome, and a small right margin stands it off the window's
+             edge. */
+          <div className="mr-2 min-w-0 flex-1 overflow-hidden rounded-l-xl">
+            <Group orientation="horizontal" className="h-full">
+              <Panel id="folder-pane" defaultSize={pct(18)} minSize={pct(12)} maxSize={pct(36)}>
+                <div className="h-full bg-background">
                   <FolderPane />
                 </div>
-              </div>
-            </Panel>
-            <FlushDivider />
-            <Panel id="mail-right" defaultSize={pct(82)} minSize={pct(40)}>
-              <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
-                <CommandRibbon />
-                <main className="min-h-0 min-w-0 flex-1">{viewContent}</main>
-              </div>
-            </Panel>
-          </Group>
+              </Panel>
+              <VDivider />
+              <Panel id="mail-right" defaultSize={pct(82)} minSize={pct(40)}>
+                <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+                  <CommandRibbon />
+                  <main className="min-h-0 min-w-0 flex-1">{viewContent}</main>
+                </div>
+              </Panel>
+            </Group>
+          </div>
         ) : (
           <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
             <CommandRibbon />
