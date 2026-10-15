@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! The Microsoft Graph half of an account: the token source today, the
-//! provider dials the later slices build over it.
+//! The Microsoft Graph half of an account: the token source the
+//! account's providers dial through.
 
 mod token_source;
 
