@@ -480,7 +480,7 @@ pub(crate) fn setup_host(app: &mut tauri::App) -> Result<(), Box<dyn std::error:
     let (oauth_tx, oauth_rx) = tokio::sync::mpsc::unbounded_channel();
     crate::oauth::session::forward_oauth_callbacks(app.handle(), oauth_tx.clone());
     let oauth = Arc::new(crate::oauth::commands::SignInSurface::new(
-        crate::oauth::commands::opener_browser(app.handle()),
+        crate::oauth::wiring::opener_browser(app.handle()),
         oauth_rx,
         oauth_tx,
     ));

@@ -125,7 +125,7 @@ fn the_assembly_primes_the_settings_snapshot_for_the_first_pull() {
         std::sync::Arc::new(QuietObserver),
         agent_sink,
         std::sync::Arc::new(QuietDraftSink),
-        crate::oauth::commands::offline_surface(),
+        crate::oauth::wiring::offline_surface(),
     )
     .expect("the assembly boots over an empty store");
 

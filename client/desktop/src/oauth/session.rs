@@ -4,9 +4,18 @@
 //! [`OAuthClient::begin`] builds the URL, the state, and the PKCE pair,
 //! and the session's job is the platform half around them: open the URL
 //! in the system browser (never an embedded webview, per the design's
-//! D2), wait for the deep-link redirect the browser lands on the
-//! registered scheme, and hand that raw URL back for
-//! [`OAuthClient::complete`], where the `state` CSRF check stands.
+//! D2), wait for the redirect the browser lands on, and hand that raw
+//! URL back for [`OAuthClient::complete`], where the `state` CSRF check
+//! stands.
+//!
+//! The redirect arrives on one of two captures, and the begin names
+//! which: Microsoft's flow lands on the registered custom scheme, whose
+//! deliveries the deep-link plugin forwards into the session's one
+//! shared channel; a Google Desktop flow lands on the loopback port
+//! that flow's own listener bound ([`super::loopback`]), whose single
+//! capture crosses on its own channel. The two never mix: a deep-link
+//! delivery does not feed a loopback flow, and a loopback capture
+//! belongs to the flow whose port it landed on.
 //!
 //! The two platform seams are injectable so the whole session is driven
 //! in tests without a Tauri runtime: [`SystemBrowser`] (the shell's
@@ -19,7 +28,8 @@
 //!
 //! The client is a per-flow input, not session state: Microsoft and
 //! Google flows share one session (one channel, one in-flight slot),
-//! and each begin names the provider whose client mints it.
+//! and each begin names the client that mints it (a Google flow's
+//! client carries the port its listener bound).
 //!
 //! [`OAuthClient::begin`]: astra_oauth::OAuthClient::begin
 //! [`OAuthClient::complete`]: astra_oauth::OAuthClient::complete
@@ -31,6 +41,8 @@ use tokio::sync::mpsc;
 
 use astra_oauth::{OAuthClient, OAuthError, TokenSet};
 
+use super::loopback::LoopbackCapture;
+
 /// The custom scheme every OAuth callback redirect lands on: the app's
 /// own identifier, the one `tauri.conf.json`'s deep-link block registers
 /// beside `mailto`. The OS only delivers links on registered schemes, so
@@ -38,8 +50,10 @@ use astra_oauth::{OAuthClient, OAuthError, TokenSet};
 /// and the capture's filter.
 pub(crate) const OAUTH_SCHEME: &str = "com.kenizhou.astra";
 
-/// The redirect URI the provider configs register: the OAuth path on
-/// this app's scheme, the shape `astra-oauth`'s callback parser names.
+/// The redirect URI Microsoft's provider config registers: the OAuth
+/// path on this app's scheme, the shape `astra-oauth`'s callback parser
+/// names. A Google Desktop flow redirects to the loopback port its own
+/// listener bound instead ([`super::loopback`]).
 pub(crate) const OAUTH_REDIRECT_URI: &str = "com.kenizhou.astra://oauth";
 
 /// Why a sign-in step refused.
@@ -57,6 +71,10 @@ pub(crate) enum SignInError {
     /// flow that opened the browser can never finish.
     #[error("the deep-link capture closed before the redirect arrived")]
     CaptureClosed,
+    /// The loopback capture ended without a redirect: its bound passed
+    /// or its socket failed, and the sentence names which.
+    #[error("the loopback capture failed: {0}")]
+    LoopbackFailed(String),
     /// The flow this waiter was minted by was cancelled while it held
     /// the capture; a redirect that arrived meanwhile was handed back
     /// for the standing flow.
@@ -114,9 +132,22 @@ pub(crate) fn forward_oauth_callbacks<R: tauri::Runtime>(
     });
 }
 
+/// Which capture a flow's redirect arrives on: the deep-link channel
+/// Microsoft's registered scheme feeds, or a Google Desktop flow's own
+/// loopback listener, handed over with its receiver.
+pub(crate) enum CaptureSource {
+    /// The deep-link plugin's forwarded callbacks: the session's one
+    /// shared channel, whose deliveries belong to whichever flow stands.
+    DeepLink,
+    /// The flow's loopback listener, whose one capture crosses on its
+    /// own receiver.
+    Loopback(mpsc::Receiver<LoopbackCapture>),
+}
+
 /// One in-flight flow's held half: the client that minted it, the
-/// `state` the callback must echo, and the PKCE verifier the exchange
-/// sends. Held from [`SignInSession::begin_sign_in`] minted it until
+/// `state` the callback must echo, the PKCE verifier the exchange
+/// sends, and the capture the redirect arrives on. Held from
+/// [`SignInSession::begin_sign_in`] minted it until
 /// [`SignInSession::complete_sign_in`] spent it, so a second begin can
 /// be refused honestly.
 struct InFlight {
@@ -132,6 +163,29 @@ struct InFlight {
     /// The PKCE verifier paired with the challenge the authorization
     /// request carried.
     verifier: String,
+    /// Whether this flow's redirect arrives on its own loopback listener
+    /// (a Google Desktop flow) rather than the shared deep-link channel.
+    loopback: bool,
+    /// The loopback capture's receiver, present from begin until this
+    /// flow's waiter claims it; `None` on a deep-link flow and after the
+    /// claim, so the in-flight lock never crosses an await.
+    loopback_rx: Option<mpsc::Receiver<LoopbackCapture>>,
+}
+
+impl InFlight {
+    /// Claims this flow's loopback capture for one wait, if it has one:
+    /// `Ok(None)` on a deep-link flow, the receiver on a loopback flow's
+    /// first wait, and the honest refusal on a second.
+    fn claim_loopback(&mut self) -> Result<Option<mpsc::Receiver<LoopbackCapture>>, SignInError> {
+        if !self.loopback {
+            return Ok(None);
+        }
+        self.loopback_rx.take().map(Some).ok_or_else(|| {
+            SignInError::LoopbackFailed(
+                "the capture was already claimed by an earlier wait".to_owned(),
+            )
+        })
+    }
 }
 
 /// One sign-in flow at a time over the injected browser and capture
@@ -177,8 +231,12 @@ impl SignInSession {
     /// Begins one sign-in: mints the request over `client` and opens the
     /// authorization URL in the system browser, returning once the browser
     /// opened, so the caller can answer "browser opened" honestly before
-    /// any wait. The redirect wait is [`SignInSession::wait_for_callback`]
-    /// and the spend is [`SignInSession::complete_sign_in`].
+    /// any wait. `capture` names where this flow's redirect arrives (the
+    /// shared deep-link channel, or a loopback flow's own listener); the
+    /// loopback listener must already be bound, because the client it
+    /// minted carries the port in its redirect. The redirect wait is
+    /// [`SignInSession::wait_for_callback`] and the spend is
+    /// [`SignInSession::complete_sign_in`].
     ///
     /// One sign-in at a time: while a flow stands (begun, not yet
     /// completed), a second begin answers [`SignInError::InFlight`]
@@ -193,6 +251,7 @@ impl SignInSession {
         &self,
         client: &Arc<OAuthClient>,
         login_hint: Option<&str>,
+        capture: CaptureSource,
     ) -> Result<u64, SignInError> {
         // Reserve the single slot before anything else: the refusal a
         // second begin meets is the flow that already stands, not a race
@@ -207,11 +266,17 @@ impl SignInSession {
                 return Err(SignInError::InFlight);
             }
             let request = client.begin(login_hint);
+            let (loopback, loopback_rx) = match capture {
+                CaptureSource::DeepLink => (false, None),
+                CaptureSource::Loopback(receiver) => (true, Some(receiver)),
+            };
             *in_flight = Some(InFlight {
                 flow,
                 client: Arc::clone(client),
                 state: request.state.clone(),
                 verifier: request.pkce.verifier().to_owned(),
+                loopback,
+                loopback_rx,
             });
             request
         };
@@ -227,16 +292,48 @@ impl SignInSession {
         Ok(flow)
     }
 
-    /// Waits for the deep-link redirect of the flow [`begin_sign_in`]
-    /// minted, handing its raw URL back whole for
-    /// [`SignInSession::complete_sign_in`]. The wait ends when the capture
-    /// forwards a URL or its channel closes.
+    /// Waits for the redirect of the flow [`begin_sign_in`] minted, on
+    /// the capture that flow named, handing its raw URL back whole for
+    /// [`SignInSession::complete_sign_in`]. The wait ends when the
+    /// capture forwards a URL or its channel closes.
     ///
     /// # Errors
     ///
     /// Returns [`SignInError::CaptureClosed`] when the capture went away
-    /// before any redirect arrived.
+    /// before any redirect arrived, and [`SignInError::LoopbackFailed`]
+    /// when a loopback capture's bound passed or its socket failed.
     pub(crate) async fn wait_for_callback(&self, flow: u64) -> Result<String, SignInError> {
+        // A loopback flow's capture arrives on its own listener, not the
+        // deep-link channel: claim the receiver under the lock so the
+        // mutex never crosses the await.
+        let loopback = self
+            .in_flight
+            .lock()
+            .expect("the in-flight lock stands")
+            .as_mut()
+            .map(InFlight::claim_loopback)
+            .transpose()?
+            .flatten();
+        if let Some(mut capture) = loopback {
+            return match capture.recv().await {
+                Some(LoopbackCapture::Received(url)) => {
+                    // The cancelled-waiter check, as below, except a
+                    // loopback capture is never requeued: each flow binds
+                    // its own port, so a capture on this one belongs to
+                    // no other flow.
+                    if self.standing_flow() != Some(flow) {
+                        return Err(SignInError::Cancelled);
+                    }
+                    Ok(url)
+                }
+                Some(LoopbackCapture::Failed(detail)) => Err(SignInError::LoopbackFailed(detail)),
+                // Only a capture thread that died without its last word
+                // ends the channel with nothing on it.
+                None => Err(SignInError::LoopbackFailed(
+                    "the capture ended without an answer".to_owned(),
+                )),
+            };
+        }
         let url = self
             .callbacks
             .lock()
@@ -248,17 +345,20 @@ impl SignInSession {
         // while it held the channel: a redirect that arrives now belongs
         // to whichever flow stands, so hand it back and answer the
         // cancellation instead of completing a stranger's flow.
-        let standing = self
-            .in_flight
-            .lock()
-            .expect("the in-flight lock stands")
-            .as_ref()
-            .map(|in_flight| in_flight.flow);
-        if standing != Some(flow) {
+        if self.standing_flow() != Some(flow) {
             let _ = self.callback_tx.send(url);
             return Err(SignInError::Cancelled);
         }
         Ok(url)
+    }
+
+    /// Which flow stands in the in-flight slot, if any.
+    fn standing_flow(&self) -> Option<u64> {
+        self.in_flight
+            .lock()
+            .expect("the in-flight lock stands")
+            .as_ref()
+            .map(|in_flight| in_flight.flow)
     }
 
     /// Completes the in-flight flow from the raw redirect URL: spends
@@ -307,9 +407,23 @@ impl SignInSession {
             .is_some()
     }
 
+    /// Whether the standing flow's loopback receiver has been claimed by
+    /// its waiter: the test probe for the claim-then-cancel ordering,
+    /// where a cancel racing an unclaimed receiver would drop the
+    /// capture channel the late send needs.
+    #[cfg(test)]
+    pub(crate) fn loopback_claimed(&self) -> bool {
+        self.in_flight
+            .lock()
+            .expect("the in-flight lock stands")
+            .as_ref()
+            .is_some_and(|in_flight| in_flight.loopback_rx.is_none())
+    }
     /// Stands a pair in the in-flight slot without opening a browser:
     /// the test seam for the refusal and cancellation windows, where
-    /// the product path mints its own pair through begin.
+    /// the product path mints its own pair through begin. The seeded
+    /// pair waits on the deep-link channel, the arm whose windows the
+    /// seam drives.
     #[cfg(test)]
     pub(crate) fn seed_in_flight_for_test(
         &self,
@@ -327,6 +441,8 @@ impl SignInSession {
                 client: Arc::clone(client),
                 state: pair.0,
                 verifier: pair.1,
+                loopback: false,
+                loopback_rx: None,
             })
             .is_none()
     }

@@ -3,15 +3,18 @@
 //! scheme's URL, handed on whole), the single-flight rule (a second
 //! begin while one stands refuses honestly, opening nothing), the raw
 //! redirect's hand-back (byte for byte what the capture forwarded), the
-//! browser seam (opened exactly once per flow), and the completion's
+//! browser seam (opened exactly once per flow), the completion's
 //! routing through the core's parser (the forged state refused, the
-//! provider's own error carried through, no flow to spend refused). No
-//! test touches a network: the client's exchange is only ever reached
-//! past a parse the tests refuse. The begin half is synchronous (it
-//! answers once the browser opened) and the wait half is async, the
-//! seam the wizard's command pair splits its answer over; the async
-//! bodies run on one runtime per test, the host's drive pattern (this
-//! crate forbids `#[tokio::test]`'s `block_on` by clippy config).
+//! provider's own error carried through, no flow to spend refused), and
+//! the loopback arm's routing (its capture on its own channel, never
+//! the deep-link one, and a displaced waiter's capture dropped rather
+//! than requeued). No test touches a network: the client's exchange is
+//! only ever reached past a parse the tests refuse. The begin half is
+//! synchronous (it answers once the browser opened) and the wait half
+//! is async, the seam the wizard's command pair splits its answer
+//! over; the async bodies run on one runtime per test, the host's
+//! drive pattern (this crate forbids `#[tokio::test]`'s `block_on` by
+//! clippy config).
 
 use std::sync::{Arc, Mutex};
 
@@ -21,8 +24,10 @@ use tokio::sync::mpsc;
 use astra_oauth::{OAuthClient, OAuthError, OAuthProviderConfig};
 
 use super::{
-    oauth_callback, SignInError, SignInSession, SystemBrowser, OAUTH_REDIRECT_URI, OAUTH_SCHEME,
+    oauth_callback, CaptureSource, SignInError, SignInSession, SystemBrowser, OAUTH_REDIRECT_URI,
+    OAUTH_SCHEME,
 };
+use crate::oauth::loopback::LoopbackCapture;
 
 /// A browser stand-in that counts its opens and can be told to refuse:
 /// the seam's contract (one open per begun flow, none on a refusal)
@@ -172,7 +177,7 @@ fn a_begin_opens_the_browser_once_and_the_wait_hands_the_raw_url_back_whole() {
             );
 
             let flow = session
-                .begin_sign_in(&client(), None)
+                .begin_sign_in(&client(), None, CaptureSource::DeepLink)
                 .expect("the browser opened for the flow");
             assert_eq!(browser.opens(), 1, "the browser opens exactly once");
 
@@ -204,7 +209,7 @@ fn a_second_begin_refuses_while_one_is_in_flight() {
             );
 
             let flow = session
-                .begin_sign_in(&client(), None)
+                .begin_sign_in(&client(), None, CaptureSource::DeepLink)
                 .expect("the browser opened for the flow");
             // The fed delivery resolves the wait, but the flow it began
             // stands until its completion spends it: exactly the window
@@ -216,7 +221,7 @@ fn a_second_begin_refuses_while_one_is_in_flight() {
             assert_eq!(first, RAW_CALLBACK);
 
             let refused = session
-                .begin_sign_in(&client(), None)
+                .begin_sign_in(&client(), None, CaptureSource::DeepLink)
                 .expect_err("a second begin while one stands refuses");
             assert!(
                 matches!(refused, SignInError::InFlight),
@@ -237,7 +242,7 @@ fn a_failed_browser_open_leaves_nothing_in_flight() {
     let session = SignInSession::new(as_seam(&browser), rx, fake_tx());
 
     let refused = session
-        .begin_sign_in(&client(), None)
+        .begin_sign_in(&client(), None, CaptureSource::DeepLink)
         .expect_err("a browser that refuses ends the begin");
     assert!(
         matches!(refused, SignInError::Browser(_)),
@@ -248,7 +253,7 @@ fn a_failed_browser_open_leaves_nothing_in_flight() {
     // reaches the browser again, refusing the same honest way) rather
     // than an in-flight refusal.
     let retried = session
-        .begin_sign_in(&client(), None)
+        .begin_sign_in(&client(), None, CaptureSource::DeepLink)
         .expect_err("the refusing browser refuses the retry too");
     assert!(
         matches!(retried, SignInError::Browser(_)),
@@ -267,7 +272,7 @@ fn a_closed_capture_ends_the_wait() {
             let session = SignInSession::new(as_seam(&browser), rx, fake_tx());
 
             let flow = session
-                .begin_sign_in(&client(), None)
+                .begin_sign_in(&client(), None, CaptureSource::DeepLink)
                 .expect("the browser opened for the flow");
             let ended = session
                 .wait_for_callback(flow)
@@ -297,7 +302,7 @@ fn completion_refuses_a_forged_state() {
                 fake_tx(),
             );
             let flow = session
-                .begin_sign_in(&client(), None)
+                .begin_sign_in(&client(), None, CaptureSource::DeepLink)
                 .expect("the browser opened for the flow");
             let raw = session
                 .wait_for_callback(flow)
@@ -339,7 +344,7 @@ fn completion_carries_a_provider_refusal_through_the_parser() {
                 fake_tx(),
             );
             let _flow = session
-                .begin_sign_in(&client(), None)
+                .begin_sign_in(&client(), None, CaptureSource::DeepLink)
                 .expect("the browser opened for the flow");
 
             // The parser reads a provider error before any state, so the
@@ -397,3 +402,98 @@ fn cancel_takes_the_in_flight_pair_back_so_a_later_begin_starts_fresh() {
         session.seed_in_flight_for_test(&client(), ("state-2".to_owned(), "verifier-2".to_owned()));
     assert!(seeded_again, "a later begin starts fresh, not InFlight");
 }
+
+/// A loopback capture's URL, the shape the listener hands its waiter.
+const LOOPBACK_CAPTURE: &str = "http://127.0.0.1:51341/?code=abc.def&state=xyz123";
+
+#[test]
+fn a_loopback_flow_waits_on_its_own_capture_and_leaves_the_deep_link_channel_alone() {
+    crate::runtime::build_runtime()
+        .expect("the test runtime builds")
+        .block_on(|| async {
+            let browser = CountingBrowser::opening();
+            // The deep-link channel carries a delivery before the flow
+            // even begins; a loopback flow must leave it where it waits.
+            let (deep_tx, deep_rx) = mpsc::unbounded_channel();
+            deep_tx
+                .send(RAW_CALLBACK.to_owned())
+                .expect("the deep-link delivery lands");
+            let session = SignInSession::new(as_seam(&browser), deep_rx, fake_tx());
+
+            let (capture_tx, capture_rx) = mpsc::channel(1);
+            let flow = session
+                .begin_sign_in(&client(), None, CaptureSource::Loopback(capture_rx))
+                .expect("the browser opened for the flow");
+
+            capture_tx
+                .send(LoopbackCapture::Received(LOOPBACK_CAPTURE.to_owned()))
+                .await
+                .expect("the capture crosses");
+            let handed_back = session
+                .wait_for_callback(flow)
+                .await
+                .expect("the flow's own capture completes the wait");
+            assert_eq!(
+                handed_back, LOOPBACK_CAPTURE,
+                "the listener's URL crosses whole, never the deep-link delivery"
+            );
+            // The bare http loopback URL meets the core's parser exactly
+            // as the custom scheme does: its state is not the minted one,
+            // so the completion refuses it there, never at a network.
+            match session
+                .complete_sign_in(LOOPBACK_CAPTURE, OffsetDateTime::UNIX_EPOCH)
+                .await
+            {
+                Err(OAuthError::Callback(sentence)) => assert!(
+                    sentence.contains("state mismatch"),
+                    "the loopback URL meets the core's parser: {sentence}"
+                ),
+                other => panic!("a foreign state must refuse, got {other:?}"),
+            }
+
+            // The deep-link delivery stayed for a deep-link flow: the
+            // next Microsoft-shaped flow receives it, not the Google one.
+            let next = session
+                .begin_sign_in(&client(), None, CaptureSource::DeepLink)
+                .expect("the spent slot admits a fresh flow");
+            let theirs = session
+                .wait_for_callback(next)
+                .await
+                .expect("the waiting delivery completes the deep-link flow");
+            assert_eq!(theirs, RAW_CALLBACK);
+        });
+}
+
+#[test]
+fn a_loopback_capture_failure_crosses_its_sentence() {
+    crate::runtime::build_runtime()
+        .expect("the test runtime builds")
+        .block_on(|| async {
+            let browser = CountingBrowser::opening();
+            let (_tx, rx) = mpsc::unbounded_channel();
+            let session = SignInSession::new(as_seam(&browser), rx, fake_tx());
+
+            let (capture_tx, capture_rx) = mpsc::channel(1);
+            let flow = session
+                .begin_sign_in(&client(), None, CaptureSource::Loopback(capture_rx))
+                .expect("the browser opened for the flow");
+            capture_tx
+                .send(LoopbackCapture::Failed(
+                    "the bound passed before any redirect arrived".to_owned(),
+                ))
+                .await
+                .expect("the failure crosses");
+
+            match session.wait_for_callback(flow).await {
+                Err(SignInError::LoopbackFailed(sentence)) => assert!(
+                    sentence.contains("bound"),
+                    "the capture's own sentence crosses: {sentence}"
+                ),
+                other => panic!("the failed capture must name itself, got {other:?}"),
+            }
+        });
+}
+
+#[cfg(test)]
+#[path = "session_tests/loopback_wait_tests.rs"]
+mod loopback_wait;

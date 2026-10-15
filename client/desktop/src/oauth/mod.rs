@@ -40,10 +40,15 @@
 //! The callback arrives on the app's own custom scheme, the identifier
 //! `tauri.conf.json` already carries ([`OAUTH_SCHEME`],
 //! `com.kenizhou.astra`), registered beside `mailto` in the deep-link
-//! block. The redirect URI the provider configs register is
+//! block. The redirect URI Microsoft's provider config registers is
 //! [`OAUTH_REDIRECT_URI`] (`com.kenizhou.astra://oauth`). The OS delivers
 //! only registered schemes, and the capture filters by the same scheme
-//! again, so a `mailto` delivery never reaches a sign-in flow.
+//! again, so a `mailto` delivery never reaches a sign-in flow. A Google
+//! Desktop flow redirects to the loopback port its own listener bound
+//! ([`loopback`]): that client type supports no custom scheme, and the
+//! capture is the listener's, not the deep-link channel's.
+//!
+//! [`loopback`]: loopback
 //!
 //! # The seams, and what is wired when
 //!
@@ -78,5 +83,11 @@ pub(crate) mod graph_add;
 /// The dial-table token sink: the host half that lands rotations and moved
 /// scope sets in the dial table's entry and the secure store.
 pub(crate) mod graph_sink;
+/// The Google Desktop flow's loopback capture: the listener the redirect
+/// lands on, bound before the authorization URL mints.
+pub(crate) mod loopback;
 pub(crate) mod session;
 pub(crate) mod transaction;
+/// The sign-in surface's Tauri-touching wiring: the opener browser, the
+/// offline surface, and the Windows argv forwarding.
+pub(crate) mod wiring;

@@ -18,6 +18,9 @@ use tokio::sync::mpsc;
 
 use astra_oauth::{GrantRefusal, OAuthClient, OAuthError, OAuthProviderConfig};
 
+#[path = "commands_tests/loopback_tests.rs"]
+mod loopback_tests;
+
 #[path = "commands_tests/wire_tests.rs"]
 mod wire_tests;
 
@@ -108,19 +111,14 @@ fn refused_consent_capture() -> mpsc::UnboundedReceiver<String> {
     rx
 }
 
-/// The surface over given clients and capture, on the counting browser.
+/// The surface over given clients and capture, on any browser stand-in.
 fn surface(
     clients: Vec<(ProviderKind, Arc<OAuthClient>)>,
-    browser: &Arc<CountingBrowser>,
+    browser: Arc<dyn SystemBrowser>,
     callbacks: mpsc::UnboundedReceiver<String>,
 ) -> Arc<SignInSurface> {
     let tx = mpsc::unbounded_channel().0;
-    Arc::new(SignInSurface::with_clients(
-        as_seam(browser),
-        callbacks,
-        tx,
-        clients,
-    ))
+    Arc::new(SignInSurface::with_clients(browser, callbacks, tx, clients))
 }
 
 /// The emit seam as the tests hold it: one channel the result lands in.
@@ -148,7 +146,11 @@ const EMIT_BOUND: Duration = Duration::from_secs(5);
 
 #[test]
 fn the_offer_names_exactly_the_registered_providers() {
-    let unregistered = surface(Vec::new(), &CountingBrowser::opening(), quiet_capture());
+    let unregistered = surface(
+        Vec::new(),
+        as_seam(&CountingBrowser::opening()),
+        quiet_capture(),
+    );
     assert!(
         unregistered.offer().providers.is_empty(),
         "a build carrying no registration offers nothing"
@@ -159,7 +161,7 @@ fn the_offer_names_exactly_the_registered_providers() {
             (ProviderKind::Microsoft, client()),
             (ProviderKind::Google, client()),
         ],
-        &CountingBrowser::opening(),
+        as_seam(&CountingBrowser::opening()),
         quiet_capture(),
     );
     assert_eq!(
@@ -175,7 +177,7 @@ fn a_begun_sign_in_answers_browser_opened_and_the_refused_consent_crosses_whole(
     let browser = CountingBrowser::opening();
     let desk = surface(
         vec![(ProviderKind::Microsoft, client())],
-        &browser,
+        as_seam(&browser),
         refused_consent_capture(),
     );
     let (_tx, results, emit) = emit_seam();
@@ -277,7 +279,7 @@ fn the_outcome_mappings_follow_the_ported_classification() {
 fn begin_refuses_a_provider_this_build_does_not_offer() {
     let runtime = crate::runtime::build_runtime().expect("the test runtime builds");
     let browser = CountingBrowser::opening();
-    let desk = surface(Vec::new(), &browser, quiet_capture());
+    let desk = surface(Vec::new(), as_seam(&browser), quiet_capture());
     let (_tx, _results, emit) = emit_seam();
 
     let refused = begin_with(
@@ -302,7 +304,7 @@ fn a_second_begin_refuses_while_one_signin_stands() {
     let browser = CountingBrowser::opening();
     let desk = surface(
         vec![(ProviderKind::Microsoft, client())],
-        &browser,
+        as_seam(&browser),
         quiet_capture(),
     );
     let (_tx, _results, emit) = emit_seam();
@@ -343,7 +345,7 @@ fn a_browser_that_refuses_answers_the_error_and_leaves_a_fresh_retry() {
     let browser = CountingBrowser::refusing();
     let desk = surface(
         vec![(ProviderKind::Microsoft, client())],
-        &browser,
+        as_seam(&browser),
         quiet_capture(),
     );
     let (_tx, _results, emit) = emit_seam();
@@ -385,7 +387,7 @@ fn cancel_takes_the_flow_back_and_a_later_begin_starts_fresh() {
     let browser = CountingBrowser::opening();
     let desk = surface(
         vec![(ProviderKind::Microsoft, client())],
-        &browser,
+        as_seam(&browser),
         quiet_capture(),
     );
     let (_tx, _results, emit) = emit_seam();
@@ -465,7 +467,7 @@ fn a_displaced_waiter_hands_the_next_flow_s_redirect_back() {
             &rt,
             second_emit,
             bare_completion(),
-            ProviderKind::Google,
+            ProviderKind::Microsoft,
             None,
         )
         .expect("the second begin opens the browser");
@@ -479,7 +481,7 @@ fn a_displaced_waiter_hands_the_next_flow_s_redirect_back() {
             .expect("the second flow's waiter completes its own redirect");
         assert_eq!(
             second.provider,
-            ProviderKind::Google,
+            ProviderKind::Microsoft,
             "the displaced waiter never steals the next flow's result"
         );
         assert!(

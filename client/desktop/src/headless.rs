@@ -243,7 +243,7 @@ fn assemble_for(env: &SliceEnv) -> Result<AppState, String> {
     // The headless host has no browser and no deep-link capture, so its
     // OAuth surface stands over the offline stand-ins: no sign-in can
     // begin there, which nothing in the slice tries.
-    let oauth = crate::oauth::commands::offline_surface();
+    let oauth = crate::oauth::wiring::offline_surface();
     assemble_state(&env.data_dir, observer, agent_sink, draft_sink, oauth)
         .map_err(|err| format!("the headless host could not boot: {err}"))
 }
