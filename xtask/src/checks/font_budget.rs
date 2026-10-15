@@ -10,7 +10,7 @@ pub(crate) const MAX_FONT_BYTES: u64 = 400 * 1024;
 pub(crate) fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
     let mut bad = Vec::new();
     for f in super::walk_files(root, &["woff2"]) {
-        let bytes = fs::metadata(&f).map(|m| m.len()).unwrap_or(0);
+        let bytes = fs::metadata(&f).map_or(0, |m| m.len());
         if bytes > MAX_FONT_BYTES {
             bad.push(format!(
                 "{}: {bytes} bytes (max {MAX_FONT_BYTES})",
@@ -18,7 +18,11 @@ pub(crate) fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
             ));
         }
     }
-    if bad.is_empty() { Ok(()) } else { Err(bad) }
+    if bad.is_empty() {
+        Ok(())
+    } else {
+        Err(bad)
+    }
 }
 
 #[cfg(test)]
@@ -33,7 +37,8 @@ mod tests {
 
     #[test]
     fn fails_over_the_budget() {
-        let big = "x".repeat(super::MAX_FONT_BYTES as usize + 1);
+        let budget = usize::try_from(super::MAX_FONT_BYTES).expect("budget fits usize");
+        let big = "x".repeat(budget + 1);
         let root = fixture(&[("a.woff2", &big)]);
         assert!(super::check(&root).is_err());
     }
