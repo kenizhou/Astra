@@ -27,8 +27,9 @@ inherently platform-specific:
   injected HTTP client built on the shared TLS policy (`engine_tls`), so
   OAuth trusts exactly what sync trusts.
 - `client/desktop/src/oauth`, the host half. The sign-in session (open the
-  system browser through an injected seam, capture the deep-link redirect,
-  hand the raw URL back), the credential transaction over the host's
+  system browser through an injected seam, capture the redirect, hand the
+  raw URL back: the deep-link scheme for Microsoft, the one-shot loopback
+  listener for Google), the credential transaction over the host's
   `AccountCredentialStore` port, and the wizard's sign-in commands with
   their typed completion event.
 
@@ -54,11 +55,14 @@ more, so token acquisition and refresh never cross `engine-api`.
    desktop host the browser is the OS default, opened through the
    opener-backed seam.
 
-3. **A custom-scheme redirect, validated by `state`.** The redirect returns
-   to the app's own scheme (`com.kenizhou.astra`, the identifier
-   `tauri.conf.json` already carries), registered beside `mailto` in the
-   deep-link block; the redirect URI the provider configs use is
-   `com.kenizhou.astra://oauth`. The capture filters by the same scheme and
+3. **A custom-scheme redirect, validated by `state`** (Microsoft's flow;
+   Google's Desktop client type supports no custom scheme, so its flow
+   returns over the loopback redirect the Google section owns). The
+   redirect returns to the app's own scheme (`com.kenizhou.astra`, the
+   identifier `tauri.conf.json` already carries), registered beside
+   `mailto` in the deep-link block; the redirect URI the provider configs
+   use is `com.kenizhou.astra://oauth`. The capture filters by the same
+   scheme and
    hands the raw callback URL to the pure half whole; the host never parses
    tokens itself. The pure half rejects a callback whose `state` does not
    match the one it minted (a possible CSRF), a callback missing the code,
@@ -91,9 +95,11 @@ more, so token acquisition and refresh never cross `engine-api`.
    discipline host-side (`add_account` persists after the dial and rolls
    the whole add back on a refusal). The rules bind wherever the transaction
    lives. The refresh anchor: the Microsoft account's refresh path (SP2m)
-   holds this transaction and answers its rotations; every rotation the
-   token source hears lands in the dial table's entry and the store, and
-   the completion's final persist reads the entry, never the copy parsed a
+   holds this transaction and answers its rotations, and the Google
+   account (SP2n) dials behind the same source over the same transaction
+   (its rotation write the backstop, below); every rotation the token
+   source hears lands in the dial table's entry and the store, and the
+   completion's final persist reads the entry, never the copy parsed a
    moment before the dial, so a rotation during the dial is never undone.
 
    **A refresh names no scope, and that rule is not negotiable.** RFC 6749
@@ -204,9 +210,9 @@ more, so token acquisition and refresh never cross `engine-api`.
    provider can return `access_denied` (consent declined, or a policy
    blocked the app); the sign-in surface shows the refusal with its
    classification word rather than doing nothing. A button that silently
-   does nothing is a bug. The honest corollary for the providers without
-   account wiring: Google's completion still answers the bare signed-in
-   word and persists nothing, until its slice lands.
+   does nothing is a bug. The honest corollary for the families whose
+   account wiring waits: the JMAP and IMAP OAuth completions ride their
+   slices (SP2o, SP2v), and no such route is offered until one lands.
 
 11. **A sign-in abandoned in the browser never wedges the surface.**
    Closing the browser tab is undetectable, so the way out is explicit:
@@ -372,6 +378,121 @@ seam itself is scripted in that proof; its token boundary is pinned by the
 account layer's dial tests. The live proof over the real Graph awaits the
 Azure registration, and nothing fakes it.
 
+## The Google account
+
+The second account type over this floor (SP2n): a Google account signs
+in through the browser flow over a loopback redirect, its mail and
+calendar dial through the engine's Google adapter behind the same token
+source the Microsoft account uses, and the surfaces it owes arrive with
+it. Everything here is scoped to what shipped; the gaps at the end of
+the document carry the rest.
+
+**The loopback redirect.** Google's Desktop client type supports no
+custom scheme, so rule 3's redirect is Microsoft's alone: a Google flow
+returns to `http://127.0.0.1:<ephemeral-port>/`, and because the port is
+part of the redirect itself the listener binds BEFORE the authorization
+URL mints (the flow binds an ephemeral loopback port, rebuilds its
+client over the template config with the port in the redirect, and only
+then opens the browser). The listener is bounded and one-shot: it stands
+for minutes, because the person may sit on the consent page as long as
+they like; a request without the callback's shape (a `POST`, a probe) is
+answered `400` and the listener stands on, because a browser may probe
+before it redirects; the one callback that parses is answered with the
+close page naming the app to return to, the socket closes (a later
+connection is refused), and only then does the captured URL cross to the
+pure half whole, `code`, `state`, and any `error` read exactly as the
+deep-link capture hands its URL on. A deep-link delivery can never
+complete a loopback flow: the session routes each provider's capture to
+its own channel, so a Microsoft redirect arriving on the shared deep
+link while a Google flow waits is a stranger's redirect, handed back and
+refused as such. The registration carries the portless loopback prefix
+in Cloud Console, which matches any port (Google's loopback rule).
+
+**The non-confidential secret.** Google's token endpoint requires the
+Desktop client secret on the code exchange AND on the refresh, PKCE
+notwithstanding: rule 1's one documented exception. The secret is not
+confidential (Google's own guidance says it "is obviously not treated as
+a secret"), so it persists in the `[google]` document beside the grant:
+a launch-later refresh reads the document and sends the secret again,
+and it never logs.
+
+**The address lookup.** The granted set picks the endpoint that names
+the account. A grant holding `userinfo.email` (every sign-in asks for
+it) reads `GET /oauth2/v3/userinfo` for its `email` field; a grant
+issued without it is named through the Gmail profile
+(`GET /gmail/v1/users/me/profile`, its `emailAddress` field), which the
+mail scope covers. A reply that names no address refuses the sign-in:
+an account the provider cannot name does not become one, the same door
+Microsoft's lookup keeps.
+
+**The dial.** One free function in the account layer dials a Google
+account, and every path that brings one up (the boot, the sign-in's
+completion, a reconnect) calls it, so no path can disagree about what a
+Google account opens. The mail half is account-global: Gmail has no
+per-folder binding, so one provider serves the whole account where
+Graph dials one per synced folder. The calendar appends after the mail
+the way every dialled calendar does. Both legs share the one token
+source, so a dial mints at most one access token. There is no `403`
+re-auth probe: Google asks for the calendar scope at sign-in, so a
+refused calendar is an error the dial carries (the mail stands, the
+failure named for the caller), never a re-consent state, and the
+reconnect banner stays Microsoft-only.
+
+**The completion's ordering and the door rules.** The ordering is
+Microsoft's exactly: the id derives from the address (`address@google`)
+and everything keys on it, the token source registers with the dial
+table's entry before the dial, the final persist reads the entry rather
+than the copy parsed before it, a new id persists through the
+transaction's `add` and a re-consent through `rotate`, and a re-consent
+keeps the stored shape beside the grant. Two doors stand at the front,
+in this order: a token set without a refresh token is refused BEFORE
+the address read (the flow always sends `access_type=offline` +
+`prompt=consent`, so a missing refresh token is a broken registration,
+not a person's choice, and a grant that cannot last an hour does not
+spend the network read naming an account it will not keep), and a grant
+whose granted set is empty is refused at the door Microsoft's
+completion owns.
+
+**The rotation backstop.** Google's refresh tokens do not rotate on
+refresh, so rule 5's rotation write is a backstop that rarely fires and
+is not optional: the shared token source lands any rotation the answer
+does carry through the same sink into the dial table's entry and the
+store, exactly as Microsoft's path does, and the offline proof drives a
+scripted ratcheting endpoint to prove the path end to end.
+
+**The scope set, scoped to what shipped.** A Google sign-in asks
+`GOOGLE_SCOPES` (the union of the use groups in the pure half's scope
+tables); what the shipped account consumes of it:
+
+| Scope | Use it serves today |
+|---|---|
+| `access_type=offline` + `prompt=consent` (request parameters, not scopes) | the refresh token; the completion's first door refuses a token set without one (rule 7) |
+| `userinfo.email` | the address lookup; asked whatever else the person allows |
+| `https://mail.google.com/` | mail sync and every mail write over the account-global provider; the group's needed scope |
+| `gmail.settings.basic` | requested at consent; the sender-name write rides the accounts-page slice |
+| `https://www.googleapis.com/auth/calendar` | the calendar's reads and writes |
+| `contacts`, `contacts.other.readonly` | requested at consent; the contacts leg over Google rides the contacts slice |
+| `directory.readonly` | requested at consent (beside contacts); the colleague directory rides its slice |
+
+A use the grant withholds is not opened, and Google lets a person untick
+a scope on the consent screen: the granted set is read back as the
+provider spelled it and gates the uses, a withheld calendar arriving as
+the dial's error above rather than a banner.
+
+**The offline proof.** The engine's Google adapter offers no offline
+replay (its live tests are gated on a real access token), and a stored
+document's token endpoint is pinned to the real Google authority, so
+the proof runs every offline-reachable link over scripted loopback
+servers: the real userinfo lookup with the granted set picking the
+endpoint, the shared token source's refresh, single-flight and rotation
+backstop through the real sink into the real dial table and credential
+transaction, the completion's ordering, the boot's stored-account dial,
+and the dead grant's classification reaching the accounts row over the
+account's own kind. The dial seam itself is scripted in that proof; its
+token boundary is pinned by the account layer's dial tests. The live
+proof over the real Google APIs awaits the owner's Google Cloud
+registration, and nothing fakes it.
+
 ## What ships today
 
 Legend: ✅ implemented and pinned · 🚧 shipped but runtime-unverified or
@@ -382,14 +503,17 @@ partial · ⬜ planned (the consuming slice named).
 | Authorization Code + PKCE, public client | ✅ | the pure half; form bodies pinned byte for byte |
 | System browser, never a WebView | 🚧 | the opener-backed seam ships; no runtime sign-in exists (no registration) |
 | Custom-scheme capture, raw URL handed back | 🚧 | the deep-link wiring ships (the boot hook, the Windows argv hand-off); runtime-unverified |
+| Google loopback capture: bind before the URL mints, one-shot, close page | 🚧 | the listener ships (the port baked into the redirect before the URL mints, the bounded one-shot capture, the shape guard, Google's close page); runtime-unverified (no registration) |
 | `state` validated, `iss` mandatory where advertised | ✅ | pinned by the pure half's tests |
-| Refresh token only, in the OS keystore | 🚧 | the transaction ships; the Microsoft completion persists accounts, offline-proven (no registration, so no real sign-in has run) |
+| Refresh token only, in the OS keystore | 🚧 | the transaction ships; the Microsoft and Google completions persist accounts, offline-proven (no registration, so no real sign-in has run) |
 | A refresh names no scope | ✅ | the refresh body carries no scope parameter, pinned |
 | Granted-set cache write rules | ✅ | pinned |
 | Refusal classified by code, never text | ✅ | `Dead` / `Underscoped` / `Indeterminate` |
 | Transport reach split, `ResponseLost` its own error | ✅ | pinned with a real client |
-| Replay-safe token source (single-flight, failure memo, cool-downs) | ✅ | SP2m; one refresh per account, the failure shared with queued callers, rotations through rule 5's transaction |
+| Replay-safe token source (single-flight, failure memo, cool-downs) | ✅ | SP2m; one refresh per account, the failure shared with queued callers, rotations through rule 5's transaction; the Google account shares the source (its rotation write the backstop) |
 | The Microsoft account: dial, `/me` lookup, re-consent, door rule | 🚧 | offline-proven end to end over scripted servers (the lifecycle suite); the live proof awaits the Azure registration |
+| The Google account: dial, granted-set userinfo lookup, re-consent, door rules | 🚧 | offline-proven end to end over scripted servers (the lifecycle suite); the live proof awaits the Google Cloud registration |
+| Google refusal surfaces: the expired-sign-in row over the google kind | 🚧 | a dead google grant renders the expired row naming the account, its Sign in again targeting the google flow; the banner stays Microsoft-only (no calendar re-auth for Google) |
 | Microsoft refusal surfaces: standing state on the accounts rows | 🚧 | the reconnect banner and the expired-sign-in row read the boot dial's and the completion's classification; Microsoft family only |
 | Discovery fail-closed (HTTPS, issuer match, no redirects, S256) | ✅ | pinned offline, plus the live proof below |
 | RFC 7591 dynamic registration | 🚧 | code and tests; unproven against a real server |
@@ -428,25 +552,46 @@ once registrations exist.
 
 ## Known gaps
 
-- **No registration exists, so nothing user-visible ships, and the live
-  proof has not run.** The Microsoft account wiring (SP2m) ships
-  offline-proven end to end over scripted servers, but the wizard's OAuth
-  offer still renders for no one. The live proof (the real browser
-  sign-in, a mail sync, a calendar read and write, the refresh rotation
-  against the real endpoint) lands when the owner's Azure registration
-  does, and is never faked. If that registration turns out to require a
-  client secret, the divergence from the public-client shape is escalated
-  in its PR. The other provider slices consume the same floor: SP2n
-  (Google native APIs), SP2o (JMAP OAuth, live-provable against the
-  harness once it mints grants), SP2v (IMAP/SMTP OAuth).
-- **The refusal surfaces ship for the Microsoft family only.** The Google,
-  JMAP, and password families wait for their slices; the cross-provider
-  spread of the expired-sign-in row is the accounts page's own later
-  change.
+- **No registration exists, so nothing user-visible ships, and neither
+  live proof has run.** The Microsoft account wiring (SP2m) and the
+  Google account wiring (SP2n) ship offline-proven end to end over
+  scripted servers, but the wizard's OAuth offer still renders for no
+  one. The Microsoft live proof (the real browser sign-in, a mail sync,
+  a calendar read and write, the refresh rotation against the real
+  endpoint) lands when the owner's Azure registration does; the Google
+  live proof lands when the owner's Google Cloud registration does, and
+  while the app is unverified the Early Access test-user allow-list is
+  Google's own gate (the reference's unverified-app notice-and-checkbox
+  surface ports with it when that becomes reachable). Neither is ever
+  faked. If the Azure registration turns out to require a client
+  secret, the divergence from the public-client shape is escalated in
+  its PR. The remaining provider slices consume the same floor: SP2o
+  (JMAP OAuth, live-provable against the harness once it mints grants),
+  SP2v (IMAP/SMTP OAuth).
+- **The reconnect banner ships for the Microsoft family only.** Google
+  has no calendar re-auth (the scope is asked at sign-in; a refused
+  calendar is the dial's error), so the banner is Graph's own surface.
+  The expired-sign-in row crosses both integrated families: the refusal
+  map is id-keyed and provider-neutral, a dead google grant renders the
+  row over the google kind, and its Sign in again targets the google
+  flow. The JMAP and password families wait for their slices.
 - **A Microsoft account keeps no server-side draft.** The refreshing
   wrapper deliberately does not advertise the engine's server-side drafts
   capability, so the composer holds a Microsoft draft in the app alone
-  until the drafts slice wires Graph's draft folder.
+  until the drafts slice wires Graph's draft folder. The Google wrapper
+  makes the same cut for the same reason.
+- **Contacts, the directory, and the sender name are requested but not
+  consumed at Google.** The consent screen lists `contacts`,
+  `contacts.other.readonly`, `directory.readonly`, and
+  `gmail.settings.basic` (the set ships as a whole, the restricted
+  scopes covered by the one assessment), while the legs that would use
+  them ride the contacts, directory, and accounts-page slices; the
+  Gmail provider already forwards the send-as identities the
+  sender-name write will land over.
+- **The full-mail scope grants permanent delete.** Google's
+  `https://mail.google.com/` carries Gmail's irreversible delete with
+  it; no surface or agent tool offers one, the cut the MCP slice
+  already records.
 - **The principal is `Me` only.** Shared and other mailboxes defer: one
   account is its own mailbox today.
 - **Contacts and the directory are requested but not consumed.** The
@@ -476,13 +621,10 @@ once registrations exist.
 - **The Windows browser is the OS default.** Reusing the person's browser
   session is the point, and the cost is inherited from it: no API closes
   the tab after the custom-scheme hand-off, so a blank tab remains.
-- **The Google Desktop loopback redirect is not built.** Google's Desktop
-  client type cannot use a custom scheme; its `http://127.0.0.1:<port>/`
-  capture listener lands with the Google slice (SP2n). The registration
-  schema anticipates it (no redirect travels with the registration).
-- **A completed sign-in with no refresh token is not yet refused.** Rule
-  7's enforcement point is the account wiring the provider slices land;
-  today nothing persists a sign-in at all.
+- **A completed sign-in with no refresh token is refused only by the
+  integrated families.** Rule 7's enforcement point ships with the
+  Microsoft and Google completions' first door; the JMAP and IMAP
+  completions ride their slices.
 - **One build identity, one scheme.** The reference's packaged-versus-dev
   scheme split (Windows registers a protocol per user, so two builds
   claiming one scheme put a picker in front of a live auth code) has no

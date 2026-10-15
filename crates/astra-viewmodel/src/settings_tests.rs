@@ -174,6 +174,7 @@ fn the_account_kinds_cross_both_ways() {
         (AccountKind::Jmap, r#""jmap""#),
         (AccountKind::Dav, r#""dav""#),
         (AccountKind::Microsoft, r#""microsoft""#),
+        (AccountKind::Google, r#""google""#),
     ] {
         assert_eq!(serde_json::to_string(&kind).unwrap(), word);
         assert_eq!(serde_json::from_str::<AccountKind>(word).unwrap(), kind);

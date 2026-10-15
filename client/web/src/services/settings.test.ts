@@ -73,6 +73,11 @@ describe('the settings snapshot wire', () => {
       '{"account":"work","address":"a@e.test","kind":"microsoft","legs":{"calendar":false,"contacts":false},"grant":"sign_in_expired"}',
     ) as AccountSettingsRow;
     expect(expired.grant).toBe('sign_in_expired');
+    const google = JSON.parse(
+      '{"account":"work","address":"a@gmail.example","kind":"google","legs":{"calendar":true,"contacts":false},"grant":"sign_in_expired"}',
+    ) as AccountSettingsRow;
+    expect(google.kind).toBe('google');
+    expect(google.grant).toBe('sign_in_expired');
     const healthy = JSON.parse(
       '{"account":"work","address":"a@e.test","kind":"microsoft","legs":{"calendar":false,"contacts":false}}',
     ) as AccountSettingsRow;

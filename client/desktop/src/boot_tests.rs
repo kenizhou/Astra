@@ -412,9 +412,22 @@ mod graph_refusals;
 #[path = "boot_tests/google_boot_tests.rs"]
 mod google_boot;
 
+// The scripted loopback servers and flow fixtures the offline lifecycle
+// proofs share: a stand-in profile read and the ratcheting token
+// endpoint.
+#[path = "boot_tests/servers.rs"]
+mod servers;
+
 // The offline end-to-end proof of the Microsoft account's whole life over
 // the scripted seams: the sign-in through the real lookup and source, the
 // rotation landing, the boot re-dial, and the dead grant's row. Split
 // from this file for the 500-line cap.
 #[path = "boot_tests/graph_lifecycle_tests.rs"]
 mod graph_lifecycle;
+
+// The offline end-to-end proof of the Google account's whole life over
+// the scripted seams: the sign-in through the real userinfo lookup and
+// source, the rotation backstop landing, the boot re-dial, and the dead
+// grant's row. Split from this file for the 500-line cap.
+#[path = "boot_tests/google_lifecycle_tests.rs"]
+mod google_lifecycle;

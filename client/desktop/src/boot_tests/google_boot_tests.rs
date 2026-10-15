@@ -19,8 +19,9 @@ pub(super) fn unused_dial() -> crate::oauth::google_add::GoogleDial {
 }
 
 /// A graph dial seam that is never meant to run: the google boot tests
-/// hand it for accounts their tables do not hold.
-fn unused_graph_dial() -> crate::oauth::graph_add::GraphDial {
+/// and the google lifecycle proof hand it for accounts their tables do
+/// not hold.
+pub(super) fn unused_graph_dial() -> crate::oauth::graph_add::GraphDial {
     Arc::new(|_account, _tokens, _config| {
         Box::pin(async move { panic!("a google-only boot dialled a graph account") })
     })
