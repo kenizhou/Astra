@@ -142,7 +142,7 @@ export function AppShell() {
             /* The calendar's interior language: the ribbon spans the
                frame's full width, and the panes ride as cards in a padded
                row beneath it, the folder pane one card among them. */
-            <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+            <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background">
               <CommandRibbon />
               <div className="min-h-0 flex-1 p-2">
                 <Group orientation="horizontal" className="h-full">
