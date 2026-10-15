@@ -78,4 +78,9 @@ fn a_refused_rotation_on_a_reconsent_keeps_the_standing_document() {
             .and_then(|g| g.granted_scopes.clone()),
         "the standing document is untouched by the refused rotation"
     );
+    assert_eq!(
+        standing.google.as_ref().map(|g| g.refresh_token.expose()),
+        Some("old-refresh"),
+        "the standing grant itself is untouched, not just its scope cache"
+    );
 }
