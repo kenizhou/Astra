@@ -150,7 +150,7 @@ function SkinSwatches() {
                 style={{ background: entry.swatch }}
               />
               <span
-                className={`text-[10px] font-medium ${selected ? 'text-primary' : 'text-muted-foreground'}`}
+                className={`text-[11px] font-medium ${selected ? 'text-primary' : 'text-muted-foreground'}`}
               >
                 {entry.label}
               </span>

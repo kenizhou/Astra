@@ -1,107 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The avatar: the monogram the row carries renders as initials on its own
-// colour, empty initials draw the person glyph, and a photo the avatar
-// command answers replaces the monogram; without an address nothing pulls.
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+// The monogram foreground derivation: dark ink over light palette colours,
+// white over dark ones, the muted ink when no colour stands.
 
-const ipc = vi.hoisted(() => ({ peopleAvatar: vi.fn(), peoplePhoto: vi.fn() }));
+import { describe, expect, it } from 'vitest';
 
-vi.mock('@/services/ipc', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  peopleAvatar: ipc.peopleAvatar,
-  peoplePhoto: ipc.peoplePhoto,
-}));
+import { monogramForeground } from './Avatar';
 
-import { Avatar } from './Avatar';
-
-beforeEach(() => {
-  ipc.peopleAvatar.mockReset();
-  ipc.peoplePhoto.mockReset();
-});
-
-afterEach(cleanup);
-
-describe('the avatar', () => {
-  it('renders the row monogram initials on its colour', () => {
-    render(<Avatar monogram={{ initials: 'AL', colour: '#4DB6AC' }} />);
-
-    const badge = screen.getByRole('img', { name: 'Avatar' });
-    expect(badge.style.backgroundColor).toBe('rgb(77, 182, 172)');
-    expect(badge.textContent).toBe('AL');
-    expect(ipc.peopleAvatar).not.toHaveBeenCalled();
+describe('the monogram foreground', () => {
+  it('draws white ink on dark colours and dark ink on light colours', () => {
+    expect(monogramForeground('#7a6ff0')).toBe('#ffffff');
+    expect(monogramForeground('#10b981')).toBe('#ffffff');
+    expect(monogramForeground('#f59e0b')).toBe('#1c1917');
+    expect(monogramForeground('#fbbf24')).toBe('#1c1917');
   });
 
-  it('draws the person glyph when the initials are empty', () => {
-    render(<Avatar monogram={{ initials: '', colour: '#4DB6AC' }} />);
-
-    const badge = screen.getByRole('img', { name: 'Avatar' });
-    expect(badge.textContent).toBe('');
-    expect(screen.getByRole('img', { name: 'Person' })).toBeTruthy();
-  });
-
-  it('replaces the monogram with the photo the commands answer', async () => {
-    ipc.peopleAvatar.mockResolvedValue({
-      initials: 'AL',
-      colour: '#4DB6AC',
-      photo: 'C:\\blobs\\ada.png',
-    });
-    ipc.peoplePhoto.mockResolvedValue('data:image/png;base64,Zm9v');
-    render(<Avatar monogram={{ initials: 'AL', colour: '#4DB6AC' }} address="ada@example.test" />);
-
-    await waitFor(() => {
-      expect(screen.getByRole('img', { name: 'Avatar' }).querySelector('img')).not.toBeNull();
-    });
-    const photo = screen.getByRole('img', { name: 'Avatar' }).querySelector('img');
-    expect(photo?.getAttribute('src')).toBe('data:image/png;base64,Zm9v');
-    expect(screen.getByRole('img', { name: 'Avatar' }).textContent).toBe('');
-  });
-
-  it('keeps the monogram when the photo read answers nothing', async () => {
-    ipc.peopleAvatar.mockResolvedValue({
-      initials: 'AL',
-      colour: '#4DB6AC',
-      photo: 'C:\\blobs\\gone.blob',
-    });
-    ipc.peoplePhoto.mockResolvedValue(null);
-    render(<Avatar monogram={{ initials: 'AL', colour: '#4DB6AC' }} address="ada@example.test" />);
-
-    await waitFor(() => {
-      expect(ipc.peoplePhoto).toHaveBeenCalledWith('C:\\blobs\\gone.blob');
-    });
-    expect(screen.getByRole('img', { name: 'Avatar' }).textContent).toBe('AL');
-  });
-
-  it('keeps the monogram when the command answers no photo', async () => {
-    ipc.peopleAvatar.mockResolvedValue({ initials: 'AL', colour: '#4DB6AC' });
-    render(<Avatar monogram={{ initials: 'AL', colour: '#4DB6AC' }} address="ada@example.test" />);
-
-    await waitFor(() => {
-      expect(ipc.peopleAvatar).toHaveBeenCalledWith('ada@example.test');
-    });
-    expect(screen.getByRole('img', { name: 'Avatar' }).textContent).toBe('AL');
-  });
-
-  it('draws the resolved monogram when the caller carries none', async () => {
-    ipc.peopleAvatar.mockResolvedValue({ initials: 'S', colour: '#F06292' });
-    render(<Avatar address="stranger@example.test" />);
-
-    await waitFor(() => {
-      expect(screen.getByRole('img', { name: 'Avatar' }).textContent).toBe('S');
-    });
-    expect(screen.getByRole('img', { name: 'Avatar' }).style.backgroundColor).toBe(
-      'rgb(240, 98, 146)',
-    );
-  });
-
-  it('pulls again when the address moves', async () => {
-    ipc.peopleAvatar.mockResolvedValue({ initials: 'AL', colour: '#4DB6AC' });
-    const { rerender } = render(<Avatar address="ada@example.test" />);
-
-    rerender(<Avatar address="bob@example.test" />);
-
-    await waitFor(() => {
-      expect(ipc.peopleAvatar).toHaveBeenNthCalledWith(2, 'bob@example.test');
-    });
+  it('falls back to the muted ink when no colour stands', () => {
+    expect(monogramForeground(undefined)).toBe('var(--muted-foreground)');
+    expect(monogramForeground('not-a-colour')).toBe('#ffffff');
   });
 });

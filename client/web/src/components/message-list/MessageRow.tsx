@@ -86,7 +86,7 @@ export function MessageRow({ row, selected, now, onSelect }: MessageRowProps) {
               <span
                 title={countLabel}
                 aria-label={countLabel}
-                className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground"
+                className="rounded-full bg-muted px-1.5 py-0.5 text-[11px] leading-none text-muted-foreground"
               >
                 {count}
               </span>
