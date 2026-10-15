@@ -6,8 +6,10 @@
 // interior language: the ribbon or toolbar spans the frame's width, and the
 // panes ride as rounded cards in a padded row beneath it (the mail view:
 // folder pane, message list, and reading pane; the agent panel docked right
-// when the rail's toggle opens it). Under the compact breakpoint the folder
-// pane leaves the row and rides the drawer the rail opens. Compose starts
+// when the rail's toggle opens it). The panels leave from the left as the
+// window narrows: first the folder pane rides the drawer's rail toggle,
+// then at the narrow stage the list and the reading pane trade the frame
+// between them. Compose starts
 // from the ribbon's New Email, which opens the pop-out composer window; the
 // app start resume opens the stored draft into the strip, a landed compose
 // request opens a pop-out window hydrated from it, the AI documents panel
@@ -23,12 +25,14 @@ import { AiPanel } from '@/features/ai-panel/AiPanel';
 import { AgentPanel } from '@/features/agent/AgentPanel';
 import { CalendarPane } from '@/features/calendar/CalendarPane';
 import { useDraftResumeAtStart } from '@/features/composer/Composer';
+import { useComposerStore } from '@/features/composer/composerStore';
 import { useComposeRequestHydration } from '@/features/composer/useComposeRequest';
 import { SendResultToast } from '@/features/outbox/SendResultToast';
 import { PeoplePane } from '@/features/people/PeoplePane';
 import { SettingsScreen } from '@/features/settings/SettingsScreen';
 import { FolderPane } from '@/components/folder-pane/FolderPane';
-import { useIsCompact } from '@/hooks/useWindowSize';
+import { useWindowStage } from '@/hooks/useWindowSize';
+import { useReadingStore } from '@/stores/readingStore';
 import { useUiStore } from '@/stores/uiStore';
 import { CommandRibbon } from '@/components/ribbon/CommandRibbon';
 import { PaneDivider } from './paneDivider';
@@ -65,13 +69,32 @@ function PaperCard({ children }: { children: React.ReactNode }) {
 }
 
 /** The mail view's pane row: the message list, the reading pane, and the
- *  docked agent column, each a card, pill handles between them. The
- *  composer lives in the reading pane's quick-reply strip and in pop-out
- *  windows now, so the row holds no fourth column. The agent dock joins
- *  the Group key, so the layout remounts cleanly when it arrives or
- *  leaves. The default sizes sum to one hundred in each combination. */
+ *  docked agent column, each a card, the shared pill handles between them.
+ *  The composer lives in the reading pane's quick-reply strip and in
+ *  pop-out windows now, so the row holds no fourth column. The pixel
+ *  minimums keep every card readable while its handle drags. The agent
+ *  dock joins the Group key, so the layout remounts cleanly when it
+ *  arrives or leaves. The default sizes sum to one hundred in each
+ *  combination. At the narrow stage one pane fills the row at a time: the
+ *  open message wins, and the reading pane's close returns to the list. */
 function MailRow() {
   const agentOpen = useUiStore((s) => s.agentOpen);
+  const stage = useWindowStage();
+  const messageOpen = useReadingStore((s) => s.snapshot !== null);
+  const composing = useComposerStore((s) => s.open && s.composition !== null);
+  const readingOpen = messageOpen || composing;
+
+  if (stage === 'narrow') {
+    return readingOpen ? (
+      <PaperCard>
+        <ReadingPane />
+      </PaperCard>
+    ) : (
+      <PaneCard>
+        <MessageList />
+      </PaneCard>
+    );
+  }
 
   return (
     <Group
@@ -79,20 +102,20 @@ function MailRow() {
       orientation="horizontal"
       className="h-full"
     >
-      <Panel id="message-list" defaultSize={pct(agentOpen ? 38 : 47)} minSize={pct(25)}>
+      <Panel id="message-list" defaultSize={pct(agentOpen ? 38 : 47)} minSize={300}>
         <PaneCard>
           <MessageList />
         </PaneCard>
       </Panel>
       <PaneDivider />
-      <Panel id="reading-pane" defaultSize={pct(agentOpen ? 34 : 53)} minSize={pct(20)}>
+      <Panel id="reading-pane" defaultSize={pct(agentOpen ? 34 : 53)} minSize={320}>
         <PaperCard>
           <ReadingPane />
         </PaperCard>
       </Panel>
       {agentOpen && <PaneDivider />}
       {agentOpen && (
-        <Panel id="agent-dock" defaultSize={pct(28)} minSize={pct(14)} maxSize={pct(40)}>
+        <Panel id="agent-dock" defaultSize={pct(28)} minSize={240} maxSize={pct(40)}>
           <PaneCard>
             <AgentPanel />
           </PaneCard>
@@ -104,7 +127,7 @@ function MailRow() {
 
 export function AppShell() {
   const shellView = useUiStore((s) => s.shellView);
-  const compact = useIsCompact();
+  const stage = useWindowStage();
   useDraftResumeAtStart();
   useComposeRequestHydration();
 
@@ -121,7 +144,7 @@ export function AppShell() {
       ) : (
         <MailRow />
       )}
-      {shellView === 'mail' && compact && (
+      {shellView === 'mail' && stage !== 'wide' && (
         <FolderPaneDrawer>
           <FolderPane />
         </FolderPaneDrawer>
@@ -138,40 +161,35 @@ export function AppShell() {
             four corners carved, a half-step right margin standing it off
             the window's edge. */}
         <div className="mr-1 min-w-0 flex-1 overflow-hidden rounded-xl border border-border-subtle">
-          {shellView === 'mail' && !compact ? (
-            /* The calendar's interior language: the ribbon spans the
-               frame's full width, and the panes ride as cards in a padded
-               row beneath it, the folder pane one card among them. */
-            <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background">
-              <CommandRibbon />
+          <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background">
+            <CommandRibbon />
+            {shellView === 'mail' && stage === 'wide' ? (
+              /* The calendar's interior language: the ribbon spans the
+                 frame's full width, and the panes ride as cards in a padded
+                 row beneath it, the folder pane one card among them. */
               <div className="min-h-0 flex-1 p-2">
                 <Group orientation="horizontal" className="h-full">
-                  <Panel id="folder-pane" defaultSize={pct(18)} minSize={pct(12)} maxSize={pct(36)}>
+                  <Panel id="folder-pane" defaultSize={pct(18)} minSize={180} maxSize={320}>
                     <PaneCard>
                       <FolderPane />
                     </PaneCard>
                   </Panel>
                   <PaneDivider />
-                  <Panel id="mail-right" defaultSize={pct(82)} minSize={pct(40)}>
+                  <Panel id="mail-right" defaultSize={pct(82)} minSize={560}>
                     <MailRow />
                   </Panel>
                 </Group>
               </div>
-            </div>
-          ) : (
-            <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
-              <CommandRibbon />
+            ) : (
               <main
                 className={
-                  shellView === 'mail'
-                    ? 'min-h-0 min-w-0 flex-1 p-2'
-                    : 'min-h-0 min-w-0 flex-1 bg-background'
+                  shellView === 'mail' ? 'min-h-0 min-w-0 flex-1 p-2' : 'min-h-0 min-w-0 flex-1'
                 }
               >
                 {viewContent}
               </main>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
       <StatusBar />

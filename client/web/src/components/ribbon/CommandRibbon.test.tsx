@@ -104,9 +104,9 @@ describe('the ribbon shell', () => {
     expect(screen.queryByRole('navigation', { name: 'Command ribbon' })).toBeNull();
   });
 
-  it('collapses to icon-only buttons under the compact breakpoint', () => {
+  it('collapses to icon-only buttons at the narrow window stage', () => {
     const width = Object.getOwnPropertyDescriptor(window, 'innerWidth');
-    Object.defineProperty(window, 'innerWidth', { value: 800, configurable: true });
+    Object.defineProperty(window, 'innerWidth', { value: 700, configurable: true });
     try {
       render(<CommandRibbon />);
       const button = screen.getByRole('button', { name: 'New Email' });

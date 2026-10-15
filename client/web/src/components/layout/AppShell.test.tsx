@@ -81,6 +81,8 @@ import type { MailboxListSnapshot } from '@/services/surfaces';
 import fixtureJson from '@/services/__fixtures__/mailbox_list.json';
 
 beforeEach(() => {
+  // The pane stages read the window width at mount; the suite runs wide.
+  window.innerWidth = 1280;
   ipc.dispatch.mockReset();
   ipc.dispatch.mockResolvedValue(undefined);
   ipc.draftResume.mockReset();
@@ -181,6 +183,56 @@ describe('the mail row layout', () => {
 
     // One separator per boundary: folder|right zone, then list|reading.
     expect(screen.getAllByRole('separator').length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('the pane stages', () => {
+  const SNAPSHOT = {
+    message: { account: 'work', key: 'imap:v1:q3' },
+    subject: 'Quarterly report',
+    from_name: 'Ada Lovelace',
+    from_address: 'ada@example.test',
+    sent_at: '2026-10-09T08:30:00Z',
+    plain: 'Hi',
+    remote_image_count: 0,
+  };
+
+  it('wide: the folder pane, the list, and the reading pane all stand', () => {
+    window.innerWidth = 1280;
+    render(<AppShell />);
+
+    expect(screen.getByRole('tree', { name: 'Accounts' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Message list' })).toBeTruthy();
+    expect(screen.getByRole('complementary', { name: 'Reading pane' })).toBeTruthy();
+  });
+
+  it('medium: the folder pane leaves first, the list and reading pane stay', () => {
+    window.innerWidth = 1000;
+    render(<AppShell />);
+
+    expect(screen.queryByRole('tree', { name: 'Accounts' })).toBeNull();
+    expect(screen.getByRole('region', { name: 'Message list' })).toBeTruthy();
+    expect(screen.getByRole('complementary', { name: 'Reading pane' })).toBeTruthy();
+  });
+
+  it('narrow with nothing open: the list fills the frame alone', () => {
+    window.innerWidth = 700;
+    render(<AppShell />);
+
+    expect(screen.queryByRole('tree', { name: 'Accounts' })).toBeNull();
+    expect(screen.getByRole('region', { name: 'Message list' })).toBeTruthy();
+    expect(screen.queryByRole('complementary', { name: 'Reading pane' })).toBeNull();
+  });
+
+  it('narrow with a message open: the reading pane fills the frame alone', () => {
+    window.innerWidth = 700;
+    render(<AppShell />);
+    act(() => {
+      useReadingStore.getState().applySnapshot(SNAPSHOT);
+    });
+
+    expect(screen.queryByRole('region', { name: 'Message list' })).toBeNull();
+    expect(screen.getByRole('complementary', { name: 'Reading pane' })).toBeTruthy();
   });
 });
 
