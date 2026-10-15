@@ -57,9 +57,10 @@
 //! single-instance callback's argv is handed to the deep-link plugin on
 //! Windows (without which a running app on this platform never sees the
 //! redirect), and the opener-backed [`SystemBrowser`] is the browser the
-//! sign-in commands install. When SP2m wires Graph, the host refresh
-//! path holds the credential transaction and answers its rotate; until
-//! then the transaction's paths stand pinned by their tests alone.
+//! sign-in commands install. The host refresh path holds the credential
+//! transaction: the account half (`graph_add`) persists grants through
+//! its add and rotation paths, and the dial-table token sink answers
+//! every rotation a Graph token source reports.
 //!
 //! [`AccountCredentialStore`]: crate::credential_store::AccountCredentialStore
 //! [`oauth_callback`]: session::oauth_callback
@@ -67,10 +68,12 @@
 //! [`SystemBrowser`]: session::SystemBrowser
 
 pub(crate) mod commands;
+/// The completion's account half: what a Microsoft sign-in's token set
+/// becomes, and the sink every Graph token source reports rotations
+/// through.
+pub(crate) mod graph_add;
+/// The dial-table token sink: the host half that lands rotations and moved
+/// scope sets in the dial table's entry and the secure store.
+pub(crate) mod graph_sink;
 pub(crate) mod session;
-// The credential transaction's runtime consumers are the provider slices
-// (SP2m wires Graph's sign-in and refresh first); its paths are pinned by
-// tests today, which dead-code analysis ignores, so the lint is answered
-// here rather than by wiring a caller this task does not own.
-#[allow(dead_code)]
 pub(crate) mod transaction;

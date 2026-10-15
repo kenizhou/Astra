@@ -52,6 +52,9 @@ async-stream.workspace = true
 # Drives the provider streams the wrapper retries (`StreamExt` over email chunks).
 futures.workspace = true
 serde.workspace = true
+# The `/me` address lookup decodes the Graph reply's JSON body (the `mail`
+# and `userPrincipalName` properties).
+serde_json.workspace = true
 # The async runtime the IMAP connections dial and deduplicate over (the TCP stream,
 # the dial mutex, and the listener the scripted test server binds).
 tokio = { workspace = true, features = ["net", "sync"] }
@@ -69,6 +72,5 @@ time.workspace = true
 rcgen.workspace = true
 # Server side of that scripted TLS server.
 rustls.workspace = true
-serde_json.workspace = true
 # The test runtime (`#[tokio::test]`) and the line reader the scripted server answers.
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread"] }

@@ -3,12 +3,16 @@
 // per provider this build carries a registration for, the browser-open
 // state with its cancel while a flow stands, and the completion
 // sentences. The offer renders nothing when the build offers no
-// provider, which is every build until a registration is injected, so
-// what ships now is the shape. The refusal sentences hang off the
-// ported classification words and never off the host's detail text,
-// which rides beside them as the diagnostic.
+// provider, which is every build until a registration is injected. The
+// refusal sentences hang off the ported classification words and never
+// off the host's detail text, which rides beside them as the diagnostic.
 
-import type { GrantRefusalWord, OAuthProvider, OAuthSignInResult } from '@/services/ipc';
+import type {
+  GrantRefusalWord,
+  OAuthProvider,
+  OAuthSignInResult,
+  OAuthSignInOutcome,
+} from '@/services/ipc';
 
 /** The wizard's OAuth state machine: idle, browser-open, then the result. */
 export type OAuthFlowState =
@@ -22,14 +26,20 @@ export function providerLabel(provider: OAuthProvider): string {
 }
 
 /**
- * The honest success sentence: the sign-in worked, and this build
- * cannot finish adding the account, because no account type consumes
- * the OAuth floor yet (the spec's known gaps). The provider slices
- * replace this sentence with the account's own next step.
+ * The success sentence: an account the host finished adding names its
+ * address and says where its first sync runs; the bare signed-in word
+ * stays the honest sentence for a provider no account consumes yet, whose
+ * account type arrives with its slice.
  */
-export function successNote(provider: OAuthProvider): string {
-  const name = providerLabel(provider);
-  return `Signed in with ${name}. This build cannot add a ${name} account yet; the account type arrives with the next update.`;
+export function successNote(provider: OAuthProvider, outcome: OAuthSignInOutcome): string {
+  if (typeof outcome !== 'object' || !('added' in outcome)) {
+    const name = providerLabel(provider);
+    return `Signed in with ${name}. This build cannot add a ${name} account yet; the account type arrives with the next update.`;
+  }
+  const base = `Signed in with ${providerLabel(provider)} as ${outcome.added.address}. The account joins with its first sync in the background.`;
+  return outcome.added.calendar_withheld
+    ? `${base} The calendar is missing from this sign-in; sign in again and consent to the calendar permission.`
+    : base;
 }
 
 /** The refusal sentence for one classification word. */
@@ -74,24 +84,27 @@ export function OAuthOffer({ offer, flow, onSignIn, onCancel }: OAuthOfferProps)
     );
   }
 
-  // A completed sign-in has nothing more to offer: no button can use the
-  // grant this build, so the success sentence stands alone. A refusal
-  // brings the buttons back, because both consent-asking refusals are
-  // remedied by beginning again.
-  if (flow.status === 'result' && flow.result.outcome === 'signed_in') {
+  // A completed sign-in has nothing more to offer: the added account
+  // stands and its first sync runs, and the bare-word success belongs to
+  // a provider no account consumes yet. A refusal brings the buttons
+  // back, because both consent-asking refusals are remedied by beginning
+  // again.
+  const refused =
+    flow.status === 'result' &&
+    typeof flow.result.outcome === 'object' &&
+    !('added' in flow.result.outcome)
+      ? flow.result.outcome.refused
+      : null;
+  if (flow.status === 'result' && refused === null) {
     return (
       <div className="grid gap-2 rounded-[var(--radius-xs)] border border-border p-3">
         <p role="status" className="text-xs text-success">
-          {successNote(flow.provider)}
+          {successNote(flow.provider, flow.result.outcome)}
         </p>
       </div>
     );
   }
 
-  const refused =
-    flow.status === 'result' && typeof flow.result.outcome === 'object'
-      ? flow.result.outcome.refused
-      : null;
   const detail = refused !== null ? refused.detail : null;
 
   return (

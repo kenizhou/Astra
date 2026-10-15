@@ -49,7 +49,13 @@ pub(crate) fn assemble_state(
         Arc::new(KeyringCredentialStore::new());
     let connections = Arc::new(AccountDials::load(data_dir)?);
 
-    let accounts = runtime.block_on(|| dial_stored(&connections));
+    let accounts = runtime.block_on(|| {
+        dial_stored(
+            &connections,
+            &credentials,
+            crate::oauth::graph_add::production_dial(),
+        )
+    });
     let (accounts, contacts_legs) = split_dialled(accounts);
     let engine_path = data_dir.join(ENGINE_STORE_FILE);
     // The AI ledgers and the agent: one store the host, the sidecar's
@@ -194,12 +200,18 @@ impl MailboxConnector<HostProvider> for DialConnector {
     }
 }
 
-/// Dials every registered account, mail half first and dav legs beside it.
-/// A mail dial that fails skips the account with a warning: one stale
+/// Dials every registered account, mail half first and dav legs beside
+/// it. A mail dial that fails skips the account with a warning: one stale
 /// password must not block the others, and the app opens with whatever
 /// connected. A dav dial that fails keeps the account standing on its mail
-/// half alone, inside [`dial_dav_with`].
-async fn dial_stored(dials: &AccountDials) -> Vec<Dialled> {
+/// half alone, inside [`dial_dav_with`]. A Graph account dials through
+/// `graph_dial`, the same free function the sign-in's completion uses,
+/// over a sink-backed token source built from its stored grant.
+async fn dial_stored(
+    dials: &Arc<AccountDials>,
+    credentials: &Arc<dyn crate::credential_store::AccountCredentialStore>,
+    graph_dial: crate::oauth::graph_add::GraphDial,
+) -> Vec<Dialled> {
     let mut accounts = Vec::new();
     for id in dials.ids() {
         let Some((config, connections)) = dials.of(&id) else {
@@ -212,6 +224,18 @@ async fn dial_stored(dials: &AccountDials) -> Vec<Dialled> {
                 continue;
             }
         };
+        if config.imap.is_none() && config.graph.is_some() {
+            match dial_graph_stored(dials, credentials, &graph_dial, &account_id, &config).await {
+                Ok(account) => accounts.push(Dialled {
+                    account,
+                    contacts: None,
+                }),
+                Err(err) => {
+                    log::warn!("boot: an account could not be connected and was skipped: {err}");
+                }
+            }
+            continue;
+        }
         let email = config
             .imap
             .as_ref()
@@ -233,6 +257,55 @@ async fn dial_stored(dials: &AccountDials) -> Vec<Dialled> {
         }
     }
     accounts
+}
+
+/// Dials one stored Graph account: the sink-backed token source over the
+/// stored refresh token, then the shared dial. The account joins with its
+/// calendar appended after its mail providers, the shape the
+/// capability-scoped calendar selection expects; a calendar that failed
+/// costs the boot nothing, its error carried in the dial's outcome for
+/// the log.
+async fn dial_graph_stored(
+    dials: &Arc<AccountDials>,
+    credentials: &Arc<dyn crate::credential_store::AccountCredentialStore>,
+    graph_dial: &crate::oauth::graph_add::GraphDial,
+    account_id: &AccountId,
+    config: &astra_account::AccountConfig,
+) -> Result<HostAccount, astra_account::AccountError> {
+    let graph = config
+        .graph
+        .as_ref()
+        .ok_or(astra_account::AccountError::NoImap)?;
+    // The stored grant dials through the same sink the sign-in's
+    // completion registers: a rotation at boot lands in the entry and the
+    // store, and a stored source adopts whatever this process already
+    // holds for the account.
+    let sink =
+        crate::oauth::graph_sink::graph_token_sink(Arc::clone(dials), Arc::clone(credentials));
+    let tokens = astra_account::GraphTokenSource::new(
+        &graph.provider_config(),
+        account_id.clone(),
+        graph.refresh_token.expose(),
+        Some(sink),
+        astra_account::CredentialOrigin::Stored,
+    )?;
+    let dialled = graph_dial(account_id, tokens, config).await?;
+    if let Some(err) = &dialled.calendar_error {
+        if dialled.calendar_reauth_required {
+            log::warn!("boot: a graph calendar needs a fresh sign-in; the agenda waits: {err}");
+        } else {
+            log::warn!("boot: a graph calendar failed to dial; the mail stands: {err}");
+        }
+    }
+    let mut providers = dialled.mail;
+    if let Some(calendar) = dialled.calendar {
+        providers.push(calendar);
+    }
+    Ok(HostAccount {
+        id: account_id.clone(),
+        providers,
+        identity: EmailAddress::new(graph.email.clone()),
+    })
 }
 
 /// One dialled account as the boot holds it: the account with every dialled

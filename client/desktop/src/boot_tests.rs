@@ -277,3 +277,123 @@ fn the_assembly_installs_the_host_account_store_before_the_state_hands_back() {
         "the installed seam answered, not the no-seam fallback"
     );
 }
+
+/// A stored graph-only document: the shape the sign-in's completion
+/// persists.
+fn graph_config() -> astra_account::AccountConfig {
+    astra_account::load_str(
+        "[graph]\nemail = \"alice@example.test\"\nclient_id = \"client-abc\"\n\
+         tenant = \"common\"\nredirect_uri = \"com.kenizhou.astra://oauth\"\n\
+         scopes = [\"offline_access\"]\nrefresh_token = \"old-refresh\"\n",
+    )
+    .expect("valid graph config")
+}
+
+/// The graph dial seam over one scripted answer, recording the refresh
+/// token the boot built its token source over.
+fn graph_dial(answer: Result<(), &'static str>) -> crate::oauth::graph_add::GraphDial {
+    std::sync::Arc::new(move |account, tokens, config| {
+        let seen_refresh = config
+            .graph
+            .as_ref()
+            .map(|graph| graph.refresh_token.expose().to_owned())
+            .unwrap_or_default();
+        let account = account.as_str().to_owned();
+        let answer = answer;
+        Box::pin(async move {
+            assert_eq!(
+                seen_refresh, "old-refresh",
+                "the dial reads the account the stored grant describes"
+            );
+            let _ = (account, tokens);
+            match answer {
+                Ok(()) => Ok(astra_account::MicrosoftProviders {
+                    mail: vec![FakeDav::mail()],
+                    calendar: Some(FakeDav::calendar()),
+                    calendar_error: None,
+                    calendar_reauth_required: false,
+                }),
+                Err(err) => Err(astra_account::AccountError::Graph(err.to_owned())),
+            }
+        })
+    })
+}
+
+/// Runs one boot's stored-account dial over `dials` with the given graph
+/// dial, on a test runtime.
+fn boot_dials(
+    dials: &std::sync::Arc<crate::AccountDials>,
+    dial: crate::oauth::graph_add::GraphDial,
+) -> Vec<super::Dialled> {
+    let runtime = crate::runtime::build_runtime().expect("the test runtime builds");
+    let store: std::sync::Arc<dyn crate::credential_store::AccountCredentialStore> =
+        crate::commands_fakes::FakeStore::accepting();
+    runtime.block_on(move || {
+        let dials = std::sync::Arc::clone(dials);
+        let store = std::sync::Arc::clone(&store);
+        async move { super::dial_stored(&dials, &store, dial).await }
+    })
+}
+
+#[test]
+fn a_stored_graph_document_dials_at_boot_with_its_calendar_appended() {
+    let dials = std::sync::Arc::new(crate::AccountDials::empty(&crate::commands_fakes::scratch(
+        "boot-graph",
+    )));
+    let account = engine_api::AccountId::try_from("alice@example.test@graph").unwrap();
+    dials
+        .register(
+            &account,
+            graph_config(),
+            astra_account::ImapConnections::new(),
+        )
+        .expect("the graph account registers");
+
+    let dialled = boot_dials(&dials, graph_dial(Ok(())));
+
+    assert_eq!(dialled.len(), 1, "the graph account dials at boot");
+    let account = &dialled[0].account;
+    assert_eq!(account.id.as_str(), "alice@example.test@graph");
+    assert_eq!(account.identity.email, "alice@example.test");
+    assert_eq!(
+        account.providers.len(),
+        2,
+        "the mail provider stands and the calendar appends after it"
+    );
+    assert!(
+        !account.providers[0]
+            .connection_info()
+            .capabilities
+            .calendars(),
+        "the mail half keeps its place in front"
+    );
+    assert!(
+        account.providers[1]
+            .connection_info()
+            .capabilities
+            .calendars(),
+        "the appended provider is the calendar one"
+    );
+}
+
+#[test]
+fn a_graph_dial_that_fails_skips_the_account_without_blocking_the_boot() {
+    let dials = std::sync::Arc::new(crate::AccountDials::empty(&crate::commands_fakes::scratch(
+        "boot-graph-failed",
+    )));
+    let account = engine_api::AccountId::try_from("alice@example.test@graph").unwrap();
+    dials
+        .register(
+            &account,
+            graph_config(),
+            astra_account::ImapConnections::new(),
+        )
+        .expect("the graph account registers");
+
+    let dialled = boot_dials(&dials, graph_dial(Err("unreachable")));
+
+    assert!(
+        dialled.is_empty(),
+        "one dead grant skips the account, not the boot"
+    );
+}
