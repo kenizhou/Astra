@@ -485,3 +485,7 @@ fn a_failed_dial_on_a_reconsent_restores_the_standing_entry() {
         "the entry is put back as it stood, not left on the new grant"
     );
 }
+
+#[cfg(test)]
+#[path = "graph_add_tests/door_tests.rs"]
+mod door;

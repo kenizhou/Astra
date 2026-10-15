@@ -88,7 +88,7 @@ fn rotating_source_seam(endpoint: String) -> SourceBuilder {
             client,
             account,
             refresh_token,
-            Some(sink),
+            sink,
             "graph",
             astra_account::CredentialOrigin::FreshSignIn,
         ))

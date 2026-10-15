@@ -194,6 +194,28 @@ struct DialConnector {
 impl MailboxConnector<HostProvider> for DialConnector {
     async fn connect_folder(&self, account: &AccountId, mailbox_key: &str) -> Option<HostProvider> {
         let (config, connections) = self.dials.of(account.as_str())?;
+        if let Some(graph) = config.graph.as_ref() {
+            // A Graph account binds folders over its stored grant: a
+            // source minted from the document through the same seam the
+            // completion uses. The sink is none here on purpose: a late
+            // bind only reads, and the boot's sink-backed source owns
+            // the rotations, so this source never writes a document.
+            let source = crate::oauth::graph_add::production_source()(
+                graph.provider_config(),
+                account.clone(),
+                graph.refresh_token.expose().to_owned(),
+                None,
+            )
+            .ok()?;
+            return astra_account::connect_graph_folder(
+                source,
+                mailbox_key,
+                None,
+                &astra_account::account_tls(&config).ok()?,
+            )
+            .map(|provider| provider as HostProvider)
+            .ok();
+        }
         astra_account::connect_imap_mailbox(&connections, &config, mailbox_key)
             .await
             .ok()

@@ -181,7 +181,7 @@ pub(crate) type SourceBuilder = Arc<
             OAuthProviderConfig,
             AccountId,
             String,
-            Arc<dyn TokenSink>,
+            Option<Arc<dyn TokenSink>>,
         ) -> Result<Arc<GraphTokenSource>, String>
         + Send
         + Sync,
@@ -197,7 +197,7 @@ pub(crate) fn production_source() -> SourceBuilder {
             &provider,
             account,
             &refresh_token,
-            Some(sink),
+            sink,
             CredentialOrigin::FreshSignIn,
         )
         .map_err(|err| err.to_string())
@@ -292,6 +292,15 @@ pub(crate) async fn complete_microsoft_signin(
         refresh_token: Secret::new(refresh.expose().to_owned()),
         granted_scopes: Some(granted.as_slice().to_vec()),
     };
+    // A grant that names no scope at all cannot bear mail: refusing it
+    // here keeps the person on the setup surface they are still looking
+    // at, rather than a full add/rollback cycle ending in an
+    // indeterminate folder-list refusal (mail-calendar's door rule).
+    if granted.as_slice().is_empty() {
+        return Err(indeterminate(
+            "the provider granted this account no permission at all; nothing to connect".to_owned(),
+        ));
+    }
     let mut config = AccountConfig {
         imap: None,
         smtp: None,
@@ -318,8 +327,13 @@ pub(crate) async fn complete_microsoft_signin(
     let sink = super::graph_sink::graph_token_sink(Arc::clone(&dials), Arc::clone(&credentials));
     let minted_access = tokens.access_token.expose().to_owned();
     let minted_expiry = tokens.expires_at;
-    let source =
-        source(provider, id.clone(), refresh.expose().to_owned(), sink).map_err(indeterminate)?;
+    let source = source(
+        provider,
+        id.clone(),
+        refresh.expose().to_owned(),
+        Some(sink),
+    )
+    .map_err(indeterminate)?;
     // Seeded with the just-minted access token, so the first sync needs no
     // immediate refresh and a freshly signed-in account inherits no
     // cool-down from the credential it replaced.

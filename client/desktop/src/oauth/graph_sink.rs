@@ -114,6 +114,10 @@ impl TokenSink for DialTableTokenSink {
             return;
         };
         self.dials.replace_config(account.as_str(), config);
+        // A scopes-only write spends nothing: a refused persist keeps the
+        // last rotation's document, and the next renewal tries again, so
+        // the refusal is a warning here rather than the rotation error
+        // the transaction's own log would name.
         if self.transaction.rotate(account, &document).is_ok() {
             log::info!(
                 "oauth: [{handle}] the provider now grants this account {} permission(s); saved \
