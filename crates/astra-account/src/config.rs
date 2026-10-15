@@ -377,13 +377,23 @@ impl AccountConfig {
     /// username is empty has no identity to derive), and [`ConfigError::NoEndpoint`] for
     /// an account without a mailbox.
     pub fn derived_account_id(&self) -> Result<AccountId, ConfigError> {
-        let imap = self.imap.as_ref().ok_or(ConfigError::NoEndpoint)?;
-        let username = imap.username.trim().to_lowercase();
-        if username.is_empty() {
-            return Err(ConfigError::Incomplete("username"));
+        if let Some(imap) = self.imap.as_ref() {
+            let username = imap.username.trim().to_lowercase();
+            if username.is_empty() {
+                return Err(ConfigError::Incomplete("username"));
+            }
+            let host = imap.server_name.trim().to_lowercase();
+            return AccountId::try_from(format!("{username}@{host}").as_str())
+                .map_err(|err| ConfigError::Identity(err.to_string()));
         }
-        let host = imap.server_name.trim().to_lowercase();
-        AccountId::try_from(format!("{username}@{host}").as_str())
+        // A graph-only account has no server of its own: the id keys the
+        // grant's mailbox by its address under the one protocol it dials.
+        let graph = self.graph.as_ref().ok_or(ConfigError::NoEndpoint)?;
+        let email = graph.email.trim().to_lowercase();
+        if email.is_empty() {
+            return Err(ConfigError::Incomplete("email"));
+        }
+        AccountId::try_from(format!("{email}@graph").as_str())
             .map_err(|err| ConfigError::Identity(err.to_string()))
     }
 }

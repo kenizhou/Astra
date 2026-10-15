@@ -118,3 +118,37 @@ async fn a_transient_refresh_failure_stays_retryable_and_the_reconnect_never_rep
         "the retry re-presented a refresh token the server may have spent",
     );
 }
+
+#[test]
+fn a_graph_only_document_derives_its_account_id_from_the_mailbox() {
+    // A graph-only account has no IMAP section to key the id from: the
+    // grant's mailbox address under the protocol it dials names it, so
+    // the sign-in and the boot derive the same id from the same document.
+    let document = "[graph]\nemail=\"person@outlook.com\"\nclient_id=\"cid\"\ntenant=\"ten\"\n\
+                    redirect_uri=\"com.kenizhou.astra://oauth\"\nscopes=[\"a\", \"b\"]\n\
+                    refresh_token=\"rt\"\n";
+    let config = crate::config::load_str(document).expect("the graph-only document loads");
+    let id = config.derived_account_id().expect("the id derives");
+    assert_eq!(id.as_str(), "person@outlook.com@graph");
+}
+
+#[test]
+fn the_refreshing_providers_debug_forms_carry_no_token() {
+    // The cached delegate is keyed by the live access token; the Debug
+    // forms name the binding and nothing else, so a logged Box<dyn
+    // Provider> never hands out the credential.
+    let (endpoint, _hits) = mock_token_endpoint(vec![]);
+    let source = source_at(endpoint, None);
+    source.seed_access_token(
+        "live-secret-token".to_owned(),
+        time::OffsetDateTime::now_utc() + time::Duration::hours(1),
+    );
+    let provider = super::RefreshingGraphProvider::new(
+        engine_api::MailboxId::try_from("inbox-folder-id").unwrap(),
+        source,
+        None,
+        tls(),
+    );
+    let rendered = format!("{provider:?}");
+    assert!(!rendered.contains("live-secret-token"));
+}

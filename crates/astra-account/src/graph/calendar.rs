@@ -68,7 +68,6 @@ const WINDOW_DAYS_AHEAD: i64 = 400;
 /// token before every network call and delegates to a freshly built
 /// [`GraphCalendarProvider`]. Internal; the account layer hands callers
 /// `Box<dyn Provider>` from the dial, never the concrete type.
-#[derive(Debug)]
 pub(crate) struct RefreshingGraphCalendarProvider {
     /// The calendar this provider syncs and writes to (the account's
     /// default).
@@ -95,10 +94,21 @@ pub(crate) struct RefreshingGraphCalendarProvider {
     cached: Mutex<Option<(String, Arc<GraphCalendarProvider>)>>,
 }
 
+impl core::fmt::Debug for RefreshingGraphCalendarProvider {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        // The cached token is a live credential: the debug form names the
+        // bound calendar and nothing else.
+        f.debug_struct("RefreshingGraphCalendarProvider")
+            .field("calendar", &self.calendar)
+            .finish_non_exhaustive()
+    }
+}
+
 impl RefreshingGraphCalendarProvider {
     /// Binds a refreshing calendar provider to `calendar`, sharing
     /// `tokens` (and its single refresh flight) with the account's mail
     /// providers.
+    #[must_use]
     pub(crate) fn new(
         calendar: CalendarId,
         tokens: Arc<GraphTokenSource>,

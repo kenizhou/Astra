@@ -39,7 +39,6 @@ use crate::AccountError;
 /// token before every network call and delegates to a freshly built
 /// [`GraphProvider`]. Internal; the account layer hands callers
 /// `Box<dyn Provider>` from the dial, never the concrete type.
-#[derive(Debug)]
 pub(crate) struct RefreshingGraphProvider {
     folder: MailboxId,
     tokens: Arc<GraphTokenSource>,
@@ -57,9 +56,20 @@ pub(crate) struct RefreshingGraphProvider {
     cached: Mutex<Option<(String, Arc<GraphProvider>)>>,
 }
 
+impl core::fmt::Debug for RefreshingGraphProvider {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        // The cached token is a live credential: the debug form names the
+        // bound folder and nothing else.
+        f.debug_struct("RefreshingGraphProvider")
+            .field("folder", &self.folder)
+            .finish_non_exhaustive()
+    }
+}
+
 impl RefreshingGraphProvider {
     /// Binds a refreshing provider to `folder` (windowed to `since`),
     /// sharing `tokens` with the account's other folders.
+    #[must_use]
     pub(crate) fn new(
         folder: MailboxId,
         tokens: Arc<GraphTokenSource>,
@@ -95,6 +105,11 @@ impl RefreshingGraphProvider {
                 // administrator owns, so claiming `Writable` here would
                 // put an editor in front of an edit that cannot land.
                 .with_sender_identities(IdentityControls::ReadOnly),
+            // Server-side drafts are deliberately not advertised although
+            // the engine's GraphProvider implements them: without the flag
+            // the composer keeps no draft on the server for a Microsoft
+            // account (the IMAP dial does advertise it). The recorded
+            // gap, named here rather than left silent.
             since,
             tls,
             cached: Mutex::new(None),
