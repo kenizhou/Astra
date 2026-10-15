@@ -61,6 +61,15 @@ body,
   background-color: var(--primary);
 }
 
+/* Scrollable without the bar: the box still scrolls (wheel, keyboard),
+   only the track hides. */
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 /* The compact shell's folder drawer slide-in. */
 @keyframes drawer-slide-in {
   from {

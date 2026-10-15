@@ -196,7 +196,7 @@ export function AgentPanel() {
             }
           }}
           placeholder={turn !== null ? 'The agent is answering' : 'Ask the agent'}
-          className="max-h-[120px] min-w-0 flex-1 resize-none rounded-xl border border-border bg-surface px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:border-primary"
+          className="scrollbar-none max-h-[120px] min-w-0 flex-1 resize-none rounded-xl border border-border bg-surface px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:border-primary"
         />
         {turn === null ? (
           <button type="submit" className={actionClass}>
