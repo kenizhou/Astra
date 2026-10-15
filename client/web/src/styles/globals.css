@@ -89,3 +89,23 @@ body,
 ::selection {
   background: color-mix(in srgb, var(--primary) 35%, transparent);
 }
+
+/* The motion scale the components actually run on: Tailwind's transition
+   utilities read --default-transition-duration, so point it at the axis's
+   fastest step; everything else names its --dur-* token explicitly. */
+:root {
+  --default-transition-duration: var(--dur-fast);
+}
+
+/* The design-system rule, made real: under prefers-reduced-motion every
+   animation and transition drops to instant, the skeleton shimmer and the
+   spinners included. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
