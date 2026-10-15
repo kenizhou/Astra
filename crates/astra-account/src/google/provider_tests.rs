@@ -173,3 +173,45 @@ fn the_refreshing_providers_debug_forms_carry_no_token() {
     let rendered = format!("{provider:?}");
     assert!(!rendered.contains("live-secret-token"));
 }
+
+#[test]
+fn the_calendar_wrapper_s_debug_form_carries_no_token() {
+    // The twin of the mail wrapper's pin: the cached delegate is keyed by
+    // the live token; the calendar's Debug names the binding and nothing
+    // else.
+    let document = concat!(
+        "[google]
+",
+        "email = \"ada@gl.com\"
+",
+        "client_id = \"google-client\"
+",
+        "redirect_uri = \"http://127.0.0.1:49152/oauth2redirect\"
+",
+        "scopes = [\"https://mail.google.com/\"]
+",
+        "refresh_token = \"live-refresh\"
+",
+    );
+    let config = crate::load_str(document).expect("the google document loads");
+    let account = engine_api::AccountId::try_from("ada@gl.com@google").expect("the account id");
+    let source = crate::google::google_token_source(
+        config.google.as_ref().expect("the google section"),
+        account,
+        None,
+        crate::CredentialOrigin::Stored,
+    )
+    .expect("the source builds");
+    source.seed_access_token(
+        "live-secret-token".to_owned(),
+        time::OffsetDateTime::now_utc() + time::Duration::hours(1),
+    );
+    let calendar = crate::google::calendar::RefreshingGoogleCalendarProvider::new(
+        engine_api::CalendarId::try_from("cal-1").unwrap(),
+        source,
+        crate::google::calendar::tests_window().unwrap(),
+        tls(),
+    );
+    let rendered = format!("{calendar:?}");
+    assert!(!rendered.contains("live-secret-token"));
+}

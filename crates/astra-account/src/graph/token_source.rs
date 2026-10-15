@@ -310,7 +310,10 @@ impl GraphTokenSource {
         let _refreshing = self.credential.refreshing.lock().await;
         let now = OffsetDateTime::now_utc();
         if let Some(token) = self.cached(now) {
-            log::debug!("graph: another caller refreshed while we waited; using its token");
+            log::debug!(
+                "{}: another caller refreshed while we waited; using its token",
+                self.provider
+            );
             return Ok(token);
         }
         // And if the refresh we queued behind *failed*, take its failure. Posting our own

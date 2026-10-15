@@ -370,5 +370,10 @@ fn rolling_window() -> Result<CalendarWindow, AccountError> {
 }
 
 #[cfg(test)]
+pub(crate) fn tests_window() -> Result<provider_google::CalendarWindow, AccountError> {
+    rolling_window()
+}
+
+#[cfg(test)]
 #[path = "calendar_tests.rs"]
 mod tests;
