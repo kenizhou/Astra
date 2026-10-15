@@ -79,7 +79,7 @@ pub(crate) mod completion;
 /// The completion's Google account half: what a Google sign-in's token
 /// set becomes once the exchange answered.
 pub(crate) mod google_add;
-/// The standing grant refusals: the map of Microsoft accounts whose OAuth
+/// The standing grant refusals: the map of the OAuth account families whose
 /// grant needs the person to act, the state the refusal surfaces render.
 pub(crate) mod grant_refusals;
 /// The completion's account half: what a Microsoft sign-in's token set

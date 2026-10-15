@@ -219,9 +219,9 @@ pub(crate) async fn complete_google_signin(
     // The granted set decides the read that names the account, so it is
     // parsed first; the derived id (`email@google`) keys everything.
     let granted = GrantedScopes::from_response(&tokens.scope, &provider.scopes);
-    let address = lookup(tokens.access_token.expose(), granted.as_slice())
-        .await
-        .map_err(|err| indeterminate(err.to_string()))?;
+    // Refused BEFORE the address read, so a grant that
+    // cannot last an hour does not spend the network read naming an
+    // account it will not keep (mail-calendar's door order).
     // The flow always sends `access_type=offline` + `prompt=consent`, so
     // a refresh token is mandatory; without it the account would break an
     // hour after setup.
@@ -230,6 +230,9 @@ pub(crate) async fn complete_google_signin(
             "Google issued no refresh token (access_type=offline + prompt=consent)".to_owned(),
         )
     })?;
+    let address = lookup(tokens.access_token.expose(), granted.as_slice())
+        .await
+        .map_err(|err| indeterminate(err.to_string()))?;
     // A grant that names no scope at all cannot bear mail: refusing it
     // here keeps the person on the setup surface they are still looking
     // at, rather than a full add/rollback cycle ending in an
