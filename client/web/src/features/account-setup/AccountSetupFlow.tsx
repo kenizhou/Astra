@@ -141,6 +141,18 @@ export function AccountSetupFlow() {
     };
   }, [open]);
 
+  // The dialog owns its dismissal: Escape and a click on the backdrop's own
+  // ground close it, and the focus moves in on open and back out on close.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    dialogRef.current?.focus();
+    return () => previous?.focus();
+  }, [open]);
+
   if (!open) {
     return null;
   }
@@ -297,12 +309,27 @@ export function AccountSetupFlow() {
   };
 
   return (
-    <div className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--backdrop)]">
+    <div
+      className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--backdrop)]"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) {
+          close();
+        }
+      }}
+    >
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="account-setup-title"
-        className="w-[26rem] rounded-[var(--radius)] border border-border bg-card p-5 shadow-[var(--shadow-lg)]"
+        ref={dialogRef}
+        tabIndex={-1}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            event.stopPropagation();
+            close();
+          }
+        }}
+        className="w-[26rem] rounded-[var(--radius)] border border-border bg-card p-5 shadow-[var(--shadow-lg)] focus-visible:outline-none"
       >
         <h2 id="account-setup-title" className="mb-1 text-[15px] font-semibold text-card-foreground">
           Add an account
@@ -428,7 +455,7 @@ export function AccountSetupFlow() {
                 </p>
               )}
               {tested !== null && (
-                <p className="text-xs text-success">The connection works. Ready to add.</p>
+                <p role="status" className="text-xs text-success">The connection works. Ready to add.</p>
               )}
 
               <div className="mt-1 flex items-center justify-between gap-2">

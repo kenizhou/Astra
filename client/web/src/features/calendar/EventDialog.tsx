@@ -8,7 +8,7 @@
 // first; the repeat rule is read-only (the snapshot carries no rule to seed
 // an editor with, and a rule half-seen is a rule silently rewritten).
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { dispatch, intents } from '@/services/ipc';
 import type {
@@ -239,12 +239,39 @@ export function EventDialog({ row, slot = null, onClose }: EventDialogProps) {
     onClose();
   };
 
+  // The dialog owns its dismissal: Escape closes it here and never bubbles
+  // to the pane's clearSelection, and a click on the backdrop's own ground
+  // closes it. The focus moves into the dialog on open and back to what
+  // opened it on close.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    dialogRef.current?.focus();
+    return () => previous?.focus();
+  }, []);
+
   return (
-    <div className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--backdrop)] p-4">
+    <div
+      className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--backdrop)] p-4"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
       <div
         role="dialog"
+        aria-modal="true"
         aria-label={title}
-        className="flex max-h-full w-[420px] flex-col overflow-y-auto rounded-xl border border-border-subtle bg-card p-5 shadow-[var(--shadow-lg)]"
+        ref={dialogRef}
+        tabIndex={-1}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            event.stopPropagation();
+            onClose();
+          }
+        }}
+        className="flex max-h-full w-[420px] flex-col overflow-y-auto rounded-xl border border-border-subtle bg-card p-5 shadow-[var(--shadow-lg)] focus-visible:outline-none"
       >
         <h2 className="mb-3 text-sm font-semibold text-foreground">{title}</h2>
 

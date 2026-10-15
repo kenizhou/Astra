@@ -70,6 +70,27 @@ describe('the manual setup flow', () => {
     expect(container.childElementCount).toBe(0);
   });
 
+  it('closes on Escape and moves the focus in on open', () => {
+    render(<AccountSetupFlow />);
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.contains(document.activeElement)).toBe(true);
+
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    expect(useUiStore.getState().accountSetupOpen).toBe(false);
+  });
+
+  it('closes on a click on the backdrop, but not on one inside the dialog', () => {
+    const { container } = render(<AccountSetupFlow />);
+    const backdrop = container.firstChild as HTMLElement;
+
+    fireEvent.click(screen.getByRole('dialog'));
+    expect(useUiStore.getState().accountSetupOpen).toBe(true);
+
+    fireEvent.click(backdrop);
+    expect(useUiStore.getState().accountSetupOpen).toBe(false);
+  });
+
   it('a failed test connection surfaces the message and never adds the account', async () => {
     ipc.imapTestConnection.mockResolvedValue({
       failed: { message: 'the server refused the sign in' },
