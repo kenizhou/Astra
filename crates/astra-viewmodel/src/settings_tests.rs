@@ -7,7 +7,7 @@ use engine_api::{AccountId, CalendarId};
 
 use crate::{
     AboutBlock, AccountKind, AccountLegs, AccountSettingsRow, DavSectionRow, DefaultCalendar,
-    SettingsBlock, SettingsError, SettingsSnapshot, ThemeMode, ViewMode, WeekdayWire,
+    GrantState, SettingsBlock, SettingsError, SettingsSnapshot, ThemeMode, ViewMode, WeekdayWire,
 };
 
 /// A well-formed account id, the way every settings test names one.
@@ -55,6 +55,7 @@ fn the_snapshot_crosses_its_full_shape_and_reads_back() {
                 "the diary could not be re-expanded under the new zone; set the zone again to retry"
                     .to_owned(),
             ),
+            grant: None,
         }],
         about: AboutBlock {
             version: "0.1.0".to_owned(),
@@ -172,10 +173,63 @@ fn the_account_kinds_cross_both_ways() {
         (AccountKind::ImapSmtp, r#""imap_smtp""#),
         (AccountKind::Jmap, r#""jmap""#),
         (AccountKind::Dav, r#""dav""#),
+        (AccountKind::Microsoft, r#""microsoft""#),
     ] {
         assert_eq!(serde_json::to_string(&kind).unwrap(), word);
         assert_eq!(serde_json::from_str::<AccountKind>(word).unwrap(), kind);
     }
+}
+
+#[test]
+fn the_grant_states_cross_both_ways_and_absent_means_healthy() {
+    // The refusal states a row can carry, pinned both ways: the surfaces
+    // branch on these words, so a renamed one must never slip out
+    // silently.
+    for (state, word) in [
+        (GrantState::CalendarWithheld, r#""calendar_withheld""#),
+        (GrantState::SignInExpired, r#""sign_in_expired""#),
+    ] {
+        assert_eq!(serde_json::to_string(&state).unwrap(), word);
+        assert_eq!(serde_json::from_str::<GrantState>(word).unwrap(), state);
+    }
+    // A healthy account crosses no grant key at all: the absence is the
+    // state, and a snapshot from a build before the field parses as
+    // healthy rather than refusing.
+    let mut healthy = AccountSettingsRow {
+        account: account("work"),
+        address: "ada@example.test".to_owned(),
+        kind: AccountKind::Microsoft,
+        legs: AccountLegs {
+            calendar: false,
+            contacts: false,
+        },
+        dav: None,
+        dav_error: None,
+        refresh_error: None,
+        grant: None,
+    };
+    let wire = serde_json::to_value(&healthy).expect("the healthy row serialises");
+    assert!(
+        wire.get("grant").is_none(),
+        "no refusal crosses no key: {wire}"
+    );
+    assert_eq!(
+        serde_json::from_str::<AccountSettingsRow>(
+            r#"{"account":"work","address":"a@e.test","kind":"microsoft",
+                "legs":{"calendar":false,"contacts":false}}"#
+        )
+        .expect("a pre-grant row parses")
+        .grant,
+        None,
+        "an old wire reads back healthy"
+    );
+    healthy.grant = Some(GrantState::CalendarWithheld);
+    let wire = serde_json::to_value(&healthy).expect("the withheld row serialises");
+    assert_eq!(wire["grant"], "calendar_withheld");
+    assert_eq!(
+        serde_json::from_value::<AccountSettingsRow>(wire).expect("the row reads back"),
+        healthy
+    );
 }
 
 #[test]
@@ -198,6 +252,7 @@ fn a_row_s_dav_echo_never_carries_the_password_back() {
         }),
         dav_error: None,
         refresh_error: None,
+        grant: None,
     };
     let wire = serde_json::to_value(&row).expect("the row serialises");
     assert!(

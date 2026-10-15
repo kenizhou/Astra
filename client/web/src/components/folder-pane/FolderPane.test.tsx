@@ -23,6 +23,8 @@ vi.mock('@/services/ipc', async (importOriginal) => ({
 import { FolderPane } from './FolderPane';
 import { useFolderStore } from '@/stores/folderStore';
 import { useSendingStore } from '@/stores/sendingStore';
+import { useSettingsStore } from '@/features/settings/settingsStore';
+import { useUiStore } from '@/stores/uiStore';
 import type { MailboxListSnapshot } from '@/services/surfaces';
 import fixtureJson from '@/services/__fixtures__/mailbox_list.json';
 
@@ -209,5 +211,59 @@ describe('the account dots', () => {
     const dots = work.querySelectorAll('[data-account-dot]');
     expect(dots).toHaveLength(1);
     expect((dots[0] as HTMLElement).style.background).toContain('--account-');
+  });
+});
+
+describe('the per-account refusal badge', () => {
+  it('badges an account whose calendar is withheld and opens the accounts page on tap', () => {
+    useSettingsStore.getState().applySnapshot({
+      settings: {
+        theme: 'follow_host',
+        twenty_four_clock: false,
+        zone: 'Etc/UTC',
+        first_day_of_week: 'mo',
+        horizon_days: 42,
+        quote_below: true,
+        view_mode: 'flat',
+      },
+      accounts: [
+        {
+          account: 'work',
+          address: 'work@example.net',
+          kind: 'microsoft',
+          legs: { calendar: false, contacts: false },
+          grant: 'calendar_withheld',
+        },
+      ],
+      about: { version: '0.1.0' },
+    });
+    render(<FolderPane />);
+
+    const badge = screen.getByRole('button', { name: 'Reconnect work@example.net' });
+    expect(badge.textContent).toContain('calendar');
+
+    fireEvent.click(badge);
+
+    expect(useUiStore.getState().settingsOpen).toBe(true);
+    expect(useSettingsStore.getState().requestedCategory).toBe('accounts');
+  });
+
+  it('draws no badge for a healthy account', () => {
+    useSettingsStore.getState().applySnapshot({
+      settings: {
+        theme: 'follow_host',
+        twenty_four_clock: false,
+        zone: 'Etc/UTC',
+        first_day_of_week: 'mo',
+        horizon_days: 42,
+        quote_below: true,
+        view_mode: 'flat',
+      },
+      accounts: [],
+      about: { version: '0.1.0' },
+    });
+    render(<FolderPane />);
+
+    expect(screen.queryByRole('button', { name: 'Reconnect work@example.net' })).toBeNull();
   });
 });

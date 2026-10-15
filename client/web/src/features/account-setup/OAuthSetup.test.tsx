@@ -171,6 +171,44 @@ describe('the completion event', () => {
     expect(screen.queryByText('Sign in with Microsoft')).toBeNull();
   });
 
+  it('lands the added account sentence with its address', async () => {
+    ipc.oauthOffer.mockResolvedValue({ providers: ['microsoft'] });
+    await openOnManualForm();
+    fireEvent.click(await screen.findByText('Sign in with Microsoft'));
+    await waitFor(() => expect(ipc.oauthBegin).toHaveBeenCalledTimes(1));
+
+    deliver({
+      provider: 'microsoft',
+      outcome: { added: { address: 'alice@example.com', calendar_withheld: false } },
+    });
+
+    expect(
+      screen.getByText(
+        'Signed in with Microsoft as alice@example.com. The account joins with its first sync in the background.',
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText('Sign in with Microsoft')).toBeNull();
+  });
+
+  it('names a withheld calendar in the added sentence', async () => {
+    ipc.oauthOffer.mockResolvedValue({ providers: ['microsoft'] });
+    await openOnManualForm();
+    fireEvent.click(await screen.findByText('Sign in with Microsoft'));
+    await waitFor(() => expect(ipc.oauthBegin).toHaveBeenCalledTimes(1));
+
+    deliver({
+      provider: 'microsoft',
+      outcome: { added: { address: 'alice@example.com', calendar_withheld: true } },
+    });
+
+    expect(
+      screen.getByText(
+        'Signed in with Microsoft as alice@example.com. The account joins with its first sync in the background. ' +
+          'The calendar is missing from this sign-in; sign in again and consent to the calendar permission.',
+      ),
+    ).toBeTruthy();
+  });
+
   it('asks for consent again on a dead grant, with the detail beside', async () => {
     ipc.oauthOffer.mockResolvedValue({ providers: ['microsoft'] });
     await openOnManualForm();

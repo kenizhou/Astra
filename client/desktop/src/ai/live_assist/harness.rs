@@ -96,6 +96,7 @@ fn harness_account(
             security: ConnectionSecurity::ImplicitTls,
         }),
         certificate_exceptions: exceptions,
+        graph: None,
         dav: None,
         shape: astra_account::AccountShape::default(),
     }

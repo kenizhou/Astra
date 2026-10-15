@@ -16,12 +16,17 @@ use std::time::Duration;
 
 use tokio::sync::mpsc;
 
-use astra_oauth::{GrantRefusal, OAuthClient, OAuthError, OAuthProviderConfig, TokenSet};
+use astra_oauth::{GrantRefusal, OAuthClient, OAuthError, OAuthProviderConfig};
+
+#[path = "commands_tests/wire_tests.rs"]
+mod wire_tests;
+
+use wire_tests::bare_completion;
 
 use super::{
-    begin_with, cancel_with, complete_outcome, wait_outcome, BrowserOpened, OAuthCommandError,
-    OAuthOfferView, ProviderKind, RefusalKind, SignInOutcome, SignInResult, SignInSurface,
-    SystemBrowser, OAUTH_REDIRECT_URI,
+    begin_with, cancel_with, refused_outcome, wait_outcome, BrowserOpened, OAuthCommandError,
+    ProviderKind, RefusalKind, SignInOutcome, SignInResult, SignInSurface, SystemBrowser,
+    OAUTH_REDIRECT_URI,
 };
 
 /// A browser stand-in that counts its opens and can be told to refuse:
@@ -93,8 +98,7 @@ fn quiet_capture() -> mpsc::UnboundedReceiver<String> {
 
 /// Feeds one raw callback into a fresh capture channel, handing back the
 /// receiving end. The delivery is the front-channel consent refusal, so
-/// the completion the runtime spawns refuses at the core's parser and
-/// never reaches a network.
+/// the completion refuses at the core's parser, never a network.
 fn refused_consent_capture() -> mpsc::UnboundedReceiver<String> {
     let (tx, rx) = mpsc::unbounded_channel();
     tx.send(
@@ -142,54 +146,11 @@ fn emit_seam() -> (
 /// fault, and the bound keeps a broken run from hanging.
 const EMIT_BOUND: Duration = Duration::from_secs(5);
 
-/// The wire literals, byte for byte the JSON the web's oauth.test.ts
-/// reads: the provider words cross bare and snake_cased, the success as
-/// a bare word, the refusal as its tagged record.
-#[test]
-fn the_views_cross_as_the_web_reads_them() {
-    assert_eq!(
-        serde_json::to_value(OAuthOfferView {
-            providers: vec![ProviderKind::Microsoft, ProviderKind::Google],
-        })
-        .expect("the offer serialises"),
-        serde_json::json!({"providers": ["microsoft", "google"]})
-    );
-    assert_eq!(
-        serde_json::to_value(BrowserOpened {
-            provider: ProviderKind::Microsoft
-        })
-        .expect("the browser-opened answer serialises"),
-        serde_json::json!({"provider": "microsoft"})
-    );
-    assert_eq!(
-        serde_json::to_value(SignInResult {
-            provider: ProviderKind::Microsoft,
-            outcome: SignInOutcome::SignedIn,
-        })
-        .expect("the success serialises"),
-        serde_json::json!({"provider": "microsoft", "outcome": "signed_in"})
-    );
-    assert_eq!(
-        serde_json::to_value(SignInResult {
-            provider: ProviderKind::Google,
-            outcome: SignInOutcome::Refused {
-                refusal: RefusalKind::Dead,
-                detail: "oauth endpoint error: invalid_grant; (no description)".to_owned(),
-            },
-        })
-        .expect("the refusal serialises"),
-        serde_json::json!({"provider": "google", "outcome": {"refused": {"refusal": "dead", "detail": "oauth endpoint error: invalid_grant; (no description)"}}})
-    );
-}
-
 #[test]
 fn the_offer_names_exactly_the_registered_providers() {
     let unregistered = surface(Vec::new(), &CountingBrowser::opening(), quiet_capture());
-    assert_eq!(
-        unregistered.offer(),
-        OAuthOfferView {
-            providers: Vec::new()
-        },
+    assert!(
+        unregistered.offer().providers.is_empty(),
         "a build carrying no registration offers nothing"
     );
 
@@ -219,14 +180,21 @@ fn a_begun_sign_in_answers_browser_opened_and_the_refused_consent_crosses_whole(
     );
     let (_tx, results, emit) = emit_seam();
 
-    let opened = begin_with(&desk, &runtime, emit, ProviderKind::Microsoft, None)
-        .expect("the browser opened");
+    let opened = begin_with(
+        &desk,
+        &runtime,
+        emit,
+        bare_completion(),
+        ProviderKind::Microsoft,
+        None,
+    )
+    .expect("the browser opened");
     assert_eq!(
         opened,
         BrowserOpened {
             provider: ProviderKind::Microsoft
         },
-        "begin answers the browser-opened state for the provider it opened"
+        "begin answers browser-opened for the provider it opened"
     );
     assert_eq!(browser.opens(), 1, "the system browser opened exactly once");
 
@@ -246,32 +214,19 @@ fn a_begun_sign_in_answers_browser_opened_and_the_refused_consent_crosses_whole(
                 "the provider's own refusal code rides in the detail: {detail}"
             );
         }
-        other @ SignInOutcome::SignedIn => panic!("a withdrawn consent must refuse, got {other:?}"),
+        other => panic!("a withdrawn consent must refuse, got {other:?}"),
     }
 }
 
 #[test]
 fn the_outcome_mappings_follow_the_ported_classification() {
-    let token_set = TokenSet {
-        access_token: astra_oauth::Secret::new("token".to_owned()),
-        refresh_token: None,
-        expires_at: time::OffsetDateTime::UNIX_EPOCH,
-        scope: String::new(),
-        token_type: "Bearer".to_owned(),
-    };
-    assert_eq!(
-        complete_outcome(Ok(token_set)),
-        SignInOutcome::SignedIn,
-        "a token set the provider issued is the success the wizard words"
-    );
-
     let endpoint = |error: &str| OAuthError::Endpoint {
         error: error.to_owned(),
         description: None,
     };
-    let dead = complete_outcome(Err(endpoint("invalid_grant")));
-    let underscoped = complete_outcome(Err(endpoint("invalid_scope")));
-    let indeterminate = complete_outcome(Err(OAuthError::Decode("a fault".to_owned())));
+    let dead = refused_outcome(&endpoint("invalid_grant"));
+    let underscoped = refused_outcome(&endpoint("invalid_scope"));
+    let indeterminate = refused_outcome(&OAuthError::Decode("a fault".to_owned()));
     assert_eq!(
         dead,
         SignInOutcome::Refused {
@@ -296,11 +251,8 @@ fn the_outcome_mappings_follow_the_ported_classification() {
         },
         "anything the two codes do not name reads indeterminate"
     );
-    assert_eq!(
-        RefusalKind::from(GrantRefusal::Dead),
-        RefusalKind::Dead,
-        "the wire word mirrors the core's own classification"
-    );
+    // The wire word mirrors the core's own classification, each of the three.
+    assert_eq!(RefusalKind::from(GrantRefusal::Dead), RefusalKind::Dead);
     assert_eq!(
         RefusalKind::from(GrantRefusal::Underscoped),
         RefusalKind::Underscoped
@@ -328,8 +280,15 @@ fn begin_refuses_a_provider_this_build_does_not_offer() {
     let desk = surface(Vec::new(), &browser, quiet_capture());
     let (_tx, _results, emit) = emit_seam();
 
-    let refused = begin_with(&desk, &runtime, emit, ProviderKind::Google, None)
-        .expect_err("a provider without a registration is not offered");
+    let refused = begin_with(
+        &desk,
+        &runtime,
+        emit,
+        bare_completion(),
+        ProviderKind::Google,
+        None,
+    )
+    .expect_err("a provider without a registration is not offered");
     assert!(
         matches!(refused, OAuthCommandError::NotOffered(ProviderKind::Google)),
         "the refusal names the unregistered provider: {refused}"
@@ -351,14 +310,22 @@ fn a_second_begin_refuses_while_one_signin_stands() {
         &desk,
         &runtime,
         emit,
+        bare_completion(),
         ProviderKind::Microsoft,
         Some("work@example.test"),
     )
     .expect("the browser opened for the first flow");
 
     let (_tx, _results, second_emit) = emit_seam();
-    let refused = begin_with(&desk, &runtime, second_emit, ProviderKind::Microsoft, None)
-        .expect_err("one sign-in at a time");
+    let refused = begin_with(
+        &desk,
+        &runtime,
+        second_emit,
+        bare_completion(),
+        ProviderKind::Microsoft,
+        None,
+    )
+    .expect_err("one sign-in at a time");
     assert!(
         matches!(refused, OAuthCommandError::InFlight),
         "the refusal names the standing flow: {refused}"
@@ -381,16 +348,30 @@ fn a_browser_that_refuses_answers_the_error_and_leaves_a_fresh_retry() {
     );
     let (_tx, _results, emit) = emit_seam();
 
-    let refused = begin_with(&desk, &runtime, emit, ProviderKind::Microsoft, None)
-        .expect_err("a browser that refuses ends the begin");
+    let refused = begin_with(
+        &desk,
+        &runtime,
+        emit,
+        bare_completion(),
+        ProviderKind::Microsoft,
+        None,
+    )
+    .expect_err("a browser that refuses ends the begin");
     assert!(
         matches!(refused, OAuthCommandError::Browser(_)),
         "the browser's refusal is the answer: {refused}"
     );
 
     let (_tx, _results, retry_emit) = emit_seam();
-    let retried = begin_with(&desk, &runtime, retry_emit, ProviderKind::Microsoft, None)
-        .expect_err("the refusing browser refuses the retry too");
+    let retried = begin_with(
+        &desk,
+        &runtime,
+        retry_emit,
+        bare_completion(),
+        ProviderKind::Microsoft,
+        None,
+    )
+    .expect_err("the refusing browser refuses the retry too");
     assert!(
         matches!(retried, OAuthCommandError::Browser(_)),
         "the retry begins fresh rather than meeting a stale in-flight: {retried}"
@@ -408,13 +389,27 @@ fn cancel_takes_the_flow_back_and_a_later_begin_starts_fresh() {
         quiet_capture(),
     );
     let (_tx, _results, emit) = emit_seam();
-    begin_with(&desk, &runtime, emit, ProviderKind::Microsoft, None)
-        .expect("the browser opened for the flow");
+    begin_with(
+        &desk,
+        &runtime,
+        emit,
+        bare_completion(),
+        ProviderKind::Microsoft,
+        None,
+    )
+    .expect("the browser opened for the flow");
 
     assert!(cancel_with(&desk), "the abandoned flow cancels");
     let (_tx, _results, again_emit) = emit_seam();
-    begin_with(&desk, &runtime, again_emit, ProviderKind::Microsoft, None)
-        .expect("a later begin starts fresh after the cancel");
+    begin_with(
+        &desk,
+        &runtime,
+        again_emit,
+        bare_completion(),
+        ProviderKind::Microsoft,
+        None,
+    )
+    .expect("a later begin starts fresh after the cancel");
     assert_eq!(browser.opens(), 2, "the fresh begin opened the browser");
 
     assert!(cancel_with(&desk), "the fresh flow cancels too");
@@ -456,6 +451,7 @@ fn a_displaced_waiter_hands_the_next_flow_s_redirect_back() {
             &surface,
             &rt,
             first_emit,
+            bare_completion(),
             ProviderKind::Microsoft,
             None,
         )
@@ -464,8 +460,15 @@ fn a_displaced_waiter_hands_the_next_flow_s_redirect_back() {
 
         // The second flow stands; its redirect arrives.
         let (_, second_rx, second_emit) = emit_seam();
-        crate::oauth::commands::begin_with(&surface, &rt, second_emit, ProviderKind::Google, None)
-            .expect("the second begin opens the browser");
+        crate::oauth::commands::begin_with(
+            &surface,
+            &rt,
+            second_emit,
+            bare_completion(),
+            ProviderKind::Google,
+            None,
+        )
+        .expect("the second begin opens the browser");
         let _ = capture_tx.send(
             "com.kenizhou.astra://oauth?error=access_denied&error_description=next".to_owned(),
         );

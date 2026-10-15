@@ -396,6 +396,7 @@ pub(crate) fn state(name: &str, app: Arc<FakeApp>, store: Arc<FakeStore>) -> App
         photo_root: scratch(name).join("photos"),
         credential_store: store,
         oauth: crate::oauth::commands::offline_surface(),
+        refusals: Arc::new(crate::oauth::grant_refusals::GrantRefusals::new()),
         runtime: crate::runtime::build_runtime().expect("the test runtime builds"),
     }
 }

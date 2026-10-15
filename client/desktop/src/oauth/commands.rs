@@ -12,31 +12,24 @@
 //! ([`SIGN_IN_RESULT_EVENT`]), emitted with the whole
 //! [`SignInResult`] payload. That is the agent-panel and draft-pool
 //! pattern (the host emits a typed payload for an occurrence that is
-//! host-side; the owning surface subscribes while it lives), chosen
-//! over the surface_changed pull loop honestly: that loop serves
-//! immutable snapshots the **app core** publishes, and the sign-in
-//! result is not one. The app core carries no OAuth type at all (the
-//! oauth module's placement record), so there is no core surface to
-//! signal and no core snapshot to pull; the flow completes inside the
-//! host, and the host says so. A polled `oauth_sign_in_result` command
-//! would need a client-side timer, a pattern nothing in the client
-//! uses, for a completion that can take minutes while a person is in
-//! the browser. The ordering is safe by construction: the wizard
+//! host-side; the owning surface subscribes while it lives), chosen over
+//! the surface_changed pull loop honestly: that loop serves immutable
+//! snapshots the **app core** publishes, the sign-in result is not one,
+//! and the app core carries no OAuth type at all (the oauth module's
+//! placement record). The ordering is safe by construction: the wizard
 //! subscribes while it is open, the browser cannot open before begin
-//! returns, and the redirect cannot arrive before the browser opened,
-//! so no completion can precede the subscription.
+//! returns, and the redirect cannot arrive before the browser opened, so
+//! no completion can precede the subscription.
 //!
-//! # What a success means today
+//! # What a success means
 //!
-//! No account type consumes the floor yet (the spec's known gaps): a
-//! successful exchange mints a [`TokenSet`] nothing persists and no
-//! account consumes, because the account kinds that would (Graph,
-//! Google) are the provider slices' work. The result still crosses as
-//! [`SignInOutcome::SignedIn`] and the wizard's success sentence says
-//! what that honestly is: the sign-in worked, this build cannot finish
-//! adding the account, the account type arrives with the next update.
-//! Recording the success end to end is what keeps the provider slices
-//! from re-plumbing the notification.
+//! A Microsoft sign-in completes into an account: the completion runs the
+//! account half ([`super::graph_add`]), which names the account from the
+//! token, dials it, persists the grant, and joins it to the app, and the
+//! success outcome carries what the wizard's sentence shows (the address,
+//! a withheld calendar). Every other provider this build can offer (Google)
+//! still completes with the bare signed-in word, honestly: no account type
+//! consumes its token set until its slice lands.
 //!
 //! # The wiring this module owns
 //!
@@ -46,12 +39,12 @@
 //! ([`forward_launch_arguments`], without which a running app on that
 //! platform never sees its own redirect), and the opener-backed
 //! [`SystemBrowser`] ([`opener_browser`]). The two Tauri-touching
-//! adapters have no unit-test shape: they need a running app, their
-//! behaviour is a one-line delegation, and the filter and refusal
-//! contracts under them are pinned by the session and command tests.
+//! adapters have no unit-test shape: the filter and refusal contracts
+//! under them are pinned by the session and command tests.
 //!
 //! [`forward_oauth_callbacks`]: super::session::forward_oauth_callbacks
 
+use std::future::Future;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -129,9 +122,20 @@ impl From<GrantRefusal> for RefusalKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum SignInOutcome {
-    /// The provider issued a token set. Nothing consumes it yet; see the
-    /// module's "what a success means today" record.
+    /// The provider issued a token set that no account consumed: the
+    /// account type this provider names arrives with its slice, and the
+    /// surface says so honestly rather than claiming an account.
     SignedIn,
+    /// The sign-in completed into an account: the address the lookup
+    /// named, and whether the grant withholds the calendar.
+    Added {
+        /// The account's own address, as the surface names it.
+        address: String,
+        /// Whether the grant withholds the calendar (a scope-denied
+        /// refusal on the calendar probe): the mail stands and the agenda
+        /// waits for a fresh sign-in.
+        calendar_withheld: bool,
+    },
     /// The flow refused, with the classification word and the host's own
     /// sentence as the diagnostic detail.
     Refused {
@@ -179,12 +183,10 @@ impl Serialize for OAuthCommandError {
 /// given no registration offers nothing and the wizard's provider routes
 /// never render. A registration whose client cannot be built (its TLS
 /// stack refused) is dropped with a warning rather than offered broken.
-///
 /// Google's registration documents a Desktop client whose redirect is a
-/// loopback port; the foundation carries exactly one capture (the custom
+/// loopback port; this build carries exactly one capture (the custom
 /// scheme), so the Google flow rides [`OAUTH_REDIRECT_URI`] and the
-/// client-type decision belongs to the Google slice that first signs a
-/// real account in.
+/// client-type decision belongs to the Google slice.
 fn registered_clients() -> Vec<(ProviderKind, Arc<OAuthClient>)> {
     let mut clients = Vec::new();
     if let Some(client_id) = credentials::microsoft_client_id() {
@@ -217,8 +219,8 @@ fn registered_clients() -> Vec<(ProviderKind, Arc<OAuthClient>)> {
 }
 
 /// The host's OAuth surface: the sign-in session over the injected
-/// browser and capture, beside the registered clients. One value, built
-/// once at boot, held by the managed state.
+/// browser and capture, beside the registered clients; one value, built
+/// at boot, held by the managed state.
 pub(crate) struct SignInSurface {
     /// The session every sign-in runs on: one flow at a time, whichever
     /// provider began it.
@@ -228,9 +230,8 @@ pub(crate) struct SignInSurface {
 }
 
 impl SignInSurface {
-    /// The production surface over `browser` and the capture's receiving
-    /// end: the providers whose registration this build carries, and no
-    /// others.
+    /// The production surface: the providers whose registration this
+    /// build carries, and no others.
     #[must_use]
     pub(crate) fn new(
         browser: Arc<dyn SystemBrowser>,
@@ -241,7 +242,7 @@ impl SignInSurface {
     }
 
     /// The surface over given clients: the test seam that drives the
-    /// command pair without a build-time registration.
+    /// command pair without a registration.
     #[must_use]
     pub(crate) fn with_clients(
         browser: Arc<dyn SystemBrowser>,
@@ -280,7 +281,7 @@ impl SignInSurface {
 
 /// Maps the redirect wait's failure to the outcome the surface shows: a
 /// capture that closed learned nothing about any grant, so the refusal is
-/// indeterminate whatever the wait's own sentence says.
+/// indeterminate.
 fn wait_outcome(err: &SignInError) -> SignInOutcome {
     SignInOutcome::Refused {
         refusal: RefusalKind::Indeterminate,
@@ -288,20 +289,17 @@ fn wait_outcome(err: &SignInError) -> SignInOutcome {
     }
 }
 
-/// Maps the completion's answer to the outcome the surface shows: a token
-/// set is the success; a refusal carries the ported classification word
-/// beside the core's own sentence. A consent withdrawn at the provider
-/// (`access_denied` on the front channel) is neither of the two
-/// grant-refusal codes, so it crosses as indeterminate with the code in
-/// the detail; the consent-again wording for it belongs to the provider
-/// slices that first meet a real refusal screen.
-fn complete_outcome(result: Result<TokenSet, OAuthError>) -> SignInOutcome {
-    match result {
-        Ok(_) => SignInOutcome::SignedIn,
-        Err(err) => SignInOutcome::Refused {
-            refusal: RefusalKind::from(err.refusal()),
-            detail: err.to_string(),
-        },
+/// Maps the completion's refusal to the outcome the surface shows: the
+/// ported classification word beside the core's own sentence. A consent
+/// withdrawn at the provider (`access_denied` on the front channel) is
+/// neither of the two grant-refusal codes, so it crosses as indeterminate
+/// with the code in the detail. A token set the provider issued crosses
+/// as whatever completion the caller wired: the bare word for a provider
+/// no account consumes, the added account for one that does.
+fn refused_outcome(err: &OAuthError) -> SignInOutcome {
+    SignInOutcome::Refused {
+        refusal: RefusalKind::from(err.refusal()),
+        detail: err.to_string(),
     }
 }
 
@@ -309,9 +307,10 @@ fn complete_outcome(result: Result<TokenSet, OAuthError>) -> SignInOutcome {
 /// request over the provider's registered client, opens the system
 /// browser, and returns the browser-opened answer once the browser is
 /// open. The completion runs on the runtime: the spawned half waits for
-/// the deep-link redirect, spends it on the core's complete, and hands
-/// the [`SignInResult`] to `emit`, which the command wires to the
-/// [`SIGN_IN_RESULT_EVENT`] event.
+/// the deep-link redirect, spends it on the core's complete, hands a
+/// token set to `complete` (the account half for a provider this build
+/// finishes into an account, the bare word otherwise), and gives the
+/// [`SignInResult`] to `emit`, which the command wires to the event.
 ///
 /// A cancelled flow's spawned half ends silently: its wait recognises
 /// itself as displaced, hands any redirect that arrived meanwhile back
@@ -323,15 +322,18 @@ fn complete_outcome(result: Result<TokenSet, OAuthError>) -> SignInOutcome {
 /// no registration, [`OAuthCommandError::InFlight`] when a sign-in
 /// already stands, and [`OAuthCommandError::Browser`] when the browser
 /// refused to open; each leaves nothing new in flight.
-pub(crate) fn begin_with<E>(
+pub(crate) fn begin_with<C, CFut, E>(
     surface: &Arc<SignInSurface>,
     runtime: &AppRuntime,
     emit: E,
+    complete: C,
     provider: ProviderKind,
     login_hint: Option<&str>,
 ) -> Result<BrowserOpened, OAuthCommandError>
 where
     E: FnOnce(SignInResult) + Send + 'static,
+    C: FnOnce(TokenSet, OAuthProviderConfig) -> CFut + Send + 'static,
+    CFut: Future<Output = SignInOutcome> + Send,
 {
     let client = surface
         .client(provider)
@@ -349,6 +351,10 @@ where
             ),
         })?;
     let desk = Arc::clone(surface);
+    // The registration the flow's client carries: the document the
+    // completion builds names the client id, tenant, redirect, and scopes
+    // the authorization actually ran over.
+    let flow_provider = client.provider().clone();
     runtime.spawn(async move {
         let outcome = match desk.session().wait_for_callback(flow).await {
             // The flow was cancelled while its redirect was pending; the
@@ -361,7 +367,10 @@ where
                     .session()
                     .complete_sign_in(&raw, OffsetDateTime::now_utc())
                     .await;
-                complete_outcome(finished)
+                match finished {
+                    Ok(tokens) => complete(tokens, flow_provider).await,
+                    Err(err) => refused_outcome(&err),
+                }
             }
         };
         emit(SignInResult { provider, outcome });
@@ -410,10 +419,12 @@ pub(crate) fn oauth_begin(
         use tauri::Emitter;
         let _ = app.emit(SIGN_IN_RESULT_EVENT, result);
     };
+    let complete = super::graph_add::outcome_completion(&state, &state.runtime, provider);
     begin_with(
         &state.oauth,
         &state.runtime,
         emit,
+        complete,
         provider,
         login_hint.as_deref(),
     )
@@ -428,8 +439,7 @@ pub(crate) fn oauth_cancel(state: State<'_, AppState>) {
 }
 
 /// The system browser over the shell's opener: the production seam the
-/// sign-in wiring installs. The opener hands the URL to the platform,
-/// which picks the default browser; the call is synchronous on desktop.
+/// sign-in wiring installs; the platform picks the default browser.
 struct OpenerBrowser {
     /// The shell handle the opener plugin reads.
     handle: tauri::AppHandle,
@@ -454,8 +464,8 @@ pub(crate) fn opener_browser(handle: &tauri::AppHandle) -> Arc<dyn SystemBrowser
 }
 
 /// The surface for hosts with no browser and no capture (the headless
-/// host, the command-test fakes): a browser that refuses and a capture
-/// that never delivers, so no sign-in can begin there.
+/// host, the test fakes): a browser that refuses and a capture that never
+/// delivers, so no sign-in can begin there.
 #[must_use]
 pub(crate) fn offline_surface() -> Arc<SignInSurface> {
     let (tx, rx) = mpsc::unbounded_channel();

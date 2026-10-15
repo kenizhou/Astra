@@ -6,8 +6,9 @@
 // re-exported whole through ipc, so ipc stays the one import point of
 // the wire. The literals are pinned in oauth.test.ts against the JSON
 // astra-desktop's commands_tests.rs asserts: the provider words cross as
-// bare snake_case words and the success outcome as a bare `signed_in`,
-// the same externally tagged shape the intent wire uses.
+// bare snake_case words, the successes as a bare `signed_in` or an
+// externally tagged `added` record, the same tagged shape the intent wire
+// uses.
 
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -29,12 +30,24 @@ export interface BrowserOpened {
 export type GrantRefusalWord = 'dead' | 'underscoped' | 'indeterminate';
 
 /**
- * How one begun sign-in ended: the bare word `signed_in`, or a refusal
- * carrying the classification word beside the host's own sentence as
- * the diagnostic detail.
+ * The account a completed sign-in added: the address the host's lookup
+ * named, and whether the grant withholds the calendar (the mail stands,
+ * the agenda waits for a fresh sign-in).
+ */
+export interface OAuthAddedAccount {
+  address: string;
+  calendar_withheld: boolean;
+}
+
+/**
+ * How one begun sign-in ended: the bare word `signed_in` for a provider
+ * no account consumes yet, the added account for one the host finishes
+ * into an account, or a refusal carrying the classification word beside
+ * the host's own sentence as the diagnostic detail.
  */
 export type OAuthSignInOutcome =
   | 'signed_in'
+  | { added: OAuthAddedAccount }
   | { refused: { refusal: GrantRefusalWord; detail: string } };
 
 /** The completion event's payload: the provider and how its sign-in ended. */

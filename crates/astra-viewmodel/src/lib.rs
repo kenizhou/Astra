@@ -38,7 +38,7 @@ pub use search::{SearchScope, SearchState};
 pub use sending::{queued_row, QueuedKey, QueuedRow, QueuedState, SendingSnapshot};
 pub use settings::{
     AboutBlock, AccountKind, AccountLegs, AccountSettingsRow, DavSectionRow, DefaultCalendar,
-    SettingsBlock, SettingsError, SettingsSnapshot, ThemeMode, WeekdayWire,
+    GrantState, SettingsBlock, SettingsError, SettingsSnapshot, ThemeMode, WeekdayWire,
 };
 pub use sync_progress::{AccountSyncProgress, AccountSyncState, SyncProgressSnapshot};
 pub use view::MailboxListSnapshot;

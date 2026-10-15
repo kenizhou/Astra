@@ -13,6 +13,9 @@ workspace = true
 # The protocol-neutral detection result (`Detected`) the recommendation layer routes onto
 # a concrete setup form.
 astra-autodetect = { path = "../astra-autodetect" }
+# The OAuth client the graph token source refreshes through: the product core's own
+# token-exchange crate, shared by every provider family.
+astra-oauth = { path = "../astra-oauth" }
 engine-api.workspace = true
 # The dav dial logs a leg that failed while the other stands: the account's
 # own errors carry what a caller needs, but a half-up diary is worth a line
@@ -37,6 +40,11 @@ provider-imap.workspace = true
 # here (calendar reads beside the mail providers, contacts as the installed
 # leg) rather than each host dialing its own.
 provider-caldav.workspace = true
+# The Graph adapters the optional graph section of a stored Microsoft account
+# dials over the token source (GraphClient, GraphProvider,
+# GraphCalendarProvider, MailboxPrincipal): an extension of SP1's design
+# decision 4 list, recorded here the way SP2l's engine-tls one was.
+provider-graph.workspace = true
 # Implementing the engine's async `Provider` trait for the reconnecting IMAP wrapper.
 async-trait.workspace = true
 # Builds the reconnecting wrapper's retried provider streams.
@@ -44,6 +52,9 @@ async-stream.workspace = true
 # Drives the provider streams the wrapper retries (`StreamExt` over email chunks).
 futures.workspace = true
 serde.workspace = true
+# The `/me` address lookup decodes the Graph reply's JSON body (the `mail`
+# and `userPrincipalName` properties).
+serde_json.workspace = true
 # The async runtime the IMAP connections dial and deduplicate over (the TCP stream,
 # the dial mutex, and the listener the scripted test server binds).
 tokio = { workspace = true, features = ["net", "sync"] }
@@ -53,12 +64,13 @@ tokio-rustls.workspace = true
 # The stored account config's TOML form (`build_config_toml` / `load_str` / `to_toml`).
 toml.workspace = true
 thiserror.workspace = true
+# The token source's expiry skew, cooldowns, and absolute expiry arithmetic.
+time.workspace = true
 
 [dev-dependencies]
 # The self-signed certificate the scripted in-process TLS IMAP server presents.
 rcgen.workspace = true
 # Server side of that scripted TLS server.
 rustls.workspace = true
-serde_json.workspace = true
 # The test runtime (`#[tokio::test]`) and the line reader the scripted server answers.
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread"] }

@@ -48,8 +48,21 @@ pub(crate) fn assemble_state(
     let credentials: Arc<dyn crate::credential_store::AccountCredentialStore> =
         Arc::new(KeyringCredentialStore::new());
     let connections = Arc::new(AccountDials::load(data_dir)?);
+    // The standing grant refusals: what the boot dial learns about every
+    // Microsoft account's grant, the state the refusal surfaces render.
+    // Built before the dial so the dial can write it, shared with the
+    // account store the settings rows read it through and the sign-in
+    // completion that rewrites it.
+    let refusals = Arc::new(crate::oauth::grant_refusals::GrantRefusals::new());
 
-    let accounts = runtime.block_on(|| dial_stored(&connections));
+    let accounts = runtime.block_on(|| {
+        dial_stored(
+            &connections,
+            &credentials,
+            crate::oauth::graph_add::production_dial(),
+            &refusals,
+        )
+    });
     let (accounts, contacts_legs) = split_dialled(accounts);
     let engine_path = data_dir.join(ENGINE_STORE_FILE);
     // The AI ledgers and the agent: one store the host, the sidecar's
@@ -87,11 +100,22 @@ pub(crate) fn assemble_state(
     // The settings seam: the account store the settings surface reads the
     // dial table through and writes it back over, installed before the
     // state hands anything to a command, so every settings dispatch from
-    // the first finds it standing.
+    // the first finds it standing. The store reads the standing grant
+    // refusals beside the configs, so the rows the snapshot renders carry
+    // what the boot dial learned.
     core.install_account_ops(Arc::new(HostAccountStore::new(
         Arc::clone(&connections),
         Arc::clone(&credentials),
+        Arc::clone(&refusals),
     )));
+    // Prime the settings snapshot: nothing republishes it until a settings
+    // intent lands, so without this the first pull after a launch answers
+    // the empty default, grant states and account rows included.
+    runtime.block_on(|| {
+        core.dispatch(astra_app::Intent::Settings(
+            astra_app::SettingsIntent::Refresh,
+        ))
+    })?;
     // The contacts legs the dials handed back, installed beside the accounts
     // they belong to before any people dispatch can run: the reads work over
     // the already-synced store either way, and the writes have nowhere to go
@@ -126,6 +150,7 @@ pub(crate) fn assemble_state(
             .join("contact-photos"),
         credential_store: credentials,
         oauth,
+        refusals,
         runtime,
     })
 }
@@ -188,18 +213,49 @@ struct DialConnector {
 impl MailboxConnector<HostProvider> for DialConnector {
     async fn connect_folder(&self, account: &AccountId, mailbox_key: &str) -> Option<HostProvider> {
         let (config, connections) = self.dials.of(account.as_str())?;
+        if let Some(graph) = config.graph.as_ref() {
+            // A Graph account binds folders over its stored grant: a
+            // source minted from the document through the same seam the
+            // completion uses. The sink is none here on purpose: a late
+            // bind only reads, and the boot's sink-backed source owns
+            // the rotations, so this source never writes a document.
+            let source = crate::oauth::graph_add::production_source()(
+                graph.provider_config(),
+                account.clone(),
+                graph.refresh_token.expose().to_owned(),
+                None,
+            )
+            .ok()?;
+            return astra_account::connect_graph_folder(
+                source,
+                mailbox_key,
+                None,
+                &astra_account::account_tls(&config).ok()?,
+            )
+            .map(|provider| provider as HostProvider)
+            .ok();
+        }
         astra_account::connect_imap_mailbox(&connections, &config, mailbox_key)
             .await
             .ok()
     }
 }
 
-/// Dials every registered account, mail half first and dav legs beside it.
-/// A mail dial that fails skips the account with a warning: one stale
+/// Dials every registered account, mail half first and dav legs beside
+/// it. A mail dial that fails skips the account with a warning: one stale
 /// password must not block the others, and the app opens with whatever
 /// connected. A dav dial that fails keeps the account standing on its mail
-/// half alone, inside [`dial_dav_with`].
-async fn dial_stored(dials: &AccountDials) -> Vec<Dialled> {
+/// half alone, inside [`dial_dav_with`]. A Graph account dials through
+/// `graph_dial`, the same free function the sign-in's completion uses,
+/// over a sink-backed token source built from its stored grant; what its
+/// dial answered lands in `refusals`, so a dead grant leaves the expired
+/// sign-in standing for the row the boot's skip would otherwise orphan.
+async fn dial_stored(
+    dials: &Arc<AccountDials>,
+    credentials: &Arc<dyn crate::credential_store::AccountCredentialStore>,
+    graph_dial: crate::oauth::graph_add::GraphDial,
+    refusals: &Arc<crate::oauth::grant_refusals::GrantRefusals>,
+) -> Vec<Dialled> {
     let mut accounts = Vec::new();
     for id in dials.ids() {
         let Some((config, connections)) = dials.of(&id) else {
@@ -212,6 +268,36 @@ async fn dial_stored(dials: &AccountDials) -> Vec<Dialled> {
                 continue;
             }
         };
+        if config.imap.is_none() && config.graph.is_some() {
+            match dial_graph_stored(
+                dials,
+                credentials,
+                &graph_dial,
+                &account_id,
+                &config,
+                refusals,
+            )
+            .await
+            {
+                Ok(account) => accounts.push(Dialled {
+                    account,
+                    contacts: None,
+                }),
+                // The grant is dead: the account skips, and the refusal
+                // state it leaves behind is the only account of why.
+                Err(astra_account::AccountError::SigninRejected(detail)) => {
+                    refusals.record_dead(account_id.as_str());
+                    log::warn!(
+                        "boot: an account's sign-in expired or was withdrawn; it waits to be \
+                         signed in again: {detail}"
+                    );
+                }
+                Err(err) => {
+                    log::warn!("boot: an account could not be connected and was skipped: {err}");
+                }
+            }
+            continue;
+        }
         let email = config
             .imap
             .as_ref()
@@ -233,6 +319,59 @@ async fn dial_stored(dials: &AccountDials) -> Vec<Dialled> {
         }
     }
     accounts
+}
+
+/// Dials one stored Graph account: the sink-backed token source over the
+/// stored refresh token, then the shared dial. The account joins with its
+/// calendar appended after its mail providers, the shape the
+/// capability-scoped calendar selection expects; a calendar that failed
+/// costs the boot nothing, its error carried in the dial's outcome for
+/// the log, and what the dial answered about the grant lands in
+/// `refusals` for the surfaces: a withheld calendar records the
+/// reconnect state, a healthy dial records none.
+async fn dial_graph_stored(
+    dials: &Arc<AccountDials>,
+    credentials: &Arc<dyn crate::credential_store::AccountCredentialStore>,
+    graph_dial: &crate::oauth::graph_add::GraphDial,
+    account_id: &AccountId,
+    config: &astra_account::AccountConfig,
+    refusals: &Arc<crate::oauth::grant_refusals::GrantRefusals>,
+) -> Result<HostAccount, astra_account::AccountError> {
+    let graph = config
+        .graph
+        .as_ref()
+        .ok_or(astra_account::AccountError::NoImap)?;
+    // The stored grant dials through the same sink the sign-in's
+    // completion registers: a rotation at boot lands in the entry and the
+    // store, and a stored source adopts whatever this process already
+    // holds for the account.
+    let sink =
+        crate::oauth::graph_sink::graph_token_sink(Arc::clone(dials), Arc::clone(credentials));
+    let tokens = astra_account::GraphTokenSource::new(
+        &graph.provider_config(),
+        account_id.clone(),
+        graph.refresh_token.expose(),
+        Some(sink),
+        astra_account::CredentialOrigin::Stored,
+    )?;
+    let dialled = graph_dial(account_id, tokens, config).await?;
+    refusals.record_dialled(account_id.as_str(), dialled.calendar_reauth_required);
+    if let Some(err) = &dialled.calendar_error {
+        if dialled.calendar_reauth_required {
+            log::warn!("boot: a graph calendar needs a fresh sign-in; the agenda waits: {err}");
+        } else {
+            log::warn!("boot: a graph calendar failed to dial; the mail stands: {err}");
+        }
+    }
+    let mut providers = dialled.mail;
+    if let Some(calendar) = dialled.calendar {
+        providers.push(calendar);
+    }
+    Ok(HostAccount {
+        id: account_id.clone(),
+        providers,
+        identity: EmailAddress::new(graph.email.clone()),
+    })
 }
 
 /// One dialled account as the boot holds it: the account with every dialled

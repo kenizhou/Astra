@@ -53,7 +53,11 @@ fn remove_drops_the_config_document_and_the_credential() {
 #[test]
 fn a_refused_removal_keeps_the_table_entry() {
     let dials = table("remove-refused");
-    let ops = HostAccountStore::new(Arc::clone(&dials), FakeStore::refusing());
+    let ops = HostAccountStore::new(
+        Arc::clone(&dials),
+        FakeStore::refusing(),
+        Arc::new(crate::oauth::grant_refusals::GrantRefusals::new()),
+    );
     let account = work();
 
     crate::runtime::build_runtime()

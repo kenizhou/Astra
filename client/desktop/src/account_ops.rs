@@ -23,10 +23,13 @@
 //!   first, and only a dial that answered legs persists. A persist the
 //!   credential store refuses likewise stores nothing, and the dialled
 //!   legs go unanswered with it.
-//! - **Every registered account is `imap_smtp`.** A stored config names
-//!   an `[imap]` section or refuses to load, and no jmap or dav-only
-//!   config shape exists for this host to register; the other kinds stay
-//!   unreachable until one lands.
+//! - **Every registered account is `imap_smtp`, except a stored grant.** A
+//!   stored config names an `[imap]` section or a `[graph]` grant or
+//!   refuses to load; the graph shape answers the `microsoft` kind and the
+//!   address the sign-in's lookup named, beside the standing grant refusal
+//!   the boot dial or the completion recorded. No jmap or dav-only config
+//!   shape exists for this host to register; those kinds stay unreachable
+//!   until one lands.
 //! - **The removal's halves go in order.** The credential entry, the
 //!   durable half, deletes first: a refusal answers `Err` with nothing
 //!   moved anywhere. The dial table's entry and its index line go after;
@@ -58,11 +61,12 @@ const NO_ORIGIN: &str = "the merged section names no origin to dial";
 /// answers.
 const NOT_REGISTERED: &str = "the account has no stored config on this host";
 
-/// The host's [`HostAccountOps`] over the dial table and the credential
-/// store: the boot installs one at assembly, and the settings surface
-/// reads the account configs and writes them back through it. Both stores
-/// the write halves move are the host's own, exactly as the boot's dial
-/// and the account-add flow use them.
+/// The host's [`HostAccountOps`] over the dial table, the credential
+/// store, and the standing grant refusals: the boot installs one at
+/// assembly, and the settings surface reads the account configs and
+/// writes them back through it. All three stores the halves move are the
+/// host's own, exactly as the boot's dial and the account-add flow use
+/// them.
 pub(crate) struct HostAccountStore {
     /// The registered accounts: the configs the read half describes and
     /// the write halves edit.
@@ -70,15 +74,24 @@ pub(crate) struct HostAccountStore {
     /// The secure store the config documents persist through and the
     /// removal erases from.
     credentials: Arc<dyn AccountCredentialStore>,
+    /// The standing grant refusals the read half answers beside each
+    /// config, and the removal clears an account's entry from.
+    refusals: Arc<crate::oauth::grant_refusals::GrantRefusals>,
 }
 
 impl HostAccountStore {
-    /// A store over the boot's dial table and credential store.
+    /// A store over the boot's dial table, credential store, and refusal
+    /// map.
     pub(crate) fn new(
         dials: Arc<AccountDials>,
         credentials: Arc<dyn AccountCredentialStore>,
+        refusals: Arc<crate::oauth::grant_refusals::GrantRefusals>,
     ) -> Self {
-        Self { dials, credentials }
+        Self {
+            dials,
+            credentials,
+            refusals,
+        }
     }
 
     /// The save's own half under an injected `dial`, which receives the
@@ -187,9 +200,24 @@ impl HostAccountOps<HostProvider> for HostAccountStore {
                     continue;
                 }
             };
+            // A stored grant is a Microsoft account addressed by the lookup
+            // the sign-in named; every other stored config names an imap
+            // section whose login is the address.
+            let (kind, address) = match config.graph.as_ref() {
+                Some(graph) => (AccountKind::Microsoft, graph.email.clone()),
+                None => (
+                    AccountKind::ImapSmtp,
+                    config
+                        .imap
+                        .as_ref()
+                        .map_or_else(String::new, |imap| imap.username.clone()),
+                ),
+            };
             infos.push(AccountInfo {
                 id: account_id,
-                kind: AccountKind::ImapSmtp,
+                kind,
+                address,
+                grant: self.refusals.of(&id),
                 dav: config.dav.as_ref().map(dav_echo),
             });
         }
@@ -216,6 +244,9 @@ impl HostAccountOps<HostProvider> for HostAccountStore {
                 "settings: an account's id stayed in the dial table's index after removal: {err}"
             );
         }
+        // The account's row goes, so the refusal state it carried goes with
+        // it: a later re-add of the same account starts clean.
+        self.refusals.clear(account.as_str());
         Ok(())
     }
 }

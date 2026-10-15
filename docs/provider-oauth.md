@@ -90,9 +90,11 @@ more, so token acquisition and refresh never cross `engine-api`.
    slices land; and the account-add flow already keeps its persist
    discipline host-side (`add_account` persists after the dial and rolls
    the whole add back on a refusal). The rules bind wherever the transaction
-   lives. The refresh anchor: when the Microsoft slice (SP2m) wires Graph,
-   the host refresh path holds this transaction and answers its rotations;
-   until then its paths stand pinned by tests alone.
+   lives. The refresh anchor: the Microsoft account's refresh path (SP2m)
+   holds this transaction and answers its rotations; every rotation the
+   token source hears lands in the dial table's entry and the store, and
+   the completion's final persist reads the entry, never the copy parsed a
+   moment before the dial, so a rotation during the dial is never undone.
 
    **A refresh names no scope, and that rule is not negotiable.** RFC 6749
    section 6 requires the requested scope on a refresh to be a subset of
@@ -177,12 +179,11 @@ more, so token acquisition and refresh never cross `engine-api`.
 
 7. **`offline_access` is mandatory.** Without it no refresh token is
    issued and the account breaks an hour after setup. The enforcement
-   point, refusing a completed sign-in that yielded no refresh token,
-   lands with the provider slices' account wiring (the foundation
-   completes exchanges but persists no account); the rule is the contract
-   they inherit. Google's equivalent is not a scope: `access_type=offline`
-   plus `prompt=consent` on every authorization request, so a refresh
-   token comes back even on a repeat consent.
+   point, refusing a completed sign-in that yielded no refresh token, is
+   the Microsoft completion's first door (SP2m); the rule is the contract
+   the other providers inherit. Google's equivalent is not a scope:
+   `access_type=offline` plus `prompt=consent` on every authorization
+   request, so a refresh token comes back even on a repeat consent.
 
 8. **Register the redirect URI in the provider portal,
    character-for-character.** It must equal what the client sends. The
@@ -203,9 +204,9 @@ more, so token acquisition and refresh never cross `engine-api`.
    provider can return `access_denied` (consent declined, or a policy
    blocked the app); the sign-in surface shows the refusal with its
    classification word rather than doing nothing. A button that silently
-   does nothing is a bug. The honest corollary ships with it today: the
-   foundation completes no account, so its success sentence says so, and
-   nothing persists.
+   does nothing is a bug. The honest corollary for the providers without
+   account wiring: Google's completion still answers the bare signed-in
+   word and persists nothing, until its slice lands.
 
 11. **A sign-in abandoned in the browser never wedges the surface.**
    Closing the browser tab is undetectable, so the way out is explicit:
@@ -262,6 +263,115 @@ more, so token acquisition and refresh never cross `engine-api`.
     as the provider spelled it. A widened set reaches an existing account
     only when it signs in again: a refresh re-uses the original grant.
 
+## The Microsoft account
+
+The first account type over this floor (SP2m): a Microsoft account signs
+in through the browser flow, its mail and calendar dial through the
+engine's Graph adapter over one token source, and the surfaces it owes
+arrive with it. Everything here is scoped to what shipped; the gaps at the
+end of the document carry the rest.
+
+**The dial.** One free function in the account layer dials a Microsoft
+account: mail providers, one per synced folder the account lists, and the
+provider for the account's default calendar, appended after the mail the
+way a dav account's calendar leg is, so the host's capability-scoped
+selection picks it up. The boot, the sign-in's completion, and a reconnect
+all call the same function, so no path can disagree about what a Microsoft
+account opens. Both legs share the one token source, so a dial mints at
+most one access token. The mail leg is the account's: its failure fails
+the dial, and a dead grant arrives as a refused sign-in, never an outage.
+The calendar leg is not: a calendar that fails to dial (a scope-denied
+`403` on the probe, today matched on the server's `ErrorAccessDenied`
+wording pending an upstream structural classification) leaves the account
+standing on its mail with the failure carried for the caller to surface.
+The refreshing wrapper caps what it advertises: a capability it does not
+forward is a capability the account does not have, and server-side drafts
+are deliberately not advertised (the recorded gap below).
+
+**The address lookup.** The completion names the account from the
+just-minted access token: `GET /me?$select=mail,userPrincipalName` with
+the bearer token, the SMTP `mail` winning and the sign-in name falling
+back where no SMTP address is set. A reply that names no address refuses
+the sign-in: an account the provider cannot name does not become one, and
+the person stays on the setup surface they are still looking at.
+
+**The completion's ordering.** The account's id derives from the address
+(`address@graph`), and everything keys on it. The token source registers
+with the dial table's entry **before** the dial: the sink reads the entry,
+so a rotation during the dial has somewhere to land, and the next launch
+never presents a spent token. The final persist reads the dial table's
+entry, not the copy parsed a moment before the dial, for exactly that
+reason. A new id persists through the transaction's `add` (its own
+rollback on a refused store); a re-consent goes through `rotate`, never
+`add`, whose rollback would delete a standing account's credential.
+
+**The re-consent.** Signing in again for an account that stands keeps the
+stored shape beside the grant: the pinned id, the dav legs, the accepted
+certificates. Only the grant changes. A failed dial on a re-consent
+restores the standing entry as it was; a failed dial on a first add rolls
+the whole registration back, leaving nothing registered and no orphaned
+credential in the store.
+
+**The door rule.** A grant whose granted set is empty is refused at the
+door, before anything registers: an account with no permission cannot
+bear a single capability, and refusing early keeps the person on the
+setup surface rather than walking them through an add that ends in an
+unexplained folder-list refusal. The granted-set cache's own word makes
+the empty case a registration fault rather than a provider answer: the
+response's set when it names one, the requested set when it names none,
+so the door guards the registration's scope list (a response naming no
+scope reads as granted-as-requested, and a provider granting nothing
+names "offline_access" at least).
+
+**The surfaces.** A standing refusal state is snapshot data, not an event:
+an additive `grant` field on the settings snapshot's account rows, sourced
+through the host's account-info seam from a map the boot dial and the
+sign-in's completion write. The completion event stays the wizard's
+one-shot channel; a surface that mounts late, or a relaunch, must pull
+standing state, never catch an emission. What the writers record: the boot
+dial classifies a dead grant into the expired-sign-in state for the
+account it then skips (the row is the only surface explaining the absence,
+and it renders even though the app holds no such account, because the row
+is the only surface offering the re-grant); a dialled calendar probe that
+answered reauthorization records the withheld calendar; a healthy dial
+clears whatever stood, because a dial that answered proves the standing
+state wrong; a refused completion records nothing, because its rollback
+rule leaves everything that stood exactly as it was. The reconnect banner
+(a withheld calendar) and the expired-sign-in row (a dead grant, never
+badged as a server outage) both offer the same one action: run the sign-in
+again, targeted at the account's address.
+
+**The scope set, scoped to what shipped.** A Microsoft sign-in asks
+`MICROSOFT_GRAPH_SCOPES` (the union of the use groups in the pure half's
+scope tables); what the shipped account consumes of it:
+
+| Scope | Use it serves today |
+|---|---|
+| `offline_access` | the refresh token; the completion's door refuses a token set without one (rule 7) |
+| `User.Read` | the `/me` address lookup |
+| `Mail.ReadWrite` | mail sync and every mail write; the group's needed scope |
+| `Mail.Send` | `POST /me/sendMail`; never granted by the mail-read scope |
+| `Calendars.ReadWrite` | the default calendar's reads and writes |
+| `Contacts.ReadWrite` | requested at consent; the contacts leg over Graph rides the contacts slice |
+| `User.ReadBasic.All` | requested at consent; the colleague directory rides its slice |
+
+A use the grant withholds is not opened: the granted-set cache answers at
+launch and offline, and a withheld calendar scope surfaces as the
+reconnect state through the dial's `403` probe rather than a crash.
+
+**The offline proof.** The engine's Graph adapter offers no offline
+replay (its live tests are gated on a real access token, its fixtures are
+recorded bodies for the parsers), and a stored document's token endpoint
+is pinned to the real Microsoft authority through its tenant, so the
+proof runs every offline-reachable link over scripted loopback servers:
+the real `/me` lookup, the real token source's refresh, single-flight and
+rotation through the real sink into the real dial table and credential
+transaction, the completion's ordering, the boot's stored-account dial,
+and the dead grant's classification reaching the accounts row. The dial
+seam itself is scripted in that proof; its token boundary is pinned by the
+account layer's dial tests. The live proof over the real Graph awaits the
+Azure registration, and nothing fakes it.
+
 ## What ships today
 
 Legend: ✅ implemented and pinned · 🚧 shipped but runtime-unverified or
@@ -273,12 +383,14 @@ partial · ⬜ planned (the consuming slice named).
 | System browser, never a WebView | 🚧 | the opener-backed seam ships; no runtime sign-in exists (no registration) |
 | Custom-scheme capture, raw URL handed back | 🚧 | the deep-link wiring ships (the boot hook, the Windows argv hand-off); runtime-unverified |
 | `state` validated, `iss` mandatory where advertised | ✅ | pinned by the pure half's tests |
-| Refresh token only, in the OS keystore | 🚧 | the transaction ships; no account persists a sign-in yet |
+| Refresh token only, in the OS keystore | 🚧 | the transaction ships; the Microsoft completion persists accounts, offline-proven (no registration, so no real sign-in has run) |
 | A refresh names no scope | ✅ | the refresh body carries no scope parameter, pinned |
 | Granted-set cache write rules | ✅ | pinned |
 | Refusal classified by code, never text | ✅ | `Dead` / `Underscoped` / `Indeterminate` |
 | Transport reach split, `ResponseLost` its own error | ✅ | pinned with a real client |
-| Replay-safe token source (single-flight, failure memo, cool-downs) | ⬜ | SP2m; consumes the reach split and rule 5's transaction |
+| Replay-safe token source (single-flight, failure memo, cool-downs) | ✅ | SP2m; one refresh per account, the failure shared with queued callers, rotations through rule 5's transaction |
+| The Microsoft account: dial, `/me` lookup, re-consent, door rule | 🚧 | offline-proven end to end over scripted servers (the lifecycle suite); the live proof awaits the Azure registration |
+| Microsoft refusal surfaces: standing state on the accounts rows | 🚧 | the reconnect banner and the expired-sign-in row read the boot dial's and the completion's classification; Microsoft family only |
 | Discovery fail-closed (HTTPS, issuer match, no redirects, S256) | ✅ | pinned offline, plus the live proof below |
 | RFC 7591 dynamic registration | 🚧 | code and tests; unproven against a real server |
 | Registrations injected, absent supported | ✅ | env-gated; none shipped today, the routes not offered |
@@ -316,17 +428,47 @@ once registrations exist.
 
 ## Known gaps
 
-- **No registration exists, so nothing user-visible ships.** The wizard's
-  OAuth offer renders for no one. The provider slices consume this
-  floor: SP2m (Microsoft Graph), SP2n (Google native APIs), SP2o (JMAP
-  OAuth, live-provable against the harness once it mints grants), SP2v
-  (IMAP/SMTP OAuth).
-- **The reconnect banner and the expired-sign-in row land with the first
-  OAuth account type.** The reference's re-consent prompt (a withheld
-  scope) and its dead-grant prompt (a refused credential, classified
-  structurally and never badged as an outage) need an OAuth account to be
-  about; their vocabulary (the refusal classification) ships with this
-  foundation, their surfaces do not.
+- **No registration exists, so nothing user-visible ships, and the live
+  proof has not run.** The Microsoft account wiring (SP2m) ships
+  offline-proven end to end over scripted servers, but the wizard's OAuth
+  offer still renders for no one. The live proof (the real browser
+  sign-in, a mail sync, a calendar read and write, the refresh rotation
+  against the real endpoint) lands when the owner's Azure registration
+  does, and is never faked. If that registration turns out to require a
+  client secret, the divergence from the public-client shape is escalated
+  in its PR. The other provider slices consume the same floor: SP2n
+  (Google native APIs), SP2o (JMAP OAuth, live-provable against the
+  harness once it mints grants), SP2v (IMAP/SMTP OAuth).
+- **The refusal surfaces ship for the Microsoft family only.** The Google,
+  JMAP, and password families wait for their slices; the cross-provider
+  spread of the expired-sign-in row is the accounts page's own later
+  change.
+- **A Microsoft account keeps no server-side draft.** The refreshing
+  wrapper deliberately does not advertise the engine's server-side drafts
+  capability, so the composer holds a Microsoft draft in the app alone
+  until the drafts slice wires Graph's draft folder.
+- **The principal is `Me` only.** Shared and other mailboxes defer: one
+  account is its own mailbox today.
+- **Contacts and the directory are requested but not consumed.** The
+  consent screen lists `Contacts.ReadWrite` and `User.ReadBasic.All` (the
+  set ships as a whole), while the legs that would use them ride the
+  contacts and directory slices.
+- **A re-grant targets by `login_hint` alone.** Completing the browser
+  flow as a different address adds a second account rather than being
+  refused; the wizard-begun flow has the same shape. Pinning the target
+  rides the provider slices' completion rework.
+- **A grant that dies mid-session is unobserved until a dial runs
+  again.** The sync pass swallows per-account failures, so the expired
+  row appears at the next launch, not the moment the provider revokes.
+- **An offline relaunch classifies nothing.** Only a dial that reaches
+  the token endpoint can answer Dead, so the accounts page holds no
+  expired row until the network returns; the last classification is not
+  persisted (rule 12's "not suppressed while offline" binding).
+- **A near-empty grant passes the door.** The door refuses a grant that
+  names no scope at all; one naming `offline_access` alone passes, dials,
+  and lands in the mail leg's refusal rather than a door sentence.
+- **A Graph calendar's display zone is UTC.** The host carries no zone
+  setting yet; the settings slice that owns one replaces it.
 - **RFC 7591 registration is unproven against a real server.** The
   harness advertises a registration endpoint, but its issuer document
   cannot be reached under its own name and no registration round trip has

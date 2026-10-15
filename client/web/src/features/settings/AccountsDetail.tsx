@@ -11,6 +11,7 @@ import { dispatch, intents } from '@/services/ipc';
 import type { AccountKind } from '@/services/ipc';
 
 import { DavEditor } from './DavEditor';
+import { ExpiredSignInRow, ReconnectBanner } from './GrantRefusals';
 import { useSettingsStore } from './settingsStore';
 
 /** The kind words the rows show. */
@@ -18,6 +19,7 @@ const KIND_LABELS: Record<AccountKind, string> = {
   imap_smtp: 'IMAP + SMTP',
   jmap: 'JMAP',
   dav: 'DAV',
+  microsoft: 'Microsoft',
 };
 
 /** The legs as one sentence, or the honest none. */
@@ -47,26 +49,42 @@ export function AccountsDetail() {
         {accounts.length === 0 && (
           <p className="text-xs text-muted-foreground">No account is configured.</p>
         )}
+        {/* The reconnect banner: a Microsoft account whose calendar
+            permission went missing, one tap from a fresh sign-in. */}
+        <ReconnectBanner rows={accounts} />
         <div className="flex flex-col gap-1">
-          {accounts.map((account) => (
-            <button
-              key={account.account}
-              type="button"
-              aria-label={`Open ${account.address}`}
-              onClick={() => {
-                setRemoving(false);
-                setSelected(account.account);
-              }}
-              className="flex flex-col items-start gap-0.5 rounded-[var(--radius-xs)] border border-border px-3 py-2 text-left transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <span className="text-xs font-medium text-foreground">{account.address}</span>
-              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <span>{KIND_LABELS[account.kind]}</span>
-                <span aria-hidden="true">·</span>
-                <span>{legsOf(account.legs)}</span>
-              </span>
-            </button>
-          ))}
+          {accounts.map((account) =>
+            account.grant === 'sign_in_expired' ? (
+              // A dead grant renders its own card: its sentence names the
+              // sign-in, never an outage, and its action the same re-grant.
+              <ExpiredSignInRow
+                key={account.account}
+                row={account}
+                onOpen={() => {
+                  setRemoving(false);
+                  setSelected(account.account);
+                }}
+              />
+            ) : (
+              <button
+                key={account.account}
+                type="button"
+                aria-label={`Open ${account.address}`}
+                onClick={() => {
+                  setRemoving(false);
+                  setSelected(account.account);
+                }}
+                className="flex flex-col items-start gap-0.5 rounded-[var(--radius-xs)] border border-border px-3 py-2 text-left transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <span className="text-xs font-medium text-foreground">{account.address}</span>
+                <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <span>{KIND_LABELS[account.kind]}</span>
+                  <span aria-hidden="true">·</span>
+                  <span>{legsOf(account.legs)}</span>
+                </span>
+              </button>
+            ),
+          )}
         </div>
       </section>
     );

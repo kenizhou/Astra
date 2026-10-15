@@ -163,6 +163,12 @@ impl HostAccountOps<Box<dyn Provider>> for DocumentAccountStore {
             infos.push(AccountInfo {
                 id: account_id,
                 kind: AccountKind::ImapSmtp,
+                address: config
+                    .imap
+                    .as_ref()
+                    .map(|imap| imap.username.clone())
+                    .unwrap_or_default(),
+                grant: None,
                 dav: config.dav.as_ref().map(dav_echo),
             });
         }

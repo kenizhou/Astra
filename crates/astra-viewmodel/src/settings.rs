@@ -166,6 +166,30 @@ pub struct AccountSettingsRow {
     /// later zone change re-expands and clears it. Absent crosses no key.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refresh_error: Option<String>,
+    /// The standing grant refusal the row carries, when the account's
+    /// OAuth grant needs the person to act: a withheld calendar or a dead
+    /// sign-in. Absent is the healthy state and crosses no key, so a
+    /// snapshot from a build before this field reads back healthy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grant: Option<GrantState>,
+}
+
+/// Why a Microsoft account's grant needs the person to act, as the
+/// refusal surfaces state it. Crosses as a snake_case word. The word set
+/// is the ported classification's: a grant too narrow (the calendar the
+/// account was opened for went missing) and a grant gone (the sign-in
+/// expired or was withdrawn), which are different prompts with the same
+/// remedy, a fresh sign-in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GrantState {
+    /// The grant withholds the calendar: the mail stands and the agenda
+    /// waits for a fresh sign-in to re-consent.
+    CalendarWithheld,
+    /// The grant is dead: the sign-in expired or was withdrawn, nothing
+    /// about the account syncs, and the account never dialled. Never an
+    /// outage word.
+    SignInExpired,
 }
 
 /// An account's kind, as the row states it. Crosses as a snake_case word.
@@ -178,6 +202,8 @@ pub enum AccountKind {
     Jmap,
     /// DAV, with no mail half.
     Dav,
+    /// A Microsoft account over Graph, signed in through the browser.
+    Microsoft,
 }
 
 /// Which of an account's legs are standing.
