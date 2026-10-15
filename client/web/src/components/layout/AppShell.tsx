@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The desktop shell: the frameless title bar spans the top, the status bar
 // spans the bottom, and the middle row is the tool rail beside the working
-// frame: one div gathering the folder pane, the command ribbon, the message
-// list, and the reading pane, all four corners carved, standing off the
-// window's right edge on a half-step margin. The panes inside draw no outer
-// rules; hairline dividers part them.
+// frame: one bordered div gathering the folder pane, the command ribbon,
+// the message list, and the reading pane in the mail view, or the calendar
+// and people views on their own, every view flush inside it, no card chrome
+// of its own.
 // The ribbon stands in the mail view only. The content is the active view:
 // the mail view is a resizable panel row (message list and reading pane,
 // the quick-reply strip docked at the reading pane's bottom, and the agent
@@ -43,13 +43,9 @@ import { TitleBar } from './TitleBar';
 import { ToolWindowBar } from './ToolWindowBar';
 import { pct } from './panelSizes';
 
-/** One view card: a rounded, subtly bordered surface filling its panel. */
-function PanelCard({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex h-full flex-col overflow-hidden rounded-xl border border-border-subtle bg-card">
-      {children}
-    </div>
-  );
+/** One view filling the frame, no card chrome of its own. */
+function FlushView({ children }: { children: React.ReactNode }) {
+  return <div className="flex h-full flex-col overflow-hidden">{children}</div>;
 }
 
 /** The pane divider: the A3 hairline between two panes. The grab zone
@@ -112,13 +108,13 @@ export function AppShell() {
   const viewContent = (
     <div className="relative h-full">
       {shellView === 'people' ? (
-        <PanelCard>
+        <FlushView>
           <PeoplePane />
-        </PanelCard>
+        </FlushView>
       ) : shellView === 'calendar' ? (
-        <PanelCard>
+        <FlushView>
           <CalendarPane />
-        </PanelCard>
+        </FlushView>
       ) : (
         <MailRow />
       )}
@@ -135,12 +131,13 @@ export function AppShell() {
       <TitleBar />
       <div className="flex min-h-0 flex-1 bg-chrome">
         <ToolWindowBar />
-        {shellView === 'mail' && !compact ? (
-          /* The working frame: one div gathering the folder pane, the
-             ribbon, the message list, and the reading pane; a barely-there
-             frame, all four corners carved, a half-step right margin
-             standing it off the window's edge. */
-          <div className="mr-1 min-w-0 flex-1 overflow-hidden rounded-xl border border-border-subtle">
+        {/* The working frame, shared by every view: a faint rule, all
+            four corners carved, a half-step right margin standing it off
+            the window's edge. */}
+        <div className="mr-1 min-w-0 flex-1 overflow-hidden rounded-xl border border-border-subtle">
+          {shellView === 'mail' && !compact ? (
+            /* The folder pane resizes against the right zone through the
+               flush handle at the boundary. */
             <Group orientation="horizontal" className="h-full">
               <Panel id="folder-pane" defaultSize={pct(18)} minSize={pct(12)} maxSize={pct(36)}>
                 <div className="h-full bg-background">
@@ -155,23 +152,13 @@ export function AppShell() {
                 </div>
               </Panel>
             </Group>
-          </div>
-        ) : (
-          <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-            <CommandRibbon />
-            {/* The mail view runs flush; the card surface stays for the
-                calendar and people views. */}
-            <main
-              className={
-                shellView === 'mail'
-                  ? 'min-h-0 min-w-0 flex-1'
-                  : 'min-h-0 min-w-0 flex-1 bg-surface p-2'
-              }
-            >
-              {viewContent}
-            </main>
-          </div>
-        )}
+          ) : (
+            <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+              <CommandRibbon />
+              <main className="min-h-0 min-w-0 flex-1 bg-background">{viewContent}</main>
+            </div>
+          )}
+        </div>
       </div>
       <StatusBar />
       <AiPanel />
