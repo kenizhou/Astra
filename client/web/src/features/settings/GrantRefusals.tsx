@@ -63,7 +63,7 @@ export function ReconnectBanner({ rows }: { rows: AccountSettingsRow[] }) {
         <div
           key={row.account}
           role="status"
-          aria-label="Calendar permission missing"
+            aria-label="Calendar permission missing"
           className="flex flex-col items-start gap-2 rounded-[var(--radius-xs)] border border-[var(--warning)]/40 p-3"
         >
           <div className="flex w-full items-start justify-between gap-3">
@@ -73,8 +73,8 @@ export function ReconnectBanner({ rows }: { rows: AccountSettingsRow[] }) {
             </p>
             <button
               type="button"
-          aria-label={`Reconnect the calendar for ${row.address}`}
-          onClick={() => regrant.begin('microsoft', row.address)}
+              aria-label={`Reconnect the calendar for ${row.address}`}
+              onClick={() => regrant.begin('microsoft', row.address)}
               className="shrink-0 rounded-[var(--radius)] bg-secondary px-2.5 py-1 text-xs text-secondary-foreground transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[var(--hit)]"
             >
               Reconnect
@@ -116,8 +116,8 @@ export function ExpiredSignInRow({
       <div className="flex gap-2 pt-1">
         <button
           type="button"
-        aria-label={`Sign in again as ${row.address}`}
-        onClick={() => regrant.begin(regrantProvider(row.kind), row.address)}
+          aria-label={`Sign in again as ${row.address}`}
+          onClick={() => regrant.begin(regrantProvider(row.kind), row.address)}
           className="rounded-[var(--radius)] bg-secondary px-2.5 py-1 text-xs text-secondary-foreground transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[var(--hit)]"
         >
           Sign in again
@@ -129,8 +129,8 @@ export function ExpiredSignInRow({
         )}
         <button
           type="button"
-          aria-label={`Open ${row.address}`}
-          onClick={onOpen}
+            aria-label={`Open ${row.address}`}
+            onClick={onOpen}
           className="rounded-[var(--radius)] border border-border px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[var(--hit)]"
         >
           Open

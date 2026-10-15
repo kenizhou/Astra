@@ -24,12 +24,12 @@
 //! # What a success means
 //!
 //! A Microsoft sign-in completes into an account: the completion runs the
-//! account half ([`super::graph_add`]), which names the account from the
-//! token, dials it, persists the grant, and joins it to the app, and the
-//! success outcome carries what the wizard's sentence shows (the address,
-//! a withheld calendar). Every other provider this build can offer (Google)
-//! still completes with the bare signed-in word, honestly: no account type
-//! consumes its token set until its slice lands.
+//! account half ([`super::graph_add`]) and the Google half
+//! ([`super::google_add`]), which name the account from the token, dial
+//! it, persist the grant, and join it to the app; the success outcome
+//! carries what the wizard's sentence shows (the address, a withheld
+//! calendar). The bare signed-in word stays on the wire for families
+//! without account wiring; no offered provider constructs it.
 //!
 //! # The wiring this module owns
 //!
