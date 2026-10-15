@@ -96,3 +96,37 @@ describe('the appearance store', () => {
     expect(root.dataset.fontSize).toBe('small');
   });
 });
+
+describe('the density axis', () => {
+  it('defaults to comfortable when nothing is stored', () => {
+    expect(useAppearanceStore.getState().density).toBe('comfortable');
+  });
+
+  it('writes the density attribute and its storage key together', () => {
+    useAppearanceStore.getState().setDensity('compact');
+    expect(document.documentElement.dataset.density).toBe('compact');
+    expect(localStorage.getItem('astra.density')).toBe('compact');
+    useAppearanceStore.getState().setDensity('comfortable');
+    expect(document.documentElement.dataset.density).toBe('comfortable');
+  });
+
+  it('hydrates a persisted density on a fresh load', async () => {
+    localStorage.setItem('astra.density', 'compact');
+    vi.resetModules();
+
+    const fresh = await import('./appearance');
+
+    expect(fresh.useAppearanceStore.getState().density).toBe('compact');
+    fresh.applyAppearance();
+    expect(document.documentElement.dataset.density).toBe('compact');
+  });
+
+  it('falls back to comfortable when the stored density is unknown', async () => {
+    localStorage.setItem('astra.density', 'dense');
+    vi.resetModules();
+
+    const fresh = await import('./appearance');
+
+    expect(fresh.useAppearanceStore.getState().density).toBe('comfortable');
+  });
+});

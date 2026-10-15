@@ -18,7 +18,9 @@ import { ReadingHeader } from '@/components/reading-pane/ReadingHeader';
 import { SmartReplies } from '@/components/reading-pane/SmartReplies';
 import { SummaryBlock } from '@/components/reading-pane/SummaryBlock';
 import { TranslateBlock } from '@/components/reading-pane/TranslateBlock';
-import { CloseIcon, MailIcon } from '@/components/icons';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { STATE_CONTENT } from '@/components/ui/stateContent';
+import { MailIcon } from '@/components/icons';
 import { dispatch, intents } from '@/services/ipc';
 import { usePeopleStore } from '@/features/people/peopleStore';
 import { useReadingStore } from '@/stores/readingStore';
@@ -33,14 +35,9 @@ export function ReadingPane() {
     return (
       <aside
         aria-label="Reading pane"
-        className="flex h-full w-full flex-col bg-background"
+        className="flex h-full w-full flex-col bg-[var(--paper)]"
       >
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 p-4">
-          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-primary-muted text-primary">
-            <MailIcon size={24} />
-          </span>
-          <p className="text-sm text-muted-text">Select a message to read it.</p>
-        </div>
+        <EmptyState glyph={<MailIcon size={24} />} message={STATE_CONTENT.readingEmpty!.message} />
         {/* The strip's expanded state stands even with nothing open: the app
             start resume opens its draft here. */}
         <QuickReplyStrip />
@@ -51,23 +48,14 @@ export function ReadingPane() {
   return (
     <aside
       aria-label="Reading pane"
-      className="flex h-full w-full flex-col overflow-hidden bg-background"
+      className="flex h-full w-full flex-col overflow-hidden bg-[var(--paper)]"
     >
-      <div className="flex h-[var(--pane-header-h)] shrink-0 items-center justify-end gap-2 border-b border-border-subtle bg-surface px-3">
-        <button
-          type="button"
-          aria-label="Close reading pane"
-          onClick={() => void dispatch(intents.closeReading())}
-          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-text transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <CloseIcon size={16} />
-        </button>
-      </div>
       <ReadingHeader
         subject={snapshot.subject}
         fromName={snapshot.from_name}
         fromAddress={snapshot.from_address}
         sentAt={snapshot.sent_at}
+        onClose={() => void dispatch(intents.closeReading())}
         onAddContact={() => {
           usePeopleStore.getState().requestContactCreate({
             name: snapshot.from_name,

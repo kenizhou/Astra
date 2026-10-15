@@ -10,11 +10,12 @@
 
 import { useEffect, useState } from 'react';
 
-import { Group, Panel, Separator } from 'react-resizable-panels';
+import { Group, Panel } from 'react-resizable-panels';
 
 import { dispatch, intents } from '@/services/ipc';
 import type { OccurrenceRow } from '@/services/ipc';
 import { pct } from '@/components/layout/panelSizes';
+import { PaneDivider } from '@/components/layout/paneDivider';
 
 import { AgendaView } from './AgendaView';
 import { BriefsPanel } from './BriefsPanel';
@@ -54,7 +55,7 @@ function WriteBanners() {
             type="button"
             aria-label="Retry"
             onClick={() => void dispatch(intents.refreshCalendar())}
-            className="rounded-[var(--radius-xs)] border border-border-subtle px-2 py-0.5 text-xs text-foreground transition-colors hover:bg-hover"
+            className="rounded-[var(--radius-xs)] border border-border-subtle px-2 py-0.5 text-xs text-foreground transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             Retry
           </button>
@@ -75,13 +76,6 @@ function PaneCard({ children }: { children: React.ReactNode }) {
     <div className="flex h-full flex-col overflow-hidden rounded-xl border border-border-subtle bg-card">
       {children}
     </div>
-  );
-}
-
-/** The pill handle between two panels. */
-function VDivider() {
-  return (
-    <Separator className="mx-1 w-1.5 rounded-full bg-border transition-colors hover:bg-primary" />
   );
 }
 
@@ -151,7 +145,7 @@ export function CalendarPane() {
               <CalendarRail />
             </PaneCard>
           </Panel>
-          <VDivider />
+          <PaneDivider />
           <Panel
             id="calendar-grid"
             defaultSize={pct(selectedEvent !== null ? 54 : 80)}
@@ -168,7 +162,7 @@ export function CalendarPane() {
               {view === 'agenda' && <AgendaView onSelectEvent={selectEvent} />}
             </PaneCard>
           </Panel>
-          {selectedEvent !== null && <VDivider />}
+          {selectedEvent !== null && <PaneDivider />}
           {selectedEvent !== null && (
             <Panel id="event-dock" defaultSize={pct(26)} minSize={pct(18)}>
               <PaneCard>

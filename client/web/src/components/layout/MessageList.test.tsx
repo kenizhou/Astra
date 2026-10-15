@@ -139,16 +139,8 @@ describe('the message list', () => {
 
     render(<MessageList />);
 
-    expect(screen.getByText('Quarterly report').className).toContain('font-semibold');
-    expect(screen.getByText('Your weekly digest').className).not.toContain('font-semibold');
-  });
-
-  it('draws the sender monogram from the address initial', () => {
-    applyList({ rows: [digest], visible_limit: 50 });
-
-    render(<MessageList />);
-
-    expect(within(optionWith('Your weekly digest')).getByText('N')).toBeTruthy();
+    expect(screen.getByText('Quarterly report').className).toContain('font-[560]');
+    expect(screen.getByText('Your weekly digest').className).not.toContain('font-[560]');
   });
 
   it('shows the flag and attachment glyphs on a flagged row', () => {

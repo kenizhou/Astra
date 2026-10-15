@@ -114,3 +114,5 @@ LLM 调用、工具调用与权限决定都带关联 id 落入其台账。
 - Windows 文件系统不区分大小写：名字仅大小写不同的兄弟模块（ComposerWindow.tsx 与 composeWindow.ts 并列）会在 vite 的解析里相撞，`./ComposerWindow` 会静默引入小写的那个文件。兄弟文件绝不要取仅差大小写的名字。
 - vitest 的部分模块 mock 无法改写同一模块两个导出之间的调用：真实函数仍走内部绑定，间谍永远不会触发。要么整体 mock 外层函数，要么把调用点移出被 mock 的模块。
 - tiptap 的 `editor.commands` getter 每次访问都重建对象，测试里对 `editor.commands.focus` 的覆盖永远不会生效；改为在 `editor.view.focus` 上插间谍，并记住 focus 命令落在 requestAnimationFrame 里，假定时器会把帧压住直到推进。
+- 门禁遍历工作树,agent 的临时目录会让它因大量外来文件报错:`.gstack`(gstack 的报告与 autoplan 检查点)加入 xtask/src/checks/mod.rs 中 `.superpowers` 所在的跳过列表;同样,任何被跟踪的文件都不得放在那里。
+- vite 别名与按路径直引同一文件会产生两个模块实例、各自独立的状态:夹具台架的 window 句柄(`__ASTRA_FIXTURES__`)之所以存在,是因为按路径导入 harness.ts 的驱动把事件推入了空处,而应用在别名实例上监听。共享的模块状态需要一条通道,而不是两条导入路径。

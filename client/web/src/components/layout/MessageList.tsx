@@ -18,6 +18,9 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 
 import { ListToolbar } from '@/components/message-list/ListToolbar';
 import { MessageRow } from '@/components/message-list/MessageRow';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { STATE_CONTENT } from '@/components/ui/stateContent';
+import { MailIcon } from '@/components/icons';
 import {
   HEADER_ROW_PX,
   flatItems,
@@ -100,7 +103,7 @@ function RowWindow({ items, highlight, now, openRow, showMore }: RowWindowProps)
               {entry.kind === 'header' ? (
                 <div
                   role="presentation"
-                  className="border-b border-border-subtle px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-text"
+                  className="px-3 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wide text-muted-text"
                 >
                   {entry.label}
                 </div>
@@ -120,7 +123,7 @@ function RowWindow({ items, highlight, now, openRow, showMore }: RowWindowProps)
         <button
           type="button"
           onClick={() => void dispatch(intents.showMore())}
-          className="w-full border-t border-border px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          className="w-full px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         >
           Show more
         </button>
@@ -190,7 +193,7 @@ export function MessageList() {
   return (
     <section
       aria-label="Message list"
-      className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background"
+      className="flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-card"
     >
       <ListToolbar
         folderName={folderDisplayName(accounts, folder)}
@@ -205,16 +208,16 @@ export function MessageList() {
         <OutboxQueue account={outboxAccount} />
       ) : searching ? (
         search.rows.length === 0 ? (
-          <p className="p-4 text-sm text-muted-foreground">No results.</p>
+          <EmptyState glyph={<MailIcon size={24} />} message={STATE_CONTENT.searchEmpty!.message} />
         ) : (
           <RowWindow items={flatItems(search.rows)} highlight={highlight} now={now} openRow={openRow} showMore={false} />
         )
       ) : folder === null ? (
-        <p className="p-4 text-sm text-muted-foreground">Select a folder to read its mail.</p>
+        <EmptyState glyph={<MailIcon size={24} />} message={STATE_CONTENT.listNoFolder!.message} />
       ) : !showRows ? (
-        <p className="p-4 text-sm text-muted-foreground">No messages in this folder.</p>
+        <EmptyState glyph={<MailIcon size={24} />} message={STATE_CONTENT.listEmptyFolder!.message} />
       ) : shownRows.length === 0 ? (
-        <p className="p-4 text-sm text-muted-foreground">No messages on this side.</p>
+        <EmptyState glyph={<MailIcon size={24} />} message={STATE_CONTENT.listEmptySide!.message} />
       ) : (
         <RowWindow items={withDateHeaders(shownRows, now)} highlight={highlight} now={now} openRow={openRow} showMore={windowIsFull} />
       )}

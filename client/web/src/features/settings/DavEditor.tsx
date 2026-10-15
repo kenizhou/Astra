@@ -57,7 +57,7 @@ function sectionOf(form: DavForm, baseline: DavForm): DavSectionInput | null {
 }
 
 const fieldClass =
-  'h-7 w-full rounded-[var(--radius-xs)] border border-input bg-background px-2 text-xs text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-ring';
+  'h-7 w-full rounded-full border border-input bg-background px-3 text-xs text-foreground outline-none transition-colors focus:border-primary';
 
 interface DavEditorProps {
   /** The account whose section the editor writes. */
@@ -185,7 +185,7 @@ export function DavEditor({ account, onClose }: DavEditorProps) {
           type="button"
           aria-label="Clear dav section"
           onClick={clear}
-          className="rounded-[var(--radius)] border border-[var(--destructive)] px-2.5 py-1 text-xs text-destructive transition-colors hover:bg-hover"
+          className="rounded-[var(--radius)] border border-[var(--destructive)] px-2.5 py-1 text-xs text-destructive transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[var(--hit)]"
         >
           Clear section
         </button>
@@ -193,7 +193,7 @@ export function DavEditor({ account, onClose }: DavEditorProps) {
           <button
             type="button"
             onClick={onClose}
-            className="rounded-[var(--radius)] border border-border px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+            className="rounded-[var(--radius)] border border-border px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[var(--hit)]"
           >
             Cancel
           </button>
@@ -201,7 +201,7 @@ export function DavEditor({ account, onClose }: DavEditorProps) {
             type="submit"
             aria-label="Save dav section"
             disabled={section === null}
-            className="rounded-[var(--radius)] bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-[var(--radius)] bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[var(--hit)]"
           >
             Save
           </button>

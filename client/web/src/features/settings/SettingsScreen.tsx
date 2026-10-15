@@ -14,6 +14,7 @@ import {
   AboutIcon,
   AdvancedIcon,
   CalendarIcon,
+  CloseIcon,
   ComposeIcon,
   PeopleIcon,
   ReadingIcon,
@@ -144,9 +145,9 @@ export function SettingsScreen() {
                 type="button"
                 aria-label="Close settings"
                 onClick={close}
-                className="rounded-[var(--radius-xs)] px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="flex h-7 w-7 items-center justify-center rounded-md text-muted-text transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
-                Close
+                <CloseIcon size={14} />
               </button>
             </div>
             <div aria-label="Settings detail" className="min-h-0 flex-1 overflow-y-auto p-4">

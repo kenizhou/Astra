@@ -5,6 +5,7 @@ pub(crate) mod british_english;
 pub(crate) mod dash_hygiene;
 pub(crate) mod doc_sync;
 pub(crate) mod file_length;
+pub(crate) mod font_budget;
 pub(crate) mod license_headers;
 pub(crate) mod paths_ascii;
 pub(crate) mod version_sync;
@@ -47,13 +48,17 @@ pub(crate) fn all() -> Vec<Check> {
             name: "doc-sync",
             run: crate::checks::doc_sync::check,
         },
+        Check {
+            name: "font-budget",
+            run: crate::checks::font_budget::check,
+        },
     ]
 }
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const SKIP_DIRS: &[&str] = &[".git", "target", "node_modules", "dist", ".superpowers"];
+const SKIP_DIRS: &[&str] = &[".git", "target", "node_modules", "dist", ".superpowers", ".gstack"];
 
 /// Every file under `root` whose name ends with one of `exts` (all files when
 /// `exts` is empty), skipping build output and the Chinese review copies.

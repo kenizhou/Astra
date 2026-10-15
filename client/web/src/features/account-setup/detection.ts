@@ -88,6 +88,11 @@ function variantEmail(recommendation: SetupRecommendation): string {
   return variant?.email ?? '';
 }
 
+/** The address one recommendation view carries, for the by-hand defaults. */
+export function recommendationEmail(view: RecommendationView): string {
+  return variantEmail(view.recommendation);
+}
+
 /**
  * The manual form's fields behind a recommendation's manual toggle: a found
  * IMAP server prefills the host, port, security, and username it detected;

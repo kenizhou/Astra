@@ -114,7 +114,7 @@ export function TranslateBlock() {
   };
 
   return (
-    <section aria-label="Translate" className="shrink-0 border-b border-border px-4 py-2">
+    <section aria-label="Translate" className="shrink-0 border-b border-border-subtle px-4 py-2">
       {phase === 'error' && (
         <p role="alert" className="mb-1 text-xs text-muted-foreground">
           {error === ''
@@ -128,7 +128,7 @@ export function TranslateBlock() {
           value={lang}
           onChange={(event) => setLang(event.target.value as TranslateLanguage)}
           disabled={phase === 'loading'}
-          className="rounded-[var(--radius-xs)] border border-border bg-background px-1 py-1 text-xs text-foreground outline-none transition-colors focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring"
+          className="rounded-full border border-border bg-background px-2.5 py-1 text-xs text-foreground outline-none transition-colors focus-visible:border-primary"
         >
           {LANGUAGES.map((entry) => (
             <option key={entry.value} value={entry.value}>

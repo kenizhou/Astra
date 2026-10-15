@@ -25,7 +25,7 @@ export function ComposingDetail() {
           onChange={(event) =>
             void dispatch(intents.setQuoteStyle(event.target.value === 'below'))
           }
-          className="h-7 w-full rounded-[var(--radius-xs)] border border-input bg-background px-2 text-xs text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-ring"
+          className="h-7 w-full rounded-full border border-input bg-background px-3 text-xs text-foreground outline-none transition-colors focus:border-primary"
         >
           <option value="below">Quote below the reply</option>
           <option value="above">Quote above the reply</option>

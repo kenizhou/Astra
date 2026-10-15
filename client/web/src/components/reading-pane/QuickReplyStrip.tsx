@@ -30,7 +30,7 @@ export function QuickReplyStrip() {
 
   if (open) {
     return (
-      <div className="flex max-h-[55%] min-h-[220px] shrink-0 flex-col border-t border-border">
+      <div className="flex max-h-[55%] min-h-[220px] shrink-0 flex-col border-t border-border-subtle">
         <ComposerPane />
       </div>
     );
@@ -41,7 +41,7 @@ export function QuickReplyStrip() {
   }
 
   return (
-    <div className="shrink-0 border-t border-border-subtle bg-surface px-3 py-2">
+    <div className="shrink-0 border-t border-border-subtle px-7 py-2">
       <button
         type="button"
         onClick={startQuickReply}

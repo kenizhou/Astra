@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The General detail: the theme picker (follow host, Light, Dark), the
 // clock picker (24 or 12 hour), and the device-local appearance choices
-// (accent skin, contrast, font size). The pickers dispatch their intents
-// and reflect the persisted block, never local optimism, and the persist
-// failure's sentence renders under the controls it belongs to. The
-// appearance choices are different: the persisted settings block has no
-// fields for them, so they write localStorage and the document-root
-// attributes through the appearance store and stay on this device.
+// (accent skin, texture, contrast, font size, density). The pickers
+// dispatch their intents and reflect the persisted block, never local
+// optimism, and the persist failure's sentence renders under the controls
+// it belongs to. The appearance choices are different: the persisted
+// settings block has no fields for them, so they write localStorage and
+// the document-root attributes through the appearance store and stay on
+// this device.
 
 import { dispatch, intents } from '@/services/ipc';
-import { SKINS, useAppearanceStore, type ContrastMode, type FontSizeStep } from '@/services/appearance';
+import { SKINS, useAppearanceStore, type ContrastMode, type DensityMode, type FontSizeStep, type TextureMode } from '@/services/appearance';
 
 import { useSettingsStore } from './settingsStore';
 
@@ -33,12 +34,26 @@ const FONT_SIZES: ReadonlyArray<{ id: FontSizeStep; label: string }> = [
   { id: 'large', label: 'Large' },
 ];
 
+/** The density steps: comfortable is the default; compact tightens the axis. */
+const DENSITIES: ReadonlyArray<{ id: DensityMode; label: string }> = [
+  { id: 'comfortable', label: 'Comfortable' },
+  { id: 'compact', label: 'Compact' },
+];
+
+/** The texture steps: warm is the default; calm its quiet sibling; classic
+ *  the pre-texture cool slate. */
+const TEXTURES: ReadonlyArray<{ id: TextureMode; label: string }> = [
+  { id: 'warm', label: 'Warm' },
+  { id: 'calm', label: 'Calm' },
+  { id: 'classic', label: 'Classic' },
+];
+
 /** The sentence a refused persist draws. */
 export const PERSIST_SENTENCE = 'The change could not be saved. Try again.';
 
 /** The select chrome every picker in the detail shares. */
 const fieldClass =
-  'h-7 w-full rounded-[var(--radius-xs)] border border-input bg-background px-2 text-xs text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-ring';
+  'h-7 w-full rounded-full border border-input bg-background px-3 text-xs text-foreground outline-none transition-colors focus:border-primary';
 
 /** One labelled picker row. */
 function Picker({
@@ -135,7 +150,7 @@ function SkinSwatches() {
                 style={{ background: entry.swatch }}
               />
               <span
-                className={`text-[10px] font-medium ${selected ? 'text-primary' : 'text-muted-foreground'}`}
+                className={`text-[11px] font-medium ${selected ? 'text-primary' : 'text-muted-foreground'}`}
               >
                 {entry.label}
               </span>
@@ -155,6 +170,10 @@ export function GeneralDetail() {
   const setContrast = useAppearanceStore((s) => s.setContrast);
   const fontSize = useAppearanceStore((s) => s.fontSize);
   const setFontSize = useAppearanceStore((s) => s.setFontSize);
+  const density = useAppearanceStore((s) => s.density);
+  const setDensity = useAppearanceStore((s) => s.setDensity);
+  const texture = useAppearanceStore((s) => s.texture);
+  const setTexture = useAppearanceStore((s) => s.setTexture);
 
   return (
     <section aria-label="General settings" className="flex flex-col gap-4">
@@ -183,8 +202,10 @@ export function GeneralDetail() {
         Appearance (this device only)
       </h3>
       <SkinSwatches />
+      <Segmented label="Texture" value={texture} options={TEXTURES} onChange={setTexture} />
       <Segmented label="Contrast" value={contrast} options={CONTRASTS} onChange={setContrast} />
       <Segmented label="Font size" value={fontSize} options={FONT_SIZES} onChange={setFontSize} />
+      <Segmented label="Density" value={density} options={DENSITIES} onChange={setDensity} />
     </section>
   );
 }

@@ -23,7 +23,7 @@ export function AttachmentList({ attachments }: { attachments: AttachmentRow[] }
     return null;
   }
   return (
-    <div aria-label="Attachments" className="shrink-0 border-t border-border">
+    <div aria-label="Attachments" className="shrink-0 border-t border-border-subtle">
       {attachments.map((attachment) => (
         <div
           key={attachment.id}

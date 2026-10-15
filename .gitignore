@@ -7,3 +7,6 @@ dist/
 /client/desktop/gen/
 # The staged externalBin copy of astra-cli (client/desktop/scripts/stage-cli.mjs).
 /client/desktop/bin/
+
+# gstack skill reports (browse, qa, design-review).
+.gstack/

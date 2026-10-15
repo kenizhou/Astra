@@ -4,12 +4,30 @@
  * never by raw colour, so the shell restyles entirely through this file.
  */
 
+/* The bundled UI face: Inter Variable, latin subset, one woff2 covering the
+   whole weight axis so the 380/450/560 stops resolve everywhere, not only on
+   Windows. Vendored from @fontsource-variable/inter 5.3.0 (OFL); sha256 of
+   the file: 3100e775e8616cd2611beecfa23a4263d7037586789b43f035236a2e6fbd4c62.
+   The xtask font-budget check keeps this file under 400KB. */
+@font-face {
+  font-family: 'Inter Variable';
+  src: url('/fonts/inter/inter-latin-wght-normal.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root,
 .light {
-  /* Typography; system stacks only, the app runs fully offline. */
+  /* Native widgets (scrollbars, checkboxes, form controls) follow the theme. */
+  color-scheme: light;
+
+  /* Typography: the bundled Inter leads, so the 380/450/560 weight stops
+     resolve on every platform offline. CJK falls through to the system
+     stack (Inter's latin subset carries no CJK glyphs). */
   --font-ui:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
-    'Microsoft YaHei', 'Noto Sans SC', system-ui, sans-serif;
+    'Inter Variable', 'Segoe UI Variable Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', system-ui, sans-serif;
   --font-serif: Georgia, Cambria, 'Times New Roman', serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Courier New', monospace;
 
@@ -88,11 +106,10 @@
   /* Glass chrome stays flat and opaque in light mode; dark adds the sheen. */
   --chrome-glass: var(--chrome);
 
-  /* Layout sizing. */
-  --header-h: 44px;
-  --tool-w: 64px;
-  --status-h: 36px;
-  --ribbon-h: 56px;
+  /* Layout sizing: the A3 geometry; the bars step down in tone, not lines. */
+  --header-h: 38px;
+  --tool-w: 54px;
+  --status-h: 26px;
   --drawer-w: 260px;
   --pane-header-h: 32px;
   --row-h: 28px;
@@ -136,6 +153,8 @@
 }
 
 .dark {
+  color-scheme: dark;
+
   /* Neutral series reversed: deep graphite-navy, never pure black. */
   --series-50: oklch(0.165 0.01 258);
   --series-100: oklch(0.205 0.012 258);
@@ -216,6 +235,84 @@
     0 12px 24px -6px color-mix(in srgb, var(--shadow-color) 45%, transparent);
 }
 
+/* The texture axis (the UI1 texture chapter): the adopted A3 "Warm,
+   sharper" execution is the default, calm its hue-260 sibling, and
+   classic the pre-texture cool slate (the base file's own values, so it
+   carries no override block). appearance.ts owns the document-root
+   attribute; the General settings page exposes the choice. The paper
+   step keeps the reading pane visibly lighter than the canvas. These
+   blocks sit ahead of the high-contrast overrides so high contrast
+   always flattens the texture. */
+:root {
+  --paper: var(--background);
+}
+
+[data-texture='warm'].light {
+  /* Honest parchment, with the working panes grounded in a light grey
+     field bright enough for the rules to read against it. */
+  --series-50: oklch(0.975 0.01 90);
+  --series-100: oklch(0.955 0.014 90);
+  --series-200: oklch(0.918 0.018 90);
+  --background: oklch(0.96 0.004 90);
+  --surface: oklch(0.925 0.02 90);
+  --card: oklch(0.99 0.007 90);
+  --paper: var(--card);
+  /* The two-level border language, darkened for the bright field: a faint
+     --border-subtle on the chrome, the sharper --hairline on rows and
+     pane separations. */
+  --border-subtle: oklch(0.85 0.012 90);
+  --hairline: oklch(0.72 0.018 90);
+}
+
+[data-texture='warm'].dark {
+  /* Warm graphite: the neutral series shifts from hue 258 to hue 60 at
+     very low chroma (warm, never brown). */
+  --series-50: oklch(0.165 0.01 60);
+  --series-100: oklch(0.205 0.014 60);
+  --series-200: oklch(0.258 0.017 60);
+  --series-300: oklch(0.335 0.019 60);
+  --series-400: oklch(0.455 0.02 60);
+  --series-500: oklch(0.56 0.022 60);
+  --series-600: oklch(0.712 0.018 60);
+  --series-700: oklch(0.8 0.015 60);
+  --series-800: oklch(0.88 0.011 60);
+  --series-900: oklch(0.94 0.009 60);
+  --series-950: oklch(0.975 0.005 60);
+
+  --paper: oklch(0.255 0.019 60);
+  --hairline: oklch(0.44 0.018 60);
+}
+
+[data-texture='calm'].light {
+  /* Cool porcelain: the warmth dialled out, the same quiet steps. */
+  --series-50: oklch(0.978 0.003 260);
+  --series-100: oklch(0.96 0.004 260);
+  --series-200: oklch(0.925 0.005 260);
+  --background: oklch(0.96 0.004 260);
+  --surface: oklch(0.935 0.005 260);
+  --card: oklch(0.99 0.002 260);
+  --paper: var(--card);
+  --hairline: oklch(0.8 0.006 260);
+}
+
+[data-texture='calm'].dark {
+  /* True-neutral graphite at hue 260: precision carries the register. */
+  --series-50: oklch(0.165 0.004 260);
+  --series-100: oklch(0.205 0.005 260);
+  --series-200: oklch(0.258 0.006 260);
+  --series-300: oklch(0.335 0.007 260);
+  --series-400: oklch(0.455 0.008 260);
+  --series-500: oklch(0.56 0.009 260);
+  --series-600: oklch(0.712 0.008 260);
+  --series-700: oklch(0.8 0.007 260);
+  --series-800: oklch(0.88 0.005 260);
+  --series-900: oklch(0.93 0.004 260);
+  --series-950: oklch(0.972 0.003 260);
+
+  --paper: oklch(0.25 0.006 260);
+  --hairline: oklch(0.42 0.006 260);
+}
+
 /* High contrast, ported from kylins and adapted to this file's token set:
    pure black on white with evenly spaced grays, every tint and shadow
    flattened so edges stay crisp. The attribute sits on the document root
@@ -237,6 +334,7 @@
   --background: #ffffff;
   --foreground: #000000;
   --surface: #ffffff;
+  --paper: #ffffff;
   --chrome: color-mix(in srgb, var(--primary) 8%, #f0f0f0);
   --card: #ffffff;
   --muted: #ffffff;
@@ -291,6 +389,7 @@
   --background: #000000;
   --foreground: #ffffff;
   --surface: #000000;
+  --paper: #000000;
   --chrome: color-mix(in srgb, var(--primary) 12%, #1a1a1a);
   --card: #000000;
   --muted: #000000;
@@ -344,4 +443,44 @@
 html[data-font-size] body,
 html[data-font-size] #root {
   font-size: var(--text-base);
+}
+
+/* The density axis (the UI1 slice): one document-root attribute drives row
+   heights, hit floors, and pane padding. Comfortable is the default,
+   including before the attribute lands. Rows are floors: content taller
+   than the step grows the row, never truncates it. */
+:root:not([data-density]),
+[data-density='comfortable'] {
+  --row-h: 28px;
+  --hit: 28px;
+  --pane-pad: 12px;
+}
+
+[data-density='compact'] {
+  --row-h: 24px;
+  --hit: 24px;
+  --pane-pad: 8px;
+}
+
+/* The motion scale: the only durations. --ease-spring belongs to the
+   command palette alone; nothing else may ease with it. */
+:root {
+  --dur-fast: 100ms;
+  --dur-row: 120ms;
+  --dur-view: 140ms;
+  --dur-panel: 160ms;
+}
+
+/* The account palette (UI1 D4): the eight defaults, assigned in rotation
+   over the account order; the extension policy lives in
+   docs/design-system.md. The hues mirror the skin swatches. */
+:root {
+  --account-1: #7a6ff0;
+  --account-2: #0a59f7;
+  --account-3: #6366f1;
+  --account-4: #f43f5e;
+  --account-5: #10b981;
+  --account-6: #f59e0b;
+  --account-7: #8b5cf6;
+  --account-8: #f97316;
 }

@@ -80,7 +80,6 @@ describe('the title bar double-click maximise', () => {
     fireEvent.doubleClick(screen.getByRole('button', { name: 'Maximise' }));
     fireEvent.doubleClick(screen.getByRole('button', { name: 'Close window' }));
     fireEvent.doubleClick(screen.getByRole('button', { name: 'Open agent panel' }));
-    fireEvent.doubleClick(screen.getByRole('button', { name: 'File' }));
     fireEvent.doubleClick(screen.getByLabelText('Search mail'));
 
     expandIsland();

@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The ribbon's building blocks: a group of buttons separated from the next
-// group by a hairline, and the button itself, labelled by text beside its
-// icon or, under the compact breakpoint, by its tooltip alone. A group
-// never wraps: when space runs out the shell clips whole trailing groups.
+// The ribbon's building blocks: a group of buttons spaced from the next
+// group by its padding alone (the A3 chrome draws no separators), and the
+// button itself, labelled by text beside its icon or, under the compact
+// breakpoint, by its tooltip alone. A group never wraps: when space runs
+// out the shell clips whole trailing groups.
 
 import type { ComponentType } from 'react';
 
 import type { IconProps } from '@/components/icons';
 
-/** One cluster of ribbon buttons, hairline-separated from the next. */
+/** One cluster of ribbon buttons; spacing alone parts it from the next. */
 export function RibbonGroup({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex shrink-0 flex-nowrap items-center gap-0.5 border-r border-border-subtle px-1.5 last:border-r-0">
+    <div className="flex shrink-0 flex-nowrap items-center gap-0.5 px-1.5">
       {children}
     </div>
   );
@@ -48,13 +49,13 @@ export function RibbonButton({
       title={title ?? label}
       disabled={disabled}
       onClick={onClick}
-      className={`my-auto flex h-9 items-center gap-1.5 rounded-md text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-50 ${
+      className={`flex h-7 shrink-0 items-center gap-1.5 rounded-[var(--radius-xs)] text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-50 ${
         primary
           ? 'bg-primary px-2.5 font-medium text-primary-foreground hover:bg-primary-hover disabled:hover:bg-primary'
           : 'px-2 text-muted-text hover:bg-hover hover:text-foreground disabled:hover:bg-transparent disabled:hover:text-muted-text'
-      } ${iconOnly ? 'w-9 justify-center px-0' : ''}`}
+      } ${iconOnly ? 'w-7 justify-center px-0' : ''}`}
     >
-      <Icon size={16} />
+      <Icon size={14} />
       <span className={`whitespace-nowrap ${iconOnly ? 'sr-only' : ''}`}>{label}</span>
     </button>
   );

@@ -22,6 +22,7 @@ import { addDays, dayKeyOf } from './calendarRange';
 import { localDelta, localSlotValue, localValueOf } from './localDateTime';
 import { useCalendarStore } from './calendarStore';
 import { useSettingsStore } from '@/features/settings/settingsStore';
+import { useDialogFocus } from '@/components/ui/useDialogFocus';
 import { DeleteChoice, SeriesWarning } from './EventDialogSteps';
 
 /** The repeat choices a create offers. */
@@ -35,7 +36,7 @@ const REPEATS: ReadonlyArray<{ id: Frequency | 'none'; label: string }> = [
 
 /** The field chrome every input shares. */
 function fieldClass(): string {
-  return 'h-7 w-full rounded-[var(--radius-xs)] border border-input bg-background px-2 text-xs text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-ring';
+  return 'h-7 w-full rounded-full border border-input bg-background px-3 text-xs text-foreground outline-none transition-colors focus:border-primary';
 }
 
 interface EventDialogProps {
@@ -239,12 +240,33 @@ export function EventDialog({ row, slot = null, onClose }: EventDialogProps) {
     onClose();
   };
 
+  // The dialog owns its dismissal: Escape closes it here and never bubbles
+  // to the pane's clearSelection, and a click on the backdrop's own ground
+  // closes it. The focus discipline rides the shared hook.
+  const dialogRef = useDialogFocus<HTMLDivElement>();
+
   return (
-    <div className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--backdrop)] p-4">
+    <div
+      className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--backdrop)] p-4"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
       <div
         role="dialog"
+        aria-modal="true"
         aria-label={title}
-        className="flex max-h-full w-[420px] flex-col overflow-y-auto rounded-xl border border-border-subtle bg-card p-5 shadow-[var(--shadow-lg)]"
+        ref={dialogRef}
+        tabIndex={-1}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            event.stopPropagation();
+            onClose();
+          }
+        }}
+        className="flex max-h-full w-[420px] flex-col overflow-y-auto rounded-xl border border-border-subtle bg-card p-5 shadow-[var(--shadow-lg)] focus-visible:outline-none"
       >
         <h2 className="mb-3 text-sm font-semibold text-foreground">{title}</h2>
 
@@ -396,7 +418,7 @@ export function EventDialog({ row, slot = null, onClose }: EventDialogProps) {
                 value={notes}
                 onChange={(event) => setNotes(event.target.value)}
                 placeholder={editing ? 'Leave empty to keep' : ''}
-                className="min-h-[56px] w-full rounded-[var(--radius-xs)] border border-input bg-background px-2 py-1 text-xs text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-ring"
+                className="min-h-[56px] w-full rounded-xl border border-input bg-background px-3 py-1 text-xs text-foreground outline-none transition-colors focus:border-primary"
               />
             </label>
 
@@ -438,7 +460,7 @@ export function EventDialog({ row, slot = null, onClose }: EventDialogProps) {
                       ? setDeleteChoice(true)
                       : remove(false)
                   }
-                  className="rounded-[var(--radius)] border border-[var(--destructive)] px-2.5 py-1 text-xs text-destructive transition-colors hover:bg-hover"
+                  className="rounded-[var(--radius)] border border-[var(--destructive)] px-2.5 py-1 text-xs text-destructive transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[var(--hit)]"
                 >
                   Delete
                 </button>
@@ -449,7 +471,7 @@ export function EventDialog({ row, slot = null, onClose }: EventDialogProps) {
                 <button
                   type="button"
                   onClick={onClose}
-                  className="rounded-[var(--radius)] border border-border-subtle px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+                  className="rounded-[var(--radius)] border border-border-subtle px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[var(--hit)]"
                 >
                   Cancel
                 </button>
@@ -459,7 +481,7 @@ export function EventDialog({ row, slot = null, onClose }: EventDialogProps) {
                   // With no writable calendar there is nothing to save into:
                   // the note says so rather than a save that silently no-ops.
                   disabled={!editing && writable.length === 0}
-                  className="rounded-[var(--radius)] bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground shadow-[var(--shadow-sm)] transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-[var(--radius)] bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground shadow-[var(--shadow-sm)] transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[var(--hit)]"
                 >
                   Save
                 </button>

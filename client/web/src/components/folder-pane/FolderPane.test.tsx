@@ -166,3 +166,48 @@ describe('the outbox row', () => {
     expect(useFolderStore.getState().selected).toEqual({ account: 'work', key: 'Sent' });
   });
 });
+
+describe('the Unified inbox row', () => {
+  it('leads the pane with the summed badge when two or more accounts exist', () => {
+    render(<FolderPane />);
+
+    const row = screen.getByRole('treeitem', { name: /Unified inbox/ });
+    expect(row.getAttribute('aria-disabled')).toBe('true');
+    const expected = fixture.account_folders
+      .flatMap((a) => a.folders)
+      .filter((f) => f.role !== 'junk' && f.role !== 'trash')
+      .reduce((total, f) => total + f.unread, 0);
+    expect(row.textContent).toContain(String(expected));
+  });
+
+  it('stays away while fewer than two accounts exist', () => {
+    useFolderStore.setState({
+      accounts: [fixture.account_folders[0]!],
+      selected: null,
+      outboxAccount: null,
+    });
+    render(<FolderPane />);
+
+    expect(screen.queryByRole('treeitem', { name: /Unified inbox/ })).toBeNull();
+  });
+
+  it('describes its future to keyboard and screen-reader users', () => {
+    render(<FolderPane />);
+
+    const row = screen.getByRole('treeitem', { name: /Unified inbox/ });
+    const describedBy = row.getAttribute('aria-describedby');
+    expect(describedBy).toBeTruthy();
+    expect(document.getElementById(describedBy!)!.textContent).toContain('SP2p');
+  });
+});
+
+describe('the account dots', () => {
+  it('marks each account header with its palette dot', () => {
+    render(<FolderPane />);
+
+    const work = screen.getByRole('region', { name: 'work@example.net' });
+    const dots = work.querySelectorAll('[data-account-dot]');
+    expect(dots).toHaveLength(1);
+    expect((dots[0] as HTMLElement).style.background).toContain('--account-');
+  });
+});

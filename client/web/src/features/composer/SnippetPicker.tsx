@@ -119,7 +119,7 @@ export function SnippetPicker({ onInsert }: SnippetPickerProps) {
             placeholder="Search snippets"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            className="w-full rounded-[var(--radius-xs)] border border-border bg-background px-2 py-1 text-xs text-foreground outline-none transition-colors focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring"
+            className="w-full rounded-full border border-border bg-background px-3 py-1 text-xs text-foreground outline-none transition-colors focus-visible:border-primary"
           />
           <div className="flex max-h-64 flex-col gap-0.5 overflow-y-auto">
             {rows.length === 0 && settled && (

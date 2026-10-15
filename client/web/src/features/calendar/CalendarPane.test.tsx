@@ -228,6 +228,29 @@ describe('the event detail dock', () => {
     expect(screen.queryByLabelText('Event detail')).toBeNull();
   });
 
+  it('Escape in the create dialog closes it without clearing the docked pick', () => {
+    useCalendarStore.setState({ occurrences: [occurrence()] });
+    render(<CalendarPane />);
+
+    fireEvent.click(screen.getByText('Standup'));
+    fireEvent.click(screen.getByRole('button', { name: 'New event' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+
+    expect(screen.queryByRole('dialog')).toBeNull();
+    // The docked pick stands: the dialog's Escape never reaches the pane.
+    expect(screen.getByLabelText('Event detail')).toBeTruthy();
+  });
+
+  it('moves the focus into the dialog when it opens', () => {
+    useCalendarStore.setState({ occurrences: [occurrence()] });
+    render(<CalendarPane />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'New event' }));
+
+    expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(true);
+  });
+
   it('opens the editor from the dock Edit action', () => {
     useCalendarStore.setState({ occurrences: [occurrence()] });
     render(<CalendarPane />);

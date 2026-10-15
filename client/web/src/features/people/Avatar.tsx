@@ -19,6 +19,29 @@ interface AvatarProps {
   size?: number;
 }
 
+/** The monogram's readable foreground: dark ink over a light palette
+ *  colour, white over a dark one, derived from the colour's luminance.
+ *  The two literals are the contrast answer, not theme tokens: the circle
+ *  wears the palette in both themes. */
+export function monogramForeground(colour: string | undefined): string {
+  if (colour === undefined) {
+    // No palette colour: the circle wears --muted, so the muted ink reads.
+    return 'var(--muted-foreground)';
+  }
+  const match = colour.match(/^#?([0-9a-f]{6})$/i);
+  if (match === null) {
+    // An unparseable colour cannot derive its ink; white reads on the
+    // saturated values the palette actually sends.
+    return '#ffffff';
+  }
+  const packed = parseInt(match[1]!, 16);
+  const r = (packed >> 16) & 255;
+  const g = (packed >> 8) & 255;
+  const b = packed & 255;
+  const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  return luminance > 0.6 ? '#1c1917' : '#ffffff';
+}
+
 /** A stroke-drawn person glyph for the monogram with no initials. */
 function PersonGlyph() {
   return (
@@ -79,11 +102,12 @@ export function Avatar({ monogram, address, size = 32 }: AvatarProps) {
     <span
       role="img"
       aria-label="Avatar"
-      className="flex shrink-0 select-none items-center justify-center overflow-hidden rounded-full text-xs font-semibold text-white"
+      className="flex shrink-0 select-none items-center justify-center overflow-hidden rounded-full text-xs font-semibold"
       style={{
         width: size,
         height: size,
         backgroundColor: drawn?.colour ?? 'var(--muted)',
+        color: monogramForeground(drawn?.colour),
       }}
     >
       {photo !== undefined ? (

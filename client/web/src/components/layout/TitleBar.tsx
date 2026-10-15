@@ -3,18 +3,16 @@
 // click on one of the dedicated drag regions toggles maximise. The handler
 // lives on the regions alone, never on the header: a double click on a button
 // bubbles to the header, and an answer there would net the control an extra
-// toggle on top of its own clicks. The product name, the application menus,
-// the ambient island, the theme override cycle, the account setup entry, and
-// the settings gear sit on the strip as their own no-drag targets by virtue
-// of being the event's target rather than the region itself. The island
-// holds the strip's centre between two drag regions, the menus ride beside
-// the product name. The strip wears the glass treatment with a primary
-// hairline along its bottom edge.
+// toggle on top of its own clicks. The product name, the ambient island, the
+// theme override cycle, the account setup entry, and the settings gear sit
+// on the strip as their own no-drag targets by virtue of being the event's
+// target rather than the region itself. The island holds the strip's centre
+// between two drag regions. The strip wears the glass treatment with no
+// underline: the tonal step and the carved junctions carry the separation.
 
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
 import { MoonIcon, PlusIcon, SettingsIcon, SunIcon } from '@/components/icons';
-import { MenuBar } from '@/components/ui/MenuBar';
 import { WindowTitleControls } from '@/components/ui/WindowTitleControls';
 import { dispatch, intents } from '@/services/ipc';
 import { nextThemeMode, useUiStore } from '@/stores/uiStore';
@@ -55,12 +53,10 @@ export function TitleBar() {
       <span
         data-tauri-drag-region
         onDoubleClick={toggleMaximise}
-        className="text-[13px] font-semibold"
+        className="whitespace-nowrap text-[13px] font-semibold"
       >
         Astra Mail
       </span>
-
-      <MenuBar />
 
       <div
         data-tauri-drag-region
@@ -115,7 +111,6 @@ export function TitleBar() {
       </button>
 
       <WindowTitleControls />
-      <span aria-hidden="true" className="absolute inset-x-0 bottom-0 h-px bg-primary opacity-40" />
     </header>
   );
 }

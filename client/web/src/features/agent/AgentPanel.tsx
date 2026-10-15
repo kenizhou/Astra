@@ -11,7 +11,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { useAgentStore, type AgentMessage } from './agentStore';
-import { AgentIcon } from '@/components/icons';
+import { AgentIcon, CloseIcon } from '@/components/icons';
 import { RAIL_BUTTON_CLASS, railButtonColours } from '@/components/layout/railButton';
 import { useUiStore } from '@/stores/uiStore';
 import type { PendingApproval } from '@/services/agent';
@@ -90,6 +90,7 @@ export function AgentPanel() {
   const abort = useAgentStore((s) => s.abort);
   const [draft, setDraft] = useState('');
   const logEnd = useRef<HTMLDivElement>(null);
+  const draftRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     // The log follows the newest entry, so a streaming turn stays visible.
@@ -113,6 +114,10 @@ export function AgentPanel() {
   const send = (): void => {
     void sendPrompt(draft);
     setDraft('');
+    // The cleared draft leaves the grown box tall; bring it back to one row.
+    if (draftRef.current !== null) {
+      draftRef.current.style.height = 'auto';
+    }
   };
 
   return (
@@ -129,9 +134,9 @@ export function AgentPanel() {
           type="button"
           aria-label="Close agent"
           onClick={() => useUiStore.getState().setAgentOpen(false)}
-          className={actionClass}
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-text transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          Close
+          <CloseIcon size={14} />
         </button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
@@ -161,20 +166,37 @@ export function AgentPanel() {
         </div>
       )}
       <form
-        className="flex shrink-0 items-center gap-1 border-t border-border px-2 py-2"
+        className="flex shrink-0 items-end gap-1 border-t border-border px-2 py-2"
         onSubmit={(event) => {
           event.preventDefault();
           send();
         }}
       >
-        <input
-          type="text"
+        <textarea
+          ref={draftRef}
           aria-label="Message the agent"
           value={draft}
           disabled={turn !== null}
-          onChange={(event) => setDraft(event.target.value)}
+          rows={1}
+          onChange={(event) => {
+            setDraft(event.target.value);
+            // Auto-grow to the content, capped so a long paste scrolls
+            // instead of swallowing the log.
+            const el = event.target;
+            el.style.height = 'auto';
+            el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+          }}
+          onKeyDown={(event) => {
+            // Enter sends, Shift+Enter breaks the line: the chat idiom.
+            if (event.key === 'Enter' && !event.shiftKey) {
+              event.preventDefault();
+              if (turn === null && draft.trim() !== '') {
+                send();
+              }
+            }
+          }}
           placeholder={turn !== null ? 'The agent is answering' : 'Ask the agent'}
-          className="min-w-0 flex-1 rounded-[var(--radius-xs)] border border-border bg-surface px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="scrollbar-none max-h-[120px] min-w-0 flex-1 resize-none rounded-xl border border-border bg-surface px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:border-primary"
         />
         {turn === null ? (
           <button type="submit" className={actionClass}>

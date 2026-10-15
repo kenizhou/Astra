@@ -25,8 +25,10 @@ import {
 } from '@/services/ipc';
 import { isTauri } from '@/events/surfaceEvents';
 import { useUiStore } from '@/stores/uiStore';
+import { useDialogFocus } from '@/components/ui/useDialogFocus';
 import { buildAccountToml } from './accountToml';
 import { DetectStep } from './DetectStep';
+import { CertificateOffer } from './CertificateOffer';
 import { OAuthOffer, type OAuthFlowState } from './OAuthOffer';
 import { RecommendationPanel } from './RecommendationPanel';
 import {
@@ -36,6 +38,7 @@ import {
   manualDefaults,
   manualPrefill,
   missNote,
+  recommendationEmail,
   type MissReason,
   type SetupFields,
 } from './detection';
@@ -141,6 +144,10 @@ export function AccountSetupFlow() {
     };
   }, [open]);
 
+  // The dialog owns its dismissal: Escape and a click on the backdrop's own
+  // ground close it; the focus discipline rides the shared hook.
+  const dialogRef = useDialogFocus<HTMLDivElement>(open);
+
   if (!open) {
     return null;
   }
@@ -231,6 +238,14 @@ export function AccountSetupFlow() {
     }
   };
 
+  // The by-hand route carries only the address: nothing discovered crosses,
+  // so an untrusted lookup's settings never reach the form through it.
+  const onByHandFromRecommendation = () => {
+    if (view !== null) {
+      goManual(manualDefaults(recommendationEmail(view)), null);
+    }
+  };
+
   const set = (key: keyof SetupFields) => (value: string) => {
     setFields((prev) => ({ ...prev, [key]: value }));
     setTested(null);
@@ -297,12 +312,27 @@ export function AccountSetupFlow() {
   };
 
   return (
-    <div className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--backdrop)]">
+    <div
+      className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--backdrop)]"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) {
+          close();
+        }
+      }}
+    >
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="account-setup-title"
-        className="w-[26rem] rounded-[var(--radius)] border border-border bg-card p-5 shadow-[var(--shadow-lg)]"
+        ref={dialogRef}
+        tabIndex={-1}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            event.stopPropagation();
+            close();
+          }
+        }}
+        className="w-[26rem] rounded-[var(--radius)] border border-border bg-card p-5 shadow-[var(--shadow-lg)] focus-visible:outline-none"
       >
         <h2 id="account-setup-title" className="mb-1 text-[15px] font-semibold text-card-foreground">
           Add an account
@@ -321,7 +351,12 @@ export function AccountSetupFlow() {
         )}
 
         {step === 'recommendation' && view !== null && (
-          <RecommendationPanel view={view} onCancel={close} onManual={onManualFromRecommendation} />
+          <RecommendationPanel
+            view={view}
+            onBack={() => setStep('detect')}
+            onByHand={onByHandFromRecommendation}
+            onManual={onManualFromRecommendation}
+          />
         )}
 
         {step === 'manual' && (
@@ -348,7 +383,7 @@ export function AccountSetupFlow() {
                   autoComplete="off"
                   spellCheck={false}
                   placeholder="imap.example.net"
-                  className="rounded-[var(--radius-xs)] border border-input bg-background px-2 py-1.5 text-[13px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="rounded-full border border-input bg-background px-3 py-1.5 text-[13px] text-foreground outline-none transition-colors focus-visible:border-primary"
                 />
               </label>
               <div className="grid grid-cols-2 gap-3">
@@ -359,7 +394,7 @@ export function AccountSetupFlow() {
                     onChange={(e) => set('port')(e.target.value)}
                     inputMode="numeric"
                     autoComplete="off"
-                    className="rounded-[var(--radius-xs)] border border-input bg-background px-2 py-1.5 text-[13px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="rounded-full border border-input bg-background px-3 py-1.5 text-[13px] text-foreground outline-none transition-colors focus-visible:border-primary"
                   />
                 </label>
                 <label className="grid gap-1 text-xs text-muted-foreground">
@@ -367,7 +402,7 @@ export function AccountSetupFlow() {
                   <select
                     value={fields.security}
                     onChange={(e) => set('security')(e.target.value)}
-                    className="rounded-[var(--radius-xs)] border border-input bg-background px-2 py-1.5 text-[13px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="rounded-full border border-input bg-background px-3 py-1.5 text-[13px] text-foreground outline-none transition-colors focus-visible:border-primary"
                   >
                     <option value="implicit_tls">SSL/TLS</option>
                     <option value="start_tls">STARTTLS</option>
@@ -381,7 +416,7 @@ export function AccountSetupFlow() {
                   onChange={(e) => set('username')(e.target.value)}
                   autoComplete="off"
                   spellCheck={false}
-                  className="rounded-[var(--radius-xs)] border border-input bg-background px-2 py-1.5 text-[13px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="rounded-full border border-input bg-background px-3 py-1.5 text-[13px] text-foreground outline-none transition-colors focus-visible:border-primary"
                 />
               </label>
               <label className="grid gap-1 text-xs text-muted-foreground">
@@ -391,36 +426,14 @@ export function AccountSetupFlow() {
                   value={fields.password}
                   onChange={(e) => set('password')(e.target.value)}
                   autoComplete="new-password"
-                  className="rounded-[var(--radius-xs)] border border-input bg-background px-2 py-1.5 text-[13px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="rounded-full border border-input bg-background px-3 py-1.5 text-[13px] text-foreground outline-none transition-colors focus-visible:border-primary"
                 />
               </label>
+              <p className="-mt-2 text-[11px] text-muted-foreground">
+                Your password goes to the system keychain, never to a log file.
+              </p>
 
-              {certificate !== null && (
-                <div className="rounded-[var(--radius-xs)] border border-warning bg-accent p-3 text-xs">
-                  <p className="font-medium text-foreground">
-                    The server&apos;s certificate could not be verified
-                  </p>
-                  <dl className="mt-2 grid gap-1">
-                    <div className="flex justify-between gap-2">
-                      <dt className="text-muted-foreground">Server</dt>
-                      <dd className="font-mono">{certificate.server_name}</dd>
-                    </div>
-                    <div className="flex justify-between gap-2">
-                      <dt className="text-muted-foreground">Fingerprint</dt>
-                      <dd className="break-all font-mono">{certificate.sha256}</dd>
-                    </div>
-                    {certificate.subject_common_name !== null && (
-                      <div className="flex justify-between gap-2">
-                        <dt className="text-muted-foreground">Claims to be</dt>
-                        <dd className="font-mono">{certificate.subject_common_name}</dd>
-                      </div>
-                    )}
-                  </dl>
-                  <p className="mt-2 text-muted-foreground">
-                    Accepting trusts this one certificate for this one server, and only here.
-                  </p>
-                </div>
-              )}
+              {certificate !== null && <CertificateOffer certificate={certificate} />}
 
               {error !== null && (
                 <p role="alert" className="text-xs text-error">
@@ -428,14 +441,14 @@ export function AccountSetupFlow() {
                 </p>
               )}
               {tested !== null && (
-                <p className="text-xs text-success">The connection works. Ready to add.</p>
+                <p role="status" className="text-xs text-success">The connection works. Ready to add.</p>
               )}
 
               <div className="mt-1 flex items-center justify-between gap-2">
                 <button
                   type="button"
                   onClick={close}
-                  className="rounded-[var(--radius-xs)] px-3 py-1.5 text-[13px] text-muted-foreground hover:bg-hover hover:text-foreground"
+                  className="rounded-[var(--radius-xs)] px-3 py-1.5 text-[13px] text-muted-foreground hover:bg-hover hover:text-foreground focus-visible:outline-none transition-colors focus-visible:border-primary"
                 >
                   Cancel
                 </button>
@@ -445,7 +458,7 @@ export function AccountSetupFlow() {
                       type="button"
                       onClick={onAccept}
                       disabled={busy}
-                      className="rounded-[var(--radius-xs)] bg-secondary px-3 py-1.5 text-[13px] text-secondary-foreground hover:bg-hover disabled:opacity-40"
+                      className="rounded-[var(--radius-xs)] bg-secondary px-3 py-1.5 text-[13px] text-secondary-foreground hover:bg-hover disabled:opacity-40 focus-visible:outline-none transition-colors focus-visible:border-primary"
                     >
                       Accept and continue
                     </button>
@@ -453,7 +466,7 @@ export function AccountSetupFlow() {
                   <button
                     type="submit"
                     disabled={busy}
-                    className="rounded-[var(--radius-xs)] bg-primary px-3 py-1.5 text-[13px] text-primary-foreground hover:opacity-90 disabled:opacity-40"
+                    className="rounded-[var(--radius-xs)] bg-primary px-3 py-1.5 text-[13px] text-primary-foreground hover:opacity-90 disabled:opacity-40 focus-visible:outline-none transition-colors focus-visible:border-primary"
                   >
                     Test connection
                   </button>
@@ -461,7 +474,7 @@ export function AccountSetupFlow() {
                     type="button"
                     onClick={onAdd}
                     disabled={busy || tested === null}
-                    className="rounded-[var(--radius-xs)] bg-primary px-3 py-1.5 text-[13px] text-primary-foreground hover:opacity-90 disabled:opacity-40"
+                    className="rounded-[var(--radius-xs)] bg-primary px-3 py-1.5 text-[13px] text-primary-foreground hover:opacity-90 disabled:opacity-40 focus-visible:outline-none transition-colors focus-visible:border-primary"
                   >
                     Add account
                   </button>

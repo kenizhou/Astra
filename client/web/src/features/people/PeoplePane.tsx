@@ -12,7 +12,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Group, Panel, Separator } from 'react-resizable-panels';
 
 import { dispatch, intents } from '@/services/ipc';
-import { PeopleIcon, PlusIcon, SearchIcon } from '@/components/icons';
+import { CloseIcon, PeopleIcon, PlusIcon, SearchIcon } from '@/components/icons';
 import { SEARCH_DEBOUNCE_MS } from '@/components/layout/TitleBar';
 import { pct } from '@/components/layout/panelSizes';
 
@@ -47,7 +47,7 @@ function WriteStatuses() {
             type="button"
             aria-label="Retry"
             onClick={() => void dispatch(intents.refreshPeople())}
-            className="rounded-[var(--radius-xs)] border border-border-subtle px-2 py-0.5 text-xs text-foreground transition-colors hover:bg-hover"
+            className="rounded-[var(--radius-xs)] border border-border-subtle px-2 py-0.5 text-xs text-foreground transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[var(--hit)]"
           >
             Retry
           </button>
@@ -108,7 +108,7 @@ function PeopleSearch() {
             void dispatch(intents.searchPeople(''));
           }
         }}
-        className="h-7 w-full rounded-full border border-border-subtle bg-card pl-7 pr-2 text-xs text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-ring"
+        className="h-7 w-full rounded-full border border-border-subtle bg-card pl-7 pr-2 text-xs text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary"
       />
     </div>
   );
@@ -175,7 +175,7 @@ export function PeoplePane() {
           <button
             type="button"
             onClick={() => setEditing('create')}
-            className="flex items-center gap-1 rounded-[var(--radius-xs)] bg-primary px-2 py-1 text-xs font-medium text-primary-foreground shadow-[var(--shadow-sm)] transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex items-center gap-1 rounded-[var(--radius-xs)] bg-primary px-2 py-1 text-xs font-medium text-primary-foreground shadow-[var(--shadow-sm)] transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[var(--hit)]"
           >
             <PlusIcon size={12} />
             New contact
@@ -208,9 +208,9 @@ export function PeoplePane() {
                       type="button"
                       aria-label="Close person"
                       onClick={() => void dispatch(intents.closePerson())}
-                      className="rounded-[var(--radius-xs)] px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="flex h-7 w-7 items-center justify-center rounded-md text-muted-text transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
-                      Close
+                      <CloseIcon size={14} />
                     </button>
                   </div>
                   <PersonDetailPane

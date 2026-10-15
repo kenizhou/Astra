@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The tool rail: the shell's view switch as an icon column down the window's
 // left edge. The view buttons pin the active view with a primary bar; the
-// foot cluster holds the folder drawer toggle (compact windows only) and the
-// agent and AI documents toggles.
+// foot cluster holds the folder drawer toggle (shown once the window leaves
+// the wide stage) and the agent and AI documents toggles.
 
 import { AgentStatus } from '@/features/agent/AgentPanel';
 import { AiStatus } from '@/features/ai-panel/AiPanel';
 import { CalendarIcon, MailIcon, PanelLeftIcon, PeopleIcon } from '@/components/icons';
-import { useIsCompact } from '@/hooks/useWindowSize';
+import { useWindowStage } from '@/hooks/useWindowSize';
 import { useUiStore } from '@/stores/uiStore';
 import type { IconProps } from '@/components/icons';
 import type { ShellView } from '@/stores/uiStore';
@@ -28,12 +28,12 @@ export function ToolWindowBar() {
   const shellView = useUiStore((s) => s.shellView);
   const setShellView = useUiStore((s) => s.setShellView);
   const drawerOpen = useUiStore((s) => s.folderDrawerOpen);
-  const compact = useIsCompact();
+  const stage = useWindowStage();
 
   return (
     <nav
       aria-label="Tool windows"
-      className="flex w-[var(--tool-w)] shrink-0 flex-col items-center justify-between border-r border-border-subtle bg-chrome py-2"
+      className="flex w-[var(--tool-w)] shrink-0 flex-col items-center justify-between bg-chrome py-2"
     >
       <div className="flex flex-col items-center gap-2">
         {VIEWS.map(({ id, label, Icon }) => {
@@ -67,7 +67,7 @@ export function ToolWindowBar() {
           aria-pressed={drawerOpen}
           title="Toggle folder pane"
           onClick={() => useUiStore.getState().setFolderDrawerOpen(!drawerOpen)}
-          className={`${RAIL_BUTTON_CLASS} ${railButtonColours(drawerOpen)} ${compact ? '' : 'hidden'}`}
+          className={`${RAIL_BUTTON_CLASS} ${railButtonColours(drawerOpen)} ${stage === 'wide' ? 'hidden' : ''}`}
         >
           <PanelLeftIcon size={22} />
         </button>

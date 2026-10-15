@@ -102,7 +102,7 @@ export function BriefsPanel({ open, onClose }: BriefsPanelProps) {
           type="button"
           aria-label="Close briefs"
           onClick={onClose}
-          className="flex h-6 w-6 items-center justify-center rounded-[var(--radius-xs)] text-muted-text transition-colors hover:bg-hover hover:text-foreground"
+          className="flex h-6 w-6 items-center justify-center rounded-[var(--radius-xs)] text-muted-text transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <CloseIcon size={14} />
         </button>
@@ -115,7 +115,7 @@ export function BriefsPanel({ open, onClose }: BriefsPanelProps) {
             <button
               type="button"
               onClick={() => void ask()}
-              className="self-start rounded-[var(--radius)] border border-border-subtle px-2.5 py-1 text-xs text-foreground transition-colors hover:bg-hover"
+              className="self-start rounded-[var(--radius)] border border-border-subtle px-2.5 py-1 text-xs text-foreground transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               Try again
             </button>
