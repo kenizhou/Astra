@@ -222,7 +222,7 @@ export function AmbientIsland() {
   return (
     <div
       ref={wrapRef}
-      className={`relative flex h-7 shrink-0 items-center gap-1 rounded-full border border-border-subtle transition-[width] duration-200 focus-within:ring-2 focus-within:ring-ring ${
+      className={`relative flex h-7 shrink-0 items-center gap-1 rounded-full border border-border-subtle transition-[width] duration-200 focus-within:border-primary ${
         expanded ? 'w-[min(420px,100%)] bg-card pl-1' : 'w-[190px] bg-card'
       }`}
     >

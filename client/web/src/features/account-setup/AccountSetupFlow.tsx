@@ -368,7 +368,7 @@ export function AccountSetupFlow() {
                   autoComplete="off"
                   spellCheck={false}
                   placeholder="imap.example.net"
-                  className="rounded-[var(--radius-xs)] border border-input bg-background px-2 py-1.5 text-[13px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="rounded-full border border-input bg-background px-3 py-1.5 text-[13px] text-foreground outline-none transition-colors focus-visible:border-primary"
                 />
               </label>
               <div className="grid grid-cols-2 gap-3">
@@ -379,7 +379,7 @@ export function AccountSetupFlow() {
                     onChange={(e) => set('port')(e.target.value)}
                     inputMode="numeric"
                     autoComplete="off"
-                    className="rounded-[var(--radius-xs)] border border-input bg-background px-2 py-1.5 text-[13px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="rounded-full border border-input bg-background px-3 py-1.5 text-[13px] text-foreground outline-none transition-colors focus-visible:border-primary"
                   />
                 </label>
                 <label className="grid gap-1 text-xs text-muted-foreground">
@@ -387,7 +387,7 @@ export function AccountSetupFlow() {
                   <select
                     value={fields.security}
                     onChange={(e) => set('security')(e.target.value)}
-                    className="rounded-[var(--radius-xs)] border border-input bg-background px-2 py-1.5 text-[13px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="rounded-full border border-input bg-background px-3 py-1.5 text-[13px] text-foreground outline-none transition-colors focus-visible:border-primary"
                   >
                     <option value="implicit_tls">SSL/TLS</option>
                     <option value="start_tls">STARTTLS</option>
@@ -401,7 +401,7 @@ export function AccountSetupFlow() {
                   onChange={(e) => set('username')(e.target.value)}
                   autoComplete="off"
                   spellCheck={false}
-                  className="rounded-[var(--radius-xs)] border border-input bg-background px-2 py-1.5 text-[13px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="rounded-full border border-input bg-background px-3 py-1.5 text-[13px] text-foreground outline-none transition-colors focus-visible:border-primary"
                 />
               </label>
               <label className="grid gap-1 text-xs text-muted-foreground">
@@ -411,7 +411,7 @@ export function AccountSetupFlow() {
                   value={fields.password}
                   onChange={(e) => set('password')(e.target.value)}
                   autoComplete="new-password"
-                  className="rounded-[var(--radius-xs)] border border-input bg-background px-2 py-1.5 text-[13px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="rounded-full border border-input bg-background px-3 py-1.5 text-[13px] text-foreground outline-none transition-colors focus-visible:border-primary"
                 />
               </label>
 
@@ -455,7 +455,7 @@ export function AccountSetupFlow() {
                 <button
                   type="button"
                   onClick={close}
-                  className="rounded-[var(--radius-xs)] px-3 py-1.5 text-[13px] text-muted-foreground hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="rounded-[var(--radius-xs)] px-3 py-1.5 text-[13px] text-muted-foreground hover:bg-hover hover:text-foreground focus-visible:outline-none transition-colors focus-visible:border-primary"
                 >
                   Cancel
                 </button>
@@ -465,7 +465,7 @@ export function AccountSetupFlow() {
                       type="button"
                       onClick={onAccept}
                       disabled={busy}
-                      className="rounded-[var(--radius-xs)] bg-secondary px-3 py-1.5 text-[13px] text-secondary-foreground hover:bg-hover disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="rounded-[var(--radius-xs)] bg-secondary px-3 py-1.5 text-[13px] text-secondary-foreground hover:bg-hover disabled:opacity-40 focus-visible:outline-none transition-colors focus-visible:border-primary"
                     >
                       Accept and continue
                     </button>
@@ -473,7 +473,7 @@ export function AccountSetupFlow() {
                   <button
                     type="submit"
                     disabled={busy}
-                    className="rounded-[var(--radius-xs)] bg-primary px-3 py-1.5 text-[13px] text-primary-foreground hover:opacity-90 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="rounded-[var(--radius-xs)] bg-primary px-3 py-1.5 text-[13px] text-primary-foreground hover:opacity-90 disabled:opacity-40 focus-visible:outline-none transition-colors focus-visible:border-primary"
                   >
                     Test connection
                   </button>
@@ -481,7 +481,7 @@ export function AccountSetupFlow() {
                     type="button"
                     onClick={onAdd}
                     disabled={busy || tested === null}
-                    className="rounded-[var(--radius-xs)] bg-primary px-3 py-1.5 text-[13px] text-primary-foreground hover:opacity-90 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="rounded-[var(--radius-xs)] bg-primary px-3 py-1.5 text-[13px] text-primary-foreground hover:opacity-90 disabled:opacity-40 focus-visible:outline-none transition-colors focus-visible:border-primary"
                   >
                     Add account
                   </button>

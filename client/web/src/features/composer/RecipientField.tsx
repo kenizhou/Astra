@@ -159,7 +159,7 @@ export function RecipientField({ label, value, onField, inputRef }: RecipientFie
 
   return (
     <div className="relative min-w-0 flex-1">
-      <div className="rounded-[var(--radius-xs)] border border-border bg-background transition-colors focus-within:border-ring focus-within:ring-2 focus-within:ring-ring">
+      <div className="rounded-xl border border-border bg-background transition-colors focus-within:border-primary">
         {pills.length > 0 && (
           <div
             role="group"

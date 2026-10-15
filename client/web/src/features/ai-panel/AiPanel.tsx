@@ -10,15 +10,12 @@
 import { useEffect } from 'react';
 
 import { DAYS_MAX, DAYS_MIN, useAiPanelStore } from './aiPanelStore';
-import { AiIcon } from '@/components/icons';
+import { AiIcon, CloseIcon } from '@/components/icons';
 import { RAIL_BUTTON_CLASS, railButtonColours } from '@/components/layout/railButton';
 import type { DocumentKind } from '@/services/ai';
 import { useAccountStore } from '@/stores/accountStore';
 import { useFolderStore } from '@/stores/folderStore';
 import { useUiStore } from '@/stores/uiStore';
-
-const actionClass =
-  'rounded-[var(--radius-xs)] px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
 const TABS: ReadonlyArray<{ id: DocumentKind; label: string }> = [
   { id: 'digest', label: 'Digest' },
@@ -110,9 +107,9 @@ export function AiPanel() {
           type="button"
           aria-label="Close AI documents"
           onClick={() => useUiStore.getState().setAiPanelOpen(false)}
-          className={actionClass}
+          className="flex h-7 w-7 items-center justify-center rounded-md text-muted-text transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          Close
+          <CloseIcon size={14} />
         </button>
       </div>
       <div role="tablist" aria-label="AI documents" className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1.5">
@@ -160,7 +157,7 @@ export function AiPanel() {
               aria-label="Document account"
               value={account ?? undefined}
               onChange={(event) => useAiPanelStore.getState().open(event.target.value)}
-              className="max-w-[140px] rounded-[var(--radius-xs)] border border-border bg-surface px-1.5 py-1 text-[11px] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="max-w-[140px] rounded-full border border-border bg-surface px-2.5 py-1 text-[11px] text-foreground transition-colors focus-visible:outline-none focus-visible:border-primary"
             >
               {accounts.map((row) => (
                 <option key={row.accountId} value={row.accountId}>
@@ -173,7 +170,7 @@ export function AiPanel() {
             aria-label="Window days"
             value={days}
             onChange={(event) => useAiPanelStore.getState().setDays(Number(event.target.value))}
-            className="rounded-[var(--radius-xs)] border border-border bg-surface px-1.5 py-1 text-[11px] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="rounded-full border border-border bg-surface px-2.5 py-1 text-[11px] text-foreground transition-colors focus-visible:outline-none focus-visible:border-primary"
           >
             {Array.from({ length: DAYS_MAX - DAYS_MIN + 1 }, (_, index) => DAYS_MIN + index).map(
               (value) => (

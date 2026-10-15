@@ -7,7 +7,7 @@
 // The row is shared by the pop-out window and the docked quick-reply strip.
 
 import { dispatch, intents } from '@/services/ipc';
-import { SentIcon } from '@/components/icons';
+import { CloseIcon, SentIcon } from '@/components/icons';
 
 import { composerEditor, useComposerStore } from './composerStore';
 import { editorToDocument } from './documentWire';
@@ -88,9 +88,9 @@ export function ComposerActionsRow({ showClose = false }: ComposerActionsRowProp
           type="button"
           aria-label="Close composer"
           onClick={close}
-          className="rounded-[var(--radius-xs)] px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[var(--hit)]"
+          className="flex h-7 w-7 items-center justify-center rounded-md text-muted-text transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          Close
+          <CloseIcon size={14} />
         </button>
       )}
     </div>

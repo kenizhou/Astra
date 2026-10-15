@@ -33,7 +33,7 @@ interface ComposerFieldsProps {
 }
 
 const subjectClass =
-  'w-full rounded-[var(--radius-xs)] border border-border bg-background px-2 py-1 text-[13px] text-foreground outline-none transition-colors focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring';
+  'w-full rounded-full border border-border bg-background px-3 py-1 text-[13px] text-foreground outline-none transition-colors focus-visible:border-primary';
 
 export function ComposerFields({
   fromLabel,

@@ -57,7 +57,7 @@ function sectionOf(form: DavForm, baseline: DavForm): DavSectionInput | null {
 }
 
 const fieldClass =
-  'h-7 w-full rounded-[var(--radius-xs)] border border-input bg-background px-2 text-xs text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-ring';
+  'h-7 w-full rounded-full border border-input bg-background px-3 text-xs text-foreground outline-none transition-colors focus:border-primary';
 
 interface DavEditorProps {
   /** The account whose section the editor writes. */

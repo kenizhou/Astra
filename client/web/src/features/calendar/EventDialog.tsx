@@ -36,7 +36,7 @@ const REPEATS: ReadonlyArray<{ id: Frequency | 'none'; label: string }> = [
 
 /** The field chrome every input shares. */
 function fieldClass(): string {
-  return 'h-7 w-full rounded-[var(--radius-xs)] border border-input bg-background px-2 text-xs text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-ring';
+  return 'h-7 w-full rounded-full border border-input bg-background px-3 text-xs text-foreground outline-none transition-colors focus:border-primary';
 }
 
 interface EventDialogProps {
@@ -418,7 +418,7 @@ export function EventDialog({ row, slot = null, onClose }: EventDialogProps) {
                 value={notes}
                 onChange={(event) => setNotes(event.target.value)}
                 placeholder={editing ? 'Leave empty to keep' : ''}
-                className="min-h-[56px] w-full rounded-[var(--radius-xs)] border border-input bg-background px-2 py-1 text-xs text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-ring"
+                className="min-h-[56px] w-full rounded-xl border border-input bg-background px-3 py-1 text-xs text-foreground outline-none transition-colors focus:border-primary"
               />
             </label>
 

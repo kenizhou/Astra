@@ -13,7 +13,7 @@ interface DetectStepProps {
 }
 
 const INPUT_CLASS =
-  'rounded-[var(--radius-xs)] border border-input bg-background px-2 py-1.5 text-[13px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring';
+  'rounded-full border border-input bg-background px-3 py-1.5 text-[13px] text-foreground outline-none transition-colors focus-visible:border-primary';
 
 export function DetectStep({ busy, onCancel, onDetect, onManual }: DetectStepProps) {
   const [email, setEmail] = useState('');

@@ -62,7 +62,7 @@ export function ReplyPromptDialog({ prompt }: ReplyPromptDialogProps) {
               aria-label="The note your reply carries"
               value={prompt.comment}
               readOnly
-              className="min-h-[48px] w-full rounded-[var(--radius-xs)] border border-input bg-surface px-2 py-1 text-xs text-foreground"
+              className="min-h-[48px] w-full rounded-xl border border-input bg-surface px-3 py-1 text-xs text-foreground"
             />
           </label>
         )}
@@ -74,7 +74,7 @@ export function ReplyPromptDialog({ prompt }: ReplyPromptDialogProps) {
             value={subject}
             onChange={(event) => setSubject(event.target.value)}
             placeholder="Re: the invitation's own subject"
-            className="h-7 w-full rounded-[var(--radius-xs)] border border-input bg-background px-2 text-xs text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-ring"
+            className="h-7 w-full rounded-full border border-input bg-background px-3 text-xs text-foreground outline-none transition-colors focus:border-primary"
           />
         </label>
         <label className="flex items-center gap-2 text-xs text-foreground">

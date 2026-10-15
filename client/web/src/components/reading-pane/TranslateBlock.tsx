@@ -128,7 +128,7 @@ export function TranslateBlock() {
           value={lang}
           onChange={(event) => setLang(event.target.value as TranslateLanguage)}
           disabled={phase === 'loading'}
-          className="rounded-[var(--radius-xs)] border border-border bg-background px-1 py-1 text-xs text-foreground outline-none transition-colors focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring"
+          className="rounded-full border border-border bg-background px-2.5 py-1 text-xs text-foreground outline-none transition-colors focus-visible:border-primary"
         >
           {LANGUAGES.map((entry) => (
             <option key={entry.value} value={entry.value}>
