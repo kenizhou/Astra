@@ -465,7 +465,7 @@ export function EventDialog({ row, slot = null, onClose }: EventDialogProps) {
                       ? setDeleteChoice(true)
                       : remove(false)
                   }
-                  className="rounded-[var(--radius)] border border-[var(--destructive)] px-2.5 py-1 text-xs text-destructive transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="rounded-[var(--radius)] border border-[var(--destructive)] px-2.5 py-1 text-xs text-destructive transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[var(--hit)]"
                 >
                   Delete
                 </button>
@@ -476,7 +476,7 @@ export function EventDialog({ row, slot = null, onClose }: EventDialogProps) {
                 <button
                   type="button"
                   onClick={onClose}
-                  className="rounded-[var(--radius)] border border-border-subtle px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="rounded-[var(--radius)] border border-border-subtle px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[var(--hit)]"
                 >
                   Cancel
                 </button>
@@ -486,7 +486,7 @@ export function EventDialog({ row, slot = null, onClose }: EventDialogProps) {
                   // With no writable calendar there is nothing to save into:
                   // the note says so rather than a save that silently no-ops.
                   disabled={!editing && writable.length === 0}
-                  className="rounded-[var(--radius)] bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground shadow-[var(--shadow-sm)] transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="rounded-[var(--radius)] bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground shadow-[var(--shadow-sm)] transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[var(--hit)]"
                 >
                   Save
                 </button>

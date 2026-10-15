@@ -69,7 +69,7 @@ export function ComposerFields({
             type="button"
             aria-pressed={ccShown}
             onClick={onToggleCc}
-            className="shrink-0 rounded-[var(--radius-xs)] px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="shrink-0 rounded-[var(--radius-xs)] px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[var(--hit)]"
           >
             {ccShown ? 'Hide Cc' : 'Show Cc'}
           </button>
@@ -79,7 +79,7 @@ export function ComposerFields({
             type="button"
             aria-pressed={bccShown}
             onClick={onToggleBcc}
-            className="shrink-0 rounded-[var(--radius-xs)] px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="shrink-0 rounded-[var(--radius-xs)] px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[var(--hit)]"
           >
             {bccShown ? 'Hide Bcc' : 'Show Bcc'}
           </button>

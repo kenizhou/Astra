@@ -62,7 +62,7 @@ export function ComposerActionsRow({ showClose = false }: ComposerActionsRowProp
         onClick={() => useComposerStore.getState().submit()}
         disabled={sendGated || sending}
         title={sendGated ? 'Add a recipient first' : 'Send'}
-        className="inline-flex items-center gap-1.5 rounded-[var(--radius-xs)] bg-primary px-3 py-1 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-50"
+        className="inline-flex items-center gap-1.5 rounded-[var(--radius-xs)] bg-primary px-3 py-1 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-50 min-h-[var(--hit)]"
       >
         <SentIcon size={13} />
         Send
@@ -79,7 +79,7 @@ export function ComposerActionsRow({ showClose = false }: ComposerActionsRowProp
       <button
         type="button"
         onClick={discard}
-        className="rounded-[var(--radius-xs)] px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="rounded-[var(--radius-xs)] px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[var(--hit)]"
       >
         Discard
       </button>
@@ -88,7 +88,7 @@ export function ComposerActionsRow({ showClose = false }: ComposerActionsRowProp
           type="button"
           aria-label="Close composer"
           onClick={close}
-          className="rounded-[var(--radius-xs)] px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="rounded-[var(--radius-xs)] px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[var(--hit)]"
         >
           Close
         </button>

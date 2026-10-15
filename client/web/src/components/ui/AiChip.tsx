@@ -53,19 +53,19 @@ export function AiChip({
           type="button"
           aria-label={approveLabel}
           onClick={onApprove}
-          className="font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex items-center self-stretch font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           {label}
         </button>
       ) : (
         <span>{label}</span>
       )}
-      <span className="text-[11px] text-muted-text">{provenance}</span>
+      <span className="text-xs text-muted-text">{provenance}</span>
       {state === 'failed' && onRetry !== undefined && (
         <button
           type="button"
           onClick={onRetry}
-          className="font-medium text-[var(--warning)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex items-center self-stretch font-medium text-[var(--warning)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           Retry
         </button>
