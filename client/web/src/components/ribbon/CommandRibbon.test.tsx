@@ -17,6 +17,29 @@ vi.mock('@/services/ipc', async (importOriginal) => ({
   dispatch: ipc.dispatch,
 }));
 
+vi.mock('@/events/surfaceEvents', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  isTauri: true,
+}));
+
+const webviewWindow = vi.hoisted(() => {
+  const instances: Record<string, unknown>[] = [];
+  class MockWebviewWindow {
+    once = vi.fn().mockResolvedValue(() => undefined);
+    constructor(
+      public label: string,
+      public options: Record<string, unknown>,
+    ) {
+      instances.push(options);
+    }
+  }
+  return { MockWebviewWindow, instances };
+});
+
+vi.mock('@tauri-apps/api/webviewWindow', () => ({
+  WebviewWindow: webviewWindow.MockWebviewWindow,
+}));
+
 import { CommandRibbon } from './CommandRibbon';
 import { useAccountStore } from '@/stores/accountStore';
 import { useListStore } from '@/stores/listStore';
@@ -83,6 +106,7 @@ function openMessage(): void {
 beforeEach(() => {
   ipc.dispatch.mockReset();
   ipc.dispatch.mockResolvedValue(undefined);
+  webviewWindow.instances.length = 0;
   resetStores();
 });
 
@@ -120,17 +144,18 @@ describe('the ribbon shell', () => {
 });
 
 describe('the read mode', () => {
-  it('opens a plain composition from New Email, as the floating action does', () => {
+  it('opens a composer window from New Email under Tauri', async () => {
     render(<CommandRibbon />);
 
-    act(() => {
+    await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'New Email' }));
+      await Promise.resolve();
     });
 
-    const state = useComposerStore.getState();
-    expect(state.open).toBe(true);
-    expect(state.composition).not.toBeNull();
-    expect(state.from).toBe('work');
+    expect(webviewWindow.instances).toHaveLength(1);
+    expect(webviewWindow.instances[0]).toMatchObject({ title: 'New message' });
+    // The inline composer stays shut: the composition is the window's.
+    expect(useComposerStore.getState().open).toBe(false);
   });
 
   it('keeps New Email disabled without an account', () => {
@@ -254,7 +279,7 @@ describe('the compose mode', () => {
 
     expect(screen.queryByRole('button', { name: 'New Email' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Send' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Snippets' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Pop out' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Discard' })).toBeTruthy();
   });
 

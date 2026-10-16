@@ -13,6 +13,7 @@ const ipc = vi.hoisted(() => ({
   mailboxList: vi.fn(),
   settings: vi.fn(),
   draftStatus: vi.fn(),
+  draftResume: vi.fn(),
   takeComposeRequest: vi.fn(),
 }));
 
@@ -22,6 +23,7 @@ vi.mock('@/services/ipc', async (importOriginal) => ({
   mailboxList: ipc.mailboxList,
   settings: ipc.settings,
   draftStatus: ipc.draftStatus,
+  draftResume: ipc.draftResume,
   takeComposeRequest: ipc.takeComposeRequest,
 }));
 
@@ -101,6 +103,8 @@ beforeEach(() => {
   ipc.settings.mockResolvedValue(settingsSnapshot);
   ipc.draftStatus.mockReset();
   ipc.draftStatus.mockResolvedValue(null);
+  ipc.draftResume.mockReset();
+  ipc.draftResume.mockResolvedValue(null);
   ipc.takeComposeRequest.mockReset();
   ipc.takeComposeRequest.mockResolvedValue(null);
   currentWindow.close.mockReset();
@@ -154,6 +158,43 @@ describe('the window hydration', () => {
     expect(state.fromLabel).toBe('Work');
     expect(state.to).toBe('');
     expect(state.request).toBeNull();
+    expect(screen.getByText('New message')).toBeTruthy();
+  });
+
+  it('resumes the transfer draft the URL marks, never asking the take', async () => {
+    ipc.draftResume.mockResolvedValue({
+      account: 'work',
+      to: 'ada@example.test',
+      cc: '',
+      bcc: '',
+      subject: 'Re: Quarterly report',
+      body_text: 'The numbers are in.',
+    });
+    render(<ComposerWindow composition="compose-47" resumeAccount="work" />);
+
+    await settle();
+
+    expect(ipc.draftResume).toHaveBeenCalledWith('work', 'compose-47');
+    expect(ipc.takeComposeRequest).not.toHaveBeenCalled();
+    const state = useComposerStore.getState();
+    expect(state.open).toBe(true);
+    expect(state.composition).toBe('compose-47');
+    expect(state.from).toBe('work');
+    expect(state.to).toBe('ada@example.test');
+    expect(state.subject).toBe('Re: Quarterly report');
+    expect(screen.getByText('Re: Quarterly report')).toBeTruthy();
+  });
+
+  it('falls through to the blank tail when the marked draft is already gone', async () => {
+    render(<ComposerWindow composition="compose-48" resumeAccount="work" />);
+
+    await settle();
+
+    expect(ipc.draftResume).toHaveBeenCalledWith('work', 'compose-48');
+    const state = useComposerStore.getState();
+    expect(state.open).toBe(true);
+    expect(state.composition).toBe('compose-48');
+    expect(state.to).toBe('');
     expect(screen.getByText('New message')).toBeTruthy();
   });
 

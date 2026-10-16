@@ -1,18 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The composer actions row, kylins' ComposerActionsRow idiom narrowed to
 // what the host backs: the primary Send on the left riding the store's one
-// submit path, and on the right the snippet picker's insert seam, Discard,
-// and Close when the pop-out window asks for it. No split-send caret and no
-// encrypt, sign, or attach toggles: the composer has no backend for them.
-// The row is shared by the pop-out window and the docked quick-reply strip.
+// submit path, and on the right the pop-out transfer, Discard, and Close
+// when the pop-out window asks for it. No split-send caret and no encrypt,
+// sign, or attach toggles: the composer has no backend for them. The row is
+// shared by the pop-out window (where the transfer never stands) and the
+// docked quick-reply strip.
 
+import { isTauri } from '@/events/surfaceEvents';
 import { dispatch, intents } from '@/services/ipc';
-import { CloseIcon, SentIcon } from '@/components/icons';
+import { CloseIcon, PopOutIcon, SentIcon } from '@/components/icons';
 
-import { composerEditor, useComposerStore } from './composerStore';
+import { useComposerStore } from './composerStore';
+import { popOutComposer } from './composeWindow';
 import { editorToDocument } from './documentWire';
-import { insertAtSelection } from './Editor';
-import { SnippetPicker } from './SnippetPicker';
 
 interface ComposerActionsRowProps {
   /** Whether the Close button stands: the pop-out window's, not the strip's. */
@@ -68,14 +69,17 @@ export function ComposerActionsRow({ showClose = false }: ComposerActionsRowProp
         Send
       </button>
       <div className="flex-1" />
-      <SnippetPicker
-        onInsert={(body) => {
-          const editor = composerEditor();
-          if (editor !== null) {
-            insertAtSelection(editor, body);
-          }
-        }}
-      />
+      {!showClose && isTauri && (
+        <button
+          type="button"
+          aria-label="Pop out composer"
+          onClick={() => void popOutComposer()}
+          className="inline-flex items-center gap-1 rounded-[var(--radius-xs)] px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[var(--hit)]"
+        >
+          <PopOutIcon size={13} />
+          Pop out
+        </button>
+      )}
       <button
         type="button"
         onClick={discard}

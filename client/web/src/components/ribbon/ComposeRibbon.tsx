@@ -2,16 +2,17 @@
 // The ribbon's compose mode, standing while the quick-reply strip's inline
 // composition is open: Send rides the store's one submit path (the pane's
 // own Send button too), the save hint repeats the status surface's word for
-// this composition, the snippet picker inserts through the live editor
-// handle the pane registered, and Discard runs the pane's discard flow: the
-// stored copy goes and the strip collapses locally. A pop-out composer
-// window has its own store in its own webview; this ribbon never sees it.
+// this composition, the pop-out transfer moves the draft to its own window
+// (the pane's Pop out button rides the same helper), and Discard runs the
+// pane's discard flow: the stored copy goes and the strip collapses
+// locally. A pop-out composer window has its own store in its own webview;
+// this ribbon never sees it.
 
-import { SentIcon, TrashIcon } from '@/components/icons';
-import { insertAtSelection } from '@/features/composer/Editor';
+import { isTauri } from '@/events/surfaceEvents';
+import { PopOutIcon, SentIcon, TrashIcon } from '@/components/icons';
 import { SaveBadge } from '@/features/composer/Composer';
-import { SnippetPicker } from '@/features/composer/SnippetPicker';
-import { composerEditor, useComposerStore } from '@/features/composer/composerStore';
+import { popOutComposer } from '@/features/composer/composeWindow';
+import { useComposerStore } from '@/features/composer/composerStore';
 import { dispatch, intents } from '@/services/ipc';
 
 import { RibbonButton, RibbonGroup } from './RibbonPrimitives';
@@ -45,14 +46,14 @@ export function ComposeRibbon({ iconOnly }: { iconOnly: boolean }) {
         {composition !== null && <SaveBadge composition={composition} />}
       </RibbonGroup>
       <RibbonGroup>
-        <SnippetPicker
-          onInsert={(body) => {
-            const editor = composerEditor();
-            if (editor !== null) {
-              insertAtSelection(editor, body);
-            }
-          }}
-        />
+        {isTauri && (
+          <RibbonButton
+            label="Pop out"
+            icon={PopOutIcon}
+            iconOnly={iconOnly}
+            onClick={() => void popOutComposer()}
+          />
+        )}
         <RibbonButton
           label="Discard"
           icon={TrashIcon}

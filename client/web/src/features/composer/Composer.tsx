@@ -4,7 +4,7 @@
 // and composeWindow.ts), the app start resume opens the stored draft into
 // the docked quick-reply strip, and this one pane serves both surfaces, the
 // window passing showClose for its Close button. The actions row carries
-// Send, Snippets, Discard, and that Close; the editor toolbar and the status
+// Send, Pop out, Discard, and that Close; the editor toolbar and the status
 // bar sit above and under the trimmed editor; the idle autosave hands the
 // whole draft to the core. A composition a request opened carries its kind
 // and threading header until the pane leaves, so its saves keep the quote

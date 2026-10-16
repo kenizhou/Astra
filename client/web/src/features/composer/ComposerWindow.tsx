@@ -14,6 +14,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 
 import { createListenerRegistry, isTauri, pullSurface, type Surface } from '@/events/surfaceEvents';
 import {
+  draftResume,
   draftStatus,
   mailboxList,
   settings,
@@ -34,8 +35,12 @@ import { fromLabelFor } from './useComposeRequest';
 // second run finds the session already taken and returns.
 let hydratedFor: CompositionId | null = null;
 
-/** Opens the window's composition: the pending request's, or a blank one. */
-async function openComposerSession(composition: CompositionId): Promise<void> {
+/** Opens the window's composition: the transfer's resumed draft, the
+ *  pending request's, or a blank one. */
+async function openComposerSession(
+  composition: CompositionId,
+  resumeAccount: string | null,
+): Promise<void> {
   if (hydratedFor === composition) {
     return;
   }
@@ -59,6 +64,25 @@ async function openComposerSession(composition: CompositionId): Promise<void> {
     useAccountStore.getState().applySnapshot(accountsSnapshot);
     useSettingsStore.getState().applySnapshot(preferences);
     useDraftStore.getState().applySnapshot(hint);
+    if (resumeAccount !== null) {
+      // The dock-to-window transfer: the dock saved its draft and closed
+      // behind it, so the resume reads exactly those words back. The wire
+      // carries a plain-text body (ResumeView.body_text), so rich editor
+      // formatting flattens to plain paragraphs on the transfer. A null
+      // answer (the draft is already gone) falls through to the blank
+      // tail rather than stranding the window on its placeholder.
+      const view = await draftResume(resumeAccount, composition);
+      if (view !== null) {
+        useComposerStore
+          .getState()
+          .hydrate(
+            view,
+            { id: view.account, label: fromLabelFor(view.account) },
+            composition,
+          );
+        return;
+      }
+    }
     const request = await takeComposeRequest();
     if (request !== null) {
       useComposeRequestStore.getState().dismiss();
@@ -81,15 +105,17 @@ async function openComposerSession(composition: CompositionId): Promise<void> {
 interface ComposerWindowProps {
   /** The composition this window holds, from the URL. */
   composition: CompositionId;
+  /** The account a transfer resumes the latest draft of, from the URL. */
+  resumeAccount?: string | null;
 }
 
-export function ComposerWindow({ composition }: ComposerWindowProps) {
+export function ComposerWindow({ composition, resumeAccount = null }: ComposerWindowProps) {
   const open = useComposerStore((s) => s.open && s.composition !== null);
   const subject = useComposerStore((s) => s.subject);
 
   useEffect(() => {
-    void openComposerSession(composition);
-  }, [composition]);
+    void openComposerSession(composition, resumeAccount);
+  }, [composition, resumeAccount]);
 
   // The save hint's surface, the one live feed the window needs.
   useEffect(() => {

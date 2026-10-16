@@ -6,13 +6,18 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 import { ComposerWindow } from './features/composer/ComposerWindow';
-import { readComposerParam } from './features/composer/composeWindow';
+import { readComposerParam, readResumeParam } from './features/composer/composeWindow';
 import './styles/globals.css';
 
 const composition = readComposerParam(window.location.search);
+const resumeAccount = readResumeParam(window.location.search);
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {composition === null ? <App /> : <ComposerWindow composition={composition} />}
+    {composition === null ? (
+      <App />
+    ) : (
+      <ComposerWindow composition={composition} resumeAccount={resumeAccount} />
+    )}
   </StrictMode>,
 );

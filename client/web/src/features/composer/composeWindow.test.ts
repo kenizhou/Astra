@@ -43,6 +43,7 @@ import {
   openComposerWindow,
   openNewMessageComposer,
   readComposerParam,
+  readResumeParam,
 } from './composeWindow';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -70,9 +71,27 @@ describe('the composer query param', () => {
   });
 });
 
+describe('the resume query param', () => {
+  it('reads the account a transfer window resumes', () => {
+    expect(readResumeParam('?composer=compose-9&resume=work')).toBe('work');
+  });
+
+  it('reads nothing for a plain pop-out', () => {
+    expect(readResumeParam('')).toBeNull();
+    expect(readResumeParam('?composer=compose-9')).toBeNull();
+    expect(readResumeParam('?composer=compose-9&resume=')).toBeNull();
+  });
+});
+
 describe('the window address', () => {
   it('carries the composition id alone in the URL', () => {
     expect(composerWindowUrl('compose-9')).toBe('index.html?composer=compose-9');
+  });
+
+  it('marks the resume account on a transfer', () => {
+    expect(composerWindowUrl('compose-9', 'work')).toBe(
+      'index.html?composer=compose-9&resume=work',
+    );
   });
 
   it('labels the window under the composer capability wildcard', () => {
@@ -97,6 +116,15 @@ describe('the window opening', () => {
       resizable: true,
     });
     expect(window?.once).toHaveBeenCalledWith('tauri://error', expect.any(Function));
+  });
+
+  it('forwards the resume account onto the URL for a transfer', async () => {
+    await openComposerWindow('compose-9', 'Re: Quarterly report', 'work');
+
+    const [window] = webviewWindow.instances;
+    expect(window?.options).toMatchObject({
+      url: 'index.html?composer=compose-9&resume=work',
+    });
   });
 });
 

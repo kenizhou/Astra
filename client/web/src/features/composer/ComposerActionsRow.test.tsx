@@ -19,6 +19,29 @@ vi.mock('@/events/surfaceEvents', async (importOriginal) => ({
   isTauri: true,
 }));
 
+const webviewWindow = vi.hoisted(() => {
+  interface Instance {
+    label: string;
+    options: Record<string, unknown>;
+    once: ReturnType<typeof vi.fn>;
+  }
+  const instances: Instance[] = [];
+  class MockWebviewWindow {
+    once = vi.fn().mockResolvedValue(() => undefined);
+    constructor(
+      public label: string,
+      public options: Record<string, unknown>,
+    ) {
+      instances.push({ label, options, once: this.once });
+    }
+  }
+  return { MockWebviewWindow, instances };
+});
+
+vi.mock('@tauri-apps/api/webviewWindow', () => ({
+  WebviewWindow: webviewWindow.MockWebviewWindow,
+}));
+
 import { useAccountStore } from '@/stores/accountStore';
 import { useComposeRequestStore } from '@/stores/composeRequestStore';
 
@@ -57,6 +80,7 @@ function newMessage(): string {
 beforeEach(() => {
   ipc.dispatch.mockReset();
   ipc.dispatch.mockResolvedValue(undefined);
+  webviewWindow.instances.length = 0;
   resetStores();
 });
 
@@ -100,10 +124,33 @@ describe('the send button', () => {
 });
 
 describe('the right-hand actions', () => {
-  it('offers the snippet picker seam', () => {
-    newMessage();
+  it('transfers the draft to the pop-out window through a final save', async () => {
+    const composition = newMessage();
     render(<ComposerActionsRow />);
-    expect(screen.getByRole('button', { name: 'Snippets' })).toBeTruthy();
+    act(() => {
+      useComposerStore.getState().setField('subject', 'Later');
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Pop out composer' }));
+      await Promise.resolve();
+    });
+
+    const save = JSON.stringify(ipc.dispatch.mock.calls[0]?.[0]);
+    expect(save).toContain(`"composition":"${composition}"`);
+    expect(save).toContain('"then_close":true');
+    expect(useComposerStore.getState().open).toBe(false);
+    expect(webviewWindow.instances).toHaveLength(1);
+    const [window] = webviewWindow.instances;
+    expect(window?.options).toMatchObject({ title: 'Later' });
+    expect(String(window?.options.url)).toContain('&resume=work');
+    expect(String(window?.options.url)).not.toContain(`composer=${composition}&`);
+  });
+
+  it('never offers the transfer inside the pop-out window itself', () => {
+    newMessage();
+    render(<ComposerActionsRow showClose />);
+    expect(screen.queryByRole('button', { name: 'Pop out composer' })).toBeNull();
   });
 
   it('discards the stored draft and closes the composition', () => {
