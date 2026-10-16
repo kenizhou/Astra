@@ -23,6 +23,7 @@ vi.mock('@/features/settings/settingsStore', () => ({
 }));
 
 import { ReadingHeader, formatReadingDate } from './ReadingHeader';
+import { useAppearanceStore } from '@/services/appearance';
 
 beforeEach(() => {
   ipc.peopleAvatar.mockReset();
@@ -206,5 +207,61 @@ describe('the header actions', () => {
 
     expect(screen.queryByRole('button', { name: 'Reply' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'More actions' })).toBeNull();
+  });
+});
+
+describe('the position menu', () => {
+  beforeEach(() => {
+    useAppearanceStore.setState({ readingPosition: 'right' });
+  });
+
+  it('offers the three positions with the current one checked', () => {
+    useAppearanceStore.setState({ readingPosition: 'bottom' });
+    render(
+      <ReadingHeader
+        subject='Launch'
+        fromName='Ada'
+        fromAddress='ada@example.test'
+        sentAt='2026-10-09T08:30:00Z'
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reading pane position' }));
+
+    const items = screen.getAllByRole('menuitem');
+    expect(items.map((i) => i.textContent)).toEqual(['Right', 'Bottom', 'Off']);
+    expect(items[1]!.querySelector('svg')).not.toBeNull();
+    expect(items[0]!.querySelector('svg')).toBeNull();
+  });
+
+  it('sets the position from the menu', () => {
+    render(
+      <ReadingHeader
+        subject='Launch'
+        fromName='Ada'
+        fromAddress='ada@example.test'
+        sentAt='2026-10-09T08:30:00Z'
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reading pane position' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Off' }));
+
+    expect(useAppearanceStore.getState().readingPosition).toBe('off');
+    expect(localStorage.getItem('astra.readingPosition')).toBe('off');
+  });
+
+  it('shows no close button anywhere', () => {
+    render(
+      <ReadingHeader
+        subject='Launch'
+        fromName='Ada'
+        fromAddress='ada@example.test'
+        sentAt='2026-10-09T08:30:00Z'
+        message={{ account: 'work', key: 'm1' }}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Close reading pane' })).toBeNull();
   });
 });

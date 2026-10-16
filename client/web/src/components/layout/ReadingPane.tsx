@@ -23,7 +23,8 @@ import { useContextMenu } from '@/components/ui/useContextMenu';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { STATE_CONTENT } from '@/components/ui/stateContent';
 import { MailIcon } from '@/components/icons';
-import { dispatch, intents } from '@/services/ipc';
+import { ComposerPane } from '@/features/composer/Composer';
+import { useComposerStore } from '@/features/composer/composerStore';
 import { usePeopleStore } from '@/features/people/peopleStore';
 import { useReadingStore } from '@/stores/readingStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -55,7 +56,22 @@ export function ReadingPane() {
   const snapshot = useReadingStore((s) => s.snapshot);
   const showRemoteImages = useReadingStore((s) => s.showRemoteImages);
   const setShowRemoteImages = useReadingStore((s) => s.setShowRemoteImages);
+  const inlineOpen = useComposerStore((s) => s.open && s.composition !== null);
   const plainMenu = useContextMenu();
+
+  // kylins' InlineReply idiom: while the inline composer stands, it owns
+  // the whole pane, the message chrome included; leaving the composition
+  // (a send, a discard) hands the pane back to the message.
+  if (inlineOpen) {
+    return (
+      <aside
+        aria-label="Reading pane"
+        className="flex h-full w-full flex-col overflow-hidden bg-[var(--paper)]"
+      >
+        <ComposerPane />
+      </aside>
+    );
+  }
 
   if (snapshot === null) {
     return (
@@ -82,7 +98,6 @@ export function ReadingPane() {
         fromAddress={snapshot.from_address}
         sentAt={snapshot.sent_at}
         message={snapshot.message}
-        onClose={() => void dispatch(intents.closeReading())}
         onAddContact={() => {
           usePeopleStore.getState().requestContactCreate({
             name: snapshot.from_name,

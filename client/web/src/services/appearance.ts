@@ -32,6 +32,10 @@ export type DensityMode = 'comfortable' | 'compact';
  *  calm is its hue-260 sibling, classic the pre-texture cool slate. */
 export type TextureMode = 'warm' | 'calm' | 'classic';
 
+/** The reading pane's position, kylins' three-way: docked right of the
+ *  list, docked beneath it, or hidden outright. */
+export type ReadingPosition = 'right' | 'bottom' | 'off';
+
 /** The swatch catalogue the General page renders; swatch is the preview dot. */
 export const SKINS: ReadonlyArray<{ id: SkinId; label: string; swatch: string }> = [
   { id: 'iris', label: 'Iris', swatch: '#7a6ff0' },
@@ -50,6 +54,7 @@ const KEYS = {
   fontSize: 'astra.fontSize',
   density: 'astra.density',
   texture: 'astra.texture',
+  readingPosition: 'astra.readingPosition',
 } as const;
 
 function readSkin(): SkinId {
@@ -75,17 +80,24 @@ function readTexture(): TextureMode {
   return raw === 'calm' || raw === 'classic' ? raw : 'warm';
 }
 
+function readReadingPosition(): ReadingPosition {
+  const raw = localStorage.getItem(KEYS.readingPosition);
+  return raw === 'bottom' || raw === 'off' ? raw : 'right';
+}
+
 interface AppearanceState {
   skin: SkinId;
   contrast: ContrastMode;
   fontSize: FontSizeStep;
   density: DensityMode;
   texture: TextureMode;
+  readingPosition: ReadingPosition;
   setSkin: (skin: SkinId) => void;
   setContrast: (contrast: ContrastMode) => void;
   setFontSize: (step: FontSizeStep) => void;
   setDensity: (density: DensityMode) => void;
   setTexture: (texture: TextureMode) => void;
+  setReadingPosition: (position: ReadingPosition) => void;
 }
 
 /** Writes the five attributes onto the document root. */
@@ -106,6 +118,7 @@ export const useAppearanceStore = create<AppearanceState>((set) => ({
   fontSize: readFontSize(),
   density: readDensity(),
   texture: readTexture(),
+  readingPosition: readReadingPosition(),
 
   setSkin: (skin) => {
     localStorage.setItem(KEYS.skin, skin);
@@ -135,6 +148,11 @@ export const useAppearanceStore = create<AppearanceState>((set) => ({
     localStorage.setItem(KEYS.texture, texture);
     set({ texture });
     applyAttributes(useAppearanceStore.getState());
+  },
+
+  setReadingPosition: (readingPosition) => {
+    localStorage.setItem(KEYS.readingPosition, readingPosition);
+    set({ readingPosition });
   },
 }));
 

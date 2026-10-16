@@ -202,3 +202,23 @@ describe('the density control', () => {
     expect(screen.getByRole('button', { name: 'Comfortable' }).getAttribute('aria-pressed')).toBe('false');
   });
 });
+
+describe('the reading pane control', () => {
+  it('writes the position through the appearance store from the segmented row', () => {
+    render(<GeneralDetail />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Bottom' }));
+
+    expect(useAppearanceStore.getState().readingPosition).toBe('bottom');
+    expect(localStorage.getItem('astra.readingPosition')).toBe('bottom');
+  });
+
+  it('renders the persisted position as pressed', () => {
+    useAppearanceStore.getState().setReadingPosition('off');
+    render(<GeneralDetail />);
+
+    expect(screen.getByRole('button', { name: 'Off' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Right' }).getAttribute('aria-pressed')).toBe('false');
+    useAppearanceStore.getState().setReadingPosition('right');
+  });
+});

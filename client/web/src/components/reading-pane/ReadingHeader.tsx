@@ -10,14 +10,16 @@
 // form the clock setting names.
 
 import {
-  CloseIcon,
   ForwardIcon,
   MoreIcon,
+  PanelLeftIcon,
   ReplyAllIcon,
   ReplyIcon,
 } from '@/components/icons';
 import { ContextMenu, placeholderItem, type ContextMenuItem } from '@/components/ui/ContextMenu';
 import { useContextMenu } from '@/components/ui/useContextMenu';
+import { useWindowStage } from '@/hooks/useWindowSize';
+import { useAppearanceStore, type ReadingPosition } from '@/services/appearance';
 import { dispatch, intents, type MessageRef } from '@/services/ipc';
 import { Avatar } from '@/features/people/Avatar';
 import { useSettingsStore } from '@/features/settings/settingsStore';
@@ -72,8 +74,6 @@ interface ReadingHeaderProps {
   sentAt: string;
   /** The open message's ref; the compose verbs and the overflow ride it. */
   message?: MessageRef;
-  /** Closes the pane; the button rides the header's top-right corner. */
-  onClose?: () => void;
   /** When set and a sender stands, the header offers an add-contact chip. */
   onAddContact?: () => void;
 }
@@ -87,6 +87,53 @@ function overflowItems(): ContextMenuItem[] {
     placeholderItem('View source', 'Viewing the message source arrives with a future slice'),
     placeholderItem('Save as .eml', 'Saving the message as .eml arrives with a future slice'),
   ];
+}
+
+const POSITIONS: ReadonlyArray<{ id: ReadingPosition; label: string }> = [
+  { id: 'right', label: 'Right' },
+  { id: 'bottom', label: 'Bottom' },
+  { id: 'off', label: 'Off' },
+];
+
+/** The position picker: kylins' three-way dock as a checked menu. At the
+ *  narrow stage the pane is the whole row, so the menu offers the way back
+ *  to the list instead. */
+function PositionMenu() {
+  const stage = useWindowStage();
+  const position = useAppearanceStore((s) => s.readingPosition);
+  const setPosition = useAppearanceStore((s) => s.setReadingPosition);
+  const menu = useContextMenu();
+
+  const items: ContextMenuItem[] =
+    stage === 'narrow'
+      ? [
+          {
+            label: 'Back to list',
+            onSelect: () => void dispatch(intents.closeReading()),
+          },
+        ]
+      : POSITIONS.map(({ id, label }) => ({
+          label,
+          checked: position === id,
+          onSelect: () => setPosition(id),
+        }));
+
+  return (
+    <>
+      <button
+        type="button"
+        aria-label="Reading pane position"
+        title="Reading pane position"
+        onClick={(event) => menu.open(event)}
+        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-text transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <PanelLeftIcon size={16} />
+      </button>
+      {menu.state !== null && (
+        <ContextMenu x={menu.state.x} y={menu.state.y} items={items} onClose={menu.close} />
+      )}
+    </>
+  );
 }
 
 /** The kylins-style verb row: one icon button per compose verb. */
@@ -120,7 +167,6 @@ export function ReadingHeader({
   fromAddress,
   sentAt,
   message,
-  onClose,
   onAddContact,
 }: ReadingHeaderProps) {
   const twentyFour = useSettingsStore((s) => s.settings.twenty_four_clock);
@@ -134,6 +180,7 @@ export function ReadingHeader({
         {subject === '' ? '(no subject)' : subject}
       </h2>
       <div className="absolute right-4 top-4 flex items-center gap-1">
+        <PositionMenu />
         {message !== undefined && (
           <button
             type="button"
@@ -143,16 +190,6 @@ export function ReadingHeader({
             className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-text transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <MoreIcon size={16} />
-          </button>
-        )}
-        {onClose !== undefined && (
-          <button
-            type="button"
-            aria-label="Close reading pane"
-            onClick={onClose}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-text transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <CloseIcon size={16} />
           </button>
         )}
       </div>

@@ -10,13 +10,28 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { JSONContent } from '@tiptap/react';
 
-const ipc = vi.hoisted(() => ({ dispatch: vi.fn(), takeComposeRequest: vi.fn() }));
+const ipc = vi.hoisted(() => ({
+  dispatch: vi.fn(),
+  takeComposeRequest: vi.fn(),
+  peopleAvatar: vi.fn(),
+}));
 
 vi.mock('@/services/ipc', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   dispatch: ipc.dispatch,
   takeComposeRequest: ipc.takeComposeRequest,
+  peopleAvatar: ipc.peopleAvatar,
 }));
+
+const ai = vi.hoisted(() => ({
+  chipsFor: vi.fn(),
+  dismissChips: vi.fn(),
+  composeFromDraft: vi.fn(),
+  summariseMessage: vi.fn(),
+  translateMessage: vi.fn(),
+}));
+
+vi.mock('@/services/ai', () => ai);
 
 vi.mock('@/events/surfaceEvents', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -39,6 +54,7 @@ import { useReadingStore } from '@/stores/readingStore';
 import { useComposerStore } from '@/features/composer/composerStore';
 import { documentToEditor } from '@/features/composer/documentWire';
 import { QuickReplyStrip } from './QuickReplyStrip';
+import { ReadingPane } from '@/components/layout/ReadingPane';
 
 /** The open message the strip answers. */
 function readingSnapshot(): ReadingSnapshot {
@@ -94,6 +110,14 @@ beforeEach(() => {
   ipc.dispatch.mockResolvedValue(undefined);
   ipc.takeComposeRequest.mockReset();
   ipc.takeComposeRequest.mockResolvedValue(null);
+  ipc.peopleAvatar.mockReset();
+  ipc.peopleAvatar.mockResolvedValue({ initials: '', colour: '' });
+  ai.chipsFor.mockReset();
+  ai.chipsFor.mockResolvedValue([]);
+  ai.dismissChips.mockReset();
+  ai.composeFromDraft.mockReset();
+  ai.summariseMessage.mockReset();
+  ai.translateMessage.mockReset();
   resetStores();
 });
 
@@ -107,7 +131,8 @@ describe('the collapsed strip', () => {
     useReadingStore.setState({ snapshot: readingSnapshot() });
     render(<QuickReplyStrip />);
 
-    expect(screen.getByRole('button', { name: 'Reply' })).toBeTruthy();
+    // The strip's affordance carries the word; the header's verb button is icon-only.
+    expect(screen.getByText('Reply')).toBeTruthy();
   });
 
   it('draws nothing with no message open', () => {
@@ -148,10 +173,10 @@ describe('the collapsed strip', () => {
   });
 });
 
-describe('the expanded strip', () => {
-  /** Expands the strip the way its own click plus the landed request does. */
+describe('the inline composer takeover', () => {
+  /** Stands a composition the way the strip's click plus the landed
+   *  request does: the inline arm runs directly here, as the strip asked. */
   function expandStrip(): void {
-    useReadingStore.setState({ snapshot: readingSnapshot() });
     act(() => {
       useComposerStore.getState().expectInlineReply();
     });
@@ -165,11 +190,13 @@ describe('the expanded strip', () => {
     });
   }
 
-  it('docks the composer prefilled in place of the affordance', () => {
-    render(<QuickReplyStrip />);
+  it('owns the whole pane prefilled in place of the message chrome', () => {
+    useReadingStore.setState({ snapshot: readingSnapshot() });
+    render(<ReadingPane />);
     expandStrip();
 
     expect(screen.queryByRole('button', { name: 'Reply' })).toBeNull();
+    expect(screen.queryByText('Quarterly report')).toBeNull();
     expect(screen.getByRole('region', { name: 'Composer' })).toBeTruthy();
     expect((screen.getByRole('textbox', { name: 'To' }) as HTMLInputElement).value).toBe(
       'ada@example.test',
@@ -177,12 +204,13 @@ describe('the expanded strip', () => {
     expect((screen.getByRole('textbox', { name: 'Subject' }) as HTMLInputElement).value).toBe(
       'Re: Quarterly report',
     );
-    // The window's Close button does not stand in the strip.
+    // The window's Close button does not stand in the dock.
     expect(screen.queryByRole('button', { name: 'Close composer' })).toBeNull();
   });
 
-  it('sends through the same submit path and collapses', async () => {
-    render(<QuickReplyStrip />);
+  it('sends through the same submit path and hands the pane back', async () => {
+    useReadingStore.setState({ snapshot: readingSnapshot() });
+    render(<ReadingPane />);
     expandStrip();
 
     await act(async () => {
@@ -194,11 +222,13 @@ describe('the expanded strip', () => {
     expect(submit).toContain('"submit_rich_reply"');
     expect(submit).toContain('"in_reply_to":"orig-1@server.test"');
     expect(useComposerStore.getState().open).toBe(false);
-    expect(screen.getByRole('button', { name: 'Reply' })).toBeTruthy();
+    // The strip's affordance carries the word; the header's verb button is icon-only.
+    expect(screen.getByText('Reply')).toBeTruthy();
   });
 
-  it('collapses on discard', () => {
-    render(<QuickReplyStrip />);
+  it('hands the pane back on discard', () => {
+    useReadingStore.setState({ snapshot: readingSnapshot() });
+    render(<ReadingPane />);
     expandStrip();
 
     act(() => {
@@ -206,6 +236,7 @@ describe('the expanded strip', () => {
     });
 
     expect(useComposerStore.getState().open).toBe(false);
-    expect(screen.getByRole('button', { name: 'Reply' })).toBeTruthy();
+    // The strip's affordance carries the word; the header's verb button is icon-only.
+    expect(screen.getByText('Reply')).toBeTruthy();
   });
 });

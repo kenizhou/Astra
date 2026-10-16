@@ -55,6 +55,7 @@ vi.mock('@/services/agent', async (importOriginal) => ({
 }));
 
 import { AppShell } from './AppShell';
+import { useAppearanceStore } from '@/services/appearance';
 import { useAccountStore } from '@/stores/accountStore';
 import { useFolderStore } from '@/stores/folderStore';
 import { useReadingStore } from '@/stores/readingStore';
@@ -128,6 +129,7 @@ beforeEach(() => {
   useSendingStore.getState().applySnapshot({ rows: [] });
   useFolderStore.setState({ accounts: [], selected: null, outboxAccount: null });
   useReadingStore.getState().applySnapshot(null);
+  useAppearanceStore.setState({ readingPosition: 'right' });
   useSendResultStore.getState().dismiss();
   useSendResultStore.setState({ settled: [], answered: [] });
 });
@@ -197,6 +199,52 @@ describe('the pane stages', () => {
 
   it('narrow with a message open: the reading pane fills the frame alone', () => {
     window.innerWidth = 700;
+    render(<AppShell />);
+    act(() => {
+      useReadingStore.getState().applySnapshot(SNAPSHOT);
+    });
+
+    expect(screen.queryByRole('region', { name: 'Message list' })).toBeNull();
+    expect(screen.getByRole('complementary', { name: 'Reading pane' })).toBeTruthy();
+  });
+});
+
+describe('the reading pane position', () => {
+  it('bottom: the reading pane docks beneath the list in one column', () => {
+    window.innerWidth = 1280;
+    useAppearanceStore.setState({ readingPosition: 'bottom' });
+    render(<AppShell />);
+
+    expect(screen.getByRole('region', { name: 'Message list' })).toBeTruthy();
+    expect(screen.getByRole('complementary', { name: 'Reading pane' })).toBeTruthy();
+    // The vertical stack adds a row-resize handle beside the column ones.
+    expect(document.querySelector('.cursor-row-resize')).not.toBeNull();
+  });
+
+  it('off: the list takes the whole row and the reading pane hides', () => {
+    window.innerWidth = 1280;
+    useAppearanceStore.setState({ readingPosition: 'off' });
+    render(<AppShell />);
+
+    expect(screen.getByRole('region', { name: 'Message list' })).toBeTruthy();
+    expect(screen.queryByRole('complementary', { name: 'Reading pane' })).toBeNull();
+  });
+
+  it('off keeps hiding the pane even with a message open', () => {
+    window.innerWidth = 1280;
+    useAppearanceStore.setState({ readingPosition: 'off' });
+    render(<AppShell />);
+    act(() => {
+      useReadingStore.getState().applySnapshot(SNAPSHOT);
+    });
+
+    expect(screen.getByRole('region', { name: 'Message list' })).toBeTruthy();
+    expect(screen.queryByRole('complementary', { name: 'Reading pane' })).toBeNull();
+  });
+
+  it('narrow ignores the position: the open message still takes the frame', () => {
+    window.innerWidth = 700;
+    useAppearanceStore.setState({ readingPosition: 'bottom' });
     render(<AppShell />);
     act(() => {
       useReadingStore.getState().applySnapshot(SNAPSHOT);

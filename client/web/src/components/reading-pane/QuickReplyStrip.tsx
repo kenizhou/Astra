@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The quick-reply strip: docked at the reading pane's bottom, kylins'
-// InlineReply idiom. Collapsed it is the three compose verbs as one-line
-// affordances, shown only while a message is open; a click flags the next
-// compose request for the inline route and dispatches the verb, so the
-// core's prefill and threading land in the docked composer rather than a
-// pop-out. Expanded it is the shared composer pane, sending through the
-// same submit path; the pane leaving (a send, a discard) collapses the
-// strip back to the affordances.
+// InlineReply idiom. It is the three compose verbs as one-line
+// affordances, shown only while a message is open and no composition
+// stands; a click flags the next compose request for the inline route and
+// dispatches the verb, so the core's prefill and threading land in the
+// docked composer rather than a pop-out. Once a composition stands, the
+// reading pane's early return takes over and this strip draws nothing.
 
-import { ComposerPane } from '@/features/composer/Composer';
 import { useComposerStore } from '@/features/composer/composerStore';
 import { ForwardIcon, ReplyAllIcon, ReplyIcon } from '@/components/icons';
 import { dispatch, intents, type Intent } from '@/services/ipc';
@@ -41,15 +39,7 @@ export function QuickReplyStrip() {
   const messageOpen = useReadingStore((s) => s.snapshot !== null);
   const expecting = useComposerStore((s) => s.inlineExpected);
 
-  if (open) {
-    return (
-      <div className="flex max-h-[55%] min-h-[220px] shrink-0 flex-col border-t border-border-subtle">
-        <ComposerPane />
-      </div>
-    );
-  }
-
-  if (!messageOpen) {
+  if (open || !messageOpen) {
     return null;
   }
 

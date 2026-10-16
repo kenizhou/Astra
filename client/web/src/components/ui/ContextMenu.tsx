@@ -10,6 +10,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import { CheckIcon } from '@/components/icons';
+
 export interface ContextMenuItem {
   label?: string;
   icon?: React.ComponentType<{ size?: number; className?: string }>;
@@ -17,6 +19,9 @@ export interface ContextMenuItem {
   disabled?: boolean;
   danger?: boolean;
   separator?: boolean;
+  /** Checkbox presentation: defined = the item renders a check slot (tick
+   *  when true, empty gutter when false), the radio-style picker form. */
+  checked?: boolean;
   /** Native tooltip over the label: the honest-disable channel. */
   title?: string;
   /** The screen-reader leg of that channel, wired via aria-describedby. */
@@ -217,6 +222,14 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
                 }`}
               >
                 {Icon !== undefined && <Icon size={14} />}
+                {/* Checkbox gutter: present (ticked or empty) only for items
+                    that opted into `checked`, so ordinary items keep their
+                    alignment. */}
+                {item.checked !== undefined && (
+                  <span aria-hidden="true" className="inline-flex w-3.5 shrink-0 justify-center">
+                    {item.checked && <CheckIcon size={13} />}
+                  </span>
+                )}
                 <span className="flex-1 truncate" title={item.title}>
                   {item.label}
                 </span>

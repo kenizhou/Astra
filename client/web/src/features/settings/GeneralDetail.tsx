@@ -10,7 +10,7 @@
 // this device.
 
 import { dispatch, intents } from '@/services/ipc';
-import { SKINS, useAppearanceStore, type ContrastMode, type DensityMode, type FontSizeStep, type TextureMode } from '@/services/appearance';
+import { SKINS, useAppearanceStore, type ContrastMode, type DensityMode, type FontSizeStep, type ReadingPosition, type TextureMode } from '@/services/appearance';
 
 import { useSettingsStore } from './settingsStore';
 
@@ -38,6 +38,13 @@ const FONT_SIZES: ReadonlyArray<{ id: FontSizeStep; label: string }> = [
 const DENSITIES: ReadonlyArray<{ id: DensityMode; label: string }> = [
   { id: 'comfortable', label: 'Comfortable' },
   { id: 'compact', label: 'Compact' },
+];
+
+/** The reading pane's dock: right of the list, beneath it, or hidden. */
+const READING_POSITIONS: ReadonlyArray<{ id: ReadingPosition; label: string }> = [
+  { id: 'right', label: 'Right' },
+  { id: 'bottom', label: 'Bottom' },
+  { id: 'off', label: 'Off' },
 ];
 
 /** The texture steps: warm is the default; calm its quiet sibling; classic
@@ -173,6 +180,8 @@ export function GeneralDetail() {
   const density = useAppearanceStore((s) => s.density);
   const setDensity = useAppearanceStore((s) => s.setDensity);
   const texture = useAppearanceStore((s) => s.texture);
+  const readingPosition = useAppearanceStore((s) => s.readingPosition);
+  const setReadingPosition = useAppearanceStore((s) => s.setReadingPosition);
   const setTexture = useAppearanceStore((s) => s.setTexture);
 
   return (
@@ -206,6 +215,7 @@ export function GeneralDetail() {
       <Segmented label="Contrast" value={contrast} options={CONTRASTS} onChange={setContrast} />
       <Segmented label="Font size" value={fontSize} options={FONT_SIZES} onChange={setFontSize} />
       <Segmented label="Density" value={density} options={DENSITIES} onChange={setDensity} />
+      <Segmented label="Reading pane" value={readingPosition} options={READING_POSITIONS} onChange={setReadingPosition} />
     </section>
   );
 }

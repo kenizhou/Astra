@@ -32,10 +32,11 @@ import { PeoplePane } from '@/features/people/PeoplePane';
 import { SettingsScreen } from '@/features/settings/SettingsScreen';
 import { FolderPane } from '@/components/folder-pane/FolderPane';
 import { useWindowStage } from '@/hooks/useWindowSize';
+import { useAppearanceStore } from '@/services/appearance';
 import { useReadingStore } from '@/stores/readingStore';
 import { useUiStore } from '@/stores/uiStore';
 import { CommandRibbon } from '@/components/ribbon/CommandRibbon';
-import { PaneDivider } from './paneDivider';
+import { PaneDivider, PaneDividerHorizontal } from './paneDivider';
 import { FolderPaneDrawer } from './FolderPaneDrawer';
 import { MessageList } from './MessageList';
 import { ReadingPane } from './ReadingPane';
@@ -77,9 +78,22 @@ function PaperCard({ children }: { children: React.ReactNode }) {
  *  arrives or leaves. The default sizes sum to one hundred in each
  *  combination. At the narrow stage one pane fills the row at a time: the
  *  open message wins, and the reading pane's close returns to the list. */
+/** The mail view's pane row: the message list, the reading pane, and the
+ *  docked agent column, each a card, the shared pill handles between them.
+ *  The composer lives in the reading pane's quick-reply strip and in
+ *  pop-out windows now, so the row holds no fourth column. The pixel
+ *  minimums keep every card readable while its handle drags. The agent
+ *  dock joins the Group key, so the layout remounts cleanly when it
+ *  arrives or leaves. The default sizes sum to one hundred in each
+ *  combination. The reading pane's position is the device-local three-way
+ *  kylins popularised: docked right of the list, docked beneath it (a
+ *  vertical stack inside the same outer group), or hidden outright. At the
+ *  narrow stage one pane fills the row at a time: the open message wins,
+ *  and the reading pane's close returns to the list. */
 function MailRow() {
   const agentOpen = useUiStore((s) => s.agentOpen);
   const stage = useWindowStage();
+  const position = useAppearanceStore((s) => s.readingPosition);
   const messageOpen = useReadingStore((s) => s.snapshot !== null);
   const composing = useComposerStore((s) => s.open && s.composition !== null);
   const readingOpen = messageOpen || composing;
@@ -93,6 +107,56 @@ function MailRow() {
       <PaneCard>
         <MessageList />
       </PaneCard>
+    );
+  }
+
+  if (position === 'off') {
+    return (
+      <Group key={agentOpen ? 'agent-off' : 'off'} orientation="horizontal" className="h-full">
+        <Panel id="message-list" defaultSize={pct(agentOpen ? 72 : 100)} minSize={300}>
+          <PaneCard>
+            <MessageList />
+          </PaneCard>
+        </Panel>
+        {agentOpen && <PaneDivider />}
+        {agentOpen && (
+          <Panel id="agent-dock" defaultSize={pct(28)} minSize={240} maxSize={pct(40)}>
+            <PaneCard>
+              <AgentPanel />
+            </PaneCard>
+          </Panel>
+        )}
+      </Group>
+    );
+  }
+
+  if (position === 'bottom') {
+    return (
+      <Group key={agentOpen ? 'agent-bottom' : 'bottom'} orientation="horizontal" className="h-full">
+        <Panel id="list-over-reading" defaultSize={pct(agentOpen ? 72 : 100)} minSize={360}>
+          <Group orientation="vertical" className="h-full">
+            <Panel id="message-list" defaultSize={pct(45)} minSize={180}>
+              <PaneCard>
+                <MessageList />
+              </PaneCard>
+            </Panel>
+            <PaneDividerHorizontal />
+            <Panel id="reading-pane" defaultSize={pct(55)} minSize={220}>
+              <PaperCard>
+                <ReadingPane />
+              </PaperCard>
+            </Panel>
+          </Group>
+        </Panel>
+        {agentOpen && <PaneDivider />}
+        {agentOpen && (
+          <Panel id="agent-dock" defaultSize={pct(28)} minSize={240} maxSize={pct(40)}>
+            <PaneCard>
+              <AgentPanel />
+            </PaneCard>
+          </Panel>
+        )}
+      </Group>
     );
   }
 

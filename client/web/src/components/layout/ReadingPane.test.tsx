@@ -31,8 +31,15 @@ const ai = vi.hoisted(() => ({
 
 vi.mock('@/services/ai', () => ai);
 
+// The composer is stubbed: the takeover tests assert pane ownership, not
+// the composer's internals (those live in QuickReplyStrip.test.tsx).
+vi.mock('@/features/composer/Composer', () => ({
+  ComposerPane: () => <div data-testid="composer-stub" />,
+}));
+
 import { ReadingPane } from './ReadingPane';
 import { useAiChipsStore } from '@/stores/aiChipsStore';
+import { useComposerStore } from '@/features/composer/composerStore';
 import { usePeopleStore } from '@/features/people/peopleStore';
 import { useReadingStore } from '@/stores/readingStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -77,6 +84,7 @@ beforeEach(() => {
   ai.translateMessage.mockReset();
   useReadingStore.setState({ snapshot: null, showRemoteImages: false });
   useAiChipsStore.setState({ message: null, chips: [] });
+  useComposerStore.setState({ open: false, composition: null });
   usePeopleStore.setState({ pendingContactCreate: null });
   useUiStore.setState({ shellView: 'mail' });
 });
@@ -162,14 +170,25 @@ describe('the reading pane', () => {
     expect(screen.getByText('This message has no readable body.')).toBeTruthy();
   });
 
-  it('dispatches close_reading from the close button', () => {
+  it('the inline composer owns the whole pane while a composition stands', () => {
     useReadingStore.getState().applySnapshot(snapshot());
+    useComposerStore.setState({ open: true, composition: { id: 'c1' } as never });
     render(<ReadingPane />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Close reading pane' }));
+    // kylins' InlineReply idiom: no header, no body, no strip while the
+    // dock owns the pane.
+    expect(screen.getByTestId('composer-stub')).toBeTruthy();
+    expect(screen.queryByText('Launch')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Reply all' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'More actions' })).toBeNull();
+  });
 
-    expect(ipc.dispatch).toHaveBeenCalledTimes(1);
-    expect(ipc.dispatch).toHaveBeenCalledWith('close_reading');
+  it('hands the pane back to the message when the composition leaves', () => {
+    useReadingStore.getState().applySnapshot(snapshot());
+    useComposerStore.setState({ open: false, composition: null });
+    render(<ReadingPane />);
+
+    expect(screen.getByText('Launch')).toBeTruthy();
   });
 
   it('mounts the smart replies strip and the summarise block below the header', async () => {
