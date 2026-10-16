@@ -61,44 +61,63 @@ function bodyItems(link: string | null, selection: string, selectAll: () => void
 }
 
 /** Wires the body menu into one frame document: contextmenu opens it,
- *  anchor clicks route to the system browser. */
+ *  anchor clicks route to the system browser. The listeners attach on the
+ *  frame's load, not at mount: the srcdoc document replaces the initial
+ *  empty one asynchronously, and handlers on the replaced document die
+ *  with it. */
 function useBodyFrame(doc: string) {
   const frameRef = useRef<HTMLIFrameElement>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; link: string | null; selection: string } | null>(null);
 
   useEffect(() => {
     const frame = frameRef.current;
-    const frameDoc = frame?.contentDocument;
-    if (frame === null || frameDoc == null) {
+    if (frame === null) {
       return;
     }
 
-    const onClick = (event: MouseEvent) => {
-      const anchor = (event.target as Element).closest('a');
-      if (anchor !== null) {
-        event.preventDefault();
-        const href = anchor.getAttribute('href');
-        if (href !== null && href !== '') {
-          void openUrl(href);
-        }
+    const attach = () => {
+      const frameDoc = frame.contentDocument;
+      if (frameDoc == null) {
+        return;
       }
+      const onClick = (event: MouseEvent) => {
+        const anchor = (event.target as Element).closest('a');
+        if (anchor !== null) {
+          event.preventDefault();
+          const href = anchor.getAttribute('href');
+          if (href !== null && href !== '') {
+            void openUrl(href);
+          }
+        }
+      };
+      const onContextMenu = (event: MouseEvent) => {
+        event.preventDefault();
+        const anchor = (event.target as Element).closest('a');
+        const frameBox = frame.getBoundingClientRect();
+        setMenu({
+          x: frameBox.left + event.clientX,
+          y: frameBox.top + event.clientY,
+          link: anchor?.getAttribute('href') ?? null,
+          selection: frameDoc.getSelection()?.toString() ?? '',
+        });
+      };
+      frameDoc.addEventListener('click', onClick);
+      frameDoc.addEventListener('contextmenu', onContextMenu);
+      return () => {
+        frameDoc.removeEventListener('click', onClick);
+        frameDoc.removeEventListener('contextmenu', onContextMenu);
+      };
     };
-    const onContextMenu = (event: MouseEvent) => {
-      event.preventDefault();
-      const anchor = (event.target as Element).closest('a');
-      const frameBox = frame.getBoundingClientRect();
-      setMenu({
-        x: frameBox.left + event.clientX,
-        y: frameBox.top + event.clientY,
-        link: anchor?.getAttribute('href') ?? null,
-        selection: frameDoc.getSelection()?.toString() ?? '',
-      });
+
+    let detach = attach();
+    const onLoad = () => {
+      detach?.();
+      detach = attach();
     };
-    frameDoc.addEventListener('click', onClick);
-    frameDoc.addEventListener('contextmenu', onContextMenu);
+    frame.addEventListener('load', onLoad);
     return () => {
-      frameDoc.removeEventListener('click', onClick);
-      frameDoc.removeEventListener('contextmenu', onContextMenu);
+      frame.removeEventListener('load', onLoad);
+      detach?.();
     };
   }, [doc]);
 
