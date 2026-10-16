@@ -126,7 +126,7 @@ export function CalendarToolbar({ onCreate, onBriefs }: CalendarToolbarProps) {
   };
 
   return (
-    <div className="flex h-[var(--pane-header-h)] shrink-0 items-center gap-2 border-b border-border-subtle bg-surface px-3">
+    <div className="flex h-[var(--ribbon-h)] shrink-0 items-center gap-2 border-b border-border-subtle bg-surface px-3">
       <button
         type="button"
         onClick={today}

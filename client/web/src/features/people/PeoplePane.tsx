@@ -167,7 +167,7 @@ export function PeoplePane() {
       aria-label="People"
       className="relative flex min-w-0 flex-1 flex-col overflow-hidden"
     >
-      <div className="flex h-[var(--pane-header-h)] shrink-0 items-center gap-2 border-b border-border-subtle bg-surface px-3">
+      <div className="flex h-[var(--ribbon-h)] shrink-0 items-center gap-2 border-b border-border-subtle bg-surface px-3">
         <div className="w-[220px]">
           <PeopleSearch />
         </div>
