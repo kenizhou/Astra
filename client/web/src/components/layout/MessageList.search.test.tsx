@@ -125,7 +125,7 @@ beforeEach(() => {
     search: null,
   });
   useReadingStore.setState({ snapshot: null, showRemoteImages: false });
-  useSplitStore.setState({ entries: {}, filter: 'all' });
+  useSplitStore.setState({ entries: {} });
 });
 
 afterEach(() => {

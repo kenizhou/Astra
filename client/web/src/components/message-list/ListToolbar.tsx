@@ -1,30 +1,31 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The list pane's toolbar: the open folder's name on the left and, on the
-// right, the split inbox's segmented control beside the flat/threaded one.
+// right, the filter's segmented control beside the flat/threaded one.
 // The view mode crosses back as one set_view_mode intent per click; the
-// split filter stays on the client, its state held by the split store,
-// because the core owes no side view of its own. A live search replaces
-// the folder's own toolbar: the result count and the depth note stand
-// where the folder name stood (a zero horizon claims no note), the split
-// control hides (its sides derive
-// from the folder the search is not showing), and the exit affordance
-// clears the search back to the folder view. The outbox mode keeps only
-// the title: the queue has no sides and no grouping mode.
+// filter stays on the client, its state held by the list-filter store,
+// because the core owes no filtered view of its own. A live search
+// replaces the folder's own toolbar: the result count and the depth note
+// stand where the folder name stood (a zero horizon claims no note), the
+// filter control hides (its tabs derive from the folder the search is not
+// showing), and the exit affordance clears the search back to the folder
+// view. The outbox mode keeps only the title: the queue has no filter and
+// no grouping mode.
 
 import { dispatch, intents } from '@/services/ipc';
 import type { SearchState, ViewMode } from '@/services/surfaces';
-import type { SplitFilter } from '@/stores/splitStore';
+import type { ListFilter } from './listFilter';
 
 const MODES: ReadonlyArray<{ id: ViewMode; label: string }> = [
   { id: 'flat', label: 'Flat' },
   { id: 'threaded', label: 'Threaded' },
 ];
 
-/** The sides the split control offers, the badge's count beside each. */
-const SIDES: ReadonlyArray<{ id: SplitFilter; label: string }> = [
+/** The tabs the filter control offers, the badge's count beside each. */
+const FILTERS: ReadonlyArray<{ id: ListFilter; label: string }> = [
   { id: 'all', label: 'All' },
-  { id: 'actioned', label: 'Actioned' },
-  { id: 'fyi', label: 'FYI' },
+  { id: 'unread', label: 'Unread' },
+  { id: 'flagged', label: 'Flagged' },
+  { id: 'attachments', label: 'Attachments' },
 ];
 
 interface ListToolbarProps {
@@ -32,19 +33,19 @@ interface ListToolbarProps {
   folderName: string | null;
   /** The grouping mode the snapshot last reported. */
   viewMode: ViewMode;
-  /** The side the split filter is showing. */
-  splitFilter: SplitFilter;
-  /** The counts the badges draw: the whole list and each half. */
-  splitCounts: { all: number; actioned: number; fyi: number };
-  /** Records the side the user chose. */
-  onSplitFilter: (filter: SplitFilter) => void;
+  /** The tab the filter is showing. */
+  filter: ListFilter;
+  /** The counts the badges draw, over the unfiltered rows. */
+  filterCounts: Record<ListFilter, number>;
+  /** Records the tab the user chose. */
+  onFilter: (filter: ListFilter) => void;
   /** The live search state; its results header replaces the folder's own. */
   search: SearchState | null;
   /** Whether the queue view leads: the title alone, no controls. */
   outbox?: boolean;
 }
 
-export function ListToolbar({ folderName, viewMode, splitFilter, splitCounts, onSplitFilter, search, outbox = false }: ListToolbarProps) {
+export function ListToolbar({ folderName, viewMode, filter, filterCounts, onFilter, search, outbox = false }: ListToolbarProps) {
   const switchMode = (mode: ViewMode) => {
     void dispatch(intents.setViewMode(mode));
   };
@@ -84,22 +85,22 @@ export function ListToolbar({ folderName, viewMode, splitFilter, splitCounts, on
         {search === null && (
           <div
             role="group"
-            aria-label="Split"
+            aria-label="Filter"
             className="flex shrink-0 items-center gap-0.5 rounded-md bg-muted p-0.5"
           >
-            {SIDES.map(({ id, label }) => (
+            {FILTERS.map(({ id, label }) => (
               <button
                 key={id}
                 type="button"
-                aria-pressed={splitFilter === id}
-                onClick={() => onSplitFilter(id)}
+                aria-pressed={filter === id}
+                onClick={() => onFilter(id)}
                 className={`whitespace-nowrap rounded-[var(--radius-xs)] px-2 py-0.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                  splitFilter === id
+                  filter === id
                     ? 'bg-background font-medium text-foreground shadow-[var(--shadow-sm)]'
                     : 'text-muted-text hover:text-foreground'
                 }`}
               >
-                {label} {splitCounts[id]}
+                {label} {filterCounts[id]}
               </button>
             ))}
           </div>

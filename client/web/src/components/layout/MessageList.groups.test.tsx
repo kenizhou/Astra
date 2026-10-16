@@ -109,7 +109,7 @@ beforeEach(() => {
     density: 'normal',
   });
   useReadingStore.setState({ snapshot: null, showRemoteImages: false });
-  useSplitStore.setState({ entries: {}, filter: 'all' });
+  useSplitStore.setState({ entries: {} });
   useSendingStore.getState().applySnapshot({ rows: [] });
   virtual.lastOpts = null;
 });

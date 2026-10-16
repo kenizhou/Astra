@@ -2,15 +2,15 @@
 // The split inbox's derivation: the side a row lands on comes from the
 // account's split map alone (a message key is unique only within its
 // account), a thread row names no single message so no side claims it,
-// and an unmapped row rides All only, never Actioned or FYI. The counts
-// behind the toolbar's badges derive from the same one map.
+// and an unmapped row answers null. The map stays fed although no
+// surface renders from it since the kylins filter tabs took the toolbar.
 
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { MessageRowView } from '@/services/surfaces';
 import type { SplitEntry } from '@/services/ai';
 
-import { sideOf, splitCounts, useSplitStore, visibleRows } from './splitStore';
+import { sideOf, useSplitStore } from './splitStore';
 
 /** A flat message row, overridable per test. */
 function row(over: Partial<MessageRowView> = {}): MessageRowView {
@@ -58,7 +58,7 @@ function applyWork(entries: SplitEntry[]): void {
 }
 
 beforeEach(() => {
-  useSplitStore.setState({ entries: {}, filter: 'all' });
+  useSplitStore.setState({ entries: {} });
 });
 
 describe('the side derivation', () => {
@@ -93,54 +93,6 @@ describe('the side derivation', () => {
   });
 });
 
-describe('the visible rows', () => {
-  it('shows every row under All', () => {
-    applyWork(workEntries);
-
-    const visible = visibleRows([actioned, fyi, unmapped, thread], 'all', useSplitStore.getState().entries);
-    expect(visible).toHaveLength(4);
-  });
-
-  it('shows only the mapped rows under Actioned and FYI, unmapped and thread rows never', () => {
-    applyWork(workEntries);
-    const entries = useSplitStore.getState().entries;
-
-    expect(visibleRows([actioned, fyi, unmapped, thread], 'actioned', entries).map((r) => r.subject)).toEqual([
-      'Needs your sign off',
-    ]);
-    expect(visibleRows([actioned, fyi, unmapped, thread], 'fyi', entries).map((r) => r.subject)).toEqual([
-      'Your weekly digest',
-    ]);
-  });
-
-  it('keeps the row order the snapshot sent', () => {
-    applyWork(workEntries);
-
-    const visible = visibleRows([fyi, unmapped, actioned], 'actioned', useSplitStore.getState().entries);
-    expect(visible.map((r) => r.subject)).toEqual(['Needs your sign off']);
-  });
-});
-
-describe('the counts', () => {
-  it('counts every side against the whole snapshot', () => {
-    applyWork(workEntries);
-
-    expect(splitCounts([actioned, fyi, unmapped, thread], useSplitStore.getState().entries)).toEqual({
-      all: 4,
-      actioned: 1,
-      fyi: 1,
-    });
-  });
-
-  it('counts an empty map as all rows on no side', () => {
-    expect(splitCounts([actioned, fyi], useSplitStore.getState().entries)).toEqual({
-      all: 2,
-      actioned: 0,
-      fyi: 0,
-    });
-  });
-});
-
 describe('the store', () => {
   it('replaces one account map on the next apply', () => {
     applyWork(workEntries);
@@ -149,13 +101,5 @@ describe('the store', () => {
     const entries = useSplitStore.getState().entries;
     expect(entries['work']?.get('imap:v1:u2')).toBe('fyi');
     expect(entries['work']?.get('imap:v1:u3')).toBeUndefined();
-  });
-
-  it('holds the chosen filter, All until a toggle names one', () => {
-    expect(useSplitStore.getState().filter).toBe('all');
-    useSplitStore.getState().setFilter('fyi');
-    expect(useSplitStore.getState().filter).toBe('fyi');
-    useSplitStore.getState().setFilter('all');
-    expect(useSplitStore.getState().filter).toBe('all');
   });
 });

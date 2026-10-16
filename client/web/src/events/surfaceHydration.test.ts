@@ -94,7 +94,7 @@ function resetStores() {
     writeStates: [],
     createTargets: [],
   });
-  useSplitStore.setState({ entries: {}, filter: 'all' });
+  useSplitStore.setState({ entries: {} });
 }
 
 beforeEach(() => {

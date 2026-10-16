@@ -3,15 +3,16 @@
 // with @tanstack/react-virtual the way KY windows its list (an absolutely
 // positioned row per virtual item, measured as it mounts, a fixed estimate
 // before the first measure). The rows come straight from the snapshot the
-// pulls keep fresh, grouped under a date header per sent-at day; the split
-// filter narrows what renders, never the window itself, so a full window
-// keeps offering to grow. A single click selects and opens (selection is
-// open, the highlight following the open message), and ShowMore grows the
-// window the core owes whenever the rows fill it. A live search state
-// replaces the folder rows with the result rows through the same window and
-// the same open flow, keyed by message, flat with no date headers. The
-// folder tree's Outbox row swaps the whole body for the account's queue
-// view. Row heights follow the density the list store holds.
+// pulls keep fresh, grouped under a date header per sent-at day; the
+// client-side filter narrows what renders, never the window itself, so a
+// full window keeps offering to grow. A single click selects and opens
+// (selection is open, the highlight following the open message), and
+// ShowMore grows the window the core owes whenever the rows fill it. A
+// live search state replaces the folder rows with the result rows through
+// the same window and the same open flow, keyed by message, flat with no
+// date headers. The folder tree's Outbox row swaps the whole body for the
+// account's queue view. Row heights follow the density the list store
+// holds.
 
 import { useEffect, useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -28,13 +29,14 @@ import {
   type ListItem,
 } from '@/components/message-list/dateGroups';
 import { DENSITY_ROW_PX } from '@/components/message-list/density';
+import { filteredRows, filterCounts } from '@/components/message-list/listFilter';
 import { sameRowKey } from '@/components/message-list/rowIdentity';
 import { OutboxQueue } from '@/features/outbox/OutboxQueue';
 import { dispatch, intents } from '@/services/ipc';
 import { useFolderStore } from '@/stores/folderStore';
+import { useListFilterStore } from '@/stores/listFilterStore';
 import { useListStore } from '@/stores/listStore';
 import { useReadingStore } from '@/stores/readingStore';
-import { splitCounts, useSplitStore, visibleRows } from '@/stores/splitStore';
 import type { RowKey } from '@/services/surfaces';
 
 /** The selected folder's display name, straight off the folder tree. */
@@ -143,13 +145,18 @@ export function MessageList() {
   const accounts = useFolderStore((s) => s.accounts);
   const folder = useFolderStore((s) => s.selected);
   const outboxAccount = useFolderStore((s) => s.outboxAccount);
-  const splitFilter = useSplitStore((s) => s.filter);
-  const entries = useSplitStore((s) => s.entries);
+  const filter = useListFilterStore((s) => s.filter);
 
   const outboxMode = outboxAccount !== null;
   const searching = search !== null;
-  const shownRows = visibleRows(rows, splitFilter, entries);
-  const counts = splitCounts(rows, entries);
+  const shownRows = filteredRows(rows, filter);
+  const counts = filterCounts(rows);
+
+  // The folder switch resets the filter to All: a tab named over one
+  // folder's rows says nothing about the next folder's.
+  useEffect(() => {
+    useListFilterStore.getState().reset();
+  }, [folder]);
 
   // The highlight follows the open message first: the reading snapshot is
   // the record of what is open, and the local click selection covers the
@@ -184,9 +191,9 @@ export function MessageList() {
 
   const now = new Date();
 
-  // The window compares against every row the snapshot sent, not the side
-  // view: rows behind the load window may belong to the chosen side, so a
-  // full window keeps offering to grow whatever the filter shows.
+  // The window compares against every row the snapshot sent, not the
+  // filtered view: rows behind the load window may match the chosen tab,
+  // so a full window keeps offering to grow whatever the filter shows.
   const windowIsFull = visibleLimit > 0 && rows.length === visibleLimit;
   const showRows = folder !== null && rows.length > 0;
 
@@ -198,9 +205,9 @@ export function MessageList() {
       <ListToolbar
         folderName={folderDisplayName(accounts, folder)}
         viewMode={viewMode}
-        splitFilter={splitFilter}
-        splitCounts={counts}
-        onSplitFilter={(filter) => useSplitStore.getState().setFilter(filter)}
+        filter={filter}
+        filterCounts={counts}
+        onFilter={(tab) => useListFilterStore.getState().setFilter(tab)}
         search={search}
         outbox={outboxMode}
       />
@@ -217,7 +224,7 @@ export function MessageList() {
       ) : !showRows ? (
         <EmptyState glyph={<MailIcon size={24} />} message={STATE_CONTENT.listEmptyFolder!.message} />
       ) : shownRows.length === 0 ? (
-        <EmptyState glyph={<MailIcon size={24} />} message={STATE_CONTENT.listEmptySide!.message} />
+        <EmptyState glyph={<MailIcon size={24} />} message={STATE_CONTENT.listEmptyFilter!.message} />
       ) : (
         <RowWindow items={withDateHeaders(shownRows, now)} highlight={highlight} now={now} openRow={openRow} showMore={windowIsFull} />
       )}

@@ -13,7 +13,7 @@ export interface StateContent {
 export const STATE_CONTENT: Record<string, StateContent> = {
   listNoFolder: { message: 'Select a folder to read its mail.' },
   listEmptyFolder: { message: 'No messages in this folder.' },
-  listEmptySide: { message: 'No messages on this side.' },
+  listEmptyFilter: { message: 'Nothing matches this filter.' },
   searchEmpty: { message: 'No results.' },
   readingEmpty: { message: 'Select a message to read it.' },
 };

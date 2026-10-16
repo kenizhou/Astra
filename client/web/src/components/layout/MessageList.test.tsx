@@ -4,11 +4,10 @@
 // badge, stamp), the selection (a single click selects and opens, the
 // highlight following the open message), every intent crossing back
 // (show more, view mode, mark read, set flagged, open message) with its
-// exact payload, and the split filter (the badges, the side views, the
-// unmapped rows riding All only, and the selection reset). The date group
-// headers, the density, and the outbox queue view have their own file:
-// MessageList.groups.test.tsx; the search results mode has its own file:
-// MessageList.search.test.tsx.
+// exact payload, and the list filter (the badges, the tabs' views, and
+// the selection reset). The date group headers, the density, and the
+// outbox queue view have their own file: MessageList.groups.test.tsx; the
+// search results mode has its own file: MessageList.search.test.tsx.
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -104,7 +103,7 @@ beforeEach(() => {
     density: 'normal',
   });
   useReadingStore.setState({ snapshot: null, showRemoteImages: false });
-  useSplitStore.setState({ entries: {}, filter: 'all' });
+  useSplitStore.setState({ entries: {} });
 });
 
 afterEach(() => {
@@ -350,48 +349,44 @@ describe('the message list', () => {
   });
 });
 
-describe('the split filter', () => {
-  /** The actioned row: a stored primary message. */
-  const signOff = row({
+describe('the list filter', () => {
+  /** The unread row: the base factory's default. */
+  const unreadRow = row();
+
+  /** The flagged row. */
+  const flaggedRow = row({
     key: { message: { account: 'work', key: 'imap:v1:u7' } },
     subject: 'Needs your sign off',
     unread: false,
+    flagged: true,
   });
 
-  /** The FYI row: a stored newsletter. */
-  const newsletter = row({
+  /** The attachment row. */
+  const attachedRow = row({
     key: { message: { account: 'work', key: 'imap:v1:u8' } },
     subject: 'Your weekly digest',
     unread: false,
+    has_attachments: true,
   });
 
-  /** Applies the split map matching the rows above: u7 actioned, u8 FYI, u1 unmapped. */
-  function applySplit(): void {
-    useSplitStore.getState().applyMap('work', [
-      { key: 'imap:v1:u7', side: 'actioned' },
-      { key: 'imap:v1:u8', side: 'fyi' },
-    ]);
-  }
-
-  it('carries the counts per side on the badges', () => {
-    applySplit();
-    applyList({ rows: [row(), signOff, newsletter], visible_limit: 50 });
+  it('carries the counts per tab on the badges', () => {
+    applyList({ rows: [unreadRow, flaggedRow, attachedRow], visible_limit: 50 });
 
     render(<MessageList />);
 
     expect(screen.getByRole('button', { name: 'All 3' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Actioned 1' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'FYI 1' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Unread 1' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Flagged 1' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Attachments 1' })).toBeTruthy();
   });
 
-  it('filters the rows to the chosen side, unmapped rows riding All only', () => {
-    applySplit();
-    applyList({ rows: [row(), signOff, newsletter], visible_limit: 50 });
+  it('filters the rows to the chosen tab', () => {
+    applyList({ rows: [unreadRow, flaggedRow, attachedRow], visible_limit: 50 });
 
     render(<MessageList />);
 
     act(() => {
-      fireEvent.click(screen.getByRole('button', { name: 'Actioned 1' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Flagged 1' }));
     });
     expect(screen.getAllByRole('option')).toHaveLength(1);
     expect(screen.getByText('Needs your sign off')).toBeTruthy();
@@ -399,31 +394,35 @@ describe('the split filter', () => {
     expect(screen.queryByText('Your weekly digest')).toBeNull();
 
     act(() => {
-      fireEvent.click(screen.getByRole('button', { name: 'FYI 1' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Attachments 1' }));
     });
     expect(screen.getAllByRole('option')).toHaveLength(1);
     expect(screen.getByText('Your weekly digest')).toBeTruthy();
 
     act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Unread 1' }));
+    });
+    expect(screen.getAllByRole('option')).toHaveLength(1);
+    expect(screen.getByText('Quarterly report')).toBeTruthy();
+
+    act(() => {
       fireEvent.click(screen.getByRole('button', { name: 'All 3' }));
     });
     expect(screen.getAllByRole('option')).toHaveLength(3);
-    expect(screen.getByText('Quarterly report')).toBeTruthy();
   });
 
   it('resets the selection when the filter hides the selected row', () => {
-    applySplit();
-    applyList({ rows: [row(), signOff], visible_limit: 50 });
+    applyList({ rows: [unreadRow, flaggedRow], visible_limit: 50 });
 
     render(<MessageList />);
     fireEvent.click(screen.getByText('Quarterly report'));
     expect(useListStore.getState().selectedKey).toEqual({ message: { account: 'work', key: 'imap:v1:u1' } });
 
     act(() => {
-      fireEvent.click(screen.getByRole('button', { name: 'Actioned 1' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Flagged 1' }));
     });
 
-    // The unmapped row is gone from the side view, so its selection went
+    // The read row is gone from the filtered view, so its selection went
     // with it: nothing stays selected, and All returning does not restore it.
     expect(useListStore.getState().selectedKey).toBeNull();
     act(() => {
@@ -433,46 +432,44 @@ describe('the split filter', () => {
   });
 
   it('keeps the selection when the filter keeps the row', () => {
-    applySplit();
-    applyList({ rows: [row(), signOff], visible_limit: 50 });
+    applyList({ rows: [unreadRow, flaggedRow], visible_limit: 50 });
 
     render(<MessageList />);
     fireEvent.click(screen.getByText('Needs your sign off'));
 
     act(() => {
-      fireEvent.click(screen.getByRole('button', { name: 'Actioned 1' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Flagged 1' }));
     });
 
     expect(optionWith('Needs your sign off').getAttribute('aria-selected')).toBe('true');
     expect(useListStore.getState().selectedKey).toEqual({ message: { account: 'work', key: 'imap:v1:u7' } });
   });
 
-  it('shows an empty state when the side holds none of the rows', () => {
-    applyList({ rows: [row()], visible_limit: 50 });
+  it('shows an empty state when the tab holds none of the rows', () => {
+    applyList({ rows: [unreadRow], visible_limit: 50 });
 
     render(<MessageList />);
 
     act(() => {
-      fireEvent.click(screen.getByRole('button', { name: 'Actioned 0' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Flagged 0' }));
     });
 
-    expect(screen.getByText('No messages on this side.')).toBeTruthy();
+    expect(screen.getByText('Nothing matches this filter.')).toBeTruthy();
     expect(screen.queryByRole('option')).toBeNull();
     // The folder itself is not empty, so the folder's own empty state stays away.
     expect(screen.queryByText('No messages in this folder.')).toBeNull();
   });
 
-  it('keeps Show more while the window is full even when a side shows fewer rows', () => {
-    applySplit();
-    applyList({ rows: [row(), signOff, newsletter], visible_limit: 3 });
+  it('keeps Show more while the window is full even when a tab shows fewer rows', () => {
+    applyList({ rows: [unreadRow, flaggedRow, attachedRow], visible_limit: 3 });
 
     render(<MessageList />);
 
     act(() => {
-      fireEvent.click(screen.getByRole('button', { name: 'Actioned 1' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Flagged 1' }));
     });
 
-    // Rows behind the load window may still belong to the side, so a full
+    // Rows behind the load window may still match the tab, so a full
     // window keeps offering to grow it.
     expect(screen.getByRole('button', { name: 'Show more' })).toBeTruthy();
   });
