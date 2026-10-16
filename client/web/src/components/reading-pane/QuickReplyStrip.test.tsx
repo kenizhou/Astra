@@ -126,6 +126,26 @@ describe('the collapsed strip', () => {
       '{"compose":{"reply":{"message":{"account":"work","key":"m1"}}}}',
     );
   });
+
+  it('offers reply all and forward beside reply, each dispatching its verb inline', () => {
+    useReadingStore.setState({ snapshot: readingSnapshot() });
+    render(<QuickReplyStrip />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reply all' }));
+    expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
+      '{"compose":{"reply_all":{"message":{"account":"work","key":"m1"}}}}',
+    );
+    expect(useComposerStore.getState().inlineExpected).toBe(true);
+
+    act(() => {
+      useComposerStore.setState({ inlineExpected: false });
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Forward' }));
+    expect(JSON.stringify(ipc.dispatch.mock.calls[1]?.[0])).toBe(
+      '{"compose":{"forward":{"message":{"account":"work","key":"m1"}}}}',
+    );
+    expect(useComposerStore.getState().inlineExpected).toBe(true);
+  });
 });
 
 describe('the expanded strip', () => {

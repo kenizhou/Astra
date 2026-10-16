@@ -9,7 +9,16 @@
 // does, with the year always shown and the time of day appended in the
 // form the clock setting names.
 
-import { CloseIcon } from '@/components/icons';
+import {
+  CloseIcon,
+  ForwardIcon,
+  MoreIcon,
+  ReplyAllIcon,
+  ReplyIcon,
+} from '@/components/icons';
+import { ContextMenu, placeholderItem, type ContextMenuItem } from '@/components/ui/ContextMenu';
+import { useContextMenu } from '@/components/ui/useContextMenu';
+import { dispatch, intents, type MessageRef } from '@/services/ipc';
 import { Avatar } from '@/features/people/Avatar';
 import { useSettingsStore } from '@/features/settings/settingsStore';
 
@@ -61,10 +70,48 @@ interface ReadingHeaderProps {
   fromAddress: string;
   /** When the message was sent, as a whole-second UTC instant string. */
   sentAt: string;
+  /** The open message's ref; the compose verbs and the overflow ride it. */
+  message?: MessageRef;
   /** Closes the pane; the button rides the header's top-right corner. */
   onClose?: () => void;
   /** When set and a sender stands, the header offers an add-contact chip. */
   onAddContact?: () => void;
+}
+
+/** The overflow's items: everything the host cannot serve yet, named. */
+function overflowItems(): ContextMenuItem[] {
+  return [
+    placeholderItem('Recipients', 'Recipient details arrive with a future slice'),
+    { separator: true },
+    placeholderItem('Print', 'Printing arrives with a future slice'),
+    placeholderItem('View source', 'Viewing the message source arrives with a future slice'),
+    placeholderItem('Save as .eml', 'Saving the message as .eml arrives with a future slice'),
+  ];
+}
+
+/** The kylins-style verb row: one icon button per compose verb. */
+function VerbRow({ message }: { message: MessageRef }) {
+  const verbs = [
+    { label: 'Reply', icon: ReplyIcon, intent: () => intents.replyTo(message) },
+    { label: 'Reply all', icon: ReplyAllIcon, intent: () => intents.replyAllTo(message) },
+    { label: 'Forward', icon: ForwardIcon, intent: () => intents.forward(message) },
+  ] as const;
+  return (
+    <div className="mt-3 flex items-center gap-1">
+      {verbs.map(({ label, icon: Icon, intent }) => (
+        <button
+          key={label}
+          type="button"
+          aria-label={label}
+          title={label}
+          onClick={() => void dispatch(intent())}
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-text transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <Icon size={16} />
+        </button>
+      ))}
+    </div>
+  );
 }
 
 export function ReadingHeader({
@@ -72,6 +119,7 @@ export function ReadingHeader({
   fromName,
   fromAddress,
   sentAt,
+  message,
   onClose,
   onAddContact,
 }: ReadingHeaderProps) {
@@ -79,20 +127,42 @@ export function ReadingHeader({
   const hasSender = fromName !== '' || fromAddress !== '';
   const displayName = fromName === '' ? fromAddress : fromName;
   const date = formatReadingDate(sentAt, twentyFour);
+  const overflow = useContextMenu();
   return (
     <div className="relative shrink-0 border-b border-[var(--hairline)] px-7 pb-3.5 pt-5">
       <h2 className="truncate pr-8 text-[19px] font-[640] leading-[1.3] tracking-[-0.015em] text-foreground">
         {subject === '' ? '(no subject)' : subject}
       </h2>
-      {onClose !== undefined && (
-        <button
-          type="button"
-          aria-label="Close reading pane"
-          onClick={onClose}
-          className="absolute right-4 top-4 inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-text transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <CloseIcon size={16} />
-        </button>
+      <div className="absolute right-4 top-4 flex items-center gap-1">
+        {message !== undefined && (
+          <button
+            type="button"
+            aria-label="More actions"
+            title="More actions"
+            onClick={(event) => overflow.open(event)}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-text transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <MoreIcon size={16} />
+          </button>
+        )}
+        {onClose !== undefined && (
+          <button
+            type="button"
+            aria-label="Close reading pane"
+            onClick={onClose}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-text transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <CloseIcon size={16} />
+          </button>
+        )}
+      </div>
+      {overflow.state !== null && (
+        <ContextMenu
+          x={overflow.state.x}
+          y={overflow.state.y}
+          items={overflowItems()}
+          onClose={overflow.close}
+        />
       )}
       {hasSender ? (
         <div className="mt-2.5 flex items-center gap-3">
@@ -121,6 +191,7 @@ export function ReadingHeader({
       ) : (
         date !== '' && <p className="mt-1 text-xs tabular-nums text-muted-text">{date}</p>
       )}
+      {message !== undefined && <VerbRow message={message} />}
     </div>
   );
 }

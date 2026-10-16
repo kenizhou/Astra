@@ -14,6 +14,7 @@ import {
   ChevronLeftIcon as ChevronLeftIconData,
   ChevronRightIcon as ChevronRightIconData,
   Delete02Icon,
+  EllipsisVerticalIcon as MoreIconData,
   Flag02Icon,
   Folder01Icon,
   Forward01Icon,
@@ -105,3 +106,4 @@ export const LinkIcon = makeIcon(Link01Icon);
 export const UndoIcon = makeIcon(UndoIconData);
 export const RedoIcon = makeIcon(RedoIconData);
 export const RefreshIcon = makeIcon(RefreshIconData);
+export const MoreIcon = makeIcon(MoreIconData);

@@ -234,7 +234,7 @@ export function MessageList() {
     }
   };
 
-  // Right-click: the Outlook semantics the selection model owns — inside
+  // Right-click: the Outlook semantics the selection model owns: inside
   // the multi-selection it stays the targets, outside it the selection
   // collapses to the clicked row before the menu opens.
   const rowMenu = (key: RowKey, event: React.MouseEvent): void => {

@@ -1,9 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The attachment rows beneath the body: read-only metadata per part (the
 // suggested file name, the media type, the decoded byte length rendered
-// human). Saving and opening arrive with the attachments slice.
+// human). Right-clicking a row opens its menu: Copy File Name works today;
+// previewing and saving stand as placeholders until the attachments slice
+// arrives.
+
+import { useState } from 'react';
 
 import type { AttachmentRow } from '@/services/ipc';
+import { ContextMenu, placeholderItem, type ContextMenuItem } from '@/components/ui/ContextMenu';
+import { useContextMenu } from '@/components/ui/useContextMenu';
 
 /** One size in bytes, rendered human: 512 B, 4.0 KB, 2.1 MB. */
 function formatSize(size: number): string {
@@ -17,17 +23,54 @@ function formatSize(size: number): string {
   return `${(kb / 1024).toFixed(1)} MB`;
 }
 
+/** The menu one attachment row opens. */
+function buildAttachmentMenu(attachment: AttachmentRow, total: number): ContextMenuItem[] {
+  return [
+    placeholderItem('Preview', 'Attachment previews arrive with a future slice'),
+    placeholderItem('Save As…', 'Saving attachments arrives with a future slice'),
+    ...(total > 1
+      ? [placeholderItem('Download All', 'Downloading attachments arrives with a future slice')]
+      : []),
+    { separator: true },
+    {
+      label: 'Copy File Name',
+      onSelect: () => void navigator.clipboard?.writeText(attachment.file_name),
+    },
+  ];
+}
+
 /** Draws the open message's attachments; an empty list draws nothing. */
 export function AttachmentList({ attachments }: { attachments: AttachmentRow[] }) {
+  const menu = useContextMenu();
+  const [target, setTarget] = useState<AttachmentRow | null>(null);
   if (attachments.length === 0) {
     return null;
   }
+
+  const openFor = (attachment: AttachmentRow, event: React.MouseEvent): void => {
+    setTarget(attachment);
+    menu.open(event);
+  };
+
   return (
     <div aria-label="Attachments" className="shrink-0 border-t border-border-subtle">
       {attachments.map((attachment) => (
         <div
           key={attachment.id}
-          className="flex items-baseline gap-2 border-b border-border px-4 py-2 text-xs last:border-b-0"
+          tabIndex={0}
+          onContextMenu={(event) => openFor(attachment, event)}
+          onKeyDown={(event) => {
+            if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+              event.preventDefault();
+              const rect = event.currentTarget.getBoundingClientRect();
+              openFor(attachment, {
+                preventDefault: () => undefined,
+                clientX: rect.left,
+                clientY: rect.bottom,
+              } as React.MouseEvent);
+            }
+          }}
+          className="flex items-baseline gap-2 border-b border-border px-4 py-2 text-xs last:border-b-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         >
           <span className="min-w-0 truncate text-foreground">{attachment.file_name}</span>
           <span className="shrink-0 text-muted-foreground">{attachment.media_type}</span>
@@ -36,6 +79,14 @@ export function AttachmentList({ attachments }: { attachments: AttachmentRow[] }
           </span>
         </div>
       ))}
+      {menu.state !== null && target !== null && (
+        <ContextMenu
+          x={menu.state.x}
+          y={menu.state.y}
+          items={buildAttachmentMenu(target, attachments.length)}
+          onClose={menu.close}
+        />
+      )}
     </div>
   );
 }

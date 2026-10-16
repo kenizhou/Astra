@@ -2,7 +2,7 @@
 // The shared context menu: a floating panel of actions rendered in a portal
 // at the cursor, with keyboard navigation (roving tabindex, arrows, Home and
 // End, typeahead), the three dismissals (Escape, pointer down outside,
-// window blur), and the honest-disable channel — a disabled item names its
+// window blur), and the honest-disable channel: a disabled item names its
 // reason in a tooltip and a screen-reader description, and stays in the
 // keyboard order so the reason is discoverable. Flyout submenus and
 // checkbox items arrive with the first consumer that needs them.

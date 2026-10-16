@@ -36,5 +36,20 @@ export default function App() {
 
   useEffect(() => mountDraftPoolEvents(), []);
 
+  // The webview's native context menu shows nowhere: the surfaces that own
+  // one render their own, and everywhere else a right-click does nothing
+  // rather than offering the browser's. Text fields keep theirs.
+  useEffect(() => {
+    const suppress = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('input, textarea, [contenteditable="true"]') !== null) {
+        return;
+      }
+      event.preventDefault();
+    };
+    document.addEventListener('contextmenu', suppress);
+    return () => document.removeEventListener('contextmenu', suppress);
+  }, []);
+
   return <AppShell />;
 }

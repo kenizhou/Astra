@@ -3,14 +3,15 @@
 // full UTC stamp the pane draws from the snapshot, with the bare address
 // standing in for an empty sender name and the standard placeholder for an
 // empty subject.
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const ipc = vi.hoisted(() => ({ peopleAvatar: vi.fn() }));
+const ipc = vi.hoisted(() => ({ peopleAvatar: vi.fn(), dispatch: vi.fn() }));
 
 vi.mock('@/services/ipc', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   peopleAvatar: ipc.peopleAvatar,
+  dispatch: ipc.dispatch,
 }));
 
 const settingsState = vi.hoisted(() => ({
@@ -127,5 +128,83 @@ describe('the reading header', () => {
   it('formats noon and midnight on the 12 hour clock', () => {
     expect(formatReadingDate('2026-10-09T00:05:00Z', false)).toBe('9 Oct 2026, 12:05 AM');
     expect(formatReadingDate('2026-10-09T12:05:00Z', false)).toBe('9 Oct 2026, 12:05 PM');
+  });
+});
+
+describe('the header actions', () => {
+  const message = { account: 'work', key: 'm1' };
+
+  it('offers the three compose verbs, each dispatching on the open message', () => {
+    render(
+      <ReadingHeader
+        subject='Launch'
+        fromName='Ada'
+        fromAddress='ada@example.test'
+        sentAt='2026-10-09T08:30:00Z'
+        message={message}
+      />,
+    );
+
+    for (const label of ['Reply', 'Reply all', 'Forward']) {
+      expect(screen.getByRole('button', { name: label })).toBeTruthy();
+    }
+  });
+
+  it('dispatches the verbs from the verb row', () => {
+    render(
+      <ReadingHeader
+        subject='Launch'
+        fromName='Ada'
+        fromAddress='ada@example.test'
+        sentAt='2026-10-09T08:30:00Z'
+        message={message}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reply' }));
+    expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
+      '{"compose":{"reply":{"message":{"account":"work","key":"m1"}}}}',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Reply all' }));
+    expect(JSON.stringify(ipc.dispatch.mock.calls[1]?.[0])).toBe(
+      '{"compose":{"reply_all":{"message":{"account":"work","key":"m1"}}}}',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Forward' }));
+    expect(JSON.stringify(ipc.dispatch.mock.calls[2]?.[0])).toBe(
+      '{"compose":{"forward":{"message":{"account":"work","key":"m1"}}}}',
+    );
+  });
+
+  it('holds the placeholders in the overflow menu', () => {
+    render(
+      <ReadingHeader
+        subject='Launch'
+        fromName='Ada'
+        fromAddress='ada@example.test'
+        sentAt='2026-10-09T08:30:00Z'
+        message={message}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+
+    for (const label of ['Recipients', 'Print', 'View source', 'Save as .eml']) {
+      const item = screen.getByRole('menuitem', { name: label });
+      expect(item.getAttribute('aria-disabled')).toBe('true');
+    }
+  });
+
+  it('draws no verbs and no overflow without a message', () => {
+    render(
+      <ReadingHeader
+        subject='Launch'
+        fromName='Ada'
+        fromAddress='ada@example.test'
+        sentAt='2026-10-09T08:30:00Z'
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Reply' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'More actions' })).toBeNull();
   });
 });

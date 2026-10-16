@@ -1,11 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The message body: the sanitised HTML rides in a sandboxed srcdoc iframe
-// whose csp allows only data images and inline styles, remote placeholders
-// stay inert until the toggle rewrites them, and the blocked count
-// affordance clears once the reader opts in.
+// The message body: the sanitised HTML rides in a srcdoc iframe (same-origin
+// but scriptless, so the parent can wire its affordances) whose csp allows
+// only data images and inline styles, remote placeholders stay inert until
+// the toggle rewrites them, and the blocked count affordance clears once
+// the reader opts in.
 import { useState } from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const opener = vi.hoisted(() => ({ openUrl: vi.fn() }));
+
+vi.mock('@tauri-apps/plugin-opener', () => ({
+  openUrl: opener.openUrl,
+}));
 
 import {
   MessageHtml,
@@ -46,6 +53,11 @@ function frameDoc(): string {
 
 afterEach(cleanup);
 
+beforeEach(() => {
+  opener.openUrl.mockReset();
+  opener.openUrl.mockResolvedValue(undefined);
+});
+
 describe('the message body', () => {
   it('renders the sanitised html untouched in the srcdoc', () => {
     render(<Harness />);
@@ -53,12 +65,14 @@ describe('the message body', () => {
     expect(frameDoc()).toBe(sanitisedHtml);
   });
 
-  it('locks the iframe down: empty sandbox, gated csp allowing only data images', () => {
+  it('locks the iframe down: same-origin but scriptless sandbox, gated csp allowing only data images', () => {
     render(<Harness />);
 
     const sandbox = frame().getAttribute('sandbox') ?? '';
-    expect(sandbox).toBe('');
-    expect(sandbox).not.toContain('allow-same-origin');
+    // allow-same-origin lets the parent wire the body menu and link
+    // opening; scripts can still never run, and popups stay shut.
+    expect(sandbox).toBe('allow-same-origin');
+    expect(sandbox).not.toContain('allow-scripts');
     expect(sandbox).not.toContain('allow-popups');
     expect(frame().getAttribute('csp')).toBe(READING_CSP_GATED);
     expect(READING_CSP_GATED).toBe(
@@ -132,5 +146,66 @@ describe('the message body', () => {
         '<img src="https://tracker.example/p.png">' +
         '<style>body{background:url(https://x.example/a.png)}</style>',
     );
+  });
+});
+
+describe('the body menu', () => {
+  // jsdom never parses the srcdoc into the frame, so the tests write the
+  // body in themselves; the component's listeners ride the document
+  // object, which a document.open rewrite keeps.
+  function frameDocument(html: string): Document {
+    const doc = (screen.getByTitle('Message body') as HTMLIFrameElement).contentDocument!;
+    doc.open();
+    doc.write(html);
+    doc.close();
+    return doc;
+  }
+
+  it('opens on a right-click inside the frame', () => {
+    render(<Harness html='<p>The launch is ready.</p>' count={0} />);
+
+    fireEvent.contextMenu(frameDocument('<p>The launch is ready.</p>').body);
+
+    expect(screen.getByRole('menu')).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'Select All' })).toBeTruthy();
+    // No anchor under the click: no link items.
+    expect(screen.queryByRole('menuitem', { name: 'Open link' })).toBeNull();
+  });
+
+  it('offers the link items over an anchor', () => {
+    render(<Harness html='<p><a href="https://example.test/x">read more</a></p>' count={0} />);
+
+    fireEvent.contextMenu(frameDocument('<p><a href="https://example.test/x">read more</a></p>').querySelector('a')!);
+
+    expect(screen.getByRole('menuitem', { name: 'Open link' })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'Copy link' })).toBeTruthy();
+  });
+
+  it('copies the link href from the menu', () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    render(<Harness html='<p><a href="https://example.test/x">read more</a></p>' count={0} />);
+
+    fireEvent.contextMenu(frameDocument('<p><a href="https://example.test/x">read more</a></p>').querySelector('a')!);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Copy link' }));
+
+    expect(writeText).toHaveBeenCalledWith('https://example.test/x');
+  });
+
+  it('opens a clicked link in the system browser, never in the frame', () => {
+    render(<Harness html='<p><a href="https://example.test/x">read more</a></p>' count={0} />);
+
+    fireEvent.click(frameDocument('<p><a href="https://example.test/x">read more</a></p>').querySelector('a')!);
+
+    expect(opener.openUrl).toHaveBeenCalledWith('https://example.test/x');
+  });
+
+  it('opens the menu link in the system browser', () => {
+    render(<Harness html='<p><a href="https://example.test/x">read more</a></p>' count={0} />);
+
+    fireEvent.contextMenu(frameDocument('<p><a href="https://example.test/x">read more</a></p>').querySelector('a')!);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Open link' }));
+
+    expect(opener.openUrl).toHaveBeenCalledWith('https://example.test/x');
   });
 });
