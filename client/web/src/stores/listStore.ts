@@ -28,6 +28,10 @@ interface ListStoreState {
   selection: RowKey | null;
   /** The row the user clicked; local to this surface, never dispatched. */
   selectedKey: RowKey | null;
+  /** The multi-selection's rows: the batch a menu action applies to. */
+  selectedKeys: RowKey[];
+  /** The multi-selection's anchor: the row a Shift range starts from. */
+  anchorKey: RowKey | null;
   /** The live search state; null at rest, while no search is running. */
   search: SearchState | null;
   /** The row height the list draws at; session-only, normal until changed. */
@@ -36,6 +40,8 @@ interface ListStoreState {
   applySnapshot: (snapshot: MailboxListSnapshot) => void;
   /** Records a local row selection the surface just drew. */
   select: (key: RowKey | null) => void;
+  /** Records the multi-selection and its anchor. */
+  setSelection: (keys: RowKey[], anchor: RowKey | null) => void;
   /** Records the density the view menu or the status bar chose. */
   setDensity: (density: Density) => void;
 }
@@ -46,6 +52,8 @@ export const useListStore = create<ListStoreState>((set) => ({
   visibleLimit: 0,
   selection: null,
   selectedKey: null,
+  selectedKeys: [],
+  anchorKey: null,
   search: null,
   density: 'normal',
 
@@ -65,10 +73,17 @@ export const useListStore = create<ListStoreState>((set) => ({
         const carried = snapshot.search?.rows ?? snapshot.rows ?? [];
         return carried.some((r) => sameRowKey(r.key, state.selectedKey)) ? state.selectedKey : null;
       })(),
+      // The multi-selection carries by the same rule, key by key.
+      selectedKeys: (() => {
+        const carried = snapshot.search?.rows ?? snapshot.rows ?? [];
+        return state.selectedKeys.filter((key) => carried.some((r) => sameRowKey(r.key, key)));
+      })(),
       search: snapshot.search ?? null,
     })),
 
   select: (key) => set({ selectedKey: key }),
+
+  setSelection: (keys, anchor) => set({ selectedKeys: keys, anchorKey: anchor }),
 
   setDensity: (density) => set({ density }),
 }));

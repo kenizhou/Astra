@@ -19,6 +19,8 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 
 import { ListToolbar } from '@/components/message-list/ListToolbar';
 import { MessageRow } from '@/components/message-list/MessageRow';
+import { ContextMenu } from '@/components/ui/ContextMenu';
+import { useContextMenu } from '@/components/ui/useContextMenu';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { STATE_CONTENT } from '@/components/ui/stateContent';
 import { MailIcon } from '@/components/icons';
@@ -30,6 +32,8 @@ import {
 } from '@/components/message-list/dateGroups';
 import { DENSITY_ROW_PX } from '@/components/message-list/density';
 import { filteredRows, filterCounts } from '@/components/message-list/listFilter';
+import { allKeys, rangeKeys, resolveTargets, toggleKey } from '@/components/message-list/listSelection';
+import { buildDraftMenu, buildRowMenu } from '@/components/message-list/rowMenu';
 import { sameRowKey } from '@/components/message-list/rowIdentity';
 import { OutboxQueue } from '@/features/outbox/OutboxQueue';
 import { dispatch, intents } from '@/services/ipc';
@@ -37,7 +41,7 @@ import { useFolderStore } from '@/stores/folderStore';
 import { useListFilterStore } from '@/stores/listFilterStore';
 import { useListStore } from '@/stores/listStore';
 import { useReadingStore } from '@/stores/readingStore';
-import type { RowKey } from '@/services/surfaces';
+import type { MessageRowView, RowKey } from '@/services/surfaces';
 
 /** The selected folder's display name, straight off the folder tree. */
 function folderDisplayName(
@@ -56,16 +60,22 @@ interface RowWindowProps {
   items: ListItem[];
   /** The key the highlight follows: the open message, or the local click. */
   highlight: RowKey | null;
+  /** The keys the multi-selection holds. */
+  selectedKeys: RowKey[];
+  /** Whether the rows wear the Draft chip (the open folder is Drafts). */
+  drafts: boolean;
   /** The clock the stamps are formatted against. */
   now: Date;
-  /** Records the local selection when a row is clicked. */
-  openRow: (key: RowKey) => void;
+  /** Handles a row's click, modifiers and all. */
+  openRow: (key: RowKey, event: React.MouseEvent) => void;
+  /** Opens a row's context menu at the cursor. */
+  rowMenu: (key: RowKey, event: React.MouseEvent) => void;
   /** Whether the grow affordance shows; only the folder window can fill. */
   showMore: boolean;
 }
 
 /** The virtualised row window both list modes draw their rows through. */
-function RowWindow({ items, highlight, now, openRow, showMore }: RowWindowProps) {
+function RowWindow({ items, highlight, selectedKeys, drafts, now, openRow, rowMenu, showMore }: RowWindowProps) {
   const density = useListStore((s) => s.density);
   const scrollRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
@@ -81,6 +91,7 @@ function RowWindow({ items, highlight, now, openRow, showMore }: RowWindowProps)
       ref={scrollRef}
       role="listbox"
       aria-label="Messages"
+      aria-multiselectable="true"
       className="min-h-0 flex-1 overflow-y-auto"
     >
       <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
@@ -113,8 +124,11 @@ function RowWindow({ items, highlight, now, openRow, showMore }: RowWindowProps)
                 <MessageRow
                   row={entry.row}
                   selected={sameRowKey(entry.row.key, highlight)}
+                  multiSelected={selectedKeys.some((key) => sameRowKey(key, entry.row.key))}
+                  draft={drafts}
                   now={now}
                   onSelect={openRow}
+                  onContextMenu={rowMenu}
                 />
               )}
             </div>
@@ -139,6 +153,7 @@ export function MessageList() {
   const viewMode = useListStore((s) => s.viewMode);
   const visibleLimit = useListStore((s) => s.visibleLimit);
   const selectedKey = useListStore((s) => s.selectedKey);
+  const selectedKeys = useListStore((s) => s.selectedKeys);
   const select = useListStore((s) => s.select);
   const search = useListStore((s) => s.search);
   const openSnapshot = useReadingStore((s) => s.snapshot);
@@ -146,6 +161,8 @@ export function MessageList() {
   const folder = useFolderStore((s) => s.selected);
   const outboxAccount = useFolderStore((s) => s.outboxAccount);
   const filter = useListFilterStore((s) => s.filter);
+  const menu = useContextMenu();
+  const menuTargets = useRef<MessageRowView[]>([]);
 
   const outboxMode = outboxAccount !== null;
   const searching = search !== null;
@@ -157,6 +174,16 @@ export function MessageList() {
   useEffect(() => {
     useListFilterStore.getState().reset();
   }, [folder]);
+
+  // Whether the open folder is the account's drafts folder: its rows wear
+  // the Draft chip and open the draft menu.
+  const draftFolder = (() => {
+    if (folder === null) {
+      return false;
+    }
+    const account = accounts.find((a) => a.account_id === folder.account);
+    return account?.folders.find((f) => f.key === folder.key)?.role === 'drafts';
+  })();
 
   // The highlight follows the open message first: the reading snapshot is
   // the record of what is open, and the local click selection covers the
@@ -170,7 +197,8 @@ export function MessageList() {
 
   // A view that hides the selected row takes the selection with it: the
   // highlight must never name a row the pane does not show, whichever row
-  // set the live mode is drawing.
+  // set the live mode is drawing. The folder switch clears the
+  // multi-selection outright (it resets beside the filter).
   const viewRows = searching ? search.rows : shownRows;
   const selectedHidden =
     selectedKey !== null && !viewRows.some((row) => sameRowKey(row.key, selectedKey));
@@ -179,13 +207,54 @@ export function MessageList() {
       useListStore.getState().select(null);
     }
   }, [selectedHidden]);
+  useEffect(() => {
+    useListStore.getState().setSelection([], null);
+  }, [folder]);
 
-  const openRow = (key: RowKey): void => {
+  const openRow = (key: RowKey, event: React.MouseEvent): void => {
+    const store = useListStore.getState();
+    if (event.ctrlKey || event.metaKey) {
+      // Ctrl toggles the row in the multi-selection and never opens.
+      const next = toggleKey(store.selectedKeys, store.anchorKey, key);
+      store.setSelection(next.selection, next.anchor);
+      return;
+    }
+    if (event.shiftKey && store.selectedKeys.length > 0) {
+      // Shift ranges from the anchor over the rendered items.
+      const items = searching ? flatItems(search.rows) : withDateHeaders(shownRows, now);
+      store.setSelection(rangeKeys(items, store.anchorKey, key), store.anchorKey);
+      return;
+    }
+    store.setSelection([key], key);
     select(key);
     // A message row opens the reading pane; a thread row names no single
     // message, so it selects alone until the thread slice lands.
     if ('message' in key) {
       void dispatch(intents.openMessage(key.message));
+    }
+  };
+
+  // Right-click: the Outlook semantics the selection model owns — inside
+  // the multi-selection it stays the targets, outside it the selection
+  // collapses to the clicked row before the menu opens.
+  const rowMenu = (key: RowKey, event: React.MouseEvent): void => {
+    const store = useListStore.getState();
+    const targets = resolveTargets(store.selectedKeys, key);
+    if (targets.length === 1 && !store.selectedKeys.some((k) => sameRowKey(k, key))) {
+      store.setSelection([key], key);
+    }
+    const pool = searching ? search.rows : rows;
+    menuTargets.current = pool.filter((row) => targets.some((key2) => sameRowKey(key2, row.key)));
+    menu.open(event);
+  };
+
+  // Ctrl/Cmd+A anywhere in the pane selects every loaded row.
+  const onKeyDown = (event: React.KeyboardEvent): void => {
+    if ((event.ctrlKey || event.metaKey) && event.key === 'a' && !searching && !outboxMode) {
+      event.preventDefault();
+      useListStore
+        .getState()
+        .setSelection(allKeys(withDateHeaders(shownRows, now)), null);
     }
   };
 
@@ -200,6 +269,7 @@ export function MessageList() {
   return (
     <section
       aria-label="Message list"
+      onKeyDown={onKeyDown}
       className="flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-card"
     >
       <ListToolbar
@@ -217,7 +287,7 @@ export function MessageList() {
         search.rows.length === 0 ? (
           <EmptyState glyph={<MailIcon size={24} />} message={STATE_CONTENT.searchEmpty!.message} />
         ) : (
-          <RowWindow items={flatItems(search.rows)} highlight={highlight} now={now} openRow={openRow} showMore={false} />
+          <RowWindow items={flatItems(search.rows)} highlight={highlight} selectedKeys={selectedKeys} drafts={false} now={now} openRow={openRow} rowMenu={rowMenu} showMore={false} />
         )
       ) : folder === null ? (
         <EmptyState glyph={<MailIcon size={24} />} message={STATE_CONTENT.listNoFolder!.message} />
@@ -226,7 +296,17 @@ export function MessageList() {
       ) : shownRows.length === 0 ? (
         <EmptyState glyph={<MailIcon size={24} />} message={STATE_CONTENT.listEmptyFilter!.message} />
       ) : (
-        <RowWindow items={withDateHeaders(shownRows, now)} highlight={highlight} now={now} openRow={openRow} showMore={windowIsFull} />
+        <RowWindow items={withDateHeaders(shownRows, now)} highlight={highlight} selectedKeys={selectedKeys} drafts={draftFolder} now={now} openRow={openRow} rowMenu={rowMenu} showMore={windowIsFull} />
+      )}
+      {menu.state !== null && (
+        <ContextMenu
+          x={menu.state.x}
+          y={menu.state.y}
+          items={
+            draftFolder ? buildDraftMenu() : buildRowMenu(menuTargets.current, viewMode)
+          }
+          onClose={menu.close}
+        />
       )}
     </section>
   );

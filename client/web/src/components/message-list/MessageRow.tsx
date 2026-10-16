@@ -22,13 +22,19 @@ interface MessageRowProps {
   row: MessageRowView;
   /** Whether the local selection names this row. */
   selected: boolean;
+  /** Whether the multi-selection names this row. */
+  multiSelected?: boolean;
+  /** Whether the row sits in the drafts folder: it wears the Draft chip. */
+  draft?: boolean;
   /** The clock the stamp is formatted against. */
   now: Date;
-  /** Records the local selection when the row is clicked. */
-  onSelect: (key: RowKey) => void;
+  /** Handles the row's click, modifiers and all. */
+  onSelect: (key: RowKey, event: React.MouseEvent) => void;
+  /** Opens the row's context menu at the cursor. */
+  onContextMenu?: (key: RowKey, event: React.MouseEvent) => void;
 }
 
-export function MessageRow({ row, selected, now, onSelect }: MessageRowProps) {
+export function MessageRow({ row, selected, multiSelected = false, draft = false, now, onSelect, onContextMenu }: MessageRowProps) {
   const [hovered, setHovered] = useState(false);
   const density = useListStore((s) => s.density);
   const actionsVisible = hovered || selected;
@@ -53,11 +59,17 @@ export function MessageRow({ row, selected, now, onSelect }: MessageRowProps) {
     <div
       role="option"
       aria-selected={selected}
-      onClick={() => onSelect(row.key)}
+      onClick={(event) => onSelect(row.key, event)}
+      onContextMenu={(event) => {
+        if (onContextMenu !== undefined) {
+          event.preventDefault();
+          onContextMenu(row.key, event);
+        }
+      }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       className={`relative flex w-full cursor-pointer items-start gap-2.5 border-b border-[var(--hairline)] px-3 ${DENSITY_ROW_CLASS[density]} ${
-        selected ? 'bg-selected' : 'hover:bg-hover'
+        selected ? 'bg-selected' : multiSelected ? 'bg-selected/60' : 'hover:bg-hover'
       }`}
     >
       <div className="min-w-0 flex-1">
@@ -74,12 +86,19 @@ export function MessageRow({ row, selected, now, onSelect }: MessageRowProps) {
           </span>
         </div>
         <div className="flex items-center justify-between gap-2">
-          <span
-            className={`min-w-0 truncate text-[13px] ${
-              row.unread ? 'font-[560] text-foreground' : 'font-[450] text-muted-text'
-            }`}
-          >
-            {row.subject === '' ? '(no subject)' : row.subject}
+          <span className="flex min-w-0 items-center gap-1.5">
+            {draft && (
+              <span className="shrink-0 rounded-[var(--radius-xs)] bg-destructive/10 px-1 text-[10px] font-medium text-destructive">
+                Draft
+              </span>
+            )}
+            <span
+              className={`min-w-0 truncate text-[13px] ${
+                row.unread ? 'font-[560] text-foreground' : 'font-[450] text-muted-text'
+              }`}
+            >
+              {row.subject === '' ? '(no subject)' : row.subject}
+            </span>
           </span>
           <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
             {count !== undefined && (
