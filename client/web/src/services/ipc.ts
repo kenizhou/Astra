@@ -140,6 +140,8 @@ export type Intent =
   | { set_view_mode: ViewMode }
   | { mark_read: { row: RowRef; read: boolean } }
   | { set_flagged: { row: RowRef; flagged: boolean } }
+  | { archive_message: { row: RowRef } }
+  | { move_to_trash: { row: RowRef } }
   | { open_message: { message: MessageRef } }
   | 'close_reading'
   | { folders: { create: { account: string; name: string; parent?: string } } }
@@ -181,6 +183,10 @@ export const intents = {
   setFlagged: (row: RowRef, flagged: boolean): Intent => ({
     set_flagged: { row, flagged },
   }),
+  /** Move one row (a message, or a whole conversation) into the archive. */
+  archiveMessage: (row: RowRef): Intent => ({ archive_message: { row } }),
+  /** Move one row (a message, or a whole conversation) into the trash. */
+  moveToTrash: (row: RowRef): Intent => ({ move_to_trash: { row } }),
   /** Read one message in the reading pane: fetch its body and publish it. */
   openMessage: (message: MessageRef): Intent => ({ open_message: { message } }),
   /** Shut the reading pane; navigating the list leaves it as it was. */
