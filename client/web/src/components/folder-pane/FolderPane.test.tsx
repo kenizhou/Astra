@@ -267,3 +267,44 @@ describe('the per-account refusal badge', () => {
     expect(screen.queryByRole('button', { name: 'Reconnect work@example.net' })).toBeNull();
   });
 });
+
+describe('the folder context menu', () => {
+  it('opens on right-click with sync, create, and the placeholders', () => {
+    render(<FolderPane />);
+
+    fireEvent.contextMenu(screen.getByText('Acme'));
+
+    expect(screen.getByRole('menu')).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'Sync this folder' })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'New Subfolder' })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'Mark All as Read' }).getAttribute('aria-disabled')).toBe('true');
+    expect(screen.getByRole('menuitem', { name: 'Rename Folder' }).getAttribute('aria-disabled')).toBe('true');
+    expect(screen.getByRole('menuitem', { name: 'Delete Folder' }).getAttribute('aria-disabled')).toBe('true');
+  });
+
+  it('syncs from the menu', () => {
+    render(<FolderPane />);
+
+    fireEvent.contextMenu(screen.getByText('Acme'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Sync this folder' }));
+
+    expect(ipc.dispatch).toHaveBeenCalledWith('refresh_mail');
+  });
+
+  it('stands the inline create row under the folder and commits the parent', () => {
+    render(<FolderPane />);
+
+    fireEvent.contextMenu(screen.getByText('Clients'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'New Subfolder' }));
+
+    const input = screen.getByLabelText('New folder name');
+    expect(document.activeElement).toBe(input);
+    fireEvent.change(input, { target: { value: 'Invoices' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(ipc.dispatch).toHaveBeenCalledWith({
+      folders: { create: { account: 'work', name: 'Invoices', parent: 'Clients' } },
+    });
+    expect(screen.queryByLabelText('New folder name')).toBeNull();
+  });
+});

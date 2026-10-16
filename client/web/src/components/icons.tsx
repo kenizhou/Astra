@@ -34,6 +34,7 @@ import {
   PanelLeftIcon as PanelLeftIconData,
   PaperclipIcon as PaperclipIconData,
   RedoIcon as RedoIconData,
+  RefreshIcon as RefreshIconData,
   Robot01Icon,
   Search01Icon,
   SentIcon as SentIconData,
@@ -103,3 +104,4 @@ export const OrderedListIcon = makeIcon(LeftToRightListNumberIcon);
 export const LinkIcon = makeIcon(Link01Icon);
 export const UndoIcon = makeIcon(UndoIconData);
 export const RedoIcon = makeIcon(RedoIconData);
+export const RefreshIcon = makeIcon(RefreshIconData);

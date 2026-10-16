@@ -4,9 +4,11 @@
 // parent chain. Expansion and selection cross back to the core as intents; the
 // tree keeps no expansion state of its own, which is what keeps it in step with
 // the snapshot every pull brings. Each account's group closes with its Outbox
-// row, which leads the list's queue view instead of a folder.
+// row, which leads the list's queue view instead of a folder. Right-clicking a
+// row opens its context menu; the menu's New Subfolder stands the tree's own
+// inline edit row beneath the folder it named.
 
-import type { ComponentType } from 'react';
+import { useState, type ComponentType } from 'react';
 
 import {
   ArchiveIcon,
@@ -19,12 +21,16 @@ import {
   TrashIcon,
   type IconProps,
 } from '@/components/icons';
+import { ContextMenu } from '@/components/ui/ContextMenu';
+import { useContextMenu } from '@/components/ui/useContextMenu';
 import { dispatch, intents, type FolderRef } from '@/services/ipc';
 import type { AccountFolderRow, FolderRow, FolderRole } from '@/services/surfaces';
 import { useSettingsStore } from '@/features/settings/settingsStore';
 import { useFolderStore, visibleFolders } from '@/stores/folderStore';
 import { useSendingStore } from '@/stores/sendingStore';
 import { useUiStore } from '@/stores/uiStore';
+import { buildFolderMenu } from './folderMenu';
+import { NewFolderRow } from './NewFolderRow';
 
 /** One icon per role; a folder with no role draws the plain folder icon. */
 const ROLE_ICON: Record<FolderRole, ComponentType<IconProps>> = {
@@ -46,9 +52,10 @@ interface FolderTreeRowProps {
   accountId: string;
   row: FolderRow;
   selected: boolean;
+  onMenu: (row: FolderRow, event: React.MouseEvent) => void;
 }
 
-function FolderTreeRow({ accountId, row, selected }: FolderTreeRowProps) {
+function FolderTreeRow({ accountId, row, selected, onMenu }: FolderTreeRowProps) {
   const ref: FolderRef = { account: accountId, key: row.key };
 
   const onSelect = () => {
@@ -67,6 +74,10 @@ function FolderTreeRow({ accountId, row, selected }: FolderTreeRowProps) {
       aria-expanded={row.has_children ? row.expanded : undefined}
       aria-level={row.depth + 1}
       data-depth={row.depth}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        onMenu(row, event);
+      }}
       className={`relative flex min-h-[var(--row-h)] items-center gap-2 rounded-lg pr-2 text-[13px] transition-colors ${
         selected
           ? 'bg-selected font-medium text-[var(--selected-text)]'
@@ -186,9 +197,28 @@ export function FolderTree({
 }) {
   const selected = useFolderStore((s) => s.selected);
   const rows = visibleFolders(account);
+  const menu = useContextMenu();
+  const [menuRow, setMenuRow] = useState<FolderRow | null>(null);
+  const [creatingUnder, setCreatingUnder] = useState<FolderRow | null>(null);
 
   const onToggleAccount = () => {
     void dispatch(intents.setAccountExpanded(account.account_id, !account.expanded));
+  };
+
+  const openMenu = (row: FolderRow, event: React.MouseEvent): void => {
+    setMenuRow(row);
+    menu.open(event);
+  };
+
+  // The inline create asks its parent to stand open first: the edit row
+  // rides the parent's visibility chain like every child row.
+  const startCreate = (row: FolderRow): void => {
+    if (row.has_children && !row.expanded) {
+      void dispatch(
+        intents.setFolderExpanded({ account: account.account_id, key: row.key }, true),
+      );
+    }
+    setCreatingUnder(row);
   };
 
   // A collapsed account still owes its reader the unread total: the rows are
@@ -228,18 +258,36 @@ export function FolderTree({
         )}
       </div>
       {rows.map((row) => (
-        <FolderTreeRow
-          key={`${account.account_id}/${row.key}`}
-          accountId={account.account_id}
-          row={row}
-          selected={
-            selected !== null &&
-            selected.account === account.account_id &&
-            selected.key === row.key
-          }
-        />
+        <div key={`${account.account_id}/${row.key}`}>
+          <FolderTreeRow
+            accountId={account.account_id}
+            row={row}
+            selected={
+              selected !== null &&
+              selected.account === account.account_id &&
+              selected.key === row.key
+            }
+            onMenu={openMenu}
+          />
+          {creatingUnder !== null && creatingUnder.key === row.key && (
+            <NewFolderRow
+              account={account.account_id}
+              parent={row.key}
+              depth={row.depth + 1}
+              onDone={() => setCreatingUnder(null)}
+            />
+          )}
+        </div>
       ))}
       {account.expanded && <OutboxTreeRow accountId={account.account_id} />}
+      {menu.state !== null && menuRow !== null && (
+        <ContextMenu
+          x={menu.state.x}
+          y={menu.state.y}
+          items={buildFolderMenu(menuRow, () => startCreate(menuRow))}
+          onClose={menu.close}
+        />
+      )}
     </section>
   );
 }
