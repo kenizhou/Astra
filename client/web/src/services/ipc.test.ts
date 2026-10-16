@@ -88,18 +88,12 @@ describe('the intent wire', () => {
   it('carries the row reference with archive and trash', () => {
     // The Rust protocol exercises these through the app API, not a byte pin;
     // these literals are the byte contract the webview relies on.
-    expect(
-      JSON.stringify(intents.archiveMessage({ message: { account: 'work', key: 'imap:v1:u1' } })),
-    ).toBe('{"archive_message":{"row":{"message":{"account":"work","key":"imap:v1:u1"}}}}');
-    expect(
-      JSON.stringify(intents.archiveMessage({ thread: { account: 'work', thread_id: 'th-7' } })),
-    ).toBe('{"archive_message":{"row":{"thread":{"account":"work","thread_id":"th-7"}}}}');
-    expect(
-      JSON.stringify(intents.moveToTrash({ message: { account: 'work', key: 'imap:v1:u1' } })),
-    ).toBe('{"move_to_trash":{"row":{"message":{"account":"work","key":"imap:v1:u1"}}}}');
-    expect(
-      JSON.stringify(intents.moveToTrash({ thread: { account: 'work', thread_id: 'th-7' } })),
-    ).toBe('{"move_to_trash":{"row":{"thread":{"account":"work","thread_id":"th-7"}}}}');
+    const message = { message: { account: 'work', key: 'k1' } };
+    const thread = { thread: { account: 'work', thread_id: 'th-7' } };
+    expect(JSON.stringify(intents.archiveMessage(message))).toBe('{"archive_message":{"row":{"message":{"account":"work","key":"k1"}}}}');
+    expect(JSON.stringify(intents.archiveMessage(thread))).toBe('{"archive_message":{"row":{"thread":{"account":"work","thread_id":"th-7"}}}}');
+    expect(JSON.stringify(intents.moveToTrash(message))).toBe('{"move_to_trash":{"row":{"message":{"account":"work","key":"k1"}}}}');
+    expect(JSON.stringify(intents.moveToTrash(thread))).toBe('{"move_to_trash":{"row":{"thread":{"account":"work","thread_id":"th-7"}}}}');
   });
 
   it('omits a top level create parent and carries a nested one', () => {
