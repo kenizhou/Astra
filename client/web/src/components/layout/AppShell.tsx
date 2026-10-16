@@ -49,11 +49,11 @@ function FlushView({ children }: { children: React.ReactNode }) {
   return <div className="flex h-full flex-col overflow-hidden">{children}</div>;
 }
 
-/** One pane card: a rounded, subtly bordered surface filling its panel,
- *  the calendar view's interior language. */
+/** One pane card: a subtly bordered surface filling its panel, the corners
+ *  barely carved, the calendar view's interior language. */
 function PaneCard({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded-xl border border-border-subtle bg-card">
+    <div className="flex h-full flex-col overflow-hidden rounded-md border border-border-subtle bg-card">
       {children}
     </div>
   );
@@ -62,7 +62,7 @@ function PaneCard({ children }: { children: React.ReactNode }) {
 /** The reading pane's card: the same chrome on its paper surface. */
 function PaperCard({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded-xl border border-border-subtle bg-[var(--paper)]">
+    <div className="flex h-full flex-col overflow-hidden rounded-md border border-border-subtle bg-[var(--paper)]">
       {children}
     </div>
   );
@@ -167,7 +167,7 @@ export function AppShell() {
               /* The calendar's interior language: the ribbon spans the
                  frame's full width, and the panes ride as cards in a padded
                  row beneath it, the folder pane one card among them. */
-              <div className="min-h-0 flex-1 p-2">
+              <div className="min-h-0 flex-1 p-1">
                 <Group orientation="horizontal" className="h-full">
                   <Panel id="folder-pane" defaultSize={pct(18)} minSize={180} maxSize={320}>
                     <PaneCard>
@@ -183,7 +183,7 @@ export function AppShell() {
             ) : (
               <main
                 className={
-                  shellView === 'mail' ? 'min-h-0 min-w-0 flex-1 p-2' : 'min-h-0 min-w-0 flex-1'
+                  shellView === 'mail' ? 'min-h-0 min-w-0 flex-1 p-1' : 'min-h-0 min-w-0 flex-1'
                 }
               >
                 {viewContent}

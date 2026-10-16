@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The one pane divider, shared by every view's panel row: a pill handle
-// between two cards, the accent lifting it on hover.
+// The one pane divider, shared by every view's panel row: a slim handle
+// between two cards, a neutral lift on hover rather than the accent.
 
 import { Separator } from 'react-resizable-panels';
 
 export function PaneDivider() {
   return (
-    <Separator className="mx-1 w-1.5 shrink-0 cursor-col-resize rounded-full bg-border transition-colors hover:bg-primary" />
+    <Separator className="mx-0.5 w-1 shrink-0 cursor-col-resize rounded-full bg-border transition-colors hover:bg-muted-foreground/50" />
   );
 }

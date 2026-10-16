@@ -114,10 +114,11 @@ function PeopleSearch() {
   );
 }
 
-/** One pane card: a rounded, subtly bordered surface filling its panel. */
+/** One pane card: a subtly bordered surface filling its panel, the corners
+ *  barely carved. */
 function PaneCard({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded-xl border border-border-subtle bg-card">
+    <div className="flex h-full flex-col overflow-hidden rounded-md border border-border-subtle bg-card">
       {children}
     </div>
   );
@@ -182,7 +183,7 @@ export function PeoplePane() {
           </button>
         )}
       </div>
-      <div className="min-h-0 flex-1 p-2">
+      <div className="min-h-0 flex-1 p-1">
         <Group orientation="horizontal" className="h-full">
           <Panel id="people-list" defaultSize={pct(32)} minSize={pct(24)}>
             <PaneCard>
@@ -196,7 +197,7 @@ export function PeoplePane() {
               </aside>
             </PaneCard>
           </Panel>
-          <Separator className="mx-1 w-1.5 rounded-full bg-border transition-colors hover:bg-primary" />
+          <Separator className="mx-0.5 w-1 rounded-full bg-border transition-colors hover:bg-muted-foreground/50" />
           <Panel id="person-detail" defaultSize={pct(68)} minSize={pct(40)}>
             <PaneCard>
               {detail === null ? (

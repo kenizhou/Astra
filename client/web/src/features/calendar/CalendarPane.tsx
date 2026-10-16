@@ -70,10 +70,11 @@ function WriteBanners() {
   );
 }
 
-/** One pane card: a rounded, subtly bordered surface filling its panel. */
+/** One pane card: a subtly bordered surface filling its panel, the corners
+ *  barely carved. */
 function PaneCard({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded-xl border border-border-subtle bg-card">
+    <div className="flex h-full flex-col overflow-hidden rounded-md border border-border-subtle bg-card">
       {children}
     </div>
   );
@@ -134,7 +135,7 @@ export function CalendarPane() {
     >
       <CalendarToolbar onCreate={() => openCreate(null)} onBriefs={() => setBriefsOpen(true)} />
       <WriteBanners />
-      <div className="min-h-0 flex-1 p-2">
+      <div className="min-h-0 flex-1 p-1">
         <Group
           key={selectedEvent !== null ? 'docked' : 'solo'}
           orientation="horizontal"
