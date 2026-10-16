@@ -63,18 +63,28 @@ describe('the account rows', () => {
           kind: 'jmap',
           legs: { calendar: false, contacts: true },
         }),
+        row({
+          account: 'gmail',
+          address: 'ada@gmail.example',
+          kind: 'google',
+          legs: { calendar: true, contacts: false },
+        }),
       ]),
     );
     render(<AccountsDetail />);
 
     expect(screen.getByText('ada@example.test')).toBeTruthy();
     expect(screen.getByText('me@home.test')).toBeTruthy();
+    expect(screen.getByText('ada@gmail.example')).toBeTruthy();
     const work = screen.getByRole('button', { name: 'Open ada@example.test' });
     expect(work.textContent).toContain('IMAP + SMTP');
     expect(work.textContent).toContain('Used for calendar');
     const home = screen.getByRole('button', { name: 'Open me@home.test' });
     expect(home.textContent).toContain('JMAP');
     expect(home.textContent).toContain('Used for contacts');
+    const gmail = screen.getByRole('button', { name: 'Open ada@gmail.example' });
+    expect(gmail.textContent).toContain('Google');
+    expect(gmail.textContent).toContain('Used for calendar');
   });
 
   it('names an account with no dialled legs honestly', () => {

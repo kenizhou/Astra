@@ -485,13 +485,16 @@ fn an_account_the_table_does_not_hold_is_refused() {
     );
 }
 
-// The graph-refusal half, split into its own file the same way: the info
-// rows a stored grant answers (the Microsoft kind, the address, the
-// standing refusal state) and the removal's refusal bookkeeping.
+// The graph half, split into its own file the same way: a stored graph
+// grant's info rows (the Microsoft kind, the address, the refusal state).
 #[path = "account_ops_graph_tests.rs"]
 mod graph;
 
-// The removal half, split into its own file so this one stays under the
-// line cap.
+// The google half, split the same way: a stored google grant's info
+// rows (the Google kind, the address, the refusal state).
+#[path = "account_ops_google_tests.rs"]
+mod google;
+
+// The removal half, in its own file for the line cap.
 #[path = "account_ops_removal_tests.rs"]
 mod removal;

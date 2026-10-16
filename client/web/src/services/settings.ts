@@ -38,7 +38,7 @@ export interface SettingsBlock {
 }
 
 /** An account's kind; crosses as a snake_case word. */
-export type AccountKind = 'imap_smtp' | 'jmap' | 'dav' | 'microsoft';
+export type AccountKind = 'imap_smtp' | 'jmap' | 'dav' | 'microsoft' | 'google';
 
 /** Which of an account's legs are standing. */
 export interface AccountLegs {

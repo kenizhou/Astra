@@ -69,7 +69,7 @@ pub fn run() {
             // this argv on Windows; the hand-off makes the deep-link
             // plugin emit it, which is the only road an OAuth redirect
             // takes back into a running instance.
-            oauth::commands::forward_launch_arguments(app, &argv);
+            oauth::wiring::forward_launch_arguments(app, &argv);
             let _ = app.emit("single-instance-args", argv);
         }))
         .plugin(tauri_plugin_deep_link::init())

@@ -20,6 +20,7 @@ const KIND_LABELS: Record<AccountKind, string> = {
   jmap: 'JMAP',
   dav: 'DAV',
   microsoft: 'Microsoft',
+  google: 'Google',
 };
 
 /** The legs as one sentence, or the honest none. */

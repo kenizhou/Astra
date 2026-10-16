@@ -13,14 +13,21 @@ fn boot_dials_recording(
     dials: &std::sync::Arc<crate::AccountDials>,
     dial: crate::oauth::graph_add::GraphDial,
     refusals: &std::sync::Arc<crate::oauth::grant_refusals::GrantRefusals>,
-) -> Vec<super::super::Dialled> {
+) -> Vec<super::super::stored::Dialled> {
     let runtime = crate::runtime::build_runtime().expect("the test runtime builds");
     let store: std::sync::Arc<dyn crate::credential_store::AccountCredentialStore> =
         crate::commands_fakes::FakeStore::accepting();
     let dials = std::sync::Arc::clone(dials);
     let refusals = std::sync::Arc::clone(refusals);
     runtime.block_on(move || async move {
-        super::super::dial_stored(&dials, &store, dial, &refusals).await
+        super::super::stored::dial_stored(
+            &dials,
+            &store,
+            dial,
+            super::google_boot::unused_dial(),
+            &refusals,
+        )
+        .await
     })
 }
 
@@ -125,7 +132,7 @@ fn the_assembly_primes_the_settings_snapshot_for_the_first_pull() {
         std::sync::Arc::new(QuietObserver),
         agent_sink,
         std::sync::Arc::new(QuietDraftSink),
-        crate::oauth::commands::offline_surface(),
+        crate::oauth::wiring::offline_surface(),
     )
     .expect("the assembly boots over an empty store");
 

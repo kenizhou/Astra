@@ -283,6 +283,159 @@ fn the_graph_section_builds_the_microsoft_endpoints_for_its_tenant() {
     );
 }
 
+/// A stored Google account: the `[google]` section a sign-in writes,
+/// beside whatever else an account carries. Carries the Desktop secret,
+/// which is the section's whole difference from the graph one.
+const GOOGLE_SAMPLE: &str = r#"
+[google]
+email = "Alice@Gmail.com"
+client_id = "google-client"
+client_secret = "GOCSPX-desktop"
+redirect_uri = "http://127.0.0.1:49152/oauth2redirect"
+scopes = ["https://mail.google.com/", "https://www.googleapis.com/auth/calendar"]
+refresh_token = "google-refresh-secret"
+"#;
+
+#[test]
+fn a_google_section_round_trips_through_the_stored_form() {
+    let config = load_str(GOOGLE_SAMPLE).expect("valid config");
+    let google = config.google.as_ref().expect("google present");
+    assert_eq!(google.email, "Alice@Gmail.com");
+    assert_eq!(google.client_id, "google-client");
+    assert_eq!(google.redirect_uri, "http://127.0.0.1:49152/oauth2redirect");
+    assert_eq!(google.scopes.len(), 2);
+    assert_eq!(google.refresh_token.expose(), "google-refresh-secret");
+    // The granted-set cache starts absent: a grant stored before a
+    // refresh named its scopes withholds nothing.
+    assert_eq!(google.granted_scopes, None);
+
+    let stored = config.to_toml().expect("serialisable config");
+    assert!(stored.contains("[google]"), "{stored}");
+    assert!(!stored.contains("granted_scopes"), "{stored}");
+    let parsed = load_str(&stored).expect("round-trips");
+    let google = parsed.google.as_ref().expect("google present");
+    assert_eq!(google.refresh_token.expose(), "google-refresh-secret");
+    assert_eq!(
+        google.scopes,
+        vec![
+            "https://mail.google.com/".to_owned(),
+            "https://www.googleapis.com/auth/calendar".to_owned(),
+        ]
+    );
+    assert_eq!(google.granted_scopes, None);
+}
+
+#[test]
+fn a_desktop_client_secret_round_trips_and_reaches_the_provider_config() {
+    // A Desktop account carries the non-confidential secret; it must
+    // survive to_toml to load and flow into the provider config so the
+    // refresh grant can re-send it.
+    let config = load_str(GOOGLE_SAMPLE).expect("valid config");
+    let parsed = load_str(&config.to_toml().expect("serialisable")).expect("round-trips");
+    assert_eq!(
+        parsed
+            .google
+            .as_ref()
+            .expect("google")
+            .client_secret
+            .as_ref()
+            .map(Secret::expose),
+        Some("GOCSPX-desktop"),
+    );
+    assert_eq!(
+        parsed
+            .google
+            .as_ref()
+            .expect("google")
+            .provider_config()
+            .client_secret
+            .as_deref(),
+        Some("GOCSPX-desktop"),
+    );
+}
+
+#[test]
+fn a_secretless_account_omits_the_client_secret_key_and_still_loads() {
+    // An account connected through a secretless client registration must
+    // not write the key, and an older stored config that predates the
+    // field must still parse (serde default to None).
+    let secretless = GOOGLE_SAMPLE.replace("client_secret = \"GOCSPX-desktop\"\n", "");
+    assert!(!secretless.contains("client_secret"));
+    let config = load_str(&secretless).expect("valid config");
+    assert!(config
+        .google
+        .as_ref()
+        .expect("google")
+        .client_secret
+        .is_none());
+    let stored = config.to_toml().expect("serialisable config");
+    assert!(!stored.contains("client_secret"), "{stored}");
+}
+
+#[test]
+fn the_google_section_builds_the_fixed_google_endpoints() {
+    let config = load_str(GOOGLE_SAMPLE).expect("valid config");
+    let provider = config.google.as_ref().expect("google").provider_config();
+    assert_eq!(
+        provider.authorize_endpoint,
+        "https://accounts.google.com/o/oauth2/v2/auth"
+    );
+    assert_eq!(
+        provider.token_endpoint,
+        "https://oauth2.googleapis.com/token"
+    );
+    assert_eq!(provider.client_id, "google-client");
+    assert_eq!(
+        provider.redirect_uri,
+        "http://127.0.0.1:49152/oauth2redirect"
+    );
+    assert_eq!(
+        provider.scopes,
+        config.google.as_ref().expect("google").scopes
+    );
+}
+
+#[test]
+fn the_google_sections_debug_never_leaks_either_secret() {
+    let config = load_str(GOOGLE_SAMPLE).expect("valid config");
+    let dump = format!("{config:?}");
+    assert!(!dump.contains("google-refresh-secret"), "{dump}");
+    // The Desktop secret is documented as non-confidential, but this
+    // layer logs nothing it carries, so its Debug form redacts it with
+    // the refresh token rather than printing it.
+    assert!(!dump.contains("GOCSPX-desktop"), "{dump}");
+}
+
+#[test]
+fn a_google_only_document_derives_its_id_from_the_address() {
+    let config = load_str(GOOGLE_SAMPLE).expect("valid config");
+    let id = config.derived_account_id().expect("the id derives");
+    // Lowercased: the address names the account, and addresses are not
+    // case-sensitive in practice.
+    assert_eq!(id.as_str(), "alice@gmail.com@google");
+    // And distinct from an IMAP account for the same address, so the two
+    // never collide in the shared engine store.
+    let imap = AccountId::try_from("alice@gmail.com@imap.gmail.com").unwrap();
+    assert_ne!(id, imap);
+}
+
+#[test]
+fn a_google_account_needs_no_imap_section() {
+    let config = load_str(GOOGLE_SAMPLE).expect("valid config");
+    assert!(config.imap.is_none());
+    assert!(config.google.is_some());
+}
+
+#[test]
+fn an_old_document_without_a_google_section_loads_clean() {
+    // A document stored before the section existed loads exactly as it
+    // did, and its serialised form grows no google section.
+    let config = load_str(SAMPLE).expect("valid config");
+    assert!(config.google.is_none());
+    let stored = config.to_toml().expect("serialisable config");
+    assert!(!stored.contains("google"), "{stored}");
+}
+
 #[test]
 fn certificate_exceptions_round_trip_and_reach_the_engine() {
     let certificate = engine_tls::CertificateDer::from(b"a certificate".to_vec());

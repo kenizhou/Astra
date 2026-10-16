@@ -197,6 +197,7 @@ fn account(
         }),
         certificate_exceptions: exceptions,
         graph: None,
+        google: None,
         dav: None,
         shape: AccountShape::default(),
     }
@@ -350,9 +351,8 @@ async fn a_dial_pins_the_rejected_certificate_and_binds_the_inbox_and_the_custom
 /// at once, and the read state survives a further refresh.
 ///
 /// The run builds the loop the desktop host builds: the engine in a scratch store,
-/// the providers the accepted dial bound, the app over them. `dispatch` awaits each
-/// whole pass (sync, outbox drain, rebuild), so the snapshot is final when it returns
-/// and nothing needs polling.
+/// the accepted dial's providers, the app over them. `dispatch` awaits each whole
+/// pass (sync, outbox drain, rebuild), so the snapshot is final and needs no polling.
 ///
 /// A warm volume may hold the read state an earlier run left, so the test first puts
 /// every note back to unread through the product's own write path; the flip is then

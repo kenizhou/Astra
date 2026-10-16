@@ -145,6 +145,29 @@ describe('the expired-sign-in row', () => {
     expect(ipc.oauthBegin).toHaveBeenCalledWith('microsoft', 'ada@outlook.test');
   });
 
+  it('begins the re-grant for the expired account own family, google for a google row', () => {
+    // The expired row is the cross-family surface: its action targets
+    // the family the grant belongs to, never the Microsoft flow alone.
+    useSettingsStore.getState().applySnapshot(
+      snapshot([
+        row({
+          account: 'goog',
+          address: 'ada@gmail.example',
+          kind: 'google',
+          grant: 'sign_in_expired',
+        }),
+      ]),
+    );
+    render(<AccountsDetail />);
+
+    const sentence = screen.getByRole('status', { name: 'Sign-in expired' });
+    expect(sentence.textContent).toContain('ada@gmail.example');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in again as ada@gmail.example' }));
+
+    expect(ipc.oauthBegin).toHaveBeenCalledWith('google', 'ada@gmail.example');
+  });
+
   it('keeps the expired account reachable for removal through its detail page', () => {
     useSettingsStore.getState().applySnapshot(
       snapshot([

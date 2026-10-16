@@ -49,6 +49,20 @@ fn parse_callback_handles_the_msauth_dotted_scheme_azure_generates() {
 }
 
 #[test]
+fn parse_callback_extracts_the_code_from_a_bare_loopback_url() {
+    // The Google Desktop flow's redirect is a plain http loopback URL a
+    // host-side listener reads off the wire, not an OS-delivered scheme;
+    // the parser reads the query wherever the URL landed.
+    let code = parse_callback(
+        "state-xyz",
+        None,
+        "http://127.0.0.1:51341/?code=the-code&state=state-xyz",
+    )
+    .unwrap();
+    assert_eq!(code, "the-code");
+}
+
+#[test]
 fn parse_callback_rejects_a_state_mismatch() {
     let err = parse_callback(
         "expected",

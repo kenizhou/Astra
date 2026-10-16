@@ -38,10 +38,9 @@ use crate::oauth::graph_add::{
 
 use super::FakeDav;
 
-#[path = "graph_lifecycle_tests/servers.rs"]
-mod servers;
-
-use servers::{me_server, provider_config_at, ratcheting_token_endpoint, token_set_with};
+use super::servers::{
+    microsoft_provider_config_at, profile_server, ratcheting_token_endpoint, token_set_with,
+};
 
 /// The lookup seam over the production read: the real
 /// [`astra_account::fetch_primary_address_at`] against the scripted `/me`
@@ -261,7 +260,7 @@ fn account_infos(host: &Host) -> Vec<astra_app::AccountInfo> {
 #[test]
 fn the_sign_in_completes_the_rotation_lands_and_the_next_boot_dials_the_advanced_grant() {
     let host = Host::new("graph-life-healthy");
-    let (me_base, me_seen) = me_server(
+    let (me_base, me_seen) = profile_server(
         r#"{"mail":"Alice@Example.com","userPrincipalName":"alice@tenant.example.test"}"#,
     );
     let (endpoint, hits) = ratcheting_token_endpoint("fresh-refresh");
@@ -271,7 +270,7 @@ fn the_sign_in_completes_the_rotation_lands_and_the_next_boot_dials_the_advanced
     let address = complete(
         &host,
         token_set_with("fresh-refresh", "fresh-access"),
-        provider_config_at(&endpoint),
+        microsoft_provider_config_at(&endpoint),
         real_lookup(me_base),
         minting_dial(Arc::clone(&saw), Arc::clone(&host.dials), "fresh-access"),
     )
@@ -342,7 +341,14 @@ fn the_sign_in_completes_the_rotation_lands_and_the_next_boot_dials_the_advanced
         let dial = boot_dial(Arc::clone(&boot_grants), BootAnswer::Healthy);
         let refusals = Arc::clone(&host.refusals);
         host.runtime.block_on(move || async move {
-            super::super::dial_stored(&dials, &store, dial, &refusals).await
+            super::super::stored::dial_stored(
+                &dials,
+                &store,
+                dial,
+                super::google_boot::unused_dial(),
+                &refusals,
+            )
+            .await
         })
     };
     assert_eq!(dialled.len(), 1, "the stored account dialled at boot");
@@ -381,7 +387,7 @@ fn the_sign_in_completes_the_rotation_lands_and_the_next_boot_dials_the_advanced
 #[test]
 fn a_dead_grant_s_classification_reaches_the_accounts_row_and_a_re_sign_in_clears_it() {
     let host = Host::new("graph-life-dead");
-    let (me_base, _seen) = me_server(
+    let (me_base, _seen) = profile_server(
         r#"{"mail":"Alice@Example.com","userPrincipalName":"alice@tenant.example.test"}"#,
     );
     let (endpoint, _hits) = ratcheting_token_endpoint("fresh-refresh");
@@ -390,7 +396,7 @@ fn a_dead_grant_s_classification_reaches_the_accounts_row_and_a_re_sign_in_clear
     complete(
         &host,
         token_set_with("fresh-refresh", "fresh-access"),
-        provider_config_at(&endpoint),
+        microsoft_provider_config_at(&endpoint),
         real_lookup(me_base.clone()),
         minting_dial(
             Arc::new(DialSaw::default()),
@@ -408,7 +414,14 @@ fn a_dead_grant_s_classification_reaches_the_accounts_row_and_a_re_sign_in_clear
         let dial = boot_dial(Arc::new(Mutex::new(Vec::new())), BootAnswer::DeadGrant);
         let refusals = Arc::clone(&host.refusals);
         host.runtime.block_on(move || async move {
-            super::super::dial_stored(&dials, &store, dial, &refusals).await
+            super::super::stored::dial_stored(
+                &dials,
+                &store,
+                dial,
+                super::google_boot::unused_dial(),
+                &refusals,
+            )
+            .await
         })
     };
     assert!(dialled.is_empty(), "the account never joins the app");
@@ -440,7 +453,7 @@ fn a_dead_grant_s_classification_reaches_the_accounts_row_and_a_re_sign_in_clear
     let address = complete(
         &host,
         token_set_with("regranted-refresh", "regranted-access"),
-        provider_config_at(&regrant_endpoint),
+        microsoft_provider_config_at(&regrant_endpoint),
         real_lookup(me_base),
         minting_dial(
             Arc::new(DialSaw::default()),

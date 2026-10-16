@@ -267,9 +267,12 @@ impl OAuthClient {
 /// server.
 ///
 /// Handles the custom-scheme redirect the OS auth session hands back
-/// (for example `com.kenizhou.astra://oauth?code=...&state=...`). A
-/// provider `error` in the callback, a missing `code`, a missing or
-/// mismatched `state`, or an unparseable URL are all rejected.
+/// (for example `com.kenizhou.astra://oauth?code=...&state=...`) and
+/// the bare `http://127.0.0.1:<port>/` loopback URL a Desktop client's
+/// host-side listener reads off the wire: the query is read wherever
+/// the URL landed. A provider `error` in the callback, a missing
+/// `code`, a missing or mismatched `state`, or an unparseable URL are
+/// all rejected.
 ///
 /// `expected_issuer` is `Some` only for a server that **advertised** it
 /// sends `iss` (RFC 9207); the parameter is then mandatory and a response

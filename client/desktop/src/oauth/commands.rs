@@ -24,23 +24,19 @@
 //! # What a success means
 //!
 //! A Microsoft sign-in completes into an account: the completion runs the
-//! account half ([`super::graph_add`]), which names the account from the
-//! token, dials it, persists the grant, and joins it to the app, and the
-//! success outcome carries what the wizard's sentence shows (the address,
-//! a withheld calendar). Every other provider this build can offer (Google)
-//! still completes with the bare signed-in word, honestly: no account type
-//! consumes its token set until its slice lands.
+//! account half ([`super::graph_add`]) and the Google half
+//! ([`super::google_add`]), which name the account from the token, dial
+//! it, persist the grant, and join it to the app; the success outcome
+//! carries what the wizard's sentence shows (the address, a withheld
+//! calendar). The bare signed-in word stays on the wire for families
+//! without account wiring; no offered provider constructs it.
 //!
 //! # The wiring this module owns
 //!
-//! Three pieces the session module named as its deferrals: the
-//! [`forward_oauth_callbacks`] registration (called by the boot hook),
-//! the Windows argv forwarding in the single-instance callback
-//! ([`forward_launch_arguments`], without which a running app on that
-//! platform never sees its own redirect), and the opener-backed
-//! [`SystemBrowser`] ([`opener_browser`]). The two Tauri-touching
-//! adapters have no unit-test shape: the filter and refusal contracts
-//! under them are pinned by the session and command tests.
+//! The Tauri-touching adapters (the opener-backed browser, the headless
+//! surface, the Windows argv forwarding) live in [`super::wiring`],
+//! split out for the file cap; the contracts under them are pinned by
+//! the session and command tests.
 //!
 //! [`forward_oauth_callbacks`]: super::session::forward_oauth_callbacks
 
@@ -60,7 +56,10 @@ use astra_oauth::{
 use crate::runtime::AppRuntime;
 use crate::AppState;
 
-use super::session::{SignInError, SignInSession, SystemBrowser, OAUTH_REDIRECT_URI};
+use super::loopback;
+use super::session::{
+    CaptureSource, SignInError, SignInSession, SystemBrowser, OAUTH_REDIRECT_URI,
+};
 
 /// A provider whose sign-in this build can offer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -170,6 +169,11 @@ pub(crate) enum OAuthCommandError {
     /// The system browser could not be opened, so nothing started.
     #[error("the system browser could not be opened: {0}")]
     Browser(String),
+    /// The loopback capture a Google flow needs could not be started:
+    /// its port could not be bound, its client could not be built, or
+    /// its serve thread could not start; nothing stays in flight.
+    #[error("the loopback capture could not be started: {0}")]
+    Capture(String),
 }
 
 impl Serialize for OAuthCommandError {
@@ -184,9 +188,10 @@ impl Serialize for OAuthCommandError {
 /// never render. A registration whose client cannot be built (its TLS
 /// stack refused) is dropped with a warning rather than offered broken.
 /// Google's registration documents a Desktop client whose redirect is a
-/// loopback port; this build carries exactly one capture (the custom
-/// scheme), so the Google flow rides [`OAUTH_REDIRECT_URI`] and the
-/// client-type decision belongs to the Google slice.
+/// loopback port bound per flow, so its boot-time client is the template
+/// [`loopback::begin`] rebuilds with the bound port in the redirect;
+/// the portless template is the URI shape the Cloud Console
+/// registration carries.
 fn registered_clients() -> Vec<(ProviderKind, Arc<OAuthClient>)> {
     let mut clients = Vec::new();
     if let Some(client_id) = credentials::microsoft_client_id() {
@@ -206,7 +211,7 @@ fn registered_clients() -> Vec<(ProviderKind, Arc<OAuthClient>)> {
         match OAuthClient::new(OAuthProviderConfig::google(
             google.client_id,
             google.client_secret,
-            OAUTH_REDIRECT_URI,
+            loopback::TEMPLATE_REDIRECT_URI,
             GOOGLE_SCOPES,
         )) {
             Ok(client) => clients.push((ProviderKind::Google, Arc::new(client))),
@@ -338,9 +343,22 @@ where
     let client = surface
         .client(provider)
         .ok_or(OAuthCommandError::NotOffered(provider))?;
+    // A Google Desktop flow's redirect is the loopback port its listener
+    // binds per flow, so its client is minted per flow over the
+    // registration's template with the bound port in the redirect;
+    // Microsoft's rides the registered custom scheme and the shared
+    // deep-link capture.
+    let (client, capture) = match provider {
+        ProviderKind::Google => {
+            let flow = loopback::begin(&client, loopback::CAPTURE_BOUND)
+                .map_err(OAuthCommandError::Capture)?;
+            (flow.client, CaptureSource::Loopback(flow.capture))
+        }
+        ProviderKind::Microsoft => (client, CaptureSource::DeepLink),
+    };
     let flow = surface
         .session()
-        .begin_sign_in(&client, login_hint)
+        .begin_sign_in(&client, login_hint, capture)
         .map_err(|err| match err {
             SignInError::InFlight | SignInError::Cancelled => OAuthCommandError::InFlight,
             SignInError::Browser(sentence) => OAuthCommandError::Browser(sentence),
@@ -348,6 +366,9 @@ where
             // before any wait runs.
             SignInError::CaptureClosed => OAuthCommandError::Browser(
                 "the deep-link capture closed before the flow could begin".to_owned(),
+            ),
+            SignInError::LoopbackFailed(_) => OAuthCommandError::Browser(
+                "the loopback capture failed before the flow could begin".to_owned(),
             ),
         })?;
     let desk = Arc::clone(surface);
@@ -419,7 +440,7 @@ pub(crate) fn oauth_begin(
         use tauri::Emitter;
         let _ = app.emit(SIGN_IN_RESULT_EVENT, result);
     };
-    let complete = super::graph_add::outcome_completion(&state, &state.runtime, provider);
+    let complete = super::completion::outcome_completion(&state, &state.runtime, provider);
     begin_with(
         &state.oauth,
         &state.runtime,
@@ -436,63 +457,6 @@ pub(crate) fn oauth_begin(
 #[tauri::command]
 pub(crate) fn oauth_cancel(state: State<'_, AppState>) {
     cancel_with(&state.oauth);
-}
-
-/// The system browser over the shell's opener: the production seam the
-/// sign-in wiring installs; the platform picks the default browser.
-struct OpenerBrowser {
-    /// The shell handle the opener plugin reads.
-    handle: tauri::AppHandle,
-}
-
-impl SystemBrowser for OpenerBrowser {
-    fn open(&self, url: &str) -> Result<(), String> {
-        use tauri_plugin_opener::OpenerExt;
-        self.handle
-            .opener()
-            .open_url(url, None::<&str>)
-            .map_err(|err| err.to_string())
-    }
-}
-
-/// The opener-backed browser the app setup installs.
-#[must_use]
-pub(crate) fn opener_browser(handle: &tauri::AppHandle) -> Arc<dyn SystemBrowser> {
-    Arc::new(OpenerBrowser {
-        handle: handle.clone(),
-    })
-}
-
-/// The surface for hosts with no browser and no capture (the headless
-/// host, the test fakes): a browser that refuses and a capture that never
-/// delivers, so no sign-in can begin there.
-#[must_use]
-pub(crate) fn offline_surface() -> Arc<SignInSurface> {
-    let (tx, rx) = mpsc::unbounded_channel();
-    Arc::new(SignInSurface::new(Arc::new(RefusingBrowser), rx, tx))
-}
-
-/// A browser no host can open.
-struct RefusingBrowser;
-
-impl SystemBrowser for RefusingBrowser {
-    fn open(&self, _url: &str) -> Result<(), String> {
-        Err("this host has no system browser".to_owned())
-    }
-}
-
-/// Hands the single-instance callback's argv to the deep-link plugin: on
-/// Windows a deep link that arrives while the app runs reaches the first
-/// instance as a launch argument, and without this hand-off the plugin
-/// never emits it, so a running app never sees the redirect its own
-/// sign-in opened. The plugin itself checks the argument against the
-/// configured schemes, so a plain relaunch's arguments reach nothing.
-pub(crate) fn forward_launch_arguments<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
-    argv: &[String],
-) {
-    use tauri_plugin_deep_link::DeepLinkExt;
-    app.deep_link().handle_cli_arguments(argv.iter());
 }
 
 #[cfg(test)]

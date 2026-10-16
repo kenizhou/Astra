@@ -14,9 +14,11 @@ mod autodetect;
 mod config;
 mod credentials;
 mod dav;
+mod google;
 mod graph;
 mod imap;
 mod log_handle;
+mod oauth_accounts;
 mod pass_folders;
 mod reconnect;
 mod setup;
@@ -26,11 +28,16 @@ mod tls;
 
 pub use autodetect::{recommend, MissReason, OauthRoutes, ServerSummary, SetupRecommendation};
 pub use config::{
-    load, load_str, AccountConfig, AccountShape, ConfigError, ConnectionSecurity, GraphAccount,
-    ImapAccount, Secret, SmtpAccount,
+    load, load_str, AccountConfig, AccountShape, ConfigError, ConnectionSecurity, ImapAccount,
+    Secret, SmtpAccount,
 };
 pub use credentials::imap_credential_source;
 pub use dav::{connect_dav_providers, DavAccount, DavProviders};
+pub use google::{
+    connect_google_calendar_providers, connect_google_folder, connect_google_mail_providers,
+    dial_google_account, fetch_google_address, fetch_google_address_at, google_token_source,
+    requested_scopes, withheld, GoogleProviders,
+};
 pub use graph::{
     connect_graph_calendar_providers, connect_graph_folder, connect_graph_mail_providers,
     dial_microsoft_account, fetch_primary_address, fetch_primary_address_at, CredentialOrigin,
@@ -38,6 +45,7 @@ pub use graph::{
 };
 pub use imap::{connect_imap_mailbox, connect_mail_providers, ImapConnections};
 pub use log_handle::account_log_handle;
+pub use oauth_accounts::{GoogleAccount, GraphAccount};
 pub use pass_folders::pass_syncs;
 pub use reconnect::{ReconnectingImapProvider, Redial};
 pub use setup::{
@@ -82,6 +90,16 @@ pub enum AccountError {
     /// the account's mail stands.
     #[error("calendar access denied: {0}")]
     CalendarAccessDenied(String),
+    /// A Google call failed: a token source build, or a Google endpoint
+    /// the account wiring reads (the calendar-list probe). The Google
+    /// parallel of [`Self::Graph`]; a refusal the account cannot recover
+    /// from arrives as [`Self::SigninRejected`] instead, so a caller
+    /// never mistakes a dead grant for an outage. There is no Google
+    /// calendar-re-auth case: Google asks for the calendar scope at
+    /// connect time, so a refused calendar is an error and never a
+    /// banner.
+    #[error("google: {0}")]
+    Google(String),
     /// The IMAP connection or login failed.
     #[error("imap: {0}")]
     Imap(#[from] provider_imap::ImapError),

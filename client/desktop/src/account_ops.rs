@@ -24,12 +24,13 @@
 //!   credential store refuses likewise stores nothing, and the dialled
 //!   legs go unanswered with it.
 //! - **Every registered account is `imap_smtp`, except a stored grant.** A
-//!   stored config names an `[imap]` section or a `[graph]` grant or
-//!   refuses to load; the graph shape answers the `microsoft` kind and the
-//!   address the sign-in's lookup named, beside the standing grant refusal
-//!   the boot dial or the completion recorded. No jmap or dav-only config
-//!   shape exists for this host to register; those kinds stay unreachable
-//!   until one lands.
+//!   stored config names an `[imap]` section or an OAuth family's grant
+//!   (`[graph]` or `[google]`) or refuses to load; a grant answers its
+//!   family's kind (the `microsoft` kind for Graph, the `google` kind for
+//!   Google) and the address the sign-in's lookup named, beside the
+//!   standing grant refusal the boot dial or the completion recorded. No
+//!   jmap or dav-only config shape exists for this host to register;
+//!   those kinds stay unreachable until one lands.
 //! - **The removal's halves go in order.** The credential entry, the
 //!   durable half, deletes first: a refusal answers `Err` with nothing
 //!   moved anywhere. The dial table's entry and its index line go after;
@@ -200,12 +201,14 @@ impl HostAccountOps<HostProvider> for HostAccountStore {
                     continue;
                 }
             };
-            // A stored grant is a Microsoft account addressed by the lookup
-            // the sign-in named; every other stored config names an imap
-            // section whose login is the address.
-            let (kind, address) = match config.graph.as_ref() {
-                Some(graph) => (AccountKind::Microsoft, graph.email.clone()),
-                None => (
+            // A stored grant is an account addressed by the lookup the
+            // sign-in named (the Microsoft family over Graph, the Google
+            // family over its native APIs); every other stored config
+            // names an imap section whose login is the address.
+            let (kind, address) = match (config.graph.as_ref(), config.google.as_ref()) {
+                (Some(graph), _) => (AccountKind::Microsoft, graph.email.clone()),
+                (None, Some(google)) => (AccountKind::Google, google.email.clone()),
+                (None, None) => (
                     AccountKind::ImapSmtp,
                     config
                         .imap

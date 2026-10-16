@@ -11,8 +11,9 @@ use async_trait::async_trait;
 use engine_api::{CalendarWrites, Capabilities, ContactsProvider, MailboxWrites, Provider};
 use engine_provider::ConnectionInfo;
 
-use super::{dial_dav_with, HostAccount, HostContactsLeg};
+use super::stored::{dial_dav_with, Dialled, HostContactsLeg};
 use crate::app_state::HostProvider;
+use crate::HostAccount;
 
 /// A dial answer: what the fake dav dial hands back for one test.
 type Dial =
@@ -176,7 +177,7 @@ fn the_assembly_hands_back_an_mcp_host_off_and_exposing_nothing() {
         std::sync::Arc::new(QuietObserver),
         agent_sink,
         std::sync::Arc::new(QuietDraftSink),
-        crate::oauth::commands::offline_surface(),
+        crate::oauth::wiring::offline_surface(),
     )
     .expect("the assembly boots over an empty store");
 
@@ -224,7 +225,7 @@ fn the_assembly_installs_the_host_account_store_before_the_state_hands_back() {
         std::sync::Arc::new(QuietObserver),
         agent_sink,
         std::sync::Arc::new(QuietDraftSink),
-        crate::oauth::commands::offline_surface(),
+        crate::oauth::wiring::offline_surface(),
     )
     .expect("the assembly boots over an empty store");
 
@@ -248,7 +249,7 @@ fn the_assembly_installs_the_host_account_store_before_the_state_hands_back() {
         .block_on(|| {
             let app = std::sync::Arc::clone(&state.app);
             async move {
-                app.add_new_account_deferred(super::HostAccount {
+                app.add_new_account_deferred(HostAccount {
                     id: account.clone(),
                     providers: Vec::new(),
                     identity: engine_api::EmailAddress::new("ada@example.test"),
@@ -325,14 +326,16 @@ fn graph_dial(answer: Result<(), &'static str>) -> crate::oauth::graph_add::Grap
 fn boot_dials(
     dials: &std::sync::Arc<crate::AccountDials>,
     dial: crate::oauth::graph_add::GraphDial,
-) -> Vec<super::Dialled> {
+) -> Vec<Dialled> {
     let runtime = crate::runtime::build_runtime().expect("the test runtime builds");
     let store: std::sync::Arc<dyn crate::credential_store::AccountCredentialStore> =
         crate::commands_fakes::FakeStore::accepting();
     let refusals = std::sync::Arc::new(crate::oauth::grant_refusals::GrantRefusals::new());
     let dials = std::sync::Arc::clone(dials);
-    runtime
-        .block_on(move || async move { super::dial_stored(&dials, &store, dial, &refusals).await })
+    runtime.block_on(move || async move {
+        super::stored::dial_stored(&dials, &store, dial, google_boot::unused_dial(), &refusals)
+            .await
+    })
 }
 
 #[test]
@@ -404,9 +407,27 @@ fn a_graph_dial_that_fails_skips_the_account_without_blocking_the_boot() {
 #[path = "boot_tests/graph_refusal_tests.rs"]
 mod graph_refusals;
 
+// The google account's boot half: the stored document's dial, its dead
+// grant's row, and the folder binder's google arm.
+#[path = "boot_tests/google_boot_tests.rs"]
+mod google_boot;
+
+// The scripted loopback servers and flow fixtures the offline lifecycle
+// proofs share: a stand-in profile read and the ratcheting token
+// endpoint.
+#[path = "boot_tests/servers.rs"]
+mod servers;
+
 // The offline end-to-end proof of the Microsoft account's whole life over
 // the scripted seams: the sign-in through the real lookup and source, the
 // rotation landing, the boot re-dial, and the dead grant's row. Split
 // from this file for the 500-line cap.
 #[path = "boot_tests/graph_lifecycle_tests.rs"]
 mod graph_lifecycle;
+
+// The offline end-to-end proof of the Google account's whole life over
+// the scripted seams: the sign-in through the real userinfo lookup and
+// source, the rotation backstop landing, the boot re-dial, and the dead
+// grant's row. Split from this file for the 500-line cap.
+#[path = "boot_tests/google_lifecycle_tests.rs"]
+mod google_lifecycle;

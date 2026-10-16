@@ -204,6 +204,9 @@ pub enum AccountKind {
     Dav,
     /// A Microsoft account over Graph, signed in through the browser.
     Microsoft,
+    /// A Google account over its native APIs, signed in through the
+    /// browser.
+    Google,
 }
 
 /// Which of an account's legs are standing.

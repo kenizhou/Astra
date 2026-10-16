@@ -6,21 +6,31 @@
 // dead grant, whose sentence names the sign-in and never a server
 // outage. Both ride the accounts page over the standing grant state the
 // settings snapshot's account rows carry; a healthy account renders
-// neither.
+// neither. The expired row is the cross-family surface: its action
+// targets the family the grant belongs to, google for a Google account
+// as microsoft for a Microsoft one, while the banner stays
+// Microsoft-only (Google has no calendar re-auth).
 
 import { useState } from 'react';
 
 import { oauthBegin } from '@/services/ipc';
-import type { AccountSettingsRow } from '@/services/ipc';
+import type { AccountKind, AccountSettingsRow } from '@/services/ipc';
+import type { OAuthProvider } from '@/services/oauth';
 
+
+/** The provider a re-grant begins for the account's family: the two
+ * families whose grants can die today. */
+function regrantProvider(kind: AccountKind): OAuthProvider {
+  return kind === 'google' ? 'google' : 'microsoft';
+}
 
 /** The begin-and-catch: a refused begin (a sign-in already stands, the
  * browser refused) surfaces its sentence beside the surface that asked,
  * never silently. */
 function useRegrant() {
   const [sentence, setSentence] = useState<string | null>(null);
-  const begin = (address: string): void => {
-    oauthBegin('microsoft', address).catch((err: unknown) => {
+  const begin = (provider: OAuthProvider, address: string): void => {
+    oauthBegin(provider, address).catch((err: unknown) => {
       setSentence(String(err));
     });
   };
@@ -53,7 +63,7 @@ export function ReconnectBanner({ rows }: { rows: AccountSettingsRow[] }) {
         <div
           key={row.account}
           role="status"
-          aria-label="Calendar permission missing"
+            aria-label="Calendar permission missing"
           className="flex flex-col items-start gap-2 rounded-[var(--radius-xs)] border border-[var(--warning)]/40 p-3"
         >
           <div className="flex w-full items-start justify-between gap-3">
@@ -64,7 +74,7 @@ export function ReconnectBanner({ rows }: { rows: AccountSettingsRow[] }) {
             <button
               type="button"
               aria-label={`Reconnect the calendar for ${row.address}`}
-              onClick={() => regrant.begin(row.address)}
+              onClick={() => regrant.begin('microsoft', row.address)}
               className="shrink-0 rounded-[var(--radius)] bg-secondary px-2.5 py-1 text-xs text-secondary-foreground transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[var(--hit)]"
             >
               Reconnect
@@ -107,7 +117,7 @@ export function ExpiredSignInRow({
         <button
           type="button"
           aria-label={`Sign in again as ${row.address}`}
-          onClick={() => regrant.begin(row.address)}
+          onClick={() => regrant.begin(regrantProvider(row.kind), row.address)}
           className="rounded-[var(--radius)] bg-secondary px-2.5 py-1 text-xs text-secondary-foreground transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[var(--hit)]"
         >
           Sign in again
@@ -119,8 +129,8 @@ export function ExpiredSignInRow({
         )}
         <button
           type="button"
-          aria-label={`Open ${row.address}`}
-          onClick={onOpen}
+            aria-label={`Open ${row.address}`}
+            onClick={onOpen}
           className="rounded-[var(--radius)] border border-border px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[var(--hit)]"
         >
           Open

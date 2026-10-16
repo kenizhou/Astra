@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! The lifecycle proof's scripted servers, split from the suite for the
-//! 500-line cap: a stand-in `/me` and a rotating, ratcheting token
-//! endpoint, both plain loopback HTTP so the production client stack (the
-//! real reqwest over the shared TLS policy, the real refresh body) makes
-//! the requests the proof pins.
+//! The scripted loopback servers and flow fixtures the offline lifecycle
+//! proofs share: a stand-in profile read (Microsoft's `/me` body,
+//! Google's userinfo body) and a rotating, ratcheting token endpoint,
+//! both plain loopback HTTP so the production client stack (the real
+//! reqwest over the shared TLS policy, the real refresh body) makes the
+//! requests the proofs pin, plus each provider's flow config and token
+//! set pointed at the scripted endpoint, the one substitution an
+//! offline proof of the real refresh needs.
 
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -11,10 +14,10 @@ use std::sync::{Arc, Mutex};
 
 use astra_oauth::{OAuthProviderConfig, Secret, TokenSet};
 
-/// A scripted `/me` server: answers one canned profile body and records
-/// each request's head, so the proof can pin the bearer the completion
-/// handed the lookup.
-pub(super) fn me_server(body: &'static str) -> (String, Arc<Mutex<Vec<String>>>) {
+/// A scripted profile server: answers one canned body to any GET and
+/// records each request's head, so a proof can pin the bearer the
+/// completion handed the read and the endpoint a granted set picked.
+pub(super) fn profile_server(body: &'static str) -> (String, Arc<Mutex<Vec<String>>>) {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let seen_thread = Arc::clone(&seen);
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -131,10 +134,11 @@ pub(super) fn ratcheting_token_endpoint(initial: &str) -> (String, Arc<AtomicUsi
     (format!("http://{addr}/token"), hits)
 }
 
-/// The flow's provider config: the registration shape the wizard builds,
-/// with its token endpoint pointed at the scripted server, which is the
-/// one substitution an offline proof of the real refresh needs.
-pub(super) fn provider_config_at(token_endpoint: &str) -> OAuthProviderConfig {
+/// The Microsoft flow's provider config: the registration shape the
+/// wizard builds, with its token endpoint pointed at the scripted
+/// server, which is the one substitution an offline proof of the real
+/// refresh needs.
+pub(super) fn microsoft_provider_config_at(token_endpoint: &str) -> OAuthProviderConfig {
     let mut provider = OAuthProviderConfig::microsoft(
         "client-abc",
         "common",
@@ -149,7 +153,8 @@ pub(super) fn provider_config_at(token_endpoint: &str) -> OAuthProviderConfig {
     provider
 }
 
-/// The token set a completed exchange answers for `refresh` / `access`.
+/// The token set a completed Microsoft exchange answers for `refresh` /
+/// `access`.
 pub(super) fn token_set_with(refresh: &str, access: &str) -> TokenSet {
     TokenSet {
         access_token: Secret::new(access.to_owned()),
@@ -158,6 +163,35 @@ pub(super) fn token_set_with(refresh: &str, access: &str) -> TokenSet {
         scope: "offline_access https://graph.microsoft.com/Mail.ReadWrite \
                 https://graph.microsoft.com/Calendars.ReadWrite"
             .to_owned(),
+        token_type: "Bearer".to_owned(),
+    }
+}
+
+/// The Google flow's provider config: the Desktop registration shape the
+/// loopback flow minted the request over (the non-confidential secret
+/// included), with its token endpoint pointed at the scripted server,
+/// which is the one substitution an offline proof of the real refresh
+/// needs.
+pub(super) fn google_provider_config_at(token_endpoint: &str) -> OAuthProviderConfig {
+    let mut provider = OAuthProviderConfig::google(
+        "google-client",
+        Some("gsecret".to_owned()),
+        "http://127.0.0.1:45001/",
+        astra_oauth::GOOGLE_SCOPES,
+    );
+    provider.token_endpoint = token_endpoint.to_owned();
+    provider
+}
+
+/// The token set a completed Google exchange answers for `refresh` /
+/// `access`: the full requested set granted back, scopes spelled as the
+/// request named them.
+pub(super) fn google_token_set_with(refresh: &str, access: &str) -> TokenSet {
+    TokenSet {
+        access_token: Secret::new(access.to_owned()),
+        refresh_token: Some(Secret::new(refresh.to_owned())),
+        expires_at: time::OffsetDateTime::now_utc() + time::Duration::hours(1),
+        scope: astra_oauth::GOOGLE_SCOPES.join(" "),
         token_type: "Bearer".to_owned(),
     }
 }

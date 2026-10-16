@@ -190,6 +190,25 @@ describe('the completion event', () => {
     expect(screen.queryByText('Sign in with Microsoft')).toBeNull();
   });
 
+  it('lands the added account sentence for a google sign-in', async () => {
+    ipc.oauthOffer.mockResolvedValue({ providers: ['google'] });
+    await openOnManualForm();
+    fireEvent.click(await screen.findByText('Sign in with Google'));
+    await waitFor(() => expect(ipc.oauthBegin).toHaveBeenCalledTimes(1));
+
+    deliver({
+      provider: 'google',
+      outcome: { added: { address: 'alice@gmail.example', calendar_withheld: false } },
+    });
+
+    expect(
+      screen.getByText(
+        'Signed in with Google as alice@gmail.example. The account joins with its first sync in the background.',
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText('Sign in with Google')).toBeNull();
+  });
+
   it('names a withheld calendar in the added sentence', async () => {
     ipc.oauthOffer.mockResolvedValue({ providers: ['microsoft'] });
     await openOnManualForm();
