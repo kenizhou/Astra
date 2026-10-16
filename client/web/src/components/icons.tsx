@@ -6,6 +6,7 @@ import { HugeiconsIcon } from '@hugeicons/react';
 import type { SVGProps } from 'react';
 import {
   Add01Icon,
+  ArchiveArrowUpIcon as ArchiveArrowUpIconData,
   ArchiveIcon as ArchiveIconData,
   BookOpen02Icon as ReadingIconData,
   Calendar03Icon,
@@ -17,7 +18,6 @@ import {
   EllipsisVerticalIcon as MoreIconData,
   Flag02Icon,
   Folder01Icon,
-  Forward01Icon,
   InformationCircleIcon as AboutIconData,
   InboxIcon as InboxIconData,
   KeyboardIcon as ShortcutsIconData,
@@ -29,7 +29,7 @@ import {
   MailOpen01Icon,
   MailReply01Icon,
   MailReplyAll01Icon,
-  MailSend01Icon,
+  MailSend02Icon as MailSend02IconData,
   MoonIcon as MoonIconData,
   Note01Icon,
   PanelLeftIcon as PanelLeftIconData,
@@ -67,7 +67,7 @@ export const CalendarIcon = makeIcon(Calendar03Icon);
 export const PeopleIcon = makeIcon(UserMultipleIcon);
 export const AgentIcon = makeIcon(Robot01Icon);
 export const AiIcon = makeIcon(SparklesIcon);
-export const OutboxIcon = makeIcon(MailSend01Icon);
+export const OutboxIcon = makeIcon(ArchiveArrowUpIconData);
 export const PanelLeftIcon = makeIcon(PanelLeftIconData);
 export const SearchIcon = makeIcon(Search01Icon);
 export const PlusIcon = makeIcon(Add01Icon);
@@ -84,7 +84,7 @@ export const FlagIcon = makeIcon(Flag02Icon);
 export const PaperclipIcon = makeIcon(PaperclipIconData);
 export const ReplyIcon = makeIcon(MailReply01Icon);
 export const ReplyAllIcon = makeIcon(MailReplyAll01Icon);
-export const ForwardIcon = makeIcon(Forward01Icon);
+export const ForwardIcon = makeIcon(MailSend02IconData);
 export const ComposeIcon = makeIcon(MailEdit01Icon);
 export const MarkReadIcon = makeIcon(MailOpen01Icon);
 export const SnippetsIcon = makeIcon(Note01Icon);
