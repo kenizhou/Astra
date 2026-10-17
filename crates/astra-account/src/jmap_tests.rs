@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Tests for the jmap account section: the one-secret fold (the legacy
-//! `token` key reads into `password`), the URL derivation matrix, and the
-//! account id. The fold is pinned hardest: a stored document never carries
-//! two secret fields, and a document that once did still loads.
+//! `token` key reads into `password`), the URL derivation matrix, the
+//! account id, and the `[jmap.oauth]` block a browser sign-in leaves. The
+//! fold is pinned hardest: a stored document never carries two secret
+//! fields, and a document that once did still loads.
 
 use provider_jmap::Credentials;
 
@@ -33,6 +34,12 @@ fn setup(server_url: Option<&str>, password: &str) -> JmapSetup {
         server_url: server_url.map(str::to_owned),
         password: password.to_owned(),
     }
+}
+
+/// A document with a complete `[jmap.oauth]` block, the form a browser
+/// sign-in writes.
+fn oauth_doc() -> &'static str {
+    "[jmap]\nemail = \"alice@example.com\"\nbase_url = \"https://api.example.com\"\n\n[jmap.oauth]\nclient_id = \"client-abc\"\nrefresh_token = \"rt-1\"\nauthorize_endpoint = \"https://api.example.com/oauth/authorize\"\ntoken_endpoint = \"https://api.example.com/oauth/refresh\"\nredirect_uri = \"com.kenizhou.astra://jmap-oauth\"\nscopes = [\"offline_access\"]\nresource = \"https://api.example.com/jmap/session\"\n"
 }
 
 #[test]
@@ -216,17 +223,75 @@ fn the_oauth_block_reads_none_for_every_account_stored_today() {
 }
 
 #[test]
-fn a_document_from_a_newer_build_with_an_oauth_block_still_loads() {
-    // The block's fields belong to a newer build; what this build owes an
-    // older document (and a newer one owes this build) is that the load
-    // never fails over keys it does not read.
+fn an_oauth_section_round_trips_through_the_stored_document() {
+    // The block a browser sign-in leaves: the discovered endpoints, the
+    // registered client id, and the refresh token, with no long-lived
+    // password beside them. It survives a load+save field for field.
+    let config = load_str(oauth_doc()).expect("a valid jmap document");
+    let jmap = config.jmap.as_ref().expect("the jmap section");
+    let grant = jmap.oauth.as_ref().expect("the grant");
+    assert_eq!(grant.client_id, "client-abc");
+    assert_eq!(grant.refresh_token.expose(), "rt-1");
+    assert_eq!(
+        grant.authorize_endpoint,
+        "https://api.example.com/oauth/authorize"
+    );
+    assert_eq!(
+        grant.token_endpoint,
+        "https://api.example.com/oauth/refresh"
+    );
+    assert_eq!(grant.redirect_uri, "com.kenizhou.astra://jmap-oauth");
+    assert_eq!(
+        grant.resource.as_deref(),
+        Some("https://api.example.com/jmap/session"),
+    );
+    assert_eq!(grant.scopes, vec!["offline_access".to_owned()]);
+    let rewritten = config.to_toml().expect("serialisable");
+    let reloaded = load_str(&rewritten).expect("a valid jmap document");
+    assert_eq!(
+        reloaded
+            .jmap
+            .as_ref()
+            .expect("the jmap section")
+            .oauth
+            .as_ref()
+            .expect("the round-tripped grant")
+            .refresh_token
+            .expose(),
+        "rt-1",
+    );
+    // The byte-for-byte rule the password account keeps: what was read is
+    // what is written back.
+    assert_eq!(rewritten, reloaded.to_toml().expect("serialisable"));
+}
+
+#[test]
+fn an_oauth_block_from_a_newer_build_still_loads() {
+    // What a newer build owes this one is that the load never fails over
+    // keys it does not read: an unknown key inside the block is tolerated,
+    // and the optional keys (the secret, the resource, the issuer) stay
+    // optional.
     let config = load_str(
-        "[jmap]\nemail = \"me@example.net\"\nbase_url = \"https://api.example.net\"\npassword = \"pw\"\n\n[jmap.oauth]\nrefresh_token = \"grant-secret\"\n",
+        "[jmap]\nemail = \"me@example.net\"\nbase_url = \"https://api.example.net\"\n\n[jmap.oauth]\nclient_id = \"client-abc\"\nrefresh_token = \"rt-1\"\nauthorize_endpoint = \"https://api.example.com/oauth/authorize\"\ntoken_endpoint = \"https://api.example.com/oauth/refresh\"\nredirect_uri = \"com.kenizhou.astra://jmap-oauth\"\nscopes = [\"offline_access\"]\na_newer_key = \"whatever\"\n",
     )
     .expect("a valid jmap document");
     let jmap = config.jmap.as_ref().expect("the jmap section");
-    assert_eq!(jmap.password.as_ref().expect("the secret").expose(), "pw");
-    assert!(!format!("{config:?}").contains("grant-secret"));
+    let grant = jmap.oauth.as_ref().expect("the grant");
+    assert!(grant.client_secret.is_none());
+    assert!(grant.resource.is_none());
+    assert!(grant.issuer.is_none());
+    assert!(!format!("{config:?}").contains("rt-1"));
+}
+
+#[test]
+fn a_partial_oauth_block_is_refused_rather_than_halved() {
+    // A block missing a required field (here the client id) is a broken
+    // document, not a grant worth half its fields: an OAuth account whose
+    // client id was dropped could never refresh again.
+    let err = load_str(
+        "[jmap]\nemail = \"me@example.net\"\nbase_url = \"https://api.example.net\"\n\n[jmap.oauth]\nrefresh_token = \"rt-1\"\nauthorize_endpoint = \"https://api.example.com/oauth/authorize\"\ntoken_endpoint = \"https://api.example.com/oauth/refresh\"\nredirect_uri = \"com.kenizhou.astra://jmap-oauth\"\nscopes = [\"offline_access\"]\n",
+    );
+    assert!(err.is_err(), "a grant without a client id loaded");
 }
 
 // The URL derivation matrix: what the setup form collected against the

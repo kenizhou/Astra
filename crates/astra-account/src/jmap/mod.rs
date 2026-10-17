@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! The JMAP half of an account: the optional `[jmap]` section of a stored
-//! config (RFC 8620/8621), the setup builder that writes it, and the dial
-//! that connects the engine's one provider for the account.
+//! config (RFC 8620/8621), the setup builder that writes it, the dial
+//! that connects the engine's one provider for the account, and the OAuth
+//! sign-in ([`oauth`]) a server that advertises one connects it by.
 //!
 //! A JMAP account is a base URL and **one** secret: a login password, an
 //! app-specific password, or an API token, whichever the server issued.
@@ -10,14 +11,27 @@
 //! `401` challenge names, so one stored form works against a server that
 //! expects Basic or Bearer.
 //!
+//! A server that advertises discoverable OAuth (RFC 9728) offers a second
+//! way in: the browser sign-in [`oauth::begin_jmap_login`] runs, whose
+//! grant persists as `[jmap.oauth]` with no long-lived password beside
+//! it, and whose access token the [`refreshing`] wrapper keeps live for
+//! the whole session.
+//!
 //! Unlike IMAP or Graph, one provider serves the whole account: JMAP's mail
 //! scope is account-wide and each message carries its `mailboxIds`
 //! membership, so a single connection syncs every folder and there are no
 //! per-folder providers to bind.
 
 mod connect;
+mod oauth;
+mod refreshing;
 
 pub use connect::dial_jmap_account;
+pub use oauth::{
+    begin_jmap_login, begin_jmap_reauth, complete_jmap_login, complete_jmap_reauth,
+    jmap_signin_offered, jmap_token_source, JmapLoginStart,
+};
+pub use refreshing::RefreshingJmapProvider;
 
 use provider_jmap::Credentials;
 use serde::Deserialize;
@@ -60,10 +74,9 @@ pub struct JmapAccount {
     pub password: Option<Secret>,
     /// The `[jmap.oauth]` block, when the account was connected by a
     /// browser sign-in rather than a pasted secret. `None` for every
-    /// account stored today: the block's fields arrive with that sign-in
-    /// path, and a block a newer build wrote is tolerated rather than
-    /// refused, so an account document never fails to load for carrying
-    /// more than this build reads.
+    /// account the password form writes; present, the account stores no
+    /// long-lived password at all, and the block's refresh token is its
+    /// one credential.
     #[serde(default)]
     pub oauth: Option<JmapOAuthGrant>,
 }
@@ -98,12 +111,119 @@ impl From<RawJmapAccount> for JmapAccount {
     }
 }
 
-/// The reserved shape of a `[jmap.oauth]` block. It carries no fields yet:
-/// the discovered endpoints, the client id, and the refresh token arrive
-/// with the browser sign-in path that writes them. Present now so the
-/// section's serde shape is settled and a newer document loads clean.
-#[derive(Debug, Clone, Default, Deserialize)]
-pub struct JmapOAuthGrant {}
+/// The `[jmap.oauth]` block of a browser-signed-in account: everything
+/// needed to mint a fresh access token at launch without repeating
+/// discovery. Written by [`complete_jmap_login`](crate::complete_jmap_login)
+/// and read by [`jmap_token_source`](crate::jmap_token_source); an OAuth
+/// account stores this block and **no** long-lived password.
+///
+/// The optional fields (`client_secret`, `resource`, `issuer`) carry
+/// `#[serde(default)]` so a document written before the field existed
+/// still loads: absent means "nothing to send / nothing to compare", which
+/// is the pre-existing behaviour rather than a fault.
+#[derive(Debug, Clone, Deserialize)]
+pub struct JmapOAuthGrant {
+    /// The client identifier, from dynamic registration (RFC 7591) at
+    /// sign-in. Not a secret. Persisted so a launch never re-registers.
+    pub client_id: String,
+    /// A client secret, on the rare server that issued one to a client
+    /// that asked to be public. Sent on the token exchange and the refresh
+    /// when present. **Not** confidential; an installed app cannot keep a
+    /// secret; PKCE is the real protection.
+    #[serde(default)]
+    pub client_secret: Option<Secret>,
+    /// The long-lived refresh token. Rotated in place when the server
+    /// issues a new one, and re-persisted through the host's
+    /// [`TokenSink`](crate::TokenSink): a ratcheting server revokes the
+    /// whole grant over a replayed token, so a rotation nobody stored
+    /// kills the account at the next launch.
+    pub refresh_token: Secret,
+    /// The discovered authorization endpoint, kept so a re-consent needs no
+    /// re-discovery.
+    pub authorize_endpoint: String,
+    /// The discovered token endpoint; where every refresh goes.
+    pub token_endpoint: String,
+    /// The redirect URI this grant was registered with. Must be replayed
+    /// verbatim on refresh and on any re-authorisation, or the server
+    /// rejects the grant.
+    pub redirect_uri: String,
+    /// The scopes granted, re-sent on refresh so the grant is re-issued
+    /// for the same set.
+    pub scopes: Vec<String>,
+    /// The RFC 8707 resource indicator: the canonical URI of the resource
+    /// this grant is for, from the server's RFC 9728 metadata. Persisted
+    /// because **every refresh must re-send it**: a server that issues
+    /// resource-scoped tokens answers `invalid_target` without it, so
+    /// dropping it here would break the account at the first refresh
+    /// rather than at setup. `None` for a server that publishes no
+    /// `resource`.
+    #[serde(default)]
+    pub resource: Option<String>,
+    /// The issuer to check a re-authorisation's `iss` against
+    /// (RFC 9207), when the server advertised that it sends one. `None`
+    /// for a server that does not: absent means "nothing to compare",
+    /// which is the pre-RFC-9207 status quo and not a reason to break a
+    /// working account.
+    #[serde(default)]
+    pub issuer: Option<String>,
+}
+
+impl JmapOAuthGrant {
+    /// The OAuth client config this grant refreshes through: its own
+    /// endpoints, its registered client id, and
+    /// [`AuthStyle::Discovered`](astra_oauth::AuthStyle::Discovered),
+    /// which sends only the parameters RFC 6749 and RFC 7636 define,
+    /// because this server's documentation is unread and vendor
+    /// extensions it may reject are not guessed at.
+    pub(crate) fn provider_config(&self) -> astra_oauth::OAuthProviderConfig {
+        astra_oauth::OAuthProviderConfig {
+            authorize_endpoint: self.authorize_endpoint.clone(),
+            token_endpoint: self.token_endpoint.clone(),
+            client_id: self.client_id.clone(),
+            client_secret: self
+                .client_secret
+                .as_ref()
+                .map(|secret| secret.expose().to_owned()),
+            redirect_uri: self.redirect_uri.clone(),
+            scopes: self.scopes.clone(),
+            resource: self.resource.clone(),
+            expected_issuer: self.issuer.clone(),
+            style: astra_oauth::AuthStyle::Discovered,
+        }
+    }
+
+    /// The grant as the `[jmap.oauth]` table the stored document carries:
+    /// the inverse of deserialisation, manual so [`Secret`] stays
+    /// non-serialisable outside this boundary.
+    pub(crate) fn to_table(&self) -> toml::Table {
+        let mut table = toml::Table::new();
+        table.insert("client_id".into(), self.client_id.clone().into());
+        if let Some(secret) = &self.client_secret {
+            table.insert("client_secret".into(), secret.expose().to_owned().into());
+        }
+        table.insert(
+            "refresh_token".into(),
+            self.refresh_token.expose().to_owned().into(),
+        );
+        table.insert(
+            "authorize_endpoint".into(),
+            self.authorize_endpoint.clone().into(),
+        );
+        table.insert("token_endpoint".into(), self.token_endpoint.clone().into());
+        table.insert("redirect_uri".into(), self.redirect_uri.clone().into());
+        table.insert(
+            "scopes".into(),
+            toml::Value::Array(self.scopes.iter().cloned().map(Into::into).collect()),
+        );
+        if let Some(resource) = &self.resource {
+            table.insert("resource".into(), resource.clone().into());
+        }
+        if let Some(issuer) = &self.issuer {
+            table.insert("issuer".into(), issuer.clone().into());
+        }
+        table
+    }
+}
 
 impl JmapAccount {
     /// The engine credentials the stored secret presents: HTTP Basic under
@@ -122,13 +242,10 @@ impl JmapAccount {
     }
 
     /// The section as the table the stored document carries it in: the
-    /// inverse of deserialization, manual so [`Secret`] stays
+    /// inverse of deserialisation, manual so [`Secret`] stays
     /// non-serialisable outside this boundary. Only the one secret is
-    /// A  block this build reads as  is STRIPPED by a
-    /// rewrite (to_table writes an empty table): a newer build's grant does
-    /// not survive a load+save from this one. The recorded gap until the
-    /// block becomes real in Task 2.
-    /// written, as `password`.
+    /// written, as `password`, and only for an account the password form
+    /// connected; a grant block, when present, writes its own sub-table.
     pub(crate) fn to_table(&self) -> toml::Table {
         let mut table = toml::Table::new();
         table.insert("email".into(), self.email.clone().into());
@@ -136,10 +253,29 @@ impl JmapAccount {
         if let Some(password) = &self.password {
             table.insert("password".into(), password.expose().to_owned().into());
         }
-        if self.oauth.is_some() {
-            table.insert("oauth".into(), toml::Table::new().into());
+        if let Some(grant) = &self.oauth {
+            table.insert("oauth".into(), grant.to_table().into());
         }
         table
+    }
+
+    /// The account id a jmap section derives: the lowercased address under
+    /// the JMAP scheme tag and the base URL's host. The one derivation
+    /// every jmap account's id walks, kept beside the section so the
+    /// config loader and the re-authentication's same-mailbox check cannot
+    /// drift apart.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConfigError::Incomplete`] when the address is blank.
+    pub(crate) fn derived_account_id(&self) -> Result<engine_api::AccountId, ConfigError> {
+        let email = self.email.trim().to_lowercase();
+        if email.is_empty() {
+            return Err(ConfigError::Incomplete("email"));
+        }
+        let host = base_host(&self.base_url);
+        engine_api::AccountId::try_from(format!("{email}@{JMAP_ID_SCHEME}:{host}").as_str())
+            .map_err(|err| ConfigError::Identity(err.to_string()))
     }
 }
 

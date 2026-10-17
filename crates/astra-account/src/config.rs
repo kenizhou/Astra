@@ -378,16 +378,10 @@ impl AccountConfig {
         // A jmap-only account keys on its address under the JMAP scheme
         // tag and the server host of its base URL: distinct from an IMAP
         // account for the same address and from the OAuth families, and
-        // distinct per server (the host is part of the id).
+        // distinct per server (the host is part of the id). The section
+        // owns the derivation.
         if let Some(jmap) = self.jmap.as_ref() {
-            let email = jmap.email.trim().to_lowercase();
-            if email.is_empty() {
-                return Err(ConfigError::Incomplete("email"));
-            }
-            let host = crate::jmap::base_host(&jmap.base_url);
-            let scheme = crate::jmap::JMAP_ID_SCHEME;
-            return AccountId::try_from(format!("{email}@{scheme}:{host}").as_str())
-                .map_err(|err| ConfigError::Identity(err.to_string()));
+            return jmap.derived_account_id();
         }
         // A graph-only account has no server of its own: the id keys the
         // grant's mailbox by its address under the one protocol it dials.
