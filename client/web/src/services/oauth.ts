@@ -93,3 +93,50 @@ export function onOauthSignInResult(
     handler(event.payload);
   });
 }
+
+/**
+ * Whether the JMAP server for the address offers discoverable OAuth
+ * sign-in: the advertise gate the JMAP form's button renders behind.
+ * Never fails: a server that advertises nothing, or a probe that could
+ * not ask, offers nothing.
+ */
+export function jmapOauthOffered(email: string, serverUrl: string): Promise<boolean> {
+  return invoke('jmap_oauth_offered', { email, serverUrl });
+}
+
+/**
+ * Begins one JMAP sign-in: the host discovers the server's
+ * authorization server, registers this install, and opens the system
+ * browser; this resolves once the browser opened, and the completion
+ * arrives later, through {@link onJmapSignInResult}.
+ */
+export function jmapOauthBegin(email: string, serverUrl: string): Promise<void> {
+  return invoke('jmap_oauth_begin', { email, serverUrl });
+}
+
+/**
+ * How one begun JMAP sign-in ended: the added account (there is no bare
+ * signed-in word; every completed flow finishes into an account), or a
+ * refusal carrying the classification word beside the host's own
+ * sentence as the diagnostic detail. Crosses with snake_case tags.
+ */
+export type JmapSignInOutcome =
+  | { added: { address: string } }
+  | { refused: { refusal: GrantRefusalWord; detail: string } };
+
+/** The JMAP completion event's payload: how the flow ended. */
+export interface JmapSignInResult {
+  outcome: JmapSignInOutcome;
+}
+
+/**
+ * Subscribes to the JMAP completion notification and resolves its
+ * unlistener; the subscription discipline is the provider flows' own.
+ */
+export function onJmapSignInResult(
+  handler: (result: JmapSignInResult) => void,
+): Promise<() => void> {
+  return listen<JmapSignInResult>('jmap_sign_in_result', (event) => {
+    handler(event.payload);
+  });
+}

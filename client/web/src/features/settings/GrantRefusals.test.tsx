@@ -168,6 +168,36 @@ describe('the expired-sign-in row', () => {
     expect(ipc.oauthBegin).toHaveBeenCalledWith('google', 'ada@gmail.example');
   });
 
+  it('a jmap expired row names the credential and never begins a microsoft flow', () => {
+    // The JMAP family has no integrated provider flow to re-grant with:
+    // the row states the credential was refused and points at
+    // reconnecting the account, and no Sign in again button renders.
+    useSettingsStore.getState().applySnapshot(
+      snapshot([
+        row({
+          account: 'jmap',
+          address: 'ada@example.test',
+          kind: 'jmap',
+          grant: 'sign_in_expired',
+        }),
+      ]),
+    );
+    render(<AccountsDetail />);
+
+    const sentence = screen.getByRole('status', { name: 'Sign-in expired' });
+    expect(sentence.textContent).toContain('ada@example.test');
+    expect(sentence.textContent).toMatch(/credential was refused/);
+    expect(
+      screen.queryByRole('button', { name: /Sign in again/ }),
+      'no microsoft or google flow begins for a jmap row'
+    ).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Reconnect' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open ada@example.test' }));
+
+    expect(screen.getByRole('button', { name: 'Remove account' })).toBeTruthy();
+  });
+
   it('keeps the expired account reachable for removal through its detail page', () => {
     useSettingsStore.getState().applySnapshot(
       snapshot([

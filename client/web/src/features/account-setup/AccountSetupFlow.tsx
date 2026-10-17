@@ -29,12 +29,15 @@ import { useDialogFocus } from '@/components/ui/useDialogFocus';
 import { buildAccountToml } from './accountToml';
 import { DetectStep } from './DetectStep';
 import { CertificateOffer } from './CertificateOffer';
+import { JmapForm } from './JmapForm';
 import { OAuthOffer, type OAuthFlowState } from './OAuthOffer';
 import { RecommendationPanel } from './RecommendationPanel';
 import {
+  buildSetup,
   detectFallbackNote,
   detectWithGuard,
   EMPTY_FIELDS,
+  jmapSeedFrom,
   manualDefaults,
   manualPrefill,
   missNote,
@@ -44,22 +47,7 @@ import {
 } from './detection';
 
 /** The wizard's steps: the email lookup, its confirmation, then the form. */
-type SetupStep = 'detect' | 'recommendation' | 'manual';
-
-/** The setup the test command takes, built from the fields on screen. */
-function buildSetup(fields: SetupFields, accepted?: RejectedCertificateView): AccountSetup {
-  const port = fields.port.trim();
-  return {
-    imap_host: port === '' ? fields.host.trim() : `${fields.host.trim()}:${port}`,
-    username: fields.username.trim(),
-    credential: { password: fields.password },
-    imap_security: fields.security,
-    smtp_security: fields.security,
-    accepted_certificate: accepted
-      ? { server_name: accepted.server_name, sha256: accepted.sha256 }
-      : undefined,
-  };
-}
+type SetupStep = 'detect' | 'recommendation' | 'manual' | 'jmap';
 
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -81,6 +69,7 @@ export function AccountSetupFlow() {
   const [miss, setMiss] = useState<MissReason | null>(null);
   const [offer, setOffer] = useState<OAuthProvider[]>([]);
   const [oauthFlow, setOauthFlow] = useState<OAuthFlowState>({ status: 'idle' });
+  const [jmapSeed, setJmapSeed] = useState<{ email: string; serverUrl: string } | null>(null);
 
   // The offer is pulled once per open: the providers this build carries a
   // registration for, and nothing when it carries none. A refused pull
@@ -170,6 +159,7 @@ export function AccountSetupFlow() {
     setAccepted(null);
     setError(null);
     setOauthFlow({ status: 'idle' });
+    setJmapSeed(null);
     useUiStore.getState().setAccountSetupOpen(false);
   };
 
@@ -234,6 +224,14 @@ export function AccountSetupFlow() {
 
   const onManualFromRecommendation = () => {
     if (view !== null) {
+      // A JMAP recommendation continues onto its own one-field form;
+      // every other route falls to the IMAP manual form.
+      const jmap = jmapSeedFrom(view);
+      if (jmap !== null) {
+        setJmapSeed(jmap);
+        setStep('jmap');
+        return;
+      }
       goManual(manualPrefill(view), null);
     }
   };
@@ -358,6 +356,8 @@ export function AccountSetupFlow() {
             onManual={onManualFromRecommendation}
           />
         )}
+
+        {step === 'jmap' && jmapSeed !== null && <JmapForm seed={jmapSeed} onClose={close} />}
 
         {step === 'manual' && (
           <>

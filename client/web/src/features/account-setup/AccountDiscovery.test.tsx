@@ -17,6 +17,11 @@ const ipc = vi.hoisted(() => ({
   imapTestConnection: vi.fn(),
   detectAccountSettings: vi.fn(),
   oauthOffer: vi.fn(),
+  addJmapAccount: vi.fn(),
+  jmapOauthOffered: vi.fn(),
+  jmapOauthBegin: vi.fn(),
+  oauthCancel: vi.fn(),
+  onJmapSignInResult: vi.fn(),
 }));
 
 vi.mock('@/services/ipc', async (importOriginal) => ({
@@ -173,6 +178,15 @@ beforeEach(() => {
   ipc.detectAccountSettings.mockResolvedValue(manualView);
   ipc.oauthOffer.mockReset();
   ipc.oauthOffer.mockResolvedValue({ providers: [] });
+  ipc.addJmapAccount.mockReset();
+  ipc.jmapOauthOffered.mockReset();
+  ipc.jmapOauthOffered.mockResolvedValue(false);
+  ipc.jmapOauthBegin.mockReset();
+  ipc.oauthCancel.mockReset();
+  ipc.onJmapSignInResult.mockReset();
+  ipc.onJmapSignInResult.mockResolvedValue(() => {
+    /* the listener teardown */
+  });
   useUiStore.setState({ accountSetupOpen: true });
 });
 
@@ -375,6 +389,21 @@ describe('the account discovery step', () => {
 
     expect(screen.getByText('JMAP')).toBeTruthy();
     expect(screen.getByText('https://jmap.example.test/.well-known/jmap')).toBeTruthy();
+  });
+
+  it('a jmap recommendation continues onto the jmap form, not the imap one', async () => {
+    await detectEmail(jmapView);
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+    expect(
+      await screen.findByLabelText('Password or API token'),
+      'the one-field JMAP form stands behind the recommendation'
+    ).toBeTruthy();
+    expect(screen.queryByLabelText('Mail server')).toBeNull();
+    expect(screen.getByLabelText('Server URL')).toHaveProperty(
+      'value',
+      'https://jmap.example.test/.well-known/jmap',
+    );
   });
 
   it('summarises a microsoft route', async () => {

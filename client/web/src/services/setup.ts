@@ -158,6 +158,22 @@ export function addAccount(configToml: string): Promise<AddedAccount> {
   return invoke('add_account', { configToml });
 }
 
+/**
+ * Adds one JMAP account from the form's fields: the host derives the
+ * base URL by the one rule every stored document walks (a blank server
+ * derives the email's domain, a bare host gains `https://`), builds the
+ * document, and runs the same dial-before-persist transaction. The one
+ * secret crosses as `password` because that form is the strictly more
+ * capable one.
+ */
+export function addJmapAccount(
+  email: string,
+  serverUrl: string,
+  password: string,
+): Promise<AddedAccount> {
+  return invoke('add_jmap_account', { email, serverUrl, password });
+}
+
 /** Tests one setup's connection once, before anything is stored. */
 export function imapTestConnection(setup: AccountSetup): Promise<ImapTestOutcome> {
   return invoke('imap_test_connection', { setup });

@@ -47,8 +47,9 @@ pub use graph::{
 pub use imap::{connect_imap_mailbox, connect_mail_providers, ImapConnections};
 pub use jmap::{
     begin_jmap_login, begin_jmap_reauth, build_jmap_config_toml, complete_jmap_login,
-    complete_jmap_reauth, dial_jmap_account, jmap_base_url, jmap_signin_offered, jmap_token_source,
-    JmapAccount, JmapLoginStart, JmapOAuthGrant, JmapSetup, RefreshingJmapProvider,
+    complete_jmap_reauth, dial_jmap_account, dial_jmap_oauth_account, jmap_base_url,
+    jmap_signin_offered, jmap_token_source, JmapAccount, JmapLoginStart, JmapOAuthGrant, JmapSetup,
+    RefreshingJmapProvider,
 };
 pub use log_handle::account_log_handle;
 pub use oauth_accounts::{GoogleAccount, GraphAccount};

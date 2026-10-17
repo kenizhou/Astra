@@ -23,14 +23,15 @@
 //!   first, and only a dial that answered legs persists. A persist the
 //!   credential store refuses likewise stores nothing, and the dialled
 //!   legs go unanswered with it.
-//! - **Every registered account is `imap_smtp`, except a stored grant.** A
-//!   stored config names an `[imap]` section or an OAuth family's grant
-//!   (`[graph]` or `[google]`) or refuses to load; a grant answers its
-//!   family's kind (the `microsoft` kind for Graph, the `google` kind for
-//!   Google) and the address the sign-in's lookup named, beside the
-//!   standing grant refusal the boot dial or the completion recorded. No
-//!   jmap or dav-only config shape exists for this host to register;
-//!   those kinds stay unreachable until one lands.
+//! - **Every registered account names its own kind.** A stored config
+//!   names an `[imap]` section, an OAuth family's grant (`[graph]` or
+//!   `[google]`), or a `[jmap]` section, password or grant; a grant
+//!   answers its family's kind (the `microsoft` kind for Graph, the
+//!   `google` kind for Google), a jmap section the `jmap` kind, and the
+//!   address is the section's own email beside the standing grant
+//!   refusal the boot dial or the completion recorded. No dav-only
+//!   config shape exists for this host to register; that kind stays
+//!   unreachable until one lands.
 //! - **The removal's halves go in order.** The credential entry, the
 //!   durable half, deletes first: a refusal answers `Err` with nothing
 //!   moved anywhere. The dial table's entry and its index line go after;
@@ -203,12 +204,19 @@ impl HostAccountOps<HostProvider> for HostAccountStore {
             };
             // A stored grant is an account addressed by the lookup the
             // sign-in named (the Microsoft family over Graph, the Google
-            // family over its native APIs); every other stored config
-            // names an imap section whose login is the address.
-            let (kind, address) = match (config.graph.as_ref(), config.google.as_ref()) {
-                (Some(graph), _) => (AccountKind::Microsoft, graph.email.clone()),
-                (None, Some(google)) => (AccountKind::Google, google.email.clone()),
-                (None, None) => (
+            // family over its native APIs); a jmap section is its own
+            // kind, password or grant, addressed by its own email; every
+            // other stored config names an imap section whose login is
+            // the address.
+            let (kind, address) = match (
+                config.graph.as_ref(),
+                config.google.as_ref(),
+                config.jmap.as_ref(),
+            ) {
+                (Some(graph), _, _) => (AccountKind::Microsoft, graph.email.clone()),
+                (None, Some(google), _) => (AccountKind::Google, google.email.clone()),
+                (None, None, Some(jmap)) => (AccountKind::Jmap, jmap.email.clone()),
+                (None, None, None) => (
                     AccountKind::ImapSmtp,
                     config
                         .imap
@@ -257,3 +265,7 @@ impl HostAccountOps<HostProvider> for HostAccountStore {
 #[cfg(test)]
 #[path = "account_ops_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "account_ops_jmap_tests.rs"]
+mod jmap_tests;

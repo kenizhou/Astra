@@ -26,7 +26,7 @@ mod connect;
 mod oauth;
 mod refreshing;
 
-pub use connect::dial_jmap_account;
+pub use connect::{dial_jmap_account, dial_jmap_oauth_account};
 pub use oauth::{
     begin_jmap_login, begin_jmap_reauth, complete_jmap_login, complete_jmap_reauth,
     jmap_signin_offered, jmap_token_source, JmapLoginStart,

@@ -8,10 +8,14 @@ use std::{
     net::TcpListener,
 };
 
+use std::sync::Arc;
+
 use engine_api::Provider;
 use provider_jmap::JmapError;
 
-use super::dial_jmap_account;
+use super::{dial_jmap_account, dial_jmap_oauth_account};
+use crate::graph::token_source::test_support::{dead_grant_token_endpoint, mock_token_endpoint};
+use crate::graph::GraphTokenSource;
 use crate::{load_str, AccountConfig, AccountError};
 
 /// A minimal session document advertising mail for one account, served by
@@ -171,6 +175,106 @@ async fn the_dial_of_a_section_without_a_secret_names_the_missing_credential() {
     assert!(
         matches!(err, AccountError::MissingCredential("jmap")),
         "not named as the jmap credential: {err}"
+    );
+}
+
+/// The one server both halves of an OAuth dial talk to: it serves the
+/// session document on the well-known path and the token endpoint the
+/// stored grant names, so one port plays the whole server.
+fn session_and_token_server() -> String {
+    crate::jmap::oauth::test_support::discovery_server(|base, path, method| match (method, path) {
+        ("GET", "/.well-known/jmap") => {
+            let port = base.rsplit(':').next().unwrap_or_default();
+            Some((
+                "200 OK",
+                String::new(),
+                session_body(port.parse().unwrap_or_default()),
+            ))
+        }
+        ("POST", "/token") => Some((
+            "200 OK",
+            String::new(),
+            r#"{"token_type":"Bearer","expires_in":3600,"access_token":"AT-1","refresh_token":"rt-2","scope":"offline_access"}"#
+                .to_owned(),
+        )),
+        _ => None,
+    })
+    .0
+}
+
+/// A stored OAuth jmap account whose base URL and token endpoint both
+/// point at `base`, the shape a completed sign-in leaves behind.
+fn oauth_account_at(email: &str, base: &str) -> AccountConfig {
+    load_str(&format!(
+        "[jmap]\nemail = \"{email}\"\nbase_url = \"{base}\"\n\n[jmap.oauth]\nclient_id = \"client-abc\"\nrefresh_token = \"rt-1\"\nauthorize_endpoint = \"{base}/oauth/authorize\"\ntoken_endpoint = \"{base}/token\"\nredirect_uri = \"com.kenizhou.astra://oauth\"\nscopes = [\"offline_access\"]\n"
+    ))
+    .expect("a valid jmap document")
+}
+
+/// A **distinct** account per source, so one test's token state never
+/// leaks into the next through the shared per-account credential.
+fn unique_source_account() -> engine_api::AccountId {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    engine_api::AccountId::try_from(format!("me+{n}@example.net@jmap:x").as_str())
+        .expect("a valid account id")
+}
+
+/// A jmap token source over `endpoint`, the same construction
+/// [`crate::jmap_token_source`] performs for a stored grant.
+fn source_over(endpoint: &str) -> Arc<GraphTokenSource> {
+    let grant = oauth_account_at("me@example.net", "https://unused.example.net")
+        .jmap
+        .expect("the section")
+        .oauth
+        .expect("the grant");
+    let mut config = grant.provider_config();
+    config.token_endpoint = endpoint.to_owned();
+    let oauth = astra_oauth::OAuthClient::new(config).expect("the client builds");
+    GraphTokenSource::from_parts(
+        oauth,
+        unique_source_account(),
+        "rt-1".to_owned(),
+        None,
+        "jmap",
+        crate::CredentialOrigin::FreshSignIn,
+    )
+}
+
+#[tokio::test]
+async fn the_oauth_dial_wraps_one_account_wide_provider_over_the_session() {
+    let base = session_and_token_server();
+    let config = oauth_account_at("me@example.net", &base);
+    let endpoint = mock_token_endpoint(vec![r#"{"token_type":"Bearer","expires_in":3600,"access_token":"AT-1","refresh_token":"rt-2","scope":"offline_access"}"#.to_owned()]);
+    let source = source_over(&endpoint.0);
+
+    let provider = dial_jmap_oauth_account(&config, &tls(), &source)
+        .await
+        .expect("the oauth dial connects");
+
+    // The wrapper answers with the capabilities the session itself
+    // advertised, read from the connect rather than guessed.
+    let info = provider.connection_info();
+    assert!(info.capabilities.mail(), "the session advertised mail");
+    assert!(
+        !info.capabilities.calendars(),
+        "the session advertised no calendar"
+    );
+}
+
+#[tokio::test]
+async fn a_dead_grant_on_the_oauth_dial_is_a_rejected_signin() {
+    let base = session_and_token_server();
+    let config = oauth_account_at("me@example.net", &base);
+    let endpoint = dead_grant_token_endpoint();
+    let source = source_over(&endpoint.0);
+
+    let err = dial_jmap_oauth_account(&config, &tls(), &source)
+        .await
+        .expect_err("the dead grant refuses the dial");
+    assert!(
+        matches!(err, AccountError::SigninRejected(_)),
+        "read as an outage: {err}"
     );
 }
 

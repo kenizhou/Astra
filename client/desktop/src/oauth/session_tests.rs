@@ -24,22 +24,22 @@ use tokio::sync::mpsc;
 use astra_oauth::{OAuthClient, OAuthError, OAuthProviderConfig};
 
 use super::{
-    oauth_callback, CaptureSource, SignInError, SignInSession, SystemBrowser, OAUTH_REDIRECT_URI,
-    OAUTH_SCHEME,
+    CaptureSource, SignInError, SignInSession, SystemBrowser, OAUTH_REDIRECT_URI, OAUTH_SCHEME,
 };
 use crate::oauth::loopback::LoopbackCapture;
+use crate::oauth::wiring::oauth_callback;
 
 /// A browser stand-in that counts its opens and can be told to refuse:
 /// the seam's contract (one open per begun flow, none on a refusal)
 /// without any platform shell.
-struct CountingBrowser {
+pub(super) struct CountingBrowser {
     opens: Mutex<usize>,
     refuse: bool,
 }
 
 impl CountingBrowser {
     /// A stand-in that opens.
-    fn opening() -> Arc<Self> {
+    pub(super) fn opening() -> Arc<Self> {
         Arc::new(Self {
             opens: Mutex::new(0),
             refuse: false,
@@ -47,7 +47,7 @@ impl CountingBrowser {
     }
 
     /// A stand-in that answers every open with a refusal.
-    fn refusing() -> Arc<Self> {
+    pub(super) fn refusing() -> Arc<Self> {
         Arc::new(Self {
             opens: Mutex::new(0),
             refuse: true,
@@ -55,7 +55,7 @@ impl CountingBrowser {
     }
 
     /// The opens that landed.
-    fn opens(&self) -> usize {
+    pub(super) fn opens(&self) -> usize {
         *self.opens.lock().unwrap()
     }
 }
@@ -90,7 +90,7 @@ const RAW_CALLBACK: &str = "com.kenizhou.astra://oauth?code=abc.def-ghi&state=xy
 
 /// The browser stand-in as the session holds it: the explicit cast,
 /// because a nested `Arc::clone` argument does not unsize on its own.
-fn as_seam(browser: &Arc<CountingBrowser>) -> Arc<dyn SystemBrowser> {
+pub(super) fn as_seam(browser: &Arc<CountingBrowser>) -> Arc<dyn SystemBrowser> {
     Arc::clone(browser) as Arc<dyn SystemBrowser>
 }
 

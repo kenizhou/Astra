@@ -68,8 +68,8 @@
 //! every rotation a Graph token source reports.
 //!
 //! [`AccountCredentialStore`]: crate::credential_store::AccountCredentialStore
-//! [`oauth_callback`]: session::oauth_callback
-//! [`forward_oauth_callbacks`]: session::forward_oauth_callbacks
+//! [`oauth_callback`]: wiring::oauth_callback
+//! [`forward_oauth_callbacks`]: wiring::forward_oauth_callbacks
 //! [`SystemBrowser`]: session::SystemBrowser
 
 pub(crate) mod commands;
@@ -89,6 +89,12 @@ pub(crate) mod graph_add;
 /// The dial-table token sink: the host half that lands rotations and moved
 /// scope sets in the dial table's entry and the secure store.
 pub(crate) mod graph_sink;
+/// The JMAP sign-in's account half: what the discovery exchange's
+/// document becomes once it answered.
+pub(crate) mod jmap_add;
+/// The JMAP sign-in command surface: the advertise-gated offer, the
+/// begin over the standards discovery, and the completion event.
+pub(crate) mod jmap_commands;
 /// The Google Desktop flow's loopback capture: the listener the redirect
 /// lands on, bound before the authorization URL mints.
 pub(crate) mod loopback;

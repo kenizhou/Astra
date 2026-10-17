@@ -11,7 +11,15 @@ const listen = vi.hoisted(() => vi.fn());
 vi.mock('@tauri-apps/api/core', () => ({ invoke }));
 vi.mock('@tauri-apps/api/event', () => ({ listen }));
 
-import { oauthBegin, oauthCancel, oauthOffer, onOauthSignInResult } from './oauth';
+import {
+  jmapOauthBegin,
+  jmapOauthOffered,
+  oauthBegin,
+  oauthCancel,
+  oauthOffer,
+  onJmapSignInResult,
+  onOauthSignInResult,
+} from './oauth';
 
 beforeEach(() => {
   invoke.mockReset();
@@ -69,6 +77,47 @@ describe('the oauth wire', () => {
     expect(seen).toEqual([
       { provider: 'microsoft', outcome: { refused: { refusal: 'dead', detail: 'x' } } },
     ]);
+    teardown();
+    expect(unlisten).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('the jmap oauth wire', () => {
+  it('pulls the advertise-gated offer with the address and the server url', async () => {
+    invoke.mockResolvedValue(true);
+    await expect(
+      jmapOauthOffered('work@example.test', 'https://mail.example.test'),
+    ).resolves.toBe(true);
+    expect(invoke).toHaveBeenCalledWith('jmap_oauth_offered', {
+      email: 'work@example.test',
+      serverUrl: 'https://mail.example.test',
+    });
+  });
+
+  it('begins the discovered sign-in', async () => {
+    invoke.mockResolvedValue(undefined);
+    await jmapOauthBegin('work@example.test', 'https://mail.example.test');
+    expect(invoke).toHaveBeenCalledWith('jmap_oauth_begin', {
+      email: 'work@example.test',
+      serverUrl: 'https://mail.example.test',
+    });
+  });
+
+  it('subscribes to the jmap sign-in result event and hands the payload over', async () => {
+    const unlisten = vi.fn();
+    listen.mockResolvedValue(unlisten);
+    const seen: unknown[] = [];
+    const teardown = await onJmapSignInResult((result) => {
+      seen.push(result);
+    });
+
+    const [event, handler] = listen.mock.calls[0] as [
+      string,
+      (event: { payload: unknown }) => void,
+    ];
+    expect(event).toBe('jmap_sign_in_result');
+    handler({ payload: { outcome: { added: { address: 'work@example.test' } } } });
+    expect(seen).toEqual([{ outcome: { added: { address: 'work@example.test' } } }]);
     teardown();
     expect(unlisten).toHaveBeenCalledTimes(1);
   });

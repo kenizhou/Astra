@@ -17,14 +17,23 @@
 //! delivery does not feed a loopback flow, and a loopback capture
 //! belongs to the flow whose port it landed on.
 //!
+//! A third shape of flow runs through the same session: an **external**
+//! one, whose authorization URL was minted outside it (the JMAP leg's
+//! standards discovery, which registers its own client and builds its
+//! own PKCE pair in `astra-account`). The session treats it exactly as
+//! a minted flow for everything platform-side: it opens the given URL,
+//! holds the one in-flight slot, and waits on the shared capture; only
+//! the completion differs, which is why the spend is the caller's own
+//! through [`SignInSession::claim_external_sign_in`].
+//!
 //! The two platform seams are injectable so the whole session is driven
 //! in tests without a Tauri runtime: [`SystemBrowser`] (the shell's
 //! opener in production, a counting stand-in in tests) and the callback
 //! channel (the receiving end of the deep-link capture's forwarding; a
 //! test feeds it directly). The capture's production shape, the
-//! plugin's `on_open_url` event filtered by [`oauth_callback`], is one
-//! function the tests drive with parsed URLs, so the filter's behaviour
-//! is pinned exactly as the runtime delivers it.
+//! plugin's `on_open_url` event filtered by [`oauth_callback`], lives in
+//! [`super::wiring`], and its behaviour is pinned there and by the
+//! session tests.
 //!
 //! The client is a per-flow input, not session state: Microsoft and
 //! Google flows share one session (one channel, one in-flight slot),
@@ -33,6 +42,7 @@
 //!
 //! [`OAuthClient::begin`]: astra_oauth::OAuthClient::begin
 //! [`OAuthClient::complete`]: astra_oauth::OAuthClient::complete
+//! [`oauth_callback`]: super::wiring::oauth_callback
 
 use std::sync::{Arc, Mutex};
 
@@ -53,7 +63,10 @@ pub(crate) const OAUTH_SCHEME: &str = "com.kenizhou.astra";
 /// The redirect URI Microsoft's provider config registers: the OAuth
 /// path on this app's scheme, the shape `astra-oauth`'s callback parser
 /// names. A Google Desktop flow redirects to the loopback port its own
-/// listener bound instead ([`super::loopback`]).
+/// listener bound instead ([`super::loopback`]); the JMAP leg's
+/// discovered registration names this one, because a dynamically
+/// registered client on a personal machine has no loopback listener of
+/// its own.
 pub(crate) const OAUTH_REDIRECT_URI: &str = "com.kenizhou.astra://oauth";
 
 /// Why a sign-in step refused.
@@ -96,42 +109,6 @@ pub(crate) trait SystemBrowser: Send + Sync {
     fn open(&self, url: &str) -> Result<(), String>;
 }
 
-/// The OAuth-scheme callback among one deep-link delivery's URLs, whole.
-///
-/// A delivery is a batch (the plugin's event carries every URL the OS
-/// handed over in one go); the capture keeps the one URL on
-/// [`OAUTH_SCHEME`] and drops the rest, and returns it as the raw string
-/// the sign-in hands to the core's parser. It never inspects the query:
-/// `code`, `state`, and any provider `error` are `astra-oauth`'s to read.
-#[must_use]
-pub(crate) fn oauth_callback(urls: &[url::Url]) -> Option<String> {
-    urls.iter()
-        .find(|url| url.scheme() == OAUTH_SCHEME)
-        .map(ToString::to_string)
-}
-
-/// Wires the deep-link plugin's event stream into `tx`: every OAuth
-/// callback the running app receives is forwarded whole. The sign-in
-/// wiring calls this once at setup; it is here, beside the filter it
-/// applies, so the capture's production shape lives in one place.
-///
-/// On Windows, a deep link that arrives while the app is already running
-/// reaches the first instance through the single-instance callback's
-/// argv, not this event; that forwarding (`DeepLink::handle_cli_arguments`)
-/// is the sign-in commands' wiring too, recorded in the module doc.
-pub(crate) fn forward_oauth_callbacks<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
-    tx: mpsc::UnboundedSender<String>,
-) {
-    use tauri_plugin_deep_link::DeepLinkExt;
-
-    app.deep_link().on_open_url(move |event| {
-        if let Some(raw) = oauth_callback(&event.urls()) {
-            let _ = tx.send(raw);
-        }
-    });
-}
-
 /// Which capture a flow's redirect arrives on: the deep-link channel
 /// Microsoft's registered scheme feeds, or a Google Desktop flow's own
 /// loopback listener, handed over with its receiver.
@@ -144,31 +121,45 @@ pub(crate) enum CaptureSource {
     Loopback(mpsc::Receiver<LoopbackCapture>),
 }
 
-/// One in-flight flow's held half: the client that minted it, the
-/// `state` the callback must echo, the PKCE verifier the exchange
-/// sends, and the capture the redirect arrives on. Held from
-/// [`SignInSession::begin_sign_in`] minted it until
-/// [`SignInSession::complete_sign_in`] spent it, so a second begin can
-/// be refused honestly.
+/// What a standing flow spends its completion on: the client the
+/// session minted it over, or nothing, when the flow was minted
+/// outside the session and its completion belongs to the caller.
+enum FlowKind {
+    /// A flow the session's own client minted: the completion spends
+    /// the client, the state, and the verifier on the core's complete.
+    Minted {
+        /// The client whose flow this is; the completion's exchange
+        /// runs on it, so the flow spends the client it was minted by.
+        client: Arc<OAuthClient>,
+        /// The CSRF state issued at begin; the callback must echo it.
+        state: String,
+        /// The PKCE verifier paired with the challenge the
+        /// authorization request carried.
+        verifier: String,
+    },
+    /// A flow minted outside the session (the JMAP leg's discovered
+    /// request): the session opened its URL and holds its slot, and
+    /// the caller's own completion spends it through
+    /// [`SignInSession::claim_external_sign_in`].
+    External,
+}
+
+/// One in-flight flow's held half: what it was minted by and the
+/// capture the redirect arrives on. Held from its begin until its
+/// completion spent it, so a second begin can be refused honestly.
 struct InFlight {
     /// Which flow this is: minted from the session's counter, so a
     /// waiter abandoned by a cancel can tell its own redirect from the
     /// next flow's and hand the latter back rather than steal it.
     flow: u64,
-    /// The client whose flow this is; the completion's exchange runs on
-    /// it, so the flow spends the client it was minted by.
-    client: Arc<OAuthClient>,
-    /// The CSRF state issued at begin; the callback must echo it.
-    state: String,
-    /// The PKCE verifier paired with the challenge the authorization
-    /// request carried.
-    verifier: String,
-    /// Whether this flow's redirect arrives on its own loopback listener
-    /// (a Google Desktop flow) rather than the shared deep-link channel.
+    /// What the flow spends its completion on.
+    kind: FlowKind,
+    /// Whether this flow's redirect arrives on its own loopback
+    /// listener rather than the shared deep-link channel.
     loopback: bool,
     /// The loopback capture's receiver, present from begin until this
-    /// flow's waiter claims it; `None` on a deep-link flow and after the
-    /// claim, so the in-flight lock never crosses an await.
+    /// flow's waiter claims it; `None` on a deep-link flow and after
+    /// the claim, so the in-flight lock never crosses an await.
     loopback_rx: Option<mpsc::Receiver<LoopbackCapture>>,
 }
 
@@ -272,9 +263,11 @@ impl SignInSession {
             };
             *in_flight = Some(InFlight {
                 flow,
-                client: Arc::clone(client),
-                state: request.state.clone(),
-                verifier: request.pkce.verifier().to_owned(),
+                kind: FlowKind::Minted {
+                    client: Arc::clone(client),
+                    state: request.state.clone(),
+                    verifier: request.pkce.verifier().to_owned(),
+                },
                 loopback,
                 loopback_rx,
             });
@@ -389,10 +382,16 @@ impl SignInSession {
             .ok_or_else(|| {
                 OAuthError::Callback("no sign-in is in flight to complete".to_owned())
             })?;
-        in_flight
-            .client
-            .complete(raw_url, &in_flight.state, &in_flight.verifier, now)
-            .await
+        match in_flight.kind {
+            FlowKind::Minted {
+                client,
+                state,
+                verifier,
+            } => client.complete(raw_url, &state, &verifier, now).await,
+            FlowKind::External => Err(OAuthError::Callback(
+                "an externally minted flow completes through its own half".to_owned(),
+            )),
+        }
     }
 
     /// Takes the in-flight pair back: the way out for a sign-in the
@@ -438,9 +437,11 @@ impl SignInSession {
                     .flow_seq
                     .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
                     + 1,
-                client: Arc::clone(client),
-                state: pair.0,
-                verifier: pair.1,
+                kind: FlowKind::Minted {
+                    client: Arc::clone(client),
+                    state: pair.0,
+                    verifier: pair.1,
+                },
                 loopback: false,
                 loopback_rx: None,
             })
@@ -448,6 +449,12 @@ impl SignInSession {
     }
 }
 
+mod external;
+
 #[cfg(test)]
 #[path = "session_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "session_external_tests.rs"]
+mod external_tests;

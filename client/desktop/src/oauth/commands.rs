@@ -38,7 +38,7 @@
 //! split out for the file cap; the contracts under them are pinned by
 //! the session and command tests.
 //!
-//! [`forward_oauth_callbacks`]: super::session::forward_oauth_callbacks
+//! [`forward_oauth_callbacks`]: super::wiring::forward_oauth_callbacks
 
 use std::future::Future;
 use std::sync::Arc;
@@ -174,6 +174,12 @@ pub(crate) enum OAuthCommandError {
     /// its serve thread could not start; nothing stays in flight.
     #[error("the loopback capture could not be started: {0}")]
     Capture(String),
+    /// The JMAP leg's standards discovery refused or outlived its
+    /// bound: the server publishes no discoverable sign-in (or could
+    /// not be asked in time), so no browser opened and nothing stays
+    /// in flight. The password field beside the offer always works.
+    #[error("this server's sign-in could not be discovered: {0}")]
+    Discover(String),
 }
 
 impl Serialize for OAuthCommandError {

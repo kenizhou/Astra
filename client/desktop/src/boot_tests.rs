@@ -412,6 +412,13 @@ mod graph_refusals;
 #[path = "boot_tests/google_boot_tests.rs"]
 mod google_boot;
 
+// The jmap account's boot half: the stored document's dial (password
+// and grant shapes), the rotation a ratcheting server issues at the
+// boot dial, the dead grant's row, and the folder binder's account-wide
+// arm.
+#[path = "boot_tests/jmap_boot_tests.rs"]
+mod jmap_boot;
+
 // The scripted loopback servers and flow fixtures the offline lifecycle
 // proofs share: a stand-in profile read and the ratcheting token
 // endpoint.

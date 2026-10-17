@@ -18,10 +18,11 @@ use crate::dial_table::AccountDials;
 
 use super::transaction::CredentialTransaction;
 
-/// The entry's OAuth section, whichever family the account dials: both
-/// carry the same two fields the sink advances (the stored grant and the
-/// granted set), so one sink serves a Google account exactly as it serves
-/// a Microsoft one.
+/// The entry's OAuth section, whichever family the account dials: every
+/// family carries the same rotation slot the sink advances, so one sink
+/// serves a Google or JMAP account exactly as it serves a Microsoft
+/// one. A jmap grant keeps no granted-set slot (its scopes are the
+/// grant's own, re-sent on refresh), so its pair answers none.
 fn oauth_grant_mut(config: &mut AccountConfig) -> Option<(&mut Secret, &mut Option<Vec<String>>)> {
     if let Some(graph) = config.graph.as_mut() {
         Some((&mut graph.refresh_token, &mut graph.granted_scopes))
@@ -30,6 +31,13 @@ fn oauth_grant_mut(config: &mut AccountConfig) -> Option<(&mut Secret, &mut Opti
     } else {
         None
     }
+}
+
+/// The entry's jmap grant's refresh slot, when the account carries one:
+/// the rotation a ratcheting JMAP server issues lands here, and a
+/// dropped one kills the account at the next launch.
+fn jmap_refresh_mut(config: &mut AccountConfig) -> Option<&mut Secret> {
+    Some(&mut config.jmap.as_mut()?.oauth.as_mut()?.refresh_token)
 }
 
 /// The sink over the dial table and the credential transaction: the boot's
@@ -69,7 +77,14 @@ impl TokenSink for DialTableTokenSink {
             );
             return;
         };
-        let Some((refresh, _)) = oauth_grant_mut(&mut config) else {
+        // Whichever family's grant the entry carries, microsoft, google,
+        // or jmap: the rotation advances it, and a jmap grant has no
+        // granted-set slot to move beside it.
+        let refresh = if let Some((refresh, _)) = oauth_grant_mut(&mut config) {
+            refresh
+        } else if let Some(refresh) = jmap_refresh_mut(&mut config) {
+            refresh
+        } else {
             // Registered, but with no grant to advance: a stored-secret
             // account handed a rotation it cannot use is silent.
             return;
