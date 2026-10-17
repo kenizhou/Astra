@@ -26,14 +26,14 @@ this row ports.
 | Accounts | IMAP/SMTP sign in with your provider where the server offers it, discovered from the standards | ⬜ | mail-oauth.md |
 | Accounts | JMAP sign-in renewed in place, keeping mail, folders, and settings | ⬜ | jmap.md |
 | Accounts | Multi-account with unified inbox and account switcher | ⬜ | |
-| Mail | Unified mail as an All Accounts group in the folder pane, remembered across launches | ⬜ | folder-pane.md |
+| Mail | Unified mail as an All Accounts group in the folder pane, remembered across launches | 🚧 | the app core merges every account's inbox rows into the unified scope, newest first, and persists the chosen scope across launches; the pane's clickable group and badge are the surface slice's; folder-pane.md |
 | Accounts | Per-account credential storage with in-app account removal | 🚧 | each account's config document sits in the host's credential store; the accounts page's confirmed removal deletes it; settings.md |
 | Accounts | Account list offered on the next device from a vendor account: address and servers, never a password | ⬜ | onboarding.md |
 | Accounts | Vendor account sign-in, creation, management, and deletion in its own settings category | ⬜ | allodia_license/entitlement.md |
 | Accounts | Subscription view: charges, renewal, retried payment, multiple-biller warning, cancel and restart under direct billing | ⬜ | allodia_license/purchasing.md |
-| Mail | Create, rename, move, and delete folders from the folder pane; queued offline; delete goes to Trash first | ⬜ | folder-pane.md |
+| Mail | Create, rename, move, and delete folders from the folder pane; queued offline; delete goes to Trash first | 🚧 | the four folder intents are wired through the app core onto the engine's outbox, capability-gated, with the selection following a renamed or moved folder's minted key; the pane's menus are the surface slice's; folder-pane.md |
 | Mail | Drag a folder into another folder or onto its account; drag messages onto a folder | ⬜ | folder-pane.md |
-| Mail | Move to folder action in the message row menu, within one account | ⬜ | folder-pane.md |
+| Mail | Move to folder action in the message row menu, within one account | 🚧 | the MoveMessages intent loops the engine's move edit per row within one account and answers a move onto the folder a row already sits in without queueing; the row menu's submenu is the surface slice's; folder-pane.md |
 | Mail | Threaded conversation view: the whole conversation including your sent replies, across folders | 🚧 | mail-calendar capabilities |
 | Mail | Reading view with sanitised HTML, inline CID images, recipient headers, remote-image gating, and retry | 🚧 | |
 | Mail | Web and mail addresses in message text open in the browser or mail app; http, https, and mailto only | 🚧 | rendering-security.md |
@@ -87,7 +87,7 @@ this row ports.
 | Calendar | Editing one occurrence of a repeating event asks this event or all events first | 🚧 | calendar.md |
 | Calendar | Setting a repeat rule: how often, how many periods to skip, weekdays, what ends it; a rule too detailed to state is shown, not offered | 🚧 | create path only; edit-time restructuring is calendar.md's gap; calendar.md |
 | Invitations | An invitation email shows a card: who is asking, when, where, how everyone answered, conflicts, that day's grid | 🚧 | kind, participation, title, organiser; no roll-call, conflicts, or day grid; invitations.md |
-| Invitations | The invitation's own .ics part is not shown as a junk attachment; a really attached calendar file still is | ⬜ | |
+| Invitations | The invitation's own .ics part is not shown as a junk attachment; a really attached calendar file still is | 🚧 | the reading snapshot drops a claimed invitation's calendar parts from the attachment rows while an ordinary message's attached calendar file keeps its row; invitations.md |
 | Invitations | An unanswered meeting drawn as a hold on the grid, month, and agenda | 🚧 | invitations.md |
 | Invitations | A declined meeting leaves the calendar on every provider; the invitation email is the way back | 🚧 | invitations.md |
 | Invitations | Answer accept, maybe, or decline, with a note to the organiser where the account supports it | 🚧 | invitations.md |

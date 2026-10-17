@@ -23,6 +23,7 @@ mod calendar;
 mod compose_request;
 mod dispatch;
 mod drafts;
+mod folder_writes;
 mod list_rows;
 mod mail_writes;
 mod outbox;
@@ -37,6 +38,7 @@ mod sanitise;
 mod search;
 mod settings;
 mod snapshot;
+mod snapshot_rows;
 mod submit;
 mod surfaced;
 mod sync;
@@ -141,6 +143,7 @@ pub use calendar::{
 pub use compose_request::OpenDraftError;
 pub use dispatch::AppError;
 pub use drafts::{DraftResume, DRAFT_AUTOSAVE_IDLE};
+pub use folder_writes::FolderWriteError;
 pub use mail_writes::MailWriteError;
 pub use people::avatar::AvatarView;
 pub use preferences::{load_preferences, preferences_path, save_preferences, Preferences};
@@ -374,17 +377,23 @@ impl<P: Provider> App<P> {
     }
 
     /// Names the preferences file the app persists through. Call it before the first
-    /// dispatch: the view mode, the expansion map, and the selected folder load from
+    /// dispatch: the view mode, the expansion map, and the selected scope load from
     /// here (defaults while unnamed, as an in-memory build wants), and a persisted
-    /// selection seeds the scope so a relaunch reopens the folder that was showing.
+    /// selection seeds the scope so a relaunch reopens the folder, the account, or
+    /// the unified view that was showing.
     #[must_use]
     pub fn with_prefs_path(mut self, path: Option<PathBuf>) -> Self {
         let pane = Mutex::new(PreferencesState::new(path));
-        let scope = pane
-            .lock()
-            .expect("preferences mutex poisoned")
-            .selected_folder()
-            .map_or_else(Scope::default, Scope::Folder);
+        let scope = {
+            let pane = pane.lock().expect("preferences mutex poisoned");
+            pane.selected_folder().map_or_else(
+                || {
+                    pane.selected_account()
+                        .map_or_else(Scope::default, Scope::Account)
+                },
+                Scope::Folder,
+            )
+        };
         self.pane = pane;
         self.scope = Mutex::new(scope);
         self

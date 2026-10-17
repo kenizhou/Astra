@@ -154,6 +154,7 @@ impl<P: Provider> App<P> {
         let provider = handle.providers.first()?;
         let (mut snapshot, original) = render_reading(&self.engine, provider, message).await?;
         snapshot.invitation = self.reading_invitation(provider, message, &original).await;
+        hide_invitation_parts(&mut snapshot);
         Some(snapshot)
     }
 
@@ -371,6 +372,25 @@ fn attachment_row(attachment: &MessageAttachment) -> AttachmentRow {
         media_type: attachment.media_type().to_owned(),
         size: attachment.size(),
     }
+}
+
+/// Drops the calendar parts the invitation surface owns from the attachment
+/// list: the card renders the meeting, so the `.ics` it came from is not also
+/// a file to download. A calendar file an ordinary message carries keeps its
+/// row; only a message the invitation machine claimed loses its chips.
+fn hide_invitation_parts(snapshot: &mut ReadingSnapshot) {
+    if snapshot.invitation.is_some() {
+        snapshot
+            .attachments
+            .retain(|row| !is_calendar_media(&row.media_type));
+    }
+}
+
+/// Whether a media type carries an iCalendar object: the iMIP type, or the
+/// belt-and-braces copy some senders attach as `application/ics`.
+fn is_calendar_media(media_type: &str) -> bool {
+    media_type.eq_ignore_ascii_case("text/calendar")
+        || media_type.eq_ignore_ascii_case("application/ics")
 }
 
 #[cfg(test)]

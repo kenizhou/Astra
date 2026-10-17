@@ -123,6 +123,12 @@ mod submit_tests;
 #[path = "protocol_search_tests.rs"]
 mod search_tests;
 
+// The folder family's intents and the move-to-folder batch, split for the
+// same reason.
+#[cfg(test)]
+#[path = "protocol_folder_tests.rs"]
+mod folder_tests;
+
 // The calendar family's intents and surface word, split for the same reason.
 #[cfg(test)]
 #[path = "protocol_calendar_tests.rs"]

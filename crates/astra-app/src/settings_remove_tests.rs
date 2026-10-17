@@ -142,7 +142,11 @@ async fn remove_account_tears_down_every_named_half() {
     let persisted = load_preferences(dir.join("preferences.toml"));
     assert!(persisted.account_expanded("work"), "no shut tree remains");
     assert_eq!(persisted.selected_folder, None);
-    assert_eq!(app.scope_for_test(), None, "the unified view stands");
+    assert_eq!(
+        app.scope_for_test(),
+        crate::Scope::AllInboxes,
+        "the unified view stands"
+    );
 }
 
 #[tokio::test]

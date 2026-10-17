@@ -15,13 +15,13 @@ use std::{
 
 use engine_api::{AccountId, MailboxRole};
 
-use crate::{
-    boot, dispatch_fakes as fakes, reference::FolderRef, AppError, FolderIntent, Intent, Surface,
-    ViewMode,
-};
+use crate::{boot, dispatch_fakes as fakes, reference::FolderRef, Intent, Surface, ViewMode};
 
 #[path = "dispatch_list_tests.rs"]
 mod list;
+
+#[path = "dispatch_unified_tests.rs"]
+mod unified;
 
 use fakes::{account, app, app_with_prefs, folder, inbox, key, scratch, NoConnector};
 
@@ -129,7 +129,7 @@ async fn the_persisted_selection_seeds_a_fresh_app_over_the_same_file() {
     );
     assert_eq!(
         relaunched.scope_for_test(),
-        Some(FolderRef::from_parts("work", "archive".to_owned()).unwrap()),
+        crate::Scope::Folder(FolderRef::from_parts("work", "archive".to_owned()).unwrap()),
         "a relaunch reopens the persisted selection"
     );
 }
@@ -281,25 +281,6 @@ async fn show_more_grows_the_window_over_the_pane_rows() {
         "one more page reaches every row"
     );
     assert_eq!(app.visible_limit(), crate::PAGE * 2);
-}
-
-#[tokio::test]
-async fn folder_intents_answer_not_yet() {
-    let surfaces = Arc::new(Mutex::new(Vec::new()));
-    let app = app(
-        vec![account("work", fakes::FakeProvider::with(vec![inbox()]))],
-        &surfaces,
-    );
-
-    let outcome = app
-        .dispatch(Intent::Folders(FolderIntent::Create {
-            account: AccountId::try_from("work").unwrap(),
-            parent: None,
-            name: "Records".to_owned(),
-        }))
-        .await;
-
-    assert!(matches!(outcome, Err(AppError::NotYet)));
 }
 
 #[tokio::test]

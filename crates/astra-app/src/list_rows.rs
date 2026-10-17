@@ -15,7 +15,7 @@
 //! answers. A group that collapses to a single message is projected as a message row,
 //! not dressed up as a one-message conversation.
 
-use std::{cmp::Reverse, collections::HashMap, sync::Arc};
+use std::{cmp::Reverse, collections::BTreeMap, collections::HashMap, sync::Arc};
 
 use astra_viewmodel::{MessageRowView, RowKey, ViewMode};
 use engine_api::{MailListRow, MailRow, ThreadId, UtcDateTime};
@@ -28,9 +28,34 @@ pub(crate) fn project(
     folder: &str,
     limit: usize,
 ) -> Vec<MessageRowView> {
+    scoped(mode, rows, limit, |row| filed_in(row, folder))
+}
+
+/// Projects the windowed rows of every account's inbox into at most `limit`
+/// snapshot rows of the unified list: the same row shape and ordering the
+/// folder view projects, with each row's own account deciding which inbox
+/// scopes it in.
+pub(crate) fn unified(
+    mode: ViewMode,
+    rows: &[Arc<MailListRow>],
+    inboxes: &BTreeMap<String, String>,
+    limit: usize,
+) -> Vec<MessageRowView> {
+    scoped(mode, rows, limit, |row| in_own_inbox(row, inboxes))
+}
+
+/// The scoped projection both lists share: `in_scope` decides which rows the
+/// list shows, everything else (the ordering, the grouping, the row shapes)
+/// being one definition.
+fn scoped(
+    mode: ViewMode,
+    rows: &[Arc<MailListRow>],
+    limit: usize,
+    in_scope: impl Fn(&MailListRow) -> bool + Copy,
+) -> Vec<MessageRowView> {
     match mode {
-        ViewMode::Flat => flat(rows, folder, limit),
-        ViewMode::Threaded => threaded(rows, folder, limit),
+        ViewMode::Flat => flat_scoped(rows, limit, in_scope),
+        ViewMode::Threaded => threaded_scoped(rows, limit, in_scope),
     }
 }
 
@@ -151,12 +176,15 @@ fn latest_match(members: &[&SearchMessage]) -> Option<UtcDateTime> {
         .flatten()
 }
 
-/// A flat list of the folder's messages, newest first.
-fn flat(rows: &[Arc<MailListRow>], folder: &str, limit: usize) -> Vec<MessageRowView> {
-    let mut in_folder: Vec<&Arc<MailListRow>> =
-        rows.iter().filter(|row| filed_in(row, folder)).collect();
-    in_folder.sort_by(|a, b| newest_first(a, b).then_with(|| tiebreak(a, b)));
-    in_folder
+/// A flat list of the scoped messages, newest first.
+fn flat_scoped(
+    rows: &[Arc<MailListRow>],
+    limit: usize,
+    in_scope: impl Fn(&MailListRow) -> bool,
+) -> Vec<MessageRowView> {
+    let mut scoped: Vec<&Arc<MailListRow>> = rows.iter().filter(|row| in_scope(row)).collect();
+    scoped.sort_by(|a, b| newest_first(a, b).then_with(|| tiebreak(a, b)));
+    scoped
         .into_iter()
         .take(limit)
         .map(|row| message_row(row))
@@ -168,21 +196,25 @@ fn flat(rows: &[Arc<MailListRow>], folder: &str, limit: usize) -> Vec<MessageRow
 type GroupedThread<'a> = ((&'a str, &'a str), Vec<Arc<MailListRow>>);
 
 /// Conversations grouped by `(account, thread id)`, newest activity first.
-fn threaded(rows: &[Arc<MailListRow>], folder: &str, limit: usize) -> Vec<MessageRowView> {
+fn threaded_scoped(
+    rows: &[Arc<MailListRow>],
+    limit: usize,
+    in_scope: impl Fn(&MailListRow) -> bool + Copy,
+) -> Vec<MessageRowView> {
     let mut groups: HashMap<(&str, &str), Vec<Arc<MailListRow>>> = HashMap::new();
     for row in rows {
         let group = (row.account.as_str(), thread_key(row));
         groups.entry(group).or_default().push(Arc::clone(row));
     }
-    // Only conversations that touch the folder show; each is ordered by its latest
-    // in-folder message, so a follow-up filed elsewhere does not jump it up the list.
+    // Only conversations that touch the scope show; each is ordered by its latest
+    // in-scope message, so a follow-up filed elsewhere does not jump it up the list.
     let mut shown: Vec<GroupedThread<'_>> = groups
         .into_iter()
-        .filter(|(_, members)| members.iter().any(|row| filed_in(row, folder)))
+        .filter(|(_, members)| members.iter().any(|row| in_scope(row)))
         .collect();
     shown.sort_by(|(key_a, members_a), (key_b, members_b)| {
-        let latest_a = latest_in_folder(members_a, folder);
-        let latest_b = latest_in_folder(members_b, folder);
+        let latest_a = latest_in_scope(members_a, in_scope);
+        let latest_b = latest_in_scope(members_b, in_scope);
         Reverse(latest_a)
             .cmp(&Reverse(latest_b))
             .then_with(|| key_a.cmp(key_b))
@@ -190,24 +222,28 @@ fn threaded(rows: &[Arc<MailListRow>], folder: &str, limit: usize) -> Vec<Messag
     shown
         .into_iter()
         .take(limit)
-        .map(|((_, thread), members)| conversation_row(thread, &members, folder))
+        .map(|((_, thread), members)| conversation_row(thread, &members, in_scope))
         .collect()
 }
 
-/// One conversation as a snapshot row: its face is the latest in-folder member, its
+/// One conversation as a snapshot row: its face is the latest in-scope member, its
 /// count every member. A group of one is a message row keyed by that message, the shape
 /// a lone (never threaded) message takes too.
-fn conversation_row(thread: &str, members: &[Arc<MailListRow>], folder: &str) -> MessageRowView {
+fn conversation_row(
+    thread: &str,
+    members: &[Arc<MailListRow>],
+    in_scope: impl Fn(&MailListRow) -> bool,
+) -> MessageRowView {
     if members.len() == 1 {
         return message_row(&members[0]);
     }
-    // The face is the first member in display order (the newest in-folder message),
+    // The face is the first member in display order (the newest in-scope message),
     // selected with `min_by` over that very ordering.
     let face = members
         .iter()
-        .filter(|row| filed_in(row, folder))
+        .filter(|row| in_scope(row))
         .min_by(|a, b| newest_first(a, b).then_with(|| tiebreak(a, b)))
-        .expect("a shown group holds an in-folder member");
+        .expect("a shown group holds an in-scope member");
     // Unreachable for any group that reached here: the key is a resolved thread id or a
     // message's non-empty provider key, and both parse. Guarded rather than unwrapped
     // so a future key shape degrades to a message row instead of panicking a release
@@ -258,6 +294,16 @@ fn filed_in(row: &MailListRow, folder: &str) -> bool {
     row.mailboxes.iter().any(|id| id.as_str() == folder)
 }
 
+/// Whether `row` is filed in its own account's inbox, the folder the unified
+/// list scopes to: each account's inbox key is its own, resolved from its own
+/// tree by the caller. An account whose tree holds no inbox contributes no
+/// rows, never another account's.
+fn in_own_inbox(row: &MailListRow, inboxes: &BTreeMap<String, String>) -> bool {
+    inboxes
+        .get(row.account.as_str())
+        .is_some_and(|inbox| row.mailboxes.iter().any(|id| id.as_str() == inbox.as_str()))
+}
+
 /// The group a row belongs to: its resolved thread id, or its own provider key when the
 /// server never threaded it (a lone message is its own conversation).
 fn thread_key(row: &MailListRow) -> &str {
@@ -267,12 +313,15 @@ fn thread_key(row: &MailListRow) -> &str {
         .map_or_else(|| row.mail.key.as_str(), |thread| thread.as_str())
 }
 
-/// The newest instant among a conversation's in-folder members; `None` sinks below every
+/// The newest instant among a conversation's in-scope members; `None` sinks below every
 /// dated conversation.
-fn latest_in_folder(members: &[Arc<MailListRow>], folder: &str) -> Option<UtcDateTime> {
+fn latest_in_scope(
+    members: &[Arc<MailListRow>],
+    in_scope: impl Fn(&MailListRow) -> bool,
+) -> Option<UtcDateTime> {
     members
         .iter()
-        .filter(|row| filed_in(row, folder))
+        .filter(|row| in_scope(row))
         .map(|row| row.mail.date_utc)
         .max()
         .flatten()

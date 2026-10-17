@@ -25,9 +25,9 @@ impl<P: Provider> App<P> {
     ///
     /// # Errors
     ///
-    /// Returns [`AppError::NotYet`] for an intent family this milestone does not
-    /// implement; every implemented arm always returns `Ok`, because a mail mutation's
-    /// outcome is told through the surfaces, not a return value.
+    /// Every implemented arm returns `Ok`, because a mutation's outcome is told
+    /// through the surfaces, never a return value; the type stays the loop's
+    /// answer shape for the family a later milestone gates.
     pub async fn dispatch(&self, intent: Intent) -> Result<(), AppError> {
         match intent {
             Intent::RefreshMail => {
@@ -106,6 +106,13 @@ impl<P: Provider> App<P> {
                     log::warn!("trash: {err}");
                 }
             }
+            // The move-to-folder batch: the same discard-and-resync discipline
+            // the single-row moves ride, looped over the row set.
+            Intent::MoveMessages { rows, folder } => {
+                if let Err(err) = self.move_messages(rows, folder).await {
+                    log::warn!("move-to-folder: {err}");
+                }
+            }
             // The reading pane: one open, one close, both publishing the surface.
             Intent::OpenMessage { message } => {
                 self.open_message(message).await;
@@ -113,7 +120,15 @@ impl<P: Provider> App<P> {
             Intent::CloseReading => {
                 self.close_reading();
             }
-            Intent::Folders(_change) => return Err(AppError::NotYet),
+            // The folder family: every tree change rides the engine's outbox,
+            // and the outcome reaches the user through the republished pane
+            // (the new tree once queued, the refusal's unchanged tree when the
+            // engine answers one), never a return value.
+            Intent::Folders(change) => {
+                if let Err(err) = self.write_folder(change).await {
+                    log::warn!("folders: {err}");
+                }
+            }
             // The people family: the reads position the list and the detail
             // over the engine's own matching, the writes name a card, and
             // every outcome the people snapshot's write states and create

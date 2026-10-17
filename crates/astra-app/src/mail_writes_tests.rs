@@ -297,3 +297,102 @@ async fn the_move_writes_signal_the_mailbox_list() {
         "the trashed row's list is republished"
     );
 }
+
+/// A message row on `account` under `key`, the reference shape the
+/// move-to-folder batch carries.
+fn message_rows(account: &str, keys: &[&str]) -> Vec<MessageRef> {
+    keys.iter()
+        .map(|key| MessageRef::from_parts(account, (*key).to_owned()).unwrap())
+        .collect()
+}
+
+#[tokio::test]
+async fn moving_a_row_set_to_a_folder_loops_one_move_edit_per_row() {
+    let surfaces = Arc::new(Mutex::new(Vec::new()));
+    let provider = fakes::FakeProvider::with_mail(
+        vec![inbox(), folder("clients", "Clients")],
+        vec![inbox_mail("m1"), inbox_mail("m2"), inbox_mail("m3")],
+    );
+    let edits = Arc::clone(&provider.edits);
+    let app = app(vec![account("work", provider)], &surfaces);
+    app.dispatch(Intent::RefreshMail).await.unwrap();
+    surfaces.lock().unwrap().clear();
+
+    app.dispatch(Intent::MoveMessages {
+        rows: message_rows("work", &["m1", "m2"]),
+        folder: crate::FolderRef::from_parts("work", "clients".to_owned()).unwrap(),
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(
+        edits.lock().unwrap().as_slice(),
+        [
+            engine_api::MailEdit::move_to(
+                ProviderKey::new("m1").unwrap(),
+                MailboxId::try_from("clients").unwrap(),
+            ),
+            engine_api::MailEdit::move_to(
+                ProviderKey::new("m2").unwrap(),
+                MailboxId::try_from("clients").unwrap(),
+            ),
+        ],
+        "one move edit per row, exactly as the single-row moves send them"
+    );
+    assert!(
+        surfaces.lock().unwrap().contains(&Surface::MailboxList),
+        "the moved rows' list is republished"
+    );
+}
+
+#[tokio::test]
+async fn a_move_to_the_folder_the_rows_already_sit_in_queues_nothing() {
+    let surfaces = Arc::new(Mutex::new(Vec::new()));
+    let provider = fakes::FakeProvider::with_mail(
+        vec![inbox(), folder("clients", "Clients")],
+        vec![inbox_mail("m1")],
+    );
+    let edits = Arc::clone(&provider.edits);
+    let app = app(vec![account("work", provider)], &surfaces);
+    app.dispatch(Intent::RefreshMail).await.unwrap();
+
+    app.move_messages(
+        message_rows("work", &["m1"]),
+        crate::FolderRef::from_parts("work", "inbox".to_owned()).unwrap(),
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        edits.lock().unwrap().is_empty(),
+        "a row already in the destination is a no-op without an outbox op"
+    );
+}
+
+#[tokio::test]
+async fn a_move_to_folder_batch_refuses_cross_account_rows_typed() {
+    let surfaces = Arc::new(Mutex::new(Vec::new()));
+    let provider = fakes::FakeProvider::with_mail(
+        vec![inbox(), folder("clients", "Clients")],
+        vec![inbox_mail("m1")],
+    );
+    let edits = Arc::clone(&provider.edits);
+    let app = app(vec![account("work", provider)], &surfaces);
+    app.dispatch(Intent::RefreshMail).await.unwrap();
+
+    let outcome = app
+        .move_messages(
+            vec![
+                MessageRef::from_parts("work", "m1".to_owned()).unwrap(),
+                MessageRef::from_parts("home", "m9".to_owned()).unwrap(),
+            ],
+            crate::FolderRef::from_parts("work", "clients".to_owned()).unwrap(),
+        )
+        .await;
+
+    assert_eq!(outcome, Err(MailWriteError::CrossAccount));
+    assert!(
+        edits.lock().unwrap().is_empty(),
+        "a refused batch queues nothing, not even its legal rows"
+    );
+}
