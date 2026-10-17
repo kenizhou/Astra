@@ -171,9 +171,13 @@ fn plan_change(
             ))
         }
         FolderIntent::Delete { folder, .. } => {
-            let target = MailboxId::try_from(folder.as_str())
-                .map_err(|_| FolderWriteError::UnknownFolder)?;
-            Ok((MailboxChange::Delete { target }, Some(folder)))
+            let mailbox = find(tree, &folder)?;
+            Ok((
+                MailboxChange::Delete {
+                    target: mailbox.id.clone(),
+                },
+                Some(folder),
+            ))
         }
     }
 }

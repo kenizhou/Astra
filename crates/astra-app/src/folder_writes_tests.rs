@@ -263,3 +263,18 @@ async fn a_folder_key_the_tree_does_not_hold_is_refused_typed() {
 
     assert_eq!(outcome, Err(FolderWriteError::UnknownFolder));
 }
+
+#[tokio::test]
+async fn a_delete_of_a_key_the_tree_does_not_hold_is_refused_typed() {
+    let surfaces = Arc::new(Mutex::new(Vec::new()));
+    let (app, _edits) = writable_tree(&surfaces, vec![inbox()]).await;
+
+    let outcome = app
+        .write_folder(FolderIntent::Delete {
+            account: work(),
+            folder: "ghost".to_owned(),
+        })
+        .await;
+
+    assert_eq!(outcome, Err(FolderWriteError::UnknownFolder));
+}

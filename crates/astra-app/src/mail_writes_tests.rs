@@ -396,3 +396,28 @@ async fn a_move_to_folder_batch_refuses_cross_account_rows_typed() {
         "a refused batch queues nothing, not even its legal rows"
     );
 }
+
+#[tokio::test]
+async fn a_move_to_a_well_formed_key_the_tree_does_not_hold_queues_nothing() {
+    let surfaces = Arc::new(Mutex::new(Vec::new()));
+    let provider = fakes::FakeProvider::with_mail(
+        vec![inbox(), folder("clients", "Clients")],
+        vec![inbox_mail("m1")],
+    );
+    let edits = Arc::clone(&provider.edits);
+    let app = app(vec![account("work", provider)], &surfaces);
+    app.dispatch(Intent::RefreshMail).await.unwrap();
+
+    let outcome = app
+        .move_messages(
+            message_rows("work", &["m1"]),
+            crate::FolderRef::from_parts("work", "ghost".to_owned()).unwrap(),
+        )
+        .await;
+
+    assert_eq!(outcome, Err(MailWriteError::NoTargetFolder));
+    assert!(
+        edits.lock().unwrap().is_empty(),
+        "a destination the tree does not hold queues no refused edits"
+    );
+}

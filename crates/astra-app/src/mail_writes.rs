@@ -123,6 +123,14 @@ impl<P: Provider> App<P> {
             log::warn!("move: the row's account has no provider to write through");
             return Err(MailWriteError::NoProvider);
         };
+        // The destination must name a folder of the account's own tree: a
+        // well-formed key naming nothing would queue one refused edit per
+        // row, the silent no-op the typed forms exist to prevent.
+        let tree = self.engine.mailboxes(&account).await.unwrap_or_default();
+        if !tree.iter().any(|mailbox| mailbox.id.as_str() == folder.key) {
+            log::warn!("move: the destination key names no folder of the account");
+            return Err(MailWriteError::NoTargetFolder);
+        }
         let Ok(destination) = MailboxId::try_from(folder.key.as_str()) else {
             log::warn!("move: the destination key names no folder");
             return Err(MailWriteError::NoTargetFolder);

@@ -36,6 +36,9 @@ pub use astra_viewmodel::SearchScope;
 /// change that names an existing folder carries where the user saw it, so a replay after
 /// the folder moved elsewhere is refused as a conflict rather than applied to whatever
 /// the folder has become.
+///
+/// The folder key travels as a bare string beside its `AccountId`, extending `Create`'s
+/// established shape; the message-side intents carry the stricter `FolderRef`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]

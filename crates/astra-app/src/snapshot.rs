@@ -128,8 +128,8 @@ impl<P: Provider> App<P> {
         MailboxListSnapshot {
             account_folders,
             rows,
-            // The selection is Task 3's to drive; nothing selects a row from inside the
-            // core yet, and `None` is the field's at-rest value.
+            // Nothing selects a row from inside the core; `None` is the
+            // field's at-rest value.
             selection: None,
             visible_limit: u32::try_from(limit).unwrap_or(u32::MAX),
             view_mode: mode,

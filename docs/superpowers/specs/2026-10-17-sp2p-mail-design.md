@@ -90,6 +90,13 @@ genuinely attached calendar file still lists.
 
 - Folder drag over IMAP reparents by rename (the protocol's only move);
   the receipt's key re-selection is the contract.
+- An invitation that carries a second, distinct attached calendar file
+  loses that chip too: the hide rule discriminates by media type because
+  no part identity crosses the engine's scheduling read, and
+  part-identity discrimination is a later engine surface.
+- The folder intents carry the folder key as a bare string beside their
+  `AccountId`, extending the create intent's established shape; a
+  versioned move to `FolderRef` everywhere is a later wire decision.
 - Attachment preview opens only what the host shell can open (the saved
   path); no in-app preview rides this slice.
 - The unified list holds inboxes only (the scope's own name); a
