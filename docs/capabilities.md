@@ -44,7 +44,7 @@ this row ports.
 | Mail | Reading actions: reply, reply all, forward, archive, delete | 🚧 | sending.md |
 | Mail | Overflow menu with Save as .eml, writing the message exactly as delivered | ⬜ | reading-actions.md |
 | Mail | Print a message with subject and header lines through the platform print dialog | ⬜ | reading-actions.md |
-| Mail | Attachments: list, save, and open received files; attach files in the composer | ⬜ | |
+| Mail | Attachments: list, save, and open received files; attach files in the composer | 🚧 | the byte read through the engine, the desktop Save As command (the save dialog, the write, the saved, cancelled, failed typed outcome) and its web wire are in; the pane's Save As and Download All controls and the composer's webview picker are the surface slice's; reading-actions.md |
 | Composer | Rich HTML composer for new mail, reply, reply all, and forward, with editable To, Cc, and Bcc | 🚧 | the composer opens in its own window; a quick reply docks under the reading pane |
 | Composer | A forward opens holding the original's attachments, removable one by one | ⬜ | sending.md |
 | Composer | Drafts stored on the server while you type; one draft across devices; taken away on send | 🚧 | drafts.md |

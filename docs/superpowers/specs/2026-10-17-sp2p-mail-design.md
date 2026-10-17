@@ -65,7 +65,8 @@ SaveAttachment intent carries the row reference and the attachment id; the
 app core reads the bytes through the engine's message_attachment; the
 desktop host answers with its save dialog and returns the path; the web
 surface shows the saved path or the refusal. The composer side: an attach
-button opens the host file picker (the multi-select dialog), each picked
+button opens the file picker (the webview's own multi-select input, so the
+bytes never round-trip through the host), each picked
 file becomes a DraftAttachment carried in the document, the actions row
 lists them with sizes and a remove control, and the send carries the blobs
 (the wire and the core's resolution already ship; the composer stops

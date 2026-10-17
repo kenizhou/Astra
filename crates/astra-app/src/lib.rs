@@ -18,6 +18,7 @@ mod ai_docs;
 mod ai_replies;
 mod ai_results;
 mod ai_rules;
+mod attachments;
 mod boot;
 mod calendar;
 mod compose_request;
@@ -134,6 +135,7 @@ pub use ai_rules::{
     Category, MailContext, MatchResult, RulesError, CATEGORISE_PROMPT_VERSION, COLD_JUDGE_VERSION,
     MATCH_CONTEXT_BODY_CAP, RULES_MATCH_VERSION, RULES_PROMPT_VERSION,
 };
+pub use attachments::{AttachmentContent, AttachmentReadError};
 pub use boot::{boot, BootError, SpawnedTask};
 pub use calendar::{
     generate_meeting_brief, meeting_brief_prompt, BriefDocumentError, BriefMeeting,

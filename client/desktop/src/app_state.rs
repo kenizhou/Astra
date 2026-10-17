@@ -7,9 +7,10 @@ use std::sync::Arc;
 
 use astra_ai::{AiDocumentKind, KnowledgeId};
 use astra_app::{
-    Account, App, AvatarView, BriefDocumentError, CardRef, Chip, CompositionId, ContactDraftInput,
-    DigestView, DocumentError, DocumentView, DraftResume, ExtractionSummary, Intent, KnowledgeView,
-    MeetingBriefView, Snippet, SplitEntry, SummariseMessageError, TranslateLanguage,
+    Account, App, AttachmentContent, AttachmentReadError, AvatarView, BriefDocumentError, CardRef,
+    Chip, CompositionId, ContactDraftInput, DigestView, DocumentError, DocumentView, DraftResume,
+    ExtractionSummary, Intent, KnowledgeView, MeetingBriefView, Snippet, SplitEntry,
+    SummariseMessageError, TranslateLanguage,
 };
 use astra_viewmodel::{
     CalendarSnapshot, ComposeRequestSnapshot, DraftStatusSnapshot, MailboxListSnapshot,
@@ -60,6 +61,21 @@ pub(crate) trait AppPort: Send + Sync {
     /// The published reading snapshot, for the host's pull: the one open
     /// message's body, or `None` when nothing is open.
     fn reading(&self) -> Option<ReadingSnapshot>;
+
+    /// Reads one attachment's decoded bytes for the host's Save As: the
+    /// row's suggested file name beside the bytes. `Ok(None)` when the
+    /// message's source reads but no downloadable part matches the id.
+    ///
+    /// # Errors
+    ///
+    /// Returns the core's own refusal: unresolved when the message cannot
+    /// be resolved, the fetch sentence when the engine's read refuses.
+    async fn attachment_content(
+        &self,
+        account: &AccountId,
+        key: &ProviderKey,
+        id: u32,
+    ) -> Result<Option<AttachmentContent>, AttachmentReadError>;
 
     /// The published draft-status snapshot, for the host's pull: the composition
     /// whose save moved and how it ended, or `None` when no composition has a
@@ -252,6 +268,15 @@ impl AppPort for App<HostProvider> {
 
     fn reading(&self) -> Option<ReadingSnapshot> {
         App::reading(self)
+    }
+
+    async fn attachment_content(
+        &self,
+        account: &AccountId,
+        key: &ProviderKey,
+        id: u32,
+    ) -> Result<Option<AttachmentContent>, AttachmentReadError> {
+        App::attachment_content(self, account, key, id).await
     }
 
     fn draft_status(&self) -> Option<DraftStatusSnapshot> {
