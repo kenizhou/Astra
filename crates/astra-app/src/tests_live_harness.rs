@@ -4,17 +4,15 @@
 //! nobody trusts; and the product's detection path, over the real HTTP fetcher,
 //! against a server whose domain resolves nowhere.
 //!
-//! The harness serves implicit TLS on `127.0.0.1:2143` with a self-signed certificate,
-//! so the first dial is refused as a certificate rejection and the test pins the
-//! accepted certificate exactly as the product's owner would: a
-//! [`CertificateException`] recorded for that one server. That is the recorded TLS
-//! route for this harness (the decision sits in `docker/harness/compose.yaml` and
-//! `scripts/dev/harness.sh`): the account layer dials TLS only, so a no-TLS port is
-//! unreachable through the connect path under test. The same certificate serves the
-//! SMTP submission listener (implicit TLS on `127.0.0.1:2025`), and the harness
-//! account carries that leg beside the IMAP one: both name the same server, so the
-//! one accepted exception covers the submission dial too, and the providers the dial
-//! returns carry the SMTP binding the outbox drain delivers through.
+//! The harness serves implicit TLS on `127.0.0.1:2143` with a self-signed
+//! certificate, so the first dial is refused as a certificate rejection and
+//! the test pins the accepted certificate exactly as the product's owner
+//! would: a [`CertificateException`] recorded for that one server. That is
+//! the recorded TLS route for this harness (the decision sits in
+//! `docker/harness/compose.yaml` and `scripts/dev/harness.sh`): the account
+//! layer dials TLS only. The same certificate serves the SMTP submission
+//! listener (`127.0.0.1:2025`), both legs name the one server, so the one
+//! accepted exception covers the submission dial too.
 //!
 //! The seed script (`docker/harness/stalwart/seed.sh`) also delivers three pinned
 //! notes to astra1's INBOX through the harness's own SMTP submission port (implicit
@@ -25,11 +23,10 @@
 //! same seed files one rich MIME note into Projects (submission into the INBOX, then
 //! an IMAP move), the message the gated reading test opens in `reading`. The gated
 //! drafts test needs no seed: it round-trips the drafts family against the account's
-//! real Drafts folder, storing and removing copies through the product's own
-//! dispatches. The gated send test (`send`) needs no seed either: it submits its own
-//! mail from astra1 to astra2 through the engine's real send path, reads the delivery
-//! back on the recipient's account, and withdraws both copies afterwards so the
-//! harness keeps its seeded shape for the suites that pin it. The gated reply and
+//! real Drafts folder through the product's own dispatches. The gated send test
+//! (`send`) needs no seed either: it submits its own mail from astra1 to astra2
+//! through the engine's real send path, reads the delivery back, and withdraws both
+//! copies so the harness keeps its seeded shape. The gated reply and
 //! forward tests (`reply`, `forward`) walk the answer chain over the same wire:
 //! each first submits a fresh note from astra1 to astra2 (the seed leaves astra2
 //! nothing to answer), then composes the answer through the product's own compose
@@ -40,32 +37,34 @@
 //! holding the three seeded notes again and astra2 holds nothing. The gated search
 //! test (`search`) reads rather than writes: it needs no seed of its own and no
 //! cleanup, because every query it runs crosses the engine's real search surface over
-//! the corpus the seed already pinned (the three INBOX notes, plus the rich note in
-//! Projects, so the `from:` hit proves the answer crosses folders), and the harness
-//! keeps its seeded shape whatever the queries find. The gated people tests
-//! (`people`) extend the same discipline to the CardDAV face: cards are seeded
-//! straight onto each account's default address book through a raw helper under
-//! unique run tokens, the dav dial proof runs the real `connect_dav_providers`
-//! and the boot-shaped assembly over it, every assertion reads through the
-//! product's own engine paths and snapshots, the autosuggest proof submits its
-//! own mail through the engine's send path so the history it ranks is the run's
-//! own, and every seeded card and every sent mail is withdrawn at the end. The
-//! card withdrawals ride the raw seeding helper rather than a product path
-//! because the product ships no contact delete; the mail withdrawals ride the
-//! product's own delete. The gated settings tests (`settings`) prove the
-//! settings editor's account seam live over the same discipline: the dav
-//! editor's save dials through the real `connect_dav_providers` over a
-//! scratch config document that mirrors the desktop store's merge rule and
-//! dial-before-persist ordering, installs both legs end to end, keeps
-//! everything that stood when a re-dial fails, and tears both legs down on
-//! the clear; the zone proof pins the now line's republished zone id.
+//! the corpus the seed already pinned (the three INBOX notes plus the rich note
+//! in Projects, so the `from:` hit proves the answer crosses folders), and the
+//! harness keeps its seeded shape whatever the queries find. The gated people
+//! tests (`people`) extend the same discipline to the CardDAV face: cards are
+//! seeded onto each account's default address book through a raw helper under
+//! unique run tokens, the dial proof runs the real `connect_dav_providers`,
+//! every assertion reads through the product's own paths, and the autosuggest
+//! proof submits its own mail so the history it ranks is the run's
+//! own, and every seeded card and sent mail is withdrawn at the end (cards
+//! through the raw seeding helper: the product ships no contact delete; mail
+//! through the product's own delete). The gated settings tests (`settings`)
+//! prove the settings editor's account seam live: the dav editor's save dials
+//! the real `connect_dav_providers` over a scratch config mirroring the
+//! store's merge rule and dial-before-persist ordering, installs both legs,
+//! keeps what stood when a re-dial fails, and tears down on the clear; the
+//! zone proof pins the now line's zone id.
+//!
+//! The gated JMAP tests (`jmap`) prove the password account end to end over
+//! the harness's plaintext JMAP origin: the dial's session snapshot, the
+//! folder list, the seeded notes, a body read, a send round trip with both
+//! copies withdrawn, the calendar read the session advertises (seeded over
+//! CalDAV, read back over JMAP), and the OAuth gate's fail-soft refusal.
 //!
 //! The JMAP-detection test cannot dial `https://example.test/.well-known/jmap` (the
 //! harness domain resolves nowhere), so it rebases the probe onto the harness's plain
 //! HTTP JMAP origin (`127.0.0.1:2080`) through the detection crate's dev-harness
-//! `well_known_base_override`, the seam whose waiver that crate's unit tests already
-//! pin. This mirrors mail-calendar's live JMAP tests, which publish the same
-//! plaintext listener; no host trust store is touched.
+//! `well_known_base_override`, mirroring mail-calendar's live JMAP tests; no
+//! host trust store is touched.
 //!
 //! The tests skip unless `ASTRA_LIVE_HARNESS=1`, so the offline `cargo test` stays
 //! green. Against a running harness:
@@ -76,11 +75,10 @@
 //! cargo test -p astra-app tests_live_harness -- --nocapture --test-threads=1
 //! ```
 //!
-//! The suites share one live server whose contracts pin whole states (the list
-//! suite's three-note INBOX; the reply and forward suites deliver into that same
-//! INBOX before withdrawing their copies), so the recorded invocation runs them
-//! one at a time: in parallel, one suite's transient delivery would break
-//! another's whole-equality assertion.
+//! The suites share one live server whose contracts pin whole states (the
+//! list suite's three-note INBOX; the reply and forward suites deliver into
+//! that INBOX before withdrawing their copies), so the recorded invocation
+//! runs them one at a time.
 
 use std::{
     sync::{
@@ -104,12 +102,10 @@ use crate::{
     Account, App, AppObserver, FolderRef, Intent, Surface,
 };
 
-// The gated reading, drafts, send, reply, forward, search, calendar, and
-// people tests: their own files, so this one stays under the 500-line cap the
-// gate enforces. The explicit paths because this file is loaded through `#[path]`
-// and so owns no directory a bare `mod` would resolve into. `proof` holds the
-// fixtures the three delivery proofs share (the two-account app, the composer
-// document, the cleanup sweep).
+// The gated suites live in their own files, so this one stays under the
+// 500-line cap the gate enforces; the explicit `#[path]`s because this file
+// owns no directory a bare `mod` would resolve into. `proof` holds the
+// fixtures the delivery proofs share.
 #[path = "tests_live_harness/calendar.rs"]
 mod calendar;
 #[path = "tests_live_harness/calendar_brief.rs"]
@@ -122,6 +118,8 @@ mod calendar_proof;
 mod drafts;
 #[path = "tests_live_harness/forward.rs"]
 mod forward;
+#[path = "tests_live_harness/jmap.rs"]
+mod jmap;
 #[path = "tests_live_harness/people.rs"]
 mod people;
 #[path = "tests_live_harness/people_proof.rs"]

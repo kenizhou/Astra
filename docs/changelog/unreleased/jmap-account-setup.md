@@ -10,7 +10,9 @@ error. The account connects at launch, joins the accounts page under
 its own JMAP kind, and serves every folder through one account-wide
 connection. A JMAP account whose stored credential is refused shows the
 expired-sign-in row naming the credential, with reconnecting the
-account as its remedy.
+account as its remedy. The whole route is proven live against a real
+JMAP server: folders, the message list, a body read, a send, and the
+calendar read the server's own session advertises.
 
 Platforms: desktop
 Bump: minor
