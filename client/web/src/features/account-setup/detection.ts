@@ -7,9 +7,11 @@
 
 import {
   detectAccountSettings,
+  type AccountSetup,
   type ConnectionSecurity,
   type MissReason,
   type RecommendationView,
+  type RejectedCertificateView,
   type SetupRecommendation,
 } from '@/services/ipc';
 
@@ -111,4 +113,45 @@ export function manualPrefill(view: RecommendationView): SetupFields {
     password: '',
     security: imap.imap_security,
   };
+}
+
+/** The setup the test command takes, built from the fields on screen. */
+export function buildSetup(
+  fields: SetupFields,
+  accepted?: RejectedCertificateView,
+): AccountSetup {
+  const port = fields.port.trim();
+  return {
+    imap_host: port === '' ? fields.host.trim() : `${fields.host.trim()}:${port}`,
+    username: fields.username.trim(),
+    credential: { password: fields.password },
+    imap_security: fields.security,
+    smtp_security: fields.security,
+    accepted_certificate: accepted
+      ? { server_name: accepted.server_name, sha256: accepted.sha256 }
+      : undefined,
+  };
+}
+
+/** The seed the JMAP form opens on: the address, and the server URL it shows. */
+export interface JmapFormSeed {
+  /** The account's email address. */
+  email: string;
+  /** The server URL the form's field opens on: the recommendation's own,
+   * passed through; the form itself displays a blank one as the
+   * domain-derived `https://<domain>` the host re-derives at the submit. */
+  serverUrl: string;
+}
+
+/**
+ * The JMAP form's seed from a recommendation: the address it carries and
+ * the server URL its JMAP route found, or null behind every other
+ * route.
+ */
+export function jmapSeedFrom(view: RecommendationView): JmapFormSeed | null {
+  const rec = view.recommendation;
+  if (!('Jmap' in rec)) {
+    return null;
+  }
+  return { email: rec.Jmap.email, serverUrl: rec.Jmap.server_url };
 }

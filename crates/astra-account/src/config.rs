@@ -13,7 +13,7 @@ use provider_imap::{CredentialSource, Credentials, ImapConfig};
 use serde::{Deserialize, Serialize};
 
 use crate::oauth_accounts::{GoogleAccount, GraphAccount};
-use crate::{dav::DavAccount, AccountError, CertificateException};
+use crate::{dav::DavAccount, jmap::JmapAccount, AccountError, CertificateException};
 
 /// A secret string (password/token) that redacts itself in `Debug`, so a config
 /// holding it can still derive `Debug` without leaking the secret into logs.
@@ -93,6 +93,11 @@ pub struct AccountConfig {
     /// stored before this section existed.
     #[serde(default)]
     pub google: Option<GoogleAccount>,
+    /// The JMAP account section, when the account speaks JMAP rather than
+    /// dialing servers itself: the server base URL and the one secret.
+    /// Absent for every account stored before this section existed.
+    #[serde(default)]
+    pub jmap: Option<JmapAccount>,
     /// Server certificates this account's owner accepted although they did not verify.
     /// Empty for every account that never met one, which is nearly all of them.
     #[serde(default, rename = "certificate_exception")]
@@ -256,6 +261,9 @@ impl AccountConfig {
             }
             root.insert("google".into(), section.into());
         }
+        if let Some(jmap) = &self.jmap {
+            root.insert("jmap".into(), jmap.to_table().into());
+        }
         if !self.certificate_exceptions.is_empty() {
             let exceptions: Vec<toml::Value> = self
                 .certificate_exceptions
@@ -367,6 +375,14 @@ impl AccountConfig {
             return AccountId::try_from(format!("{username}@{host}").as_str())
                 .map_err(|err| ConfigError::Identity(err.to_string()));
         }
+        // A jmap-only account keys on its address under the JMAP scheme
+        // tag and the server host of its base URL: distinct from an IMAP
+        // account for the same address and from the OAuth families, and
+        // distinct per server (the host is part of the id). The section
+        // owns the derivation.
+        if let Some(jmap) = self.jmap.as_ref() {
+            return jmap.derived_account_id();
+        }
         // A graph-only account has no server of its own: the id keys the
         // grant's mailbox by its address under the one protocol it dials.
         if let Some(graph) = self.graph.as_ref() {
@@ -419,11 +435,15 @@ pub fn load(path: impl AsRef<Path>) -> Result<AccountConfig, ConfigError> {
 /// # Errors
 ///
 /// Returns [`ConfigError`] if the text is not valid config, or names no
-/// server at all (no `[imap]` section, no `[graph]` section, and no
-/// `[google]` section).
+/// server at all (no `[imap]` section, no `[jmap]` section, no `[graph]`
+/// section, and no `[google]` section).
 pub fn load_str(text: &str) -> Result<AccountConfig, ConfigError> {
     let mut config: AccountConfig = toml::from_str(text)?;
-    if config.imap.is_none() && config.graph.is_none() && config.google.is_none() {
+    if config.imap.is_none()
+        && config.jmap.is_none()
+        && config.graph.is_none()
+        && config.google.is_none()
+    {
         return Err(ConfigError::NoEndpoint);
     }
     if let Some(dav) = &config.dav {
@@ -446,8 +466,10 @@ pub enum ConfigError {
     #[error("missing required field: {0}")]
     Incomplete(&'static str),
     /// The config names no server: an account needs an `[imap]` section,
-    /// a `[graph]` section, or a `[google]` section.
-    #[error("the account names no server: it needs an [imap], [graph], or [google] section")]
+    /// a `[jmap]` section, a `[graph]` section, or a `[google]` section.
+    #[error(
+        "the account names no server: it needs an [imap], [jmap], [graph], or [google] section"
+    )]
     NoEndpoint,
     /// The `[dav]` section names no server: a dav section needs a
     /// `caldav_url`, a `carddav_url`, or both.

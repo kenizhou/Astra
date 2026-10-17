@@ -296,6 +296,7 @@ pub(crate) async fn complete_microsoft_signin(
         dav: None,
         graph: Some(graph),
         google: None,
+        jmap: None,
         certificate_exceptions: Vec::new(),
         shape: AccountShape::default(),
     };

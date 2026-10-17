@@ -39,6 +39,35 @@ impl DialConnector {
 impl MailboxConnector<HostProvider> for DialConnector {
     async fn connect_folder(&self, account: &AccountId, mailbox_key: &str) -> Option<HostProvider> {
         let (config, connections) = self.dials.of(account.as_str())?;
+        if let Some(jmap) = config.jmap.as_ref() {
+            // One provider serves the whole JMAP account: the binder
+            // reconnects that account-wide provider, whatever the
+            // mailbox key names, and never mints a per-folder one. The
+            // key is deliberately unread; a grant account dials over a
+            // source minted here whose sink is none on purpose (a late
+            // bind only reads, and the boot's sink-backed source owns
+            // the rotations, exactly the graph arm's rule).
+            let tls = astra_account::account_tls(&config).ok()?;
+            let provider = match jmap.oauth.as_ref() {
+                Some(_) => {
+                    let source = astra_account::jmap_token_source(
+                        jmap,
+                        account.clone(),
+                        None,
+                        astra_account::CredentialOrigin::Stored,
+                    )
+                    .ok()?;
+                    Box::new(
+                        astra_account::dial_jmap_oauth_account(&config, &tls, &source)
+                            .await
+                            .ok()?,
+                    ) as HostProvider
+                }
+                None => Box::new(astra_account::dial_jmap_account(&config, &tls).await.ok()?)
+                    as HostProvider,
+            };
+            return Some(provider);
+        }
         if let Some(graph) = config.graph.as_ref() {
             // A Graph account binds folders over its stored grant: a
             // source minted from the document through the same seam the
@@ -175,6 +204,29 @@ pub(crate) async fn dial_stored(
             }
             continue;
         }
+        if config.imap.is_none() && config.jmap.is_some() {
+            match dial_jmap_stored(dials, credentials, &account_id, &config).await {
+                Ok(account) => {
+                    let (account, contacts) = dial_dav(&config, account).await;
+                    accounts.push(Dialled { account, contacts });
+                }
+                // The credential was refused outright (a dead grant's
+                // token mint or a password the session's own 401
+                // rejects): the account skips, and the refusal state it
+                // leaves behind is the row the surfaces render.
+                Err(astra_account::AccountError::SigninRejected(detail)) => {
+                    refusals.record_dead(account_id.as_str());
+                    log::warn!(
+                        "boot: an account's sign-in expired or was withdrawn; it waits to be \
+                         signed in again: {detail}"
+                    );
+                }
+                Err(err) => {
+                    log::warn!("boot: an account could not be connected and was skipped: {err}");
+                }
+            }
+            continue;
+        }
         let email = config
             .imap
             .as_ref()
@@ -297,6 +349,51 @@ async fn dial_google_stored(
         id: account_id.clone(),
         providers,
         identity: EmailAddress::new(google.email.clone()),
+    })
+}
+
+/// Dials one stored JMAP account: the one account-wide provider, over
+/// the stored password or over the grant's sink-backed token source
+/// (a rotation a ratcheting server issues at this dial lands in the
+/// entry and the store, the defence without which the account dies at
+/// the next launch). The dial is the account layer's own free function
+/// both shapes walk, so the boot, the folder binder, and the sign-in's
+/// completion cannot disagree about what a JMAP account opens.
+async fn dial_jmap_stored(
+    dials: &Arc<AccountDials>,
+    credentials: &Arc<dyn crate::credential_store::AccountCredentialStore>,
+    account_id: &AccountId,
+    config: &astra_account::AccountConfig,
+) -> Result<HostAccount, astra_account::AccountError> {
+    let jmap = config
+        .jmap
+        .as_ref()
+        .ok_or(astra_account::AccountError::NoImap)?;
+    let tls = astra_account::account_tls(config)?;
+    let provider: HostProvider = match jmap.oauth.as_ref() {
+        Some(_) => {
+            // The stored grant dials through the same sink the sign-in's
+            // completion registers: a rotation at boot lands in the
+            // entry and the store, and a stored source adopts whatever
+            // this process already holds for the account.
+            let sink = crate::oauth::graph_sink::graph_token_sink(
+                Arc::clone(dials),
+                Arc::clone(credentials),
+            );
+            let source = astra_account::jmap_token_source(
+                jmap,
+                account_id.clone(),
+                Some(sink),
+                astra_account::CredentialOrigin::Stored,
+            )?;
+            Box::new(astra_account::dial_jmap_oauth_account(config, &tls, &source).await?)
+        }
+        None => Box::new(astra_account::dial_jmap_account(config, &tls).await?),
+    };
+    Ok(HostAccount {
+        id: account_id.clone(),
+        providers: vec![provider],
+        identity: EmailAddress::new(jmap.email.clone()),
     })
 }
 

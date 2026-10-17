@@ -55,6 +55,10 @@ pub(crate) mod settings;
 // host-side mutations), under the same split.
 pub(crate) mod mcp;
 
+// The jmap add command surface (the wizard's JMAP form's password leg),
+// under the same split.
+pub(crate) mod jmap;
+
 /// A command failure, serialised to the webview as its display string: a sentence a
 /// surface can show, with the reason the host saw.
 #[derive(Debug, thiserror::Error)]
@@ -274,6 +278,7 @@ where
         .imap
         .as_ref()
         .map(|imap| imap.username.clone())
+        .or_else(|| config.jmap.as_ref().map(|jmap| jmap.email.clone()))
         .ok_or_else(|| CommandError::Config("the account names no mail server".to_owned()))?;
 
     let (providers, connections) =

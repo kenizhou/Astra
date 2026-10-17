@@ -94,7 +94,9 @@ export function ReconnectBanner({ rows }: { rows: AccountSettingsRow[] }) {
 /** The expired-sign-in row: a dead grant renders its own card, because a
  * sign-in button inside the open-button row is markup no screen reader
  * tolerates. The sentence names the sign-in, never an outage, and its
- * action is the same re-grant. */
+ * action is the same re-grant. A jmap row has no integrated provider
+ * flow to re-run: its sentence names the refused credential and its
+ * remedy is reconnecting the account here. */
 export function ExpiredSignInRow({
   row,
   onOpen,
@@ -103,6 +105,7 @@ export function ExpiredSignInRow({
   onOpen: () => void;
 }) {
   const regrant = useRegrant();
+  const jmap = row.kind === 'jmap';
   return (
     <div
       role="status"
@@ -111,17 +114,21 @@ export function ExpiredSignInRow({
     >
       <p className="text-xs font-medium text-foreground">{row.address}</p>
       <p className="text-xs text-muted-foreground">
-        The sign-in expired or was withdrawn. Sign in again to reconnect this account.
+        {jmap
+          ? 'This account\u2019s credential was refused. Remove the account and connect it again to update it.'
+          : 'The sign-in expired or was withdrawn. Sign in again to reconnect this account.'}
       </p>
       <div className="flex gap-2 pt-1">
-        <button
-          type="button"
-          aria-label={`Sign in again as ${row.address}`}
-          onClick={() => regrant.begin(regrantProvider(row.kind), row.address)}
-          className="rounded-[var(--radius)] bg-secondary px-2.5 py-1 text-xs text-secondary-foreground transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[var(--hit)]"
-        >
-          Sign in again
-        </button>
+        {!jmap && (
+          <button
+            type="button"
+            aria-label={`Sign in again as ${row.address}`}
+            onClick={() => regrant.begin(regrantProvider(row.kind), row.address)}
+            className="rounded-[var(--radius)] bg-secondary px-2.5 py-1 text-xs text-secondary-foreground transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[var(--hit)]"
+          >
+            Sign in again
+          </button>
+        )}
         {regrant.sentence !== null && (
           <p role="alert" className="text-xs text-muted-foreground">
             {regrant.sentence}

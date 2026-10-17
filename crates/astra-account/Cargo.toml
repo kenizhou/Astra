@@ -50,6 +50,10 @@ provider-graph.workspace = true
 # GoogleCalendarProvider, CalendarWindow): under the same decision-4 clause
 # as the graph one above.
 provider-google.workspace = true
+# The JMAP adapter the optional jmap section of a stored JMAP account dials
+# (JmapConfig, JmapProvider, Credentials): under the same decision-4 clause
+# as the graph and google ones above.
+provider-jmap.workspace = true
 # Implementing the engine's async `Provider` trait for the reconnecting IMAP wrapper.
 async-trait.workspace = true
 # Builds the reconnecting wrapper's retried provider streams.

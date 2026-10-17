@@ -99,6 +99,7 @@ pub(crate) fn account(
         certificate_exceptions: exceptions,
         graph: None,
         google: None,
+        jmap: None,
         dav: None,
         shape: AccountShape::default(),
     }

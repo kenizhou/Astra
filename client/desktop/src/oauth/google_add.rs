@@ -257,6 +257,7 @@ pub(crate) async fn complete_google_signin(
         dav: None,
         graph: None,
         google: Some(google),
+        jmap: None,
         certificate_exceptions: Vec::new(),
         shape: AccountShape::default(),
     };
