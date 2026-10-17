@@ -124,6 +124,10 @@ impl JmapAccount {
     /// The section as the table the stored document carries it in: the
     /// inverse of deserialization, manual so [`Secret`] stays
     /// non-serialisable outside this boundary. Only the one secret is
+    /// A  block this build reads as  is STRIPPED by a
+    /// rewrite (to_table writes an empty table): a newer build's grant does
+    /// not survive a load+save from this one. The recorded gap until the
+    /// block becomes real in Task 2.
     /// written, as `password`.
     pub(crate) fn to_table(&self) -> toml::Table {
         let mut table = toml::Table::new();
@@ -202,7 +206,7 @@ pub fn build_jmap_config_toml(setup: &JmapSetup) -> Result<String, ConfigError> 
 /// an explicit server URL, or (when blank) `https://<email-domain>`
 /// relying on `/.well-known/jmap` autodiscovery.
 ///
-/// Shared by the setup path and the detection's prefill so a discovered
+/// The one derivation every stored JMAP document and every connect walks so a discovered
 /// account and a hand-entered one cannot disagree about which server they
 /// mean.
 ///
@@ -250,7 +254,13 @@ fn is_loopback(authority: &str) -> bool {
     } else {
         host.split(':').next().unwrap_or(host)
     };
-    host.eq_ignore_ascii_case("localhost") || host == "127.0.0.1" || host == "::1"
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<std::net::Ipv4Addr>()
+            .is_ok_and(|ip| ip.is_loopback())
+        || host
+            .parse::<std::net::Ipv6Addr>()
+            .is_ok_and(|ip| ip.is_loopback())
 }
 
 /// The host portion (`host` or `host:port`, lowercased) of a JMAP base

@@ -6,7 +6,7 @@
 
 use provider_jmap::Credentials;
 
-use super::{base_host, build_jmap_config_toml, jmap_base_url, JmapSetup};
+use super::{base_host, build_jmap_config_toml, jmap_base_url, normalize_base_url, JmapSetup};
 use crate::{load_str, AccountConfig, ConfigError};
 
 /// A `[jmap]` document with a password, the form every setup writes.
@@ -322,4 +322,12 @@ fn build_toml_requires_an_email() {
         build_jmap_config_toml(&empty),
         Err(ConfigError::Incomplete("email"))
     ));
+}
+
+#[test]
+fn an_explicit_https_base_passes_through_unchanged() {
+    // The scheme the owner typed is theirs to keep: only http is subject
+    // to the loopback rule, and nothing rewrites a path or port away.
+    let url = normalize_base_url("https://mail.example.test:443/jmap");
+    assert_eq!(url, "https://mail.example.test:443/jmap");
 }

@@ -131,7 +131,7 @@ pub enum AccountError {
     #[error("tls: {0}")]
     Tls(#[from] engine_tls::TlsError),
     /// The server refused the account's **stored credential** outright (a password
-    /// answered with `[AUTHENTICATIONFAILED]`). Distinct from every other variant
+    /// answered with `[AUTHENTICATIONFAILED]`, or a JMAP connect's `401`). Distinct from every other variant
     /// because it is the one failure a retry cannot fix and an outage badge
     /// misdescribes (the server *was* reached) so a caller prompts "sign in again".
     #[error("sign-in rejected: {0}")]
