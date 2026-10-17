@@ -79,6 +79,9 @@ pub struct JmapAccount {
     /// one credential.
     #[serde(default)]
     pub oauth: Option<JmapOAuthGrant>,
+    // A document somehow carrying both a password and a grant: the grant
+    // wins (mail-calendar's precedence). The host never writes both, and
+    // a grant-carrying account was connected by signing in.
 }
 
 /// The wire form of [`JmapAccount`]: the only place the legacy `token` key

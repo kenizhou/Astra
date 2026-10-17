@@ -56,8 +56,10 @@ pub fn begin_jmap_reauth(section: &JmapAccount) -> Result<JmapLoginStart, Accoun
 /// Completes a re-authentication started by [`begin_jmap_reauth`]:
 /// exchanges the redirect for a fresh grant and returns the section to
 /// store in the account's place. The account keeps its identity; only the
-/// credential changes, and the host re-persists the result through its
-/// credential transaction.
+/// credential changes. The host persists the fresh grant BEFORE the first
+/// dial with it, so a rotation a ratcheting server issues at that dial
+/// lands on the fresh grant rather than the dead one, and it connects to
+/// prove the grant works before displacing the stored one.
 ///
 /// # Errors
 ///
