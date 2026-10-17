@@ -8,7 +8,7 @@
 // it. The probe fails soft: any miss leaves the field standing, never
 // an error, because the password form works against every server.
 
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 
 import {
   addJmapAccount,
@@ -61,6 +61,10 @@ export function JmapForm({ seed, onClose }: JmapFormProps) {
   const [password, setPassword] = useState('');
   const [offered, setOffered] = useState(false);
   const [flow, setFlow] = useState<JmapFlowState>({ status: 'idle' });
+  // The unmount cleanup below reads the LIVE status; a closure over the
+  // initial state would see 'idle' forever.
+  const flowRef = useRef(flow);
+  flowRef.current = flow;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -115,6 +119,12 @@ export function JmapForm({ seed, onClose }: JmapFormProps) {
       disposed = true;
       unlisten?.();
       unlisten = null;
+      // The wizard closing abandons a browser-open flow: the shared
+      // sign-in slot is taken back so a later begin (any provider) does
+      // not answer InFlight into the void.
+      if (flowRef.current.status === 'browser-open' && isTauri) {
+        void oauthCancel();
+      }
     };
   }, []);
 

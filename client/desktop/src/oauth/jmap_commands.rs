@@ -150,20 +150,6 @@ where
     })
 }
 
-/// Begins one JMAP sign-in: runs the discovery under `bound`, opens the
-/// minted authorization URL in the system browser through the session's
-/// external arm, and returns once the browser opened. The completion
-/// runs on the runtime: the spawned half waits for the redirect, spends
-/// the flow through the claim, and hands the pending handle and the
-/// redirect to `complete`, whose outcome crosses through `emit`.
-///
-/// # Errors
-///
-/// Answers [`OAuthCommandError::Discover`] when the discovery refused
-/// or outlived its bound (each leaves nothing in flight, no browser
-/// opened), [`OAuthCommandError::InFlight`] when a sign-in already
-/// stands, and [`OAuthCommandError::Browser`] when the browser refused
-/// to open.
 /// The halves one begun JMAP sign-in runs over: the discovery seam, the
 /// completion seam, and the bound the discovery runs under.
 pub(crate) struct JmapFlowHalves {

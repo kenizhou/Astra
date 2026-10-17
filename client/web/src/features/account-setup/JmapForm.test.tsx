@@ -242,4 +242,16 @@ describe('a begun jmap sign-in', () => {
     ).toBeTruthy();
     expect(useUiStore.getState().accountSetupOpen).toBe(true);
   });
+  it('cancels a browser-open sign-in when the form unmounts', async () => {
+    ipc.jmapOauthOffered.mockResolvedValue(true);
+    ipc.jmapOauthBegin.mockResolvedValue({ status: 'browser-opened' });
+    renderForm({ email: 'ada@example.test', serverUrl: 'https://mail.example.test' });
+    const button = await screen.findByRole('button', { name: 'Sign in with your provider' });
+    fireEvent.click(button);
+    // The completion never arrives; the wizard closes and the shared slot
+    // must come back so a later begin (any provider) is not InFlight.
+    expect(ipc.jmapOauthBegin).toHaveBeenCalledTimes(1);
+    cleanup();
+    expect(ipc.oauthCancel).toHaveBeenCalledTimes(1);
+  });
 });
