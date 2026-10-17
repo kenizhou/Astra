@@ -160,10 +160,9 @@ fn jmap_base() -> Option<String> {
     if std::env::var("ASTRA_LIVE_HARNESS").ok().as_deref() != Some("1") {
         return None;
     }
-    Some(
-        std::env::var("ASTRA_HARNESS_JMAP_URL")
-            .unwrap_or_else(|_| "http://127.0.0.1:2080".to_owned()),
-    )
+    let url = std::env::var("ASTRA_HARNESS_JMAP_URL")
+        .unwrap_or_else(|_| "http://127.0.0.1:2080".to_owned());
+    Some(url)
 }
 
 /// The harness's SMTP submission port from the environment: the compose file publishes
@@ -198,6 +197,7 @@ fn account(
         certificate_exceptions: exceptions,
         graph: None,
         google: None,
+        jmap: None,
         dav: None,
         shape: AccountShape::default(),
     }

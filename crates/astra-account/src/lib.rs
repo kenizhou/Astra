@@ -17,6 +17,7 @@ mod dav;
 mod google;
 mod graph;
 mod imap;
+mod jmap;
 mod log_handle;
 mod oauth_accounts;
 mod pass_folders;
@@ -44,6 +45,7 @@ pub use graph::{
     GraphTokenSource, MicrosoftProviders, TokenSink,
 };
 pub use imap::{connect_imap_mailbox, connect_mail_providers, ImapConnections};
+pub use jmap::{build_jmap_config_toml, dial_jmap_account, jmap_base_url, JmapAccount, JmapSetup};
 pub use log_handle::account_log_handle;
 pub use oauth_accounts::{GoogleAccount, GraphAccount};
 pub use pass_folders::pass_syncs;
@@ -100,6 +102,13 @@ pub enum AccountError {
     /// banner.
     #[error("google: {0}")]
     Google(String),
+    /// A JMAP call failed: the session discovery, the connect, or a
+    /// transport failure while building or driving a JMAP account's
+    /// provider. A refusal the account cannot recover from arrives as
+    /// [`Self::SigninRejected`] instead, so a caller never mistakes a
+    /// dead password for an outage.
+    #[error("jmap: {0}")]
+    Jmap(String),
     /// The IMAP connection or login failed.
     #[error("imap: {0}")]
     Imap(#[from] provider_imap::ImapError),
@@ -159,6 +168,20 @@ impl AccountError {
             Self::SigninRejected(err.to_string())
         } else {
             Self::Imap(err)
+        }
+    }
+
+    /// The verdict for a JMAP connect, which presents the credential on
+    /// **every** attempt (the session discovery itself authenticates, so
+    /// there is no first-then-folders sequence to corroborate against): an
+    /// authentication-class refusal (a `401` to a password or an API
+    /// token) becomes [`Self::SigninRejected`]; anything else keeps
+    /// [`Self::Jmap`].
+    pub(crate) fn from_jmap_connect(err: &provider_jmap::JmapError) -> Self {
+        if err.failure_class() == engine_api::FailureClass::Authentication {
+            Self::SigninRejected(err.to_string())
+        } else {
+            Self::Jmap(err.to_string())
         }
     }
 }
