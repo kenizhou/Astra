@@ -10,9 +10,9 @@
 //! would: a [`CertificateException`] recorded for that one server. That is
 //! the recorded TLS route for this harness (the decision sits in
 //! `docker/harness/compose.yaml` and `scripts/dev/harness.sh`): the account
-//! layer dials TLS only. The same certificate serves the SMTP submission
-//! listener (`127.0.0.1:2025`), both legs name the one server, so the one
-//! accepted exception covers the submission dial too.
+//! layer dials TLS only, and the same certificate serves the SMTP submission
+//! listener (`127.0.0.1:2025`), both legs naming the one server, so the one
+//! accepted exception covers both dials.
 //!
 //! The seed script (`docker/harness/stalwart/seed.sh`) also delivers three pinned
 //! notes to astra1's INBOX through the harness's own SMTP submission port (implicit
@@ -26,20 +26,30 @@
 //! real Drafts folder through the product's own dispatches. The gated send test
 //! (`send`) needs no seed either: it submits its own mail from astra1 to astra2
 //! through the engine's real send path, reads the delivery back, and withdraws both
-//! copies so the harness keeps its seeded shape. The gated reply and
+//! copies so the harness keeps its seeded shape; the attachment proof in the same
+//! file carries the wire one file further, staging one attachment behind a minted
+//! handle whose bytes the app-level read returns exactly. The gated reply and
 //! forward tests (`reply`, `forward`) walk the answer chain over the same wire:
 //! each first submits a fresh note from astra1 to astra2 (the seed leaves astra2
 //! nothing to answer), then composes the answer through the product's own compose
 //! pipeline, submits it as a reply or a forward, and reads the delivery back at
 //! astra1 with the threading pinned (`In-Reply-To` matching the original's
 //! `Message-ID` for the reply; `References` only, under a `Fwd:` subject, for the
-//! forward). Both withdraw every copy they made, so astra1's INBOX ends the run
-//! holding the three seeded notes again and astra2 holds nothing. The gated search
+//! forward). All of them withdraw every copy they made, so astra1's INBOX ends the
+//! run holding the three seeded notes again and astra2 holds nothing. The gated
+//! folder tests (`folders`, `move_to_folder`) walk the pane's folder writes end to
+//! end over the IMAP
+//! dial: the folder lifecycle (created nested, renamed under the receipt's minted
+//! key, reparented, trashed, deleted for good) and a move-to-folder batch, each
+//! run withdrawing what it created and rescuing the seeded notes from inside it.
+//! The gated unified proof (`unified`) lists both harness accounts' inbox rows on
+//! the all-inboxes scope, newest first, over a fresh note submitted across the
+//! same wire. The gated search
 //! test (`search`) reads rather than writes: it needs no seed of its own and no
 //! cleanup, because every query it runs crosses the engine's real search surface over
-//! the corpus the seed already pinned (the three INBOX notes plus the rich note
-//! in Projects, so the `from:` hit proves the answer crosses folders), and the
-//! harness keeps its seeded shape whatever the queries find. The gated people
+//! the corpus the seed already pinned (the rich note sits in Projects, so the
+//! `from:` hit proves the answer crosses folders), and the harness keeps its seeded
+//! shape whatever the queries find. The gated people
 //! tests (`people`) extend the same discipline to the CardDAV face: cards are
 //! seeded onto each account's default address book through a raw helper under
 //! unique run tokens, the dial proof runs the real `connect_dav_providers`,
@@ -80,32 +90,22 @@
 //! that INBOX before withdrawing their copies), so the recorded invocation
 //! runs them one at a time.
 
-use std::{
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
-    time::Duration,
-};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
-use engine_api::{AccountId, EmailAddress, Engine, Provider, SyncScope};
+use engine_api::{AccountId, Provider};
 
 use astra_account::{
     connect_mail_providers, AccountConfig, AccountError, AccountShape, CertificateException,
     ConnectionSecurity, ImapAccount, ImapConnections, Secret, SmtpAccount,
 };
-use astra_autodetect::{detect, DetectConfig, Detected, SourceKind};
 use astra_viewmodel::{FolderRole, MailboxListSnapshot, MessageRowView, RowKey};
 
-use crate::{
-    reference::{MessageRef, RowRef},
-    Account, App, AppObserver, FolderRef, Intent, Surface,
-};
+use crate::{reference::MessageRef, App, AppObserver, FolderRef, Intent, RowRef, Surface};
 
 // The gated suites live in their own files, so this one stays under the
 // 500-line cap the gate enforces; the explicit `#[path]`s because this file
 // owns no directory a bare `mod` would resolve into. `proof` holds the
-// fixtures the delivery proofs share.
+// fixtures the delivery proofs share; `folder_proof` the folder proofs'.
 #[path = "tests_live_harness/calendar.rs"]
 mod calendar;
 #[path = "tests_live_harness/calendar_brief.rs"]
@@ -116,10 +116,18 @@ mod calendar_invite;
 mod calendar_proof;
 #[path = "tests_live_harness/drafts.rs"]
 mod drafts;
+#[path = "tests_live_harness/folder_proof.rs"]
+mod folder_proof;
+#[path = "tests_live_harness/folders.rs"]
+mod folders;
 #[path = "tests_live_harness/forward.rs"]
 mod forward;
 #[path = "tests_live_harness/jmap.rs"]
 mod jmap;
+#[path = "tests_live_harness/list.rs"]
+mod list;
+#[path = "tests_live_harness/move_to_folder.rs"]
+mod move_to_folder;
 #[path = "tests_live_harness/people.rs"]
 mod people;
 #[path = "tests_live_harness/people_proof.rs"]
@@ -138,6 +146,8 @@ mod send;
 mod settings;
 #[path = "tests_live_harness/settings_proof.rs"]
 mod settings_proof;
+#[path = "tests_live_harness/unified.rs"]
+mod unified;
 
 /// The harness connection details from the environment, or `None` to skip.
 fn harness() -> Option<(String, String, String, String)> {
@@ -201,27 +211,23 @@ fn account(
     }
 }
 
-/// The mailbox each provider is bound to, in the order the dial returned them.
-fn bound_mailboxes(providers: &[Box<dyn Provider>], account_id: &AccountId) -> Vec<String> {
-    providers
-        .iter()
-        .map(|provider| match provider.email_scope(account_id) {
-            SyncScope::ImapMailbox { mailbox, .. } => mailbox.as_str().to_owned(),
-            other => panic!("an IMAP folder provider bound to {other:?}"),
-        })
-        .collect()
-}
-
 /// Dials the harness account through the certificate acceptance path a person's first
 /// connect walks: the self-signed certificate is refused, the rejection is recorded,
 /// the one certificate is accepted for the one server, and the re-dial returns the
-/// account id and every provider it bound (the INBOX first).
+/// account id, every provider it bound (the INBOX first), the accepted config, and
+/// the shared connections: a late folder bind (the connector a folder proof
+/// installs) draws on the same account without a second handshake.
 async fn dial_with_accepted_certificate(
     host: &str,
     port: &str,
     user: &str,
     password: &str,
-) -> (AccountId, Vec<Box<dyn Provider>>) {
+) -> (
+    AccountId,
+    Vec<Box<dyn Provider>>,
+    astra_account::AccountConfig,
+    std::sync::Arc<ImapConnections>,
+) {
     let config = account(host, port, user, password, Vec::new());
     let account_id = config.account_id().expect("the account id");
     let connections = ImapConnections::new();
@@ -238,7 +244,7 @@ async fn dial_with_accepted_certificate(
     let providers = connect_mail_providers(&connections, &config, &account_id)
         .await
         .expect("the dial with the accepted certificate");
-    (account_id, providers)
+    (account_id, providers, config, connections)
 }
 
 /// The three subjects the harness seed pins; the list test's fixtures.
@@ -289,11 +295,6 @@ fn row_by_subject<'a>(snapshot: &'a MailboxListSnapshot, subject: &str) -> &'a M
         .unwrap_or_else(|| panic!("no row with subject {subject}"))
 }
 
-/// How many listed rows are unread.
-fn unread_count(snapshot: &MailboxListSnapshot) -> usize {
-    snapshot.rows.iter().filter(|row| row.unread).count()
-}
-
 /// Flips `subject`'s row to `read`, building the action's reference from the row the
 /// list actually shows: the row's own key is the ref an action carries.
 async fn mark_read(app: &App<Box<dyn Provider>>, subject: &str, read: bool) {
@@ -307,192 +308,4 @@ async fn mark_read(app: &App<Box<dyn Provider>>, subject: &str, read: bool) {
     })
     .await
     .expect("the mark-read dispatch");
-}
-
-/// The dial against the harness walks the certificate acceptance path a person does:
-/// refused first, the rejection recorded, the one certificate accepted for the one
-/// server, and then the dial binds the INBOX and the custom folder the seed created.
-#[tokio::test]
-async fn a_dial_pins_the_rejected_certificate_and_binds_the_inbox_and_the_custom_folder() {
-    let Some((host, port, user, password)) = harness() else {
-        eprintln!("skipping live harness test: ASTRA_LIVE_HARNESS is not 1");
-        return;
-    };
-    let (account_id, providers) =
-        dial_with_accepted_certificate(&host, &port, &user, &password).await;
-
-    let bound = bound_mailboxes(&providers, &account_id);
-    assert_eq!(
-        bound.first().map(String::as_str),
-        Some("INBOX"),
-        "the reserved INBOX is bound first; the bound list is {bound:?}",
-    );
-    assert!(
-        bound.contains(&"Projects".to_owned()),
-        "the custom folder astra1 seeds is bound; the bound list is {bound:?}",
-    );
-    // The submission leg rides the same walk: both legs name the one server whose
-    // certificate was just accepted, and every provider the dial returns carries the
-    // SMTP binding the outbox drain delivers through. A send queued against this
-    // account has a provider that can take it.
-    assert!(
-        providers
-            .iter()
-            .all(|provider| provider.connection_info().capabilities.submission()),
-        "the dial bound no submission provider beside the folders",
-    );
-}
-
-/// The message list against the live harness: the three notes the seed delivers
-/// through the harness's own SMTP submission appear in astra1's INBOX after one
-/// refresh, newest first, and a mark-read writes through to the server: the row flips
-/// at once, and the read state survives a further refresh.
-///
-/// The run builds the loop the desktop host builds: the engine in a scratch store,
-/// the accepted dial's providers, the app over them. `dispatch` awaits each whole
-/// pass (sync, outbox drain, rebuild), so the snapshot is final and needs no polling.
-///
-/// A warm volume may hold the read state an earlier run left, so the test first puts
-/// every note back to unread through the product's own write path; the flip is then
-/// proven from a known state on any volume.
-#[tokio::test]
-async fn the_message_list_shows_the_seeded_notes_and_a_mark_read_survives_a_refresh() {
-    let Some((host, port, user, password)) = harness() else {
-        eprintln!("skipping live harness test: ASTRA_LIVE_HARNESS is not 1");
-        return;
-    };
-    let (account_id, providers) =
-        dial_with_accepted_certificate(&host, &port, &user, &password).await;
-
-    let counter = Arc::new(CountingObserver::default());
-    let observer: Arc<dyn AppObserver> = counter.clone();
-    let app = App::new(
-        Arc::new(Engine::open_in_memory().expect("the engine store")),
-        vec![Account {
-            id: account_id.clone(),
-            providers,
-            identity: EmailAddress::new("astra1@example.test"),
-        }],
-        None,
-        observer,
-    );
-
-    app.dispatch(Intent::RefreshMail).await.unwrap();
-
-    let inbox = FolderRef::from_parts(account_id.as_str(), inbox_key(&app, &account_id))
-        .expect("the INBOX folder reference");
-    app.dispatch(Intent::SelectFolder { folder: inbox })
-        .await
-        .unwrap();
-
-    // The three seeded notes, newest first: the seed pins the Date headers and
-    // delivers oldest first, so the order holds whatever clock served them.
-    let snapshot = app.mailbox_list();
-    let subjects: Vec<&str> = snapshot
-        .rows
-        .iter()
-        .map(|row| row.subject.as_str())
-        .collect();
-    assert_eq!(
-        subjects,
-        ["Harness note three", "Harness note two", "Harness note one"],
-        "the whole INBOX is the three seeded notes, newest first",
-    );
-    let one = row_by_subject(&snapshot, "Harness note one");
-    assert_eq!(one.sender_name, "Astra Two");
-    assert_eq!(one.sender_address, "astra2@example.test");
-
-    // Back to a known state: every note unread, the writes reaching the server on the
-    // same pass (the refresh drains the outbox after the sync).
-    for subject in NOTES {
-        mark_read(&app, subject, false).await;
-    }
-    app.dispatch(Intent::RefreshMail).await.unwrap();
-    let snapshot = app.mailbox_list();
-    assert_eq!(
-        unread_count(&snapshot),
-        NOTES.len(),
-        "every note is unread after the reset pass"
-    );
-
-    // The flip: one row marked read flips at once and republishes the list.
-    let signals = counter.signals();
-    mark_read(&app, "Harness note two", true).await;
-    assert!(
-        counter.signals() > signals,
-        "the flipped list is republished"
-    );
-    let snapshot = app.mailbox_list();
-    assert!(
-        !row_by_subject(&snapshot, "Harness note two").unread,
-        "the marked row flipped"
-    );
-    assert_eq!(unread_count(&snapshot), 2, "two notes are still unread");
-
-    // And the write holds: a further refresh syncs the server's state back and the
-    // row stays read.
-    app.dispatch(Intent::RefreshMail).await.unwrap();
-    let snapshot = app.mailbox_list();
-    assert!(
-        !row_by_subject(&snapshot, "Harness note two").unread,
-        "the read state survives a refresh"
-    );
-    assert_eq!(
-        unread_count(&snapshot),
-        2,
-        "the other two notes are untouched"
-    );
-}
-
-/// Detection for a harness user runs the real well-known probe over the real HTTP
-/// fetcher: `/.well-known/jmap` redirects to the session, the session's anonymous
-/// JSON advertises `capabilities`, and the account layer routes the find onto the
-/// JMAP form the wizard prefills. The run is clamped to the host command's five
-/// second bound, so it also proves the probe fits that budget.
-#[tokio::test]
-async fn detection_returns_the_jmap_recommendation_for_a_harness_user() {
-    let Some(base) = jmap_base() else {
-        eprintln!("skipping live harness test: ASTRA_LIVE_HARNESS is not 1");
-        return;
-    };
-    let config = DetectConfig {
-        overall_deadline: Duration::from_secs(5),
-        well_known_base_override: Some(url::Url::parse(&base).expect("the harness JMAP URL")),
-        ..DetectConfig::default()
-    };
-
-    let email = "astra1@example.test";
-    let detected = detect(email, None, &config)
-        .await
-        .expect("the detection run against the harness");
-
-    let Detected::Jmap(jmap) = detected else {
-        panic!("the harness domain speaks JMAP over its well-known, got {detected:?}");
-    };
-    assert_eq!(jmap.base_url, base, "the stored base is the harness origin");
-    assert!(
-        jmap.is_trusted,
-        "the harness override is the sanctioned trusted route"
-    );
-    assert_eq!(
-        jmap.source.kind,
-        SourceKind::JmapWellKnown,
-        "the apex well-known (rebased) is the winning source"
-    );
-
-    let recommendation = astra_account::recommend(
-        email,
-        Detected::Jmap(jmap),
-        astra_account::OauthRoutes {
-            google: false,
-            microsoft: false,
-        },
-    );
-    let astra_account::SetupRecommendation::Jmap { server_url, .. } = recommendation else {
-        panic!("a JMAP find routes to the JMAP form, got {recommendation:?}");
-    };
-    assert_eq!(
-        server_url, base,
-        "the JMAP form is prefilled with the harness origin"
-    );
 }

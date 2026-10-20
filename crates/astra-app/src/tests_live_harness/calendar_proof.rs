@@ -207,9 +207,9 @@ pub(super) async fn suite_apps(
     };
     let cal_first = connect(user.to_owned()).await;
     let cal_second = connect(proof::RECIPIENT.to_owned()).await;
-    let (first, mail_first) =
+    let (first, mail_first, ..) =
         super::dial_with_accepted_certificate(host, port, user, password).await;
-    let (second, mail_second) =
+    let (second, mail_second, ..) =
         super::dial_with_accepted_certificate(host, port, proof::RECIPIENT, password).await;
     let engine = Arc::new(Engine::open_in_memory().expect("the engine store"));
     let observer = || Arc::new(CountingObserver::default()) as Arc<dyn AppObserver>;

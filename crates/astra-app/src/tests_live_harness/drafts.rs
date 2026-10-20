@@ -61,7 +61,7 @@ async fn the_drafts_family_saves_discards_and_closes_through_the_live_store() {
         eprintln!("skipping live harness test: ASTRA_LIVE_HARNESS is not 1");
         return;
     };
-    let (account_id, providers) =
+    let (account_id, providers, ..) =
         dial_with_accepted_certificate(&host, &port, &user, &password).await;
 
     let observer: Arc<dyn AppObserver> = Arc::new(super::CountingObserver::default());

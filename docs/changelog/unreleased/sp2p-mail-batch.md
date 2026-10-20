@@ -20,5 +20,13 @@ inline or file. In the reading pane, Save As writes an attachment
 through the platform save dialog and reports the saved path or the
 refusal, and Download All saves every row.
 
+The whole batch is proven live against the local harness: the folder
+lifecycle walks create, rename, reparent, trash, and permanent delete over
+the real IMAP dial with the pane reselecting under each receipt's minted
+key and rows still rendering after the rename, a move to folder carries a
+seeded note into a created folder and back, an attachment round trips from
+the composer to the reader byte for byte, and the unified list holds both
+accounts' inboxes newest first.
+
 Platforms: desktop
 Bump: minor
