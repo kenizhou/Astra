@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The composer fields: From renders read only, To and Subject always show,
+// The composer fields: From renders as the account picker (each row the
+// display name beside the sending address), To and Subject always show,
 // Cc and Bcc stay hidden until their toggles open them, a toggle the
 // composition cannot carry never stands at all, and every change crosses
 // with its exact field name and value.
@@ -10,12 +11,20 @@ import { ComposerFields } from './ComposerFields';
 
 afterEach(cleanup);
 
+/** The account rows the picker draws, the default first. */
+const accounts = [
+  { id: 'work', label: 'Work', address: 'ada@work.test' },
+  { id: 'home', label: 'Home', address: 'ada@home.test' },
+];
+
 function setup(over: Partial<Parameters<typeof ComposerFields>[0]> = {}) {
   const onField = vi.fn();
   const onToggleCc = vi.fn();
   const onToggleBcc = vi.fn();
+  const onChangeFrom = vi.fn();
   const props = {
-    fromLabel: 'Work',
+    from: 'work',
+    fromAccounts: accounts,
     to: 'you@test.local',
     cc: '',
     bcc: '',
@@ -27,18 +36,32 @@ function setup(over: Partial<Parameters<typeof ComposerFields>[0]> = {}) {
     onField,
     onToggleCc,
     onToggleBcc,
+    onChangeFrom,
     ...over,
   };
   render(<ComposerFields {...props} />);
-  return { onField, onToggleCc, onToggleBcc };
+  return { onField, onToggleCc, onToggleBcc, onChangeFrom };
 }
 
 describe('the composer fields', () => {
-  it('shows from as read only text', () => {
+  it('draws From as the account picker, the address beside the name', () => {
     setup();
 
-    expect(screen.getByText('Work')).toBeTruthy();
-    expect(screen.queryByRole('textbox', { name: 'From' })).toBeNull();
+    const from = screen.getByRole('combobox', { name: 'From' }) as HTMLSelectElement;
+    expect(from.value).toBe('work');
+    expect(
+      Array.from(from.querySelectorAll('option')).map((option) => option.textContent),
+    ).toEqual(['Work (ada@work.test)', 'Home (ada@home.test)']);
+  });
+
+  it('carries a From change with the chosen account id', () => {
+    const { onChangeFrom } = setup();
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'From' }), {
+      target: { value: 'home' },
+    });
+
+    expect(onChangeFrom).toHaveBeenCalledWith('home');
   });
 
   it('carries to and subject changes with their field names', () => {

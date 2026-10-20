@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The trimmed rich text editor: TipTap v3 at kylins' package versions, with
 // StarterKit narrowed to the set the composer document carries (paragraphs,
-// bold, italic, underline, both list kinds, links, hard breaks). Everything
-// else the kit bundles is switched off, so the editor cannot produce a
-// shape the wire would have to reject. The editor also hands its live
-// instance to the pane (the snippet picker's insert seam), carries the
-// autocomplete chip anchored to its own scroll box, and exports the
-// place-plain-text-at-the-selection discipline both inserts share.
+// bold, italic, underline, both list kinds, links, hard breaks, and the
+// three widened marks: font size, text colour, highlight). Everything else
+// the kit bundles is switched off, so the editor cannot produce a shape
+// the wire would have to reject. The editor also hands its live instance
+// to the pane (the snippet picker's insert seam and the toolbar's), binds
+// the typed-address recogniser to the space and enter keys, hands a pasted
+// picture up for inline staging exactly as a drop's inline answer stages
+// it, carries the autocomplete chip anchored to its own scroll box, and
+// exports the place-plain-text-at-the-selection discipline both inserts
+// share.
 
 import { useEffect, useRef } from 'react';
 import { Editor as CoreEditor } from '@tiptap/core';
@@ -14,6 +18,8 @@ import { EditorContent, useEditor, type JSONContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 
 import { AutocompleteChip } from './AutocompleteChip';
+import { ColorMark, FontSizeMark, HighlightMark } from './editorMarks';
+import { TypedLinkRecogniser } from './typedLinks';
 
 /**
  * The trimmed extension set: one array shared by the mounted editor and the
@@ -30,8 +36,14 @@ export function trimmedExtensions() {
       horizontalRule: false,
       strike: false,
       trailingNode: false,
-      link: { openOnClick: false },
+      // The scheme allowlist stays core-side: the editor refuses no target
+      // of its own, and the send-time sentence names what degrades.
+      link: { openOnClick: false, isAllowedUri: () => true },
     }),
+    FontSizeMark,
+    ColorMark,
+    HighlightMark,
+    TypedLinkRecogniser,
   ];
 }
 
@@ -72,13 +84,17 @@ interface EditorProps {
   onChange: (doc: JSONContent) => void;
   /** Handed the live editor once created, and null again on unmount. */
   onReady?: (editor: CoreEditor | null) => void;
+  /** Handed the picture files a paste carries, for inline staging. */
+  onPasteImages?: (files: File[]) => void;
 }
 
-export function Editor({ initialContent, onChange, onReady }: EditorProps) {
+export function Editor({ initialContent, onChange, onReady, onPasteImages }: EditorProps) {
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
   const onReadyRef = useRef(onReady);
   onReadyRef.current = onReady;
+  const onPasteImagesRef = useRef(onPasteImages);
+  onPasteImagesRef.current = onPasteImages;
   const wrapRef = useRef<HTMLDivElement>(null);
 
   const editor = useEditor({
@@ -94,6 +110,30 @@ export function Editor({ initialContent, onChange, onReady }: EditorProps) {
       },
     },
   });
+
+  // A pasted picture stages inline exactly as a drop's inline answer stages
+  // it. The listener stands on the wrapper in the capture phase so it
+  // preempts the editor's own paste parsing: the picture never reaches the
+  // document as content, and pasted text (no files) falls through untouched.
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (editor === null || wrap === null) {
+      return undefined;
+    }
+    const onPaste = (event: ClipboardEvent): void => {
+      const files = Array.from(event.clipboardData?.files ?? []).filter((file) =>
+        file.type.startsWith('image/'),
+      );
+      if (files.length === 0) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      onPasteImagesRef.current?.(files);
+    };
+    wrap.addEventListener('paste', onPaste, true);
+    return () => wrap.removeEventListener('paste', onPaste, true);
+  }, [editor]);
 
   useEffect(() => {
     const ready = onReadyRef.current;

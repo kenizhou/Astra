@@ -11,6 +11,7 @@
 import { isTauri } from '@/events/surfaceEvents';
 import { dispatch, intents, type CompositionId } from '@/services/ipc';
 import { useAccountStore } from '@/stores/accountStore';
+import { useSettingsStore } from '@/features/settings/settingsStore';
 
 import {
   mintCompositionId,
@@ -126,17 +127,32 @@ export async function openComposerWindow(
 }
 
 /**
+ * The account a plain composition opens from: the default send account the
+ * persisted preference names when it still stands, else the first account.
+ * Undefined only when no account stands at all.
+ */
+export function defaultSendAccount(): { id: string; label: string } | undefined {
+  const accounts = useAccountStore.getState().accounts;
+  const preferred = useSettingsStore.getState().settings.default_send_account;
+  const pinned =
+    preferred !== undefined && accounts.some((account) => account.accountId === preferred)
+      ? accounts.find((account) => account.accountId === preferred)
+      : accounts[0];
+  return pinned === undefined ? undefined : { id: pinned.accountId, label: pinned.displayName };
+}
+
+/**
  * The New message route: a pop-out window under Tauri, the inline composer
  * outside it (a plain browser holds no windows). The window hydrates blank;
  * only the minted id crosses.
  */
 export function openNewMessageComposer(): Promise<void> {
-  const account = useAccountStore.getState().accounts[0];
+  const account = defaultSendAccount();
   if (account === undefined) {
     return Promise.resolve();
   }
   if (!isTauri) {
-    useComposerStore.getState().newMessage({ id: account.accountId, label: account.displayName });
+    useComposerStore.getState().newMessage(account);
     return Promise.resolve();
   }
   const composition = mintCompositionId();

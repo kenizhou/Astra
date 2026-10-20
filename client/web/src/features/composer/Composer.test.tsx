@@ -118,13 +118,17 @@ afterEach(() => {
 });
 
 describe('the new message mint', () => {
-  it('opens the pane empty with the account as its read only from', () => {
+  it('opens the pane empty with the account as its from', () => {
     newMessage();
 
     render(<ComposerPane />);
 
     expect(screen.getByRole('region', { name: 'Composer' })).toBeTruthy();
-    expect(screen.getByText('Work')).toBeTruthy();
+    const from = screen.getByRole('combobox', { name: 'From' }) as HTMLSelectElement;
+    expect(from.value).toBe('work');
+    expect(Array.from(from.querySelectorAll('option')).map((option) => option.textContent)).toEqual(
+      ['Work (me@work.example)'],
+    );
     expect((screen.getByRole('textbox', { name: 'To' }) as HTMLInputElement).value).toBe('');
     expect((screen.getByRole('textbox', { name: 'Subject' }) as HTMLInputElement).value).toBe('');
   });

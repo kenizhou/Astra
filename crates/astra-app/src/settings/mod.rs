@@ -155,6 +155,18 @@ impl<P: Provider> App<P> {
             SettingsIntent::RemoveAccount { account } => {
                 self.remove_account(account).await;
             }
+            SettingsIntent::SetSendAccount { account } => {
+                self.set_setting(|prefs| prefs.set_send_account(account))
+                    .await;
+            }
+            SettingsIntent::SetSignature {
+                account,
+                reply,
+                signature,
+            } => {
+                self.set_setting(|prefs| prefs.set_seeded_signature(&account, reply, signature))
+                    .await;
+            }
         }
     }
 
@@ -282,6 +294,25 @@ impl<P: Provider> App<P> {
             .refresh_errors
             .clone();
         let accounts = {
+            // The signature assignment each row echoes, projected from the
+            // persisted document's own shape into the wire's.
+            let signatures: BTreeMap<AccountId, astra_viewmodel::AccountSignatures> = self
+                .pane
+                .lock()
+                .expect("preferences mutex poisoned")
+                .prefs
+                .signatures
+                .iter()
+                .map(|(id, slots)| {
+                    (
+                        id.clone(),
+                        astra_viewmodel::AccountSignatures {
+                            new_mail: slots.new_mail.clone(),
+                            reply: slots.reply.clone(),
+                        },
+                    )
+                })
+                .collect();
             let handles = self.account_handles().await;
             let mut accounts = Vec::with_capacity(handles.len());
             for handle in &handles {
@@ -301,6 +332,7 @@ impl<P: Provider> App<P> {
                     dav_error: dav_errors.get(&handle.id).cloned(),
                     refresh_error: refresh_errors.get(&handle.id).cloned(),
                     grant: info.and_then(|info| info.grant),
+                    signatures: signatures.get(&handle.id).cloned(),
                 });
             }
             // The one exception to the join rule: an account whose grant the
@@ -325,6 +357,7 @@ impl<P: Provider> App<P> {
                         dav_error: dav_errors.get(&info.id).cloned(),
                         refresh_error: refresh_errors.get(&info.id).cloned(),
                         grant: Some(grant),
+                        signatures: signatures.get(&info.id).cloned(),
                     });
                 }
             }
@@ -382,3 +415,7 @@ mod remove_tests;
 #[cfg(test)]
 #[path = "../settings_accounts_tests.rs"]
 mod accounts_tests;
+
+#[cfg(test)]
+#[path = "../settings_composer_tests.rs"]
+mod composer_tests;

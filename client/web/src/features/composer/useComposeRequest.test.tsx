@@ -280,7 +280,9 @@ describe('the inline route', () => {
     expect((screen.getByRole('textbox', { name: 'Subject' }) as HTMLInputElement).value).toBe(
       'Re: Quarterly report',
     );
-    expect(screen.getByText('Work')).toBeTruthy();
+    expect((screen.getByRole('combobox', { name: 'From' }) as HTMLSelectElement).value).toBe(
+      'work',
+    );
   });
 
   it('labels the from with the account id when no account is known', () => {

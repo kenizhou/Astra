@@ -91,7 +91,20 @@ describe('the settings snapshot wire', () => {
     expect(snapshot.accounts).toBeUndefined();
     expect(snapshot.error).toBeUndefined();
     expect(snapshot.settings.default_calendar).toBeUndefined();
+    expect(snapshot.settings.default_send_account).toBeUndefined();
     expect(snapshot.about.attributions).toBeUndefined();
+  });
+
+  it('carries the default send account and the signature assignment additively', () => {
+    const snapshot = JSON.parse(
+      '{"settings":{"theme":"follow_host","twenty_four_clock":false,"zone":"","first_day_of_week":"mo","horizon_days":42,"quote_below":true,"view_mode":"flat","default_send_account":"work"},"accounts":[{"account":"work","address":"ada@work.test","kind":"imap_smtp","legs":{"calendar":false,"contacts":false},"signatures":{"new_mail":{"body_html":"<p>Ada</p>","body_plain":"Ada"}}}],"about":{"version":""}}',
+    ) as SettingsSnapshot;
+    expect(snapshot.settings.default_send_account).toBe('work');
+    expect(snapshot.accounts?.[0]?.signatures?.new_mail).toEqual({
+      body_html: '<p>Ada</p>',
+      body_plain: 'Ada',
+    });
+    expect(snapshot.accounts?.[0]?.signatures?.reply).toBeUndefined();
   });
 
   it('pulls the snapshot by its command name', async () => {
@@ -185,6 +198,28 @@ describe('the settings intent wire', () => {
   it('names the account a removal takes', () => {
     expect(JSON.stringify(settingsIntents.removeAccount('work'))).toBe(
       '{"settings":{"remove_account":{"account":"work"}}}',
+    );
+  });
+
+  it('names the default send account or unpins it with an explicit null', () => {
+    expect(JSON.stringify(settingsIntents.setSendAccount('home'))).toBe(
+      '{"settings":{"set_send_account":{"account":"home"}}}',
+    );
+    expect(JSON.stringify(settingsIntents.setSendAccount(null))).toBe(
+      '{"settings":{"set_send_account":{"account":null}}}',
+    );
+  });
+
+  it('writes one signature slot with both legs, or clears it with null', () => {
+    expect(
+      JSON.stringify(
+        settingsIntents.setSignature('work', false, { body_html: '<p>Ada</p>', body_plain: 'Ada' }),
+      ),
+    ).toBe(
+      '{"settings":{"set_signature":{"account":"work","reply":false,"signature":{"body_html":"<p>Ada</p>","body_plain":"Ada"}}}}',
+    );
+    expect(JSON.stringify(settingsIntents.setSignature('work', true, null))).toBe(
+      '{"settings":{"set_signature":{"account":"work","reply":true,"signature":null}}}',
     );
   });
 });

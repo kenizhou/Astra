@@ -37,12 +37,14 @@ vi.mock('@/events/surfaceEvents', async (importOriginal) => ({
 }));
 
 import { useAccountStore } from '@/stores/accountStore';
+import { useSettingsStore } from '@/features/settings/settingsStore';
 
 import { useComposerStore, type MailtoOpen } from './composerStore';
 import { openMailtoComposer } from './mailtoOpen';
 import {
   composerWindowLabel,
   composerWindowUrl,
+  defaultSendAccount,
   openComposerWindow,
   openNewMessageComposer,
   readComposerParam,
@@ -200,6 +202,34 @@ describe('the New message route', () => {
     await openNewMessageComposer();
 
     expect(webviewWindow.instances).toHaveLength(0);
+  });
+
+  it('resolves the default send account when the preference names a standing one', () => {
+    useAccountStore.setState({
+      accounts: [
+        { accountId: 'work', displayName: 'Work', address: 'me@work.example' },
+        { accountId: 'home', displayName: 'Home', address: 'me@home.example' },
+      ],
+    });
+    useSettingsStore.setState({
+      settings: { ...useSettingsStore.getState().settings, default_send_account: 'home' },
+    });
+
+    expect(defaultSendAccount()).toEqual({ id: 'home', label: 'Home' });
+  });
+
+  it('falls back to the first account when the preference stands unset or stale', () => {
+    useAccountStore.setState({
+      accounts: [
+        { accountId: 'work', displayName: 'Work', address: 'me@work.example' },
+        { accountId: 'home', displayName: 'Home', address: 'me@home.example' },
+      ],
+    });
+    useSettingsStore.setState({
+      settings: { ...useSettingsStore.getState().settings, default_send_account: 'gone' },
+    });
+
+    expect(defaultSendAccount()).toEqual({ id: 'work', label: 'Work' });
   });
 });
 

@@ -29,6 +29,7 @@ import { useSettingsStore } from '@/features/settings/settingsStore';
 
 import { ComposerPane } from './Composer';
 import { ComposerTitleBar } from './ComposerTitleBar';
+import { defaultSendAccount } from './composeWindow';
 import { useComposerStore, type MailtoOpen } from './composerStore';
 import { fromLabelFor } from './useComposeRequest';
 
@@ -48,12 +49,11 @@ async function openComposerSession(
   }
   hydratedFor = composition;
   if (!isTauri) {
-    // A plain browser holds no host to pull from; open blank.
-    const account = useAccountStore.getState().accounts[0];
+    // A plain browser holds no host to pull from; open blank from the
+    // default send account the store already holds.
+    const account = defaultSendAccount();
     if (account !== undefined) {
-      useComposerStore
-        .getState()
-        .newMessage({ id: account.accountId, label: account.displayName }, composition);
+      useComposerStore.getState().newMessage(account, composition);
     }
     return;
   }
@@ -102,11 +102,9 @@ async function openComposerSession(
         .openRequest(request, fromLabelFor(request.from), composition);
       return;
     }
-    const account = useAccountStore.getState().accounts[0];
+    const account = defaultSendAccount();
     if (account !== undefined) {
-      useComposerStore
-        .getState()
-        .newMessage({ id: account.accountId, label: account.displayName }, composition);
+      useComposerStore.getState().newMessage(account, composition);
     }
   } catch (err) {
     console.error('composer: the window hydration failed', err);

@@ -439,6 +439,7 @@ impl PreferencesState {
                     key: pin.key.clone(),
                 }
             }),
+            default_send_account: prefs.default_send_account.clone(),
         }
     }
 

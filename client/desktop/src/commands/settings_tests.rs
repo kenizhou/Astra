@@ -32,6 +32,7 @@ fn the_settings_pull_round_trips_the_published_snapshot() {
             quote_below: false,
             view_mode: ViewMode::Threaded,
             default_calendar: None,
+            default_send_account: None,
         },
         accounts: vec![AccountSettingsRow {
             account: account(),
@@ -50,6 +51,7 @@ fn the_settings_pull_round_trips_the_published_snapshot() {
             dav_error: None,
             refresh_error: None,
             grant: None,
+            signatures: None,
         }],
         about: AboutBlock {
             version: "0.1.0".to_owned(),

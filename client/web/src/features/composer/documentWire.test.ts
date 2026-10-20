@@ -421,4 +421,57 @@ describe('the round trip through the trimmed schema', () => {
 
     expect(JSON.stringify(editorToDocument(seeded))).toBe(JSON.stringify(doc));
   });
+
+  it('applies the three widened marks live and reads them back over the wire', () => {
+    const editor = new CoreEditor({
+      element: document.createElement('div'),
+      extensions: trimmedExtensions(),
+      content: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: 'hello' }] }],
+      },
+    });
+    editor.commands.selectAll();
+    editor.commands.setMark('fontSize', { size: 'Huge' });
+    editor.commands.setMark('color', { color: '#7a6ff0' });
+    editor.commands.setMark('highlight', { color: '#f59e0b' });
+
+    const doc = editorToDocument({
+      content: editor.getJSON().content ?? [],
+      retained: [],
+      attachments: [],
+    });
+    expect(doc.blocks[0]).toEqual({
+      Paragraph: {
+        content: [
+          {
+            Text: {
+              text: 'hello',
+              bold: false,
+              italic: false,
+              underline: false,
+              font_size: 'Huge',
+              color: '#7a6ff0',
+              highlight: '#f59e0b',
+              link: null,
+            },
+          },
+        ],
+      },
+    });
+
+    // The marked run crosses into a second live editor and back unchanged,
+    // so a run another client formatted stays editable, never frozen.
+    const seeded = documentToEditor(doc);
+    const second = new CoreEditor({
+      element: document.createElement('div'),
+      extensions: trimmedExtensions(),
+      content: { type: 'doc', content: seeded.content },
+    });
+    expect(
+      JSON.stringify(editorToDocument({ ...seeded, content: second.getJSON().content ?? [] })),
+    ).toBe(JSON.stringify(doc));
+    editor.destroy();
+    second.destroy();
+  });
 });

@@ -18,6 +18,7 @@
 //!   editor's section with its password; the settings snapshot's row echoes
 //!   the section masked, stating only that one is stored.
 
+use astra_composer::Signature;
 use engine_api::AccountId;
 use serde::{Deserialize, Serialize};
 
@@ -112,5 +113,21 @@ pub enum SettingsIntent {
     RemoveAccount {
         /// The account to remove.
         account: AccountId,
+    },
+    /// Pin the account plain compositions open from, or unpin it with
+    /// `None`; the first standing account answers an unpinned one.
+    SetSendAccount {
+        /// The default send account, or `None` to unpin.
+        account: Option<AccountId>,
+    },
+    /// Write one slot of an account's signature assignment. `None` clears
+    /// the slot, and the account's last empty slot takes its row with it.
+    SetSignature {
+        /// The account whose slot to write.
+        account: AccountId,
+        /// Whether the slot is the reply one; `false` is the new-mail one.
+        reply: bool,
+        /// The signature to seed from, or `None` to clear the slot.
+        signature: Option<Signature>,
     },
 }

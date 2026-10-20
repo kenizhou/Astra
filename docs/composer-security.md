@@ -2,10 +2,11 @@
 
 **Scope.** The composer's security-shaped contracts: what the document may
 carry, where attachment bytes live before a send, the never-send-twice
-contract, the refusals, the attachment surfaces, and the forward carry.
-Binding on every surface that ships a composer. Ported in substance from
-mail-calendar's compose contracts, scoped to what Astra Mail ships today;
-the gaps are recorded at the end, never left silent.
+contract, the refusals, the attachment surfaces, the forward carry, the
+finished links, the From picker, and the picture paste. Binding on every
+surface that ships a composer. Ported in substance from mail-calendar's
+compose contracts, scoped to what Astra Mail ships today; the gaps are
+recorded at the end, never left silent.
 
 **Principle.** *Nothing sends twice, and nothing sends half.* A gesture
 either queues a whole message or refuses with a sentence; the words are
@@ -104,6 +105,42 @@ the pane asks the host with the raw link (the parse never happens in the
 surface), every other scheme still going to the OS, and the OS mail app
 keeps the link only outside the desktop host.
 
+## The finished links
+
+The link button opens an in-place popover, never a window prompt: the
+target and the display text side by side, set and remove on the selection,
+with a Ctrl+K keybinding beside the button. The popover refuses nothing
+client-side except an empty target: the scheme allowlist stays core-side
+and absolute (http, https, mailto, the 2048 bound, no whitespace or
+control characters, something after the scheme).
+
+A typed address becomes a link when the words leave the caret: a space or
+an enter commits a delimited `http`, `https`, `mailto`, or `www` prefix in
+the caret's word as a link run. The recogniser is client-side and
+conservative: the word the caret sits in never links when it already is a
+link, and a bare domain never links.
+
+Before a submit the document's link targets are validated against the
+core's allowlist and any that degrade are named in a sentence under the
+toolbar. The sentence never blocks the send: the core's degradation to
+plain text remains the send's own floor.
+
+## The From picker
+
+The From field is the account picker: the account rows with the sending
+address beside the display name, the app-level default send account first,
+the choice changing the seeded signature per signatures.md's swap rule. A
+composition opened from a request keeps the request's account at open and
+never re-picks on its own, but the picker stays available, so the choice
+is always the person's.
+
+## The picture paste
+
+Pasting a picture into the editor stages it exactly as a drop's inline
+answer stages it: the inline disposition, the cid binding, the removable
+row. No ask stands, because a paste into the message body carries the
+inline intent already. Pasted text is untouched.
+
 ## Known gaps
 
 - **Inline images are not preserved across a forward**: the carried parts
@@ -113,5 +150,5 @@ keeps the link only outside the desktop host.
   roads are pinned offline at their seams, and a real OS delivery (the
   protocol registration, the cold launch, the second launch's argv) has
   no harness yet.
-- **Link editing, pasted-picture capture, and image resize** stand as
-  future rows this document will own as they land.
+- **Image resize** stands as a future row this document will own as it
+  lands.

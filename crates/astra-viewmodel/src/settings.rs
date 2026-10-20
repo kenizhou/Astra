@@ -14,6 +14,19 @@ use serde::{Deserialize, Serialize};
 
 use crate::ViewMode;
 
+/// One account's signature assignment, as a settings row carries it: what
+/// its new mail opens with and what its replies open with. Either slot may
+/// stand empty while the other holds one, and both absent crosses no key.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountSignatures {
+    /// What a plain new message from this account seeds; absent seeds nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new_mail: Option<astra_composer::Signature>,
+    /// What a reply or forward from this account seeds; absent seeds nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply: Option<astra_composer::Signature>,
+}
+
 /// An immutable settings snapshot for a surface to render: the persisted
 /// settings block, one row per configured account, and the about block.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -75,6 +88,11 @@ pub struct SettingsBlock {
     /// `None` when none is pinned.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_calendar: Option<DefaultCalendar>,
+    /// The account plain compositions open from: the new-message button and
+    /// the `mailto:` entry. `None` when unset, which the first standing
+    /// account answers; a request (reply, forward) always keeps its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_send_account: Option<AccountId>,
 }
 
 /// The theme the chrome renders: follow the host, or an explicit override.
@@ -172,6 +190,11 @@ pub struct AccountSettingsRow {
     /// snapshot from a build before this field reads back healthy.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grant: Option<GrantState>,
+    /// The account's signature assignment, when it holds one: what its new
+    /// mail and its replies open with. Absent crosses no key, the state of
+    /// an account that seeds nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signatures: Option<AccountSignatures>,
 }
 
 /// Why a Microsoft account's grant needs the person to act, as the
