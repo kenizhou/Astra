@@ -24,7 +24,7 @@ beforeEach(() => {
   ipc.dispatch.mockReset();
   ipc.dispatch.mockResolvedValue(undefined);
   useUiStore.setState({ engineState: 'running', sync: [] });
-  useAccountStore.setState({ accounts: [{ accountId: 'work', displayName: 'Work' }] });
+  useAccountStore.setState({ accounts: [{ accountId: 'work', displayName: 'Work', address: 'me@work.example' }] });
   useFolderStore.setState({ selected: null, outboxAccount: null });
   useListStore.setState({ rows: [], selectedKey: null, density: 'normal' });
   useSendingStore.getState().applySnapshot({ rows: [] });

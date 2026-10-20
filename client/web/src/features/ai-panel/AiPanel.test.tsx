@@ -65,7 +65,7 @@ function reset(): void {
   useAiPanelStore.getState().reset();
   useUiStore.getState().setAiPanelOpen(false);
   useFolderStore.setState({ accounts: [], selected: { account: 'work', key: 'INBOX' } });
-  useAccountStore.setState({ accounts: [{ accountId: 'work', displayName: 'Work' }] });
+  useAccountStore.setState({ accounts: [{ accountId: 'work', displayName: 'Work', address: 'me@work.example' }] });
 }
 
 beforeEach(reset);
@@ -318,8 +318,8 @@ describe('the account', () => {
   it('switches accounts under the selector and re-pulls both kinds', async () => {
     useAccountStore.setState({
       accounts: [
-        { accountId: 'work', displayName: 'Work' },
-        { accountId: 'home', displayName: 'Home' },
+        { accountId: 'work', displayName: 'Work', address: 'me@work.example' },
+        { accountId: 'home', displayName: 'Home', address: 'home@example.test' },
       ],
     });
     ai.latestDocument.mockClear();
@@ -340,8 +340,8 @@ describe('the account switch race', () => {
   function seedTwoAccounts(): void {
     useAccountStore.setState({
       accounts: [
-        { accountId: 'work', displayName: 'Work' },
-        { accountId: 'home', displayName: 'Home' },
+        { accountId: 'work', displayName: 'Work', address: 'me@work.example' },
+        { accountId: 'home', displayName: 'Home', address: 'home@example.test' },
       ],
     });
   }

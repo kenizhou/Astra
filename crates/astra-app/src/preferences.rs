@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     reference::{CalendarRef, FolderRef},
+    signatures::AccountSignatures,
     ViewMode,
 };
 
@@ -89,6 +90,16 @@ pub struct Preferences {
     /// `None` when none is pinned, which writes no entry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_calendar: Option<CalendarRef>,
+    /// The account plain compositions open from: the new-message button and
+    /// the `mailto:` entry. `None` when unset, which the first standing
+    /// account answers; a request (reply, forward) always keeps its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_send_account: Option<engine_api::AccountId>,
+    /// Each account's signature assignment, by account id. An account
+    /// absent from the map seeds no signature, and its last empty slot
+    /// takes its row with it, so the file holds only live assignments.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub signatures: BTreeMap<engine_api::AccountId, AccountSignatures>,
 }
 
 /// The shipped defaults, which the serde field defaults and a first launch
@@ -109,6 +120,8 @@ impl Default for Preferences {
             horizon_days: default_horizon(),
             quote_below: default_true(),
             default_calendar: None,
+            default_send_account: None,
+            signatures: BTreeMap::new(),
         }
     }
 }
@@ -225,7 +238,14 @@ impl Preferences {
             .selected_account
             .take_if(|held| held.as_str() == account)
             .is_some();
-        tree || folders || selected || viewed
+        let held = self.signatures.len();
+        self.signatures.retain(|id, _| id.as_str() != account);
+        let signatures = self.signatures.len() < held;
+        let send_default = self
+            .default_send_account
+            .take_if(|held| held.as_str() == account)
+            .is_some();
+        tree || folders || selected || viewed || signatures || send_default
     }
 }
 
@@ -270,7 +290,7 @@ pub fn save_preferences(path: impl AsRef<Path>, prefs: &Preferences) -> std::io:
 /// Held in memory and consulted on every snapshot rebuild, so it cannot be a file read;
 /// the persisted copy is written only when the user actually changes something.
 pub(crate) struct PreferencesState {
-    prefs: Preferences,
+    pub(crate) prefs: Preferences,
     path: Option<PathBuf>,
     last_save_failed: bool,
 }
@@ -465,6 +485,10 @@ impl PreferencesState {
         on_disk
             .default_calendar
             .clone_from(&self.prefs.default_calendar);
+        on_disk
+            .default_send_account
+            .clone_from(&self.prefs.default_send_account);
+        on_disk.signatures.clone_from(&self.prefs.signatures);
         self.last_save_failed = save_preferences(path, &on_disk).is_err();
     }
 }

@@ -26,6 +26,7 @@ function account(id: string, unread = 0): AccountFolderRow {
   return {
     account_id: id,
     display_name: id,
+    address: `${id}@example.test`,
     expanded: true,
     folders: [
       { key: 'INBOX', name: 'Inbox', role: 'inbox', unread, depth: 0, has_children: false, expanded: false },

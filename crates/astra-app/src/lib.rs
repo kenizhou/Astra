@@ -21,6 +21,7 @@ mod ai_rules;
 mod attachments;
 mod boot;
 mod calendar;
+mod compose_open;
 mod compose_request;
 mod dispatch;
 mod drafts;
@@ -38,6 +39,7 @@ mod row_cache;
 mod sanitise;
 mod search;
 mod settings;
+mod signatures;
 mod snapshot;
 mod snapshot_rows;
 mod submit;
@@ -161,6 +163,7 @@ pub use reference::{
     ThreadRef,
 };
 pub use settings::{AccountInfo, DavLegs, HostAccountOps};
+pub use signatures::{seed_signature, swap_seeded, AccountSignatures};
 pub use surfaced::Surfaced;
 
 /// The app runtime: owns one [`Engine`] shared across every configured [`Account`],

@@ -21,6 +21,7 @@ vi.mock('@/services/ipc', async (importOriginal) => ({
 }));
 
 import { useComposerStore } from './composerStore';
+import { documentFromPlainText, editorToDocument } from './documentWire';
 import type { Block, ComposeRequestSnapshot } from '@/services/ipc';
 
 /** One plain paragraph block with the given words. */
@@ -111,6 +112,45 @@ describe('the caller-minted composition', () => {
     expect(state.composition).toBe('compose-78');
     expect(state.subject).toBe('Re: Quarterly report');
     expect(state.request).toEqual({ kind: 'reply', inReplyTo: 'orig-1@server.test' });
+  });
+});
+
+// A mailto link's prefill: the five fields the core's parser honours, opened
+// as a plain new message from the account the caller resolved, request-free
+// so the send rides the plain submit.
+describe('a prefilled new message', () => {
+  it('seeds the fields, the body document, and nothing pending', () => {
+    useComposerStore.getState().newMessage({ id: 'work', label: 'Work' }, undefined, {
+      to: 'ada@example.test, grace@example.test',
+      cc: 'tim@example.test',
+      bcc: '',
+      subject: 'Lunch',
+      body: 'Shall we say noon?\nAt the usual place.',
+    });
+
+    const state = useComposerStore.getState();
+    expect(state.open).toBe(true);
+    expect(state.from).toBe('work');
+    expect(state.fromLabel).toBe('Work');
+    expect(state.to).toBe('ada@example.test, grace@example.test');
+    expect(state.cc).toBe('tim@example.test');
+    expect(state.bcc).toBe('');
+    expect(state.subject).toBe('Lunch');
+    expect(state.request).toBeNull();
+    expect(JSON.stringify(editorToDocument(state.editor))).toBe(
+      JSON.stringify(documentFromPlainText('Shall we say noon?\nAt the usual place.')),
+    );
+  });
+
+  it('opens a blank composition when no prefill crosses', () => {
+    useComposerStore.getState().newMessage({ id: 'work', label: 'Work' });
+
+    const state = useComposerStore.getState();
+    expect(state.to).toBe('');
+    expect(state.subject).toBe('');
+    expect(JSON.stringify(editorToDocument(state.editor))).toBe(
+      JSON.stringify(documentFromPlainText('')),
+    );
   });
 });
 

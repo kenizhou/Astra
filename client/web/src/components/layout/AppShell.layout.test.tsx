@@ -110,7 +110,7 @@ beforeEach(() => {
   useUiStore.getState().setSettingsOpen(false);
   useUiStore.getState().setAgentOpen(false);
   useUiStore.getState().setFolderDrawerOpen(false);
-  useAccountStore.setState({ accounts: [{ accountId: 'work', displayName: 'Work' }] });
+  useAccountStore.setState({ accounts: [{ accountId: 'work', displayName: 'Work', address: 'me@work.example' }] });
   useComposerStore.setState({
     open: false,
     inlineExpected: false,

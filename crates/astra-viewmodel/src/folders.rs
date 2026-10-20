@@ -101,6 +101,11 @@ pub struct AccountFolderRow {
     /// A label, never an identity: `account_id` is what selects the account, and this is
     /// what a person recognises it by.
     pub display_name: String,
+    /// The account's sending address: what a composition's From picker shows
+    /// beside the label, the address mail leaves from. Absent from a snapshot
+    /// an older emitter built, which reads as empty.
+    #[serde(default)]
+    pub address: String,
     /// Whether this account's folder tree is open in the sidebar.
     ///
     /// Independent of selection, and persisted across launches. A surface renders the

@@ -11,6 +11,7 @@ function account(id: string, unreadByFolder: Array<[string, number, string?]>): 
   return {
     account_id: id,
     display_name: id,
+    address: `${id}@example.test`,
     expanded: true,
     folders: unreadByFolder.map(([key, unread, role]) => ({
       key,

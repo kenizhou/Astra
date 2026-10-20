@@ -40,6 +40,7 @@ fn a_snapshot_round_trips_through_json_with_the_exact_wire_shape() {
             AccountFolderRow {
                 account_id: account("work"),
                 display_name: "me@work.example".to_owned(),
+                address: "me@work.example".to_owned(),
                 expanded: true,
                 can_edit_folders: false,
                 folders: vec![
@@ -78,6 +79,7 @@ fn a_snapshot_round_trips_through_json_with_the_exact_wire_shape() {
             AccountFolderRow {
                 account_id: account("home"),
                 display_name: "Home".to_owned(),
+                address: "me@home.example".to_owned(),
                 expanded: false,
                 can_edit_folders: false,
                 folders: vec![],
@@ -91,11 +93,11 @@ fn a_snapshot_round_trips_through_json_with_the_exact_wire_shape() {
         json,
         concat!(
             r#"{"account_folders":["#,
-            r#"{"account_id":"work","display_name":"me@work.example","expanded":true,"folders":["#,
+            r#"{"account_id":"work","display_name":"me@work.example","address":"me@work.example","expanded":true,"folders":["#,
             r#"{"key":"INBOX","name":"Inbox","role":"inbox","unread":545,"depth":0,"has_children":false,"expanded":false},"#,
             r#"{"key":"Clients","name":"Clients","unread":0,"depth":0,"has_children":true,"expanded":true},"#,
             r#"{"key":"Clients/Acme","name":"Acme","unread":0,"parent":"Clients","depth":1,"has_children":false,"expanded":false}]},"#,
-            r#"{"account_id":"home","display_name":"Home","expanded":false,"folders":[]}]}"#
+            r#"{"account_id":"home","display_name":"Home","address":"me@home.example","expanded":false,"folders":[]}]}"#
         )
     );
 
@@ -149,6 +151,7 @@ fn a_snapshot_with_message_rows_crosses_with_the_list_fields_after_the_trees() {
         account_folders: vec![AccountFolderRow {
             account_id: account("work"),
             display_name: "me@work.example".to_owned(),
+            address: "me@work.example".to_owned(),
             expanded: true,
             can_edit_folders: false,
             folders: vec![inbox_row(0)],
@@ -167,7 +170,7 @@ fn a_snapshot_with_message_rows_crosses_with_the_list_fields_after_the_trees() {
     assert_eq!(
         json,
         concat!(
-            r#"{"account_folders":[{"account_id":"work","display_name":"me@work.example","expanded":true,"folders":["#,
+            r#"{"account_folders":[{"account_id":"work","display_name":"me@work.example","address":"me@work.example","expanded":true,"folders":["#,
             r#"{"key":"INBOX","name":"Inbox","role":"inbox","unread":0,"depth":0,"has_children":false,"expanded":false}]}],"#,
             r#""rows":["#,
             r#"{"key":{"thread":{"account":"work","thread_id":"th-7"}},"account_id":"work","sender_name":"Grace Hopper","sender_address":"grace@example.test","subject":"Re: Compiler design","sent_at":"2026-10-08T16:05:00Z","unread":false,"flagged":true,"has_attachments":false,"thread_count":3},"#,
@@ -191,6 +194,7 @@ fn a_snapshot_at_rest_crosses_without_the_list_fields() {
         account_folders: vec![AccountFolderRow {
             account_id: account("home"),
             display_name: "Home".to_owned(),
+            address: "me@home.example".to_owned(),
             expanded: false,
             can_edit_folders: false,
             folders: vec![],
@@ -204,7 +208,7 @@ fn a_snapshot_at_rest_crosses_without_the_list_fields() {
     .unwrap();
     assert_eq!(
         json,
-        r#"{"account_folders":[{"account_id":"home","display_name":"Home","expanded":false,"folders":[]}]}"#
+        r#"{"account_folders":[{"account_id":"home","display_name":"Home","address":"me@home.example","expanded":false,"folders":[]}]}"#
     );
 }
 
@@ -217,6 +221,9 @@ fn a_wire_with_no_list_fields_parses_to_the_at_rest_snapshot() {
     )
     .unwrap();
     assert_eq!(back.account_folders.len(), 1);
+    // The row's address is the same additive direction: absent on an old
+    // emitter's wire, it reads back empty rather than failing the parse.
+    assert_eq!(back.account_folders[0].address, "");
     assert!(back.rows.is_empty());
     assert_eq!(back.selection, None);
     assert_eq!(back.visible_limit, 0);
@@ -231,6 +238,7 @@ fn the_snapshot_carries_every_account_s_tree_unchanged() {
         AccountFolderRow {
             account_id: account("work"),
             display_name: "me@work.example".to_owned(),
+            address: "me@work.example".to_owned(),
             expanded: true,
             can_edit_folders: false,
             folders: vec![
@@ -260,6 +268,7 @@ fn the_snapshot_carries_every_account_s_tree_unchanged() {
         AccountFolderRow {
             account_id: account("home"),
             display_name: "me@home.example".to_owned(),
+            address: "me@home.example".to_owned(),
             expanded: false,
             can_edit_folders: false,
             folders: vec![inbox_row(1)],

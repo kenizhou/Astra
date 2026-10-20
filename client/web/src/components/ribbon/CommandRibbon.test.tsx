@@ -67,7 +67,7 @@ function row(over: Partial<MessageRowView> = {}): MessageRowView {
 
 function resetStores(): void {
   useUiStore.getState().setShellView('mail');
-  useAccountStore.setState({ accounts: [{ accountId: 'work', displayName: 'Work' }] });
+  useAccountStore.setState({ accounts: [{ accountId: 'work', displayName: 'Work', address: 'me@work.example' }] });
   useReadingStore.setState({ snapshot: null, showRemoteImages: false });
   useListStore.setState({ rows: [], selectedKey: null });
   useComposerStore.setState({

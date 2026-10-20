@@ -14,7 +14,7 @@ import { useComposerStore } from './composerStore';
 import { openNewMessageComposer } from './composeWindow';
 
 beforeEach(() => {
-  useAccountStore.setState({ accounts: [{ accountId: 'work', displayName: 'Work' }] });
+  useAccountStore.setState({ accounts: [{ accountId: 'work', displayName: 'Work', address: 'me@work.example' }] });
   useComposerStore.getState().closePane();
 });
 

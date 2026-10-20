@@ -131,6 +131,7 @@ fn the_pull_commands_return_what_the_app_published() {
         account_folders: vec![astra_viewmodel::AccountFolderRow {
             account_id: account.clone(),
             display_name: "user@example.test".to_owned(),
+            address: "user@example.test".to_owned(),
             expanded: true,
             can_edit_folders: false,
             folders: Vec::new(),

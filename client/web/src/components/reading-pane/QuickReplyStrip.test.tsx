@@ -83,7 +83,7 @@ function replyRequest(): ComposeRequestSnapshot {
 }
 
 function resetStores(): void {
-  useAccountStore.setState({ accounts: [{ accountId: 'work', displayName: 'Work' }] });
+  useAccountStore.setState({ accounts: [{ accountId: 'work', displayName: 'Work', address: 'me@work.example' }] });
   useReadingStore.setState({ snapshot: null, showRemoteImages: false });
   useDraftStore.setState({ snapshot: null });
   useComposeRequestStore.setState({ snapshot: null });

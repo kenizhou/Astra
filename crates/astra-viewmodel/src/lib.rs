@@ -7,6 +7,7 @@
 //! what is on screen.
 
 mod calendar;
+mod compose_open;
 mod compose_request;
 mod drafts;
 mod folders;
@@ -23,6 +24,7 @@ pub use calendar::{
     CalendarRow, CalendarSnapshot, CalendarWriteRow, CalendarWriteState, NowLineData,
     OccurrenceAccuracy, OccurrenceRow, Participation, ReplyPromptRow,
 };
+pub use compose_open::MailtoOpen;
 pub use compose_request::{ComposeKind, ComposeRequestSnapshot};
 pub use drafts::{DraftSaveState, DraftStatusSnapshot};
 pub use folders::{folder_role, sorted_folder_rows, AccountFolderRow, FolderRole, FolderRow};

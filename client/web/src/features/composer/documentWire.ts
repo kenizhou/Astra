@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The document wire: TipTap's editor JSON to and from the ComposerDocument
-// the core stores, both ways deterministic. Blocks the trimmed editor
-// cannot produce (tables, quotes, signatures, inline images, runs with
-// marks it cannot show) never enter the editor: they are retained verbatim
-// and spliced back at their original positions, so nothing crosses silently
-// altered. A shape the wire cannot carry at all is rejected loudly with a
-// typed error, never dropped.
+// the core stores, both ways deterministic. Every mark a text run can carry
+// (bold, italic, underline, font size, text colour, highlight, link) crosses
+// into the editor as editable content; blocks the trimmed editor cannot
+// produce (tables, quotes, signatures, inline images) never enter it: they
+// are retained verbatim and spliced back at their original positions, so
+// nothing crosses silently altered. A shape the wire cannot carry at all is
+// rejected loudly with a typed error, never dropped.
 //
 // Known gap for the rich-paste slice: content pasted INTO the editor that
-// the trimmed schema cannot hold (a table, a heading, a coloured run) is
-// coerced away by ProseMirror at paste time, before this module ever sees
-// it; the retention below protects only what arrives through the wire.
+// the trimmed schema cannot hold (a table, a heading) is coerced away by
+// ProseMirror at paste time, before this module ever sees it; the retention
+// below protects only what arrives through the wire.
 
 import type { JSONContent } from '@tiptap/react';
 
@@ -18,6 +19,7 @@ import type {
   Block,
   ComposerDocument,
   DraftAttachment,
+  FontSize,
   InlineContent,
   List,
   ListItem,
@@ -48,14 +50,12 @@ export interface EditorDocument {
   attachments: DraftAttachment[];
 }
 
-/** A run whose marks are all ones the trimmed editor can show and set. */
-function runIsEditable(run: TextRun): boolean {
-  return run.font_size === null && run.color === null && run.highlight === null;
-}
+/** The four size words the wire's font size mark carries, nothing wider. */
+const FONT_SIZE_WORDS: readonly FontSize[] = ['Small', 'Normal', 'Large', 'Huge'];
 
-/** Inline content the editor can hold: text runs with its own mark set. */
+/** Inline content the editor can hold: text runs, whose marks all cross. */
 function inlinesAreEditable(content: InlineContent[]): boolean {
-  return content.every((inline) => 'Text' in inline && runIsEditable(inline.Text));
+  return content.every((inline) => 'Text' in inline);
 }
 
 /** A list the editor can hold: every item editable and every child too. */
@@ -86,6 +86,15 @@ function runMarks(run: TextRun): EditorMark[] {
   }
   if (run.underline) {
     marks.push({ type: 'underline' });
+  }
+  if (run.font_size !== null) {
+    marks.push({ type: 'fontSize', attrs: { size: run.font_size } });
+  }
+  if (run.color !== null) {
+    marks.push({ type: 'color', attrs: { color: run.color } });
+  }
+  if (run.highlight !== null) {
+    marks.push({ type: 'highlight', attrs: { color: run.highlight } });
   }
   if (run.link !== null) {
     marks.push({ type: 'link', attrs: { href: run.link } });
@@ -161,10 +170,15 @@ export function documentToEditor(doc: ComposerDocument): EditorDocument {
 }
 
 /** The marks of one TipTap text node as the wire spells them. */
-function marksOf(node: JSONContent): Pick<TextRun, 'bold' | 'italic' | 'underline' | 'link'> {
+function marksOf(
+  node: JSONContent,
+): Pick<TextRun, 'bold' | 'italic' | 'underline' | 'font_size' | 'color' | 'highlight' | 'link'> {
   let bold = false;
   let italic = false;
   let underline = false;
+  let font_size: FontSize | null = null;
+  let color: string | null = null;
+  let highlight: string | null = null;
   let link: string | null = null;
   for (const mark of node.marks ?? []) {
     if (mark.type === 'bold') {
@@ -173,6 +187,22 @@ function marksOf(node: JSONContent): Pick<TextRun, 'bold' | 'italic' | 'underlin
       italic = true;
     } else if (mark.type === 'underline') {
       underline = true;
+    } else if (mark.type === 'fontSize') {
+      const size = mark.attrs?.size;
+      if (typeof size !== 'string' || !FONT_SIZE_WORDS.includes(size as FontSize)) {
+        throw new DocumentWireError('a font size mark crossed without one of the four words');
+      }
+      font_size = size as FontSize;
+    } else if (mark.type === 'color' || mark.type === 'highlight') {
+      const value = mark.attrs?.color;
+      if (typeof value !== 'string') {
+        throw new DocumentWireError(`a ${mark.type} mark crossed without its colour`);
+      }
+      if (mark.type === 'color') {
+        color = value;
+      } else {
+        highlight = value;
+      }
     } else if (mark.type === 'link') {
       const href = mark.attrs?.href;
       if (typeof href !== 'string') {
@@ -183,7 +213,7 @@ function marksOf(node: JSONContent): Pick<TextRun, 'bold' | 'italic' | 'underlin
       throw new DocumentWireError(`the ${mark.type} mark is not one the wire carries`);
     }
   }
-  return { bold, italic, underline, link };
+  return { bold, italic, underline, font_size, color, highlight, link };
 }
 
 /** Appends one text node's words, merging with a run that carries the same marks. */
@@ -197,6 +227,9 @@ function appendRun(node: JSONContent, content: InlineContent[]): void {
     previous.Text.bold === marks.bold &&
     previous.Text.italic === marks.italic &&
     previous.Text.underline === marks.underline &&
+    previous.Text.font_size === marks.font_size &&
+    previous.Text.color === marks.color &&
+    previous.Text.highlight === marks.highlight &&
     previous.Text.link === marks.link
   ) {
     previous.Text.text += text;
@@ -208,9 +241,9 @@ function appendRun(node: JSONContent, content: InlineContent[]): void {
       bold: marks.bold,
       italic: marks.italic,
       underline: marks.underline,
-      font_size: null,
-      color: null,
-      highlight: null,
+      font_size: marks.font_size,
+      color: marks.color,
+      highlight: marks.highlight,
       link: marks.link,
     },
   });

@@ -237,6 +237,7 @@ describe('the row context menu', () => {
         {
           account_id: 'work',
           display_name: 'work@example.net',
+          address: 'work@example.net',
           expanded: true,
           folders: [
             {

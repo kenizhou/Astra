@@ -19,11 +19,9 @@ import type { Editor as CoreEditor } from '@tiptap/core';
 import type { JSONContent } from '@tiptap/react';
 
 import type {
-  ComposeKind,
   ComposeRequestSnapshot,
   CompositionId,
   ComposerBlob,
-  ComposerDocument,
   Intent,
   ResumeView,
 } from '@/services/ipc';
@@ -43,33 +41,31 @@ import {
   stripInlineRefs,
   type StagedAttachment,
 } from './composerStaging';
+import {
+  fingerprintOf,
+  mintCompositionId,
+  prefillFields,
+  quoteOrdered,
+  type ComposePrefill,
+  type CompositionRequest,
+  type SendAccount,
+} from './composerOpening';
 import { normaliseRecipients } from './recipientTokens';
 
-/** Mints one composition's id: a UUID, unique across restarts. */
-export function mintCompositionId(): CompositionId {
-  return crypto.randomUUID();
-}
-
-/**
- * The one predicate the composer's opening caret runs on: in the body when
- * the composer was already addressed (a reply, a forward's quoted original,
- * a resumed draft), in To otherwise, where the work starts.
- */
-export function opensInBody(request: CompositionRequest | null, to: string): boolean {
-  return request !== null || to.trim() !== '';
-}
-
-/** The account a composition sends from. */
-interface SendAccount {
-  id: string;
-  label: string;
-}
-
-/** The reply or forward a composition is, when a compose request opened it. */
-export interface CompositionRequest {
-  kind: ComposeKind;
-  inReplyTo: string | null;
-}
+// The opening rules live in composerOpening; re-exported here so every
+// importer keeps the one path it always had.
+export {
+  fingerprintOf,
+  mintCompositionId,
+  opensInBody,
+  prefillFields,
+  quoteOrdered,
+} from './composerOpening';
+export type {
+  ComposePrefill,
+  CompositionRequest,
+  SendAccount,
+} from './composerOpening';
 
 interface ComposerStoreState {
   /** Whether the composer pane is up. */
@@ -106,8 +102,14 @@ interface ComposerStoreState {
   /**
    * Opens a plain composition. `composition` is the caller-minted id of the
    * pop-out window the composition lives in; absent, one is minted here.
+   * `prefill`, the shape a mailto link fills, seeds the fields and the body;
+   * the composition stays request-free and sends as plain mail.
    */
-  newMessage: (account: SendAccount, composition?: CompositionId) => void;
+  newMessage: (
+    account: SendAccount,
+    composition?: CompositionId,
+    prefill?: ComposePrefill,
+  ) => void;
   /** Opens a resumed draft under the composition the resume pull named. */
   hydrate: (view: ResumeView, account: SendAccount, composition: CompositionId) => void;
   /**
@@ -137,44 +139,6 @@ interface ComposerStoreState {
 }
 
 const emptyEditor = (): EditorDocument => documentToEditor(documentFromPlainText(''));
-
-/**
- * Orders a request's quote blocks per the quote-style setting: `below`
- * leaves the document as the core built it (the reply's words above the
- * quoted original), otherwise each quote moves to the top so the reply is
- * typed under it. The setting seeds only the opening order: the document
- * the composer then edits and saves is the per-message truth.
- */
-export function quoteOrdered(document: ComposerDocument, below: boolean): ComposerDocument {
-  if (below) {
-    return document;
-  }
-  const quotes = document.blocks.filter((block) => 'Quote' in block);
-  if (quotes.length === 0) {
-    return document;
-  }
-  const rest = document.blocks.filter((block) => !('Quote' in block));
-  return { ...document, blocks: [...quotes, ...rest] };
-}
-
-/** What a handover would carry, as comparable text. */
-export function fingerprintOf(state: {
-  from: string;
-  to: string;
-  cc: string;
-  bcc: string;
-  subject: string;
-  editor: EditorDocument;
-}): string {
-  return JSON.stringify([
-    state.from,
-    state.to,
-    state.cc,
-    state.bcc,
-    state.subject,
-    editorToDocument(state.editor),
-  ]);
-}
 
 const closedState = {
   open: false,
@@ -323,13 +287,16 @@ export const useComposerStore = create<ComposerStoreState>((set, get) => ({
   ...closedState,
   resumeAttempted: false,
 
-  newMessage: (account, composition) =>
+  newMessage: (account, composition, prefill) =>
     set({
       ...closedState,
       open: true,
       composition: composition ?? mintCompositionId(),
       from: account.id,
       fromLabel: account.label,
+      // A mailto link's prefill seeds the same normalised fields a hand
+      // typed open would hold; no prefill crosses, the blank state stands.
+      ...(prefill === undefined ? {} : prefillFields(prefill)),
     }),
 
   hydrate: (view, account, composition) => {

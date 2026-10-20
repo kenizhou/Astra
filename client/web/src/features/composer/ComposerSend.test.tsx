@@ -85,7 +85,7 @@ function replyRequest(over: Partial<ComposeRequestSnapshot> = {}): ComposeReques
 }
 
 function resetStores(): void {
-  useAccountStore.setState({ accounts: [{ accountId: 'work', displayName: 'Work' }] });
+  useAccountStore.setState({ accounts: [{ accountId: 'work', displayName: 'Work', address: 'me@work.example' }] });
   useDraftStore.setState({ snapshot: null });
   useComposerStore.setState({
     open: false,
