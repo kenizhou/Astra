@@ -36,7 +36,7 @@ this row ports.
 | Mail | Move to folder action in the message row menu, within one account | ✅ | one move edit per row through the outbox, the picker offering the account's other folders, hidden across accounts, the conversation reason on threaded rows, and a no-op answered without queueing; the batch is proven live over the harness dial, moved in and withdrawn; list-selection.md |
 | Mail | Threaded conversation view: the whole conversation including your sent replies, across folders | 🚧 | mail-calendar capabilities |
 | Mail | Reading view with sanitised HTML, inline CID images, recipient headers, remote-image gating, and retry | 🚧 | |
-| Mail | Web and mail addresses in message text open in the browser or mail app; http, https, and mailto only | 🚧 | rendering-security.md |
+| Mail | Web addresses in message text open in the browser, mailto addresses open the composer prefilled; http, https, and mailto only | 🚧 | rendering-security.md |
 | Mail | Message laid out against the reading pane's own width, so a newsletter's own mobile rules apply | ⬜ | reading-zoom.md |
 | Mail | Fixed-width messages reflowed to fit at every pane width, live during resize | ⬜ | reading-zoom.md |
 | Mail | Offline-first bodies: synced bodies auto-download after every sync under a per-account cap, so opens are instant | ⬜ | |

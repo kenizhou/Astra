@@ -224,4 +224,14 @@ describe('the mailto route', () => {
     const [window] = webviewWindow.instances;
     expect(window?.options).toMatchObject({ title: 'New message' });
   });
+
+  it('opens a second window for a second mailto while one stands, each on its own composition', async () => {
+    await openMailtoComposer(prefill);
+    await openMailtoComposer({ ...prefill, subject: 'Again' });
+
+    expect(webviewWindow.instances).toHaveLength(2);
+    const [first, second] = webviewWindow.instances;
+    expect(first?.label).not.toBe(second?.label);
+    expect(useComposerStore.getState().open).toBe(false);
+  });
 });
