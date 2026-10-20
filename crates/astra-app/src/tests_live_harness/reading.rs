@@ -48,7 +48,7 @@ async fn the_reading_pane_opens_the_rich_note_and_the_read_state_survives_a_refr
         eprintln!("skipping live harness test: ASTRA_LIVE_HARNESS is not 1");
         return;
     };
-    let (account_id, providers) =
+    let (account_id, providers, ..) =
         dial_with_accepted_certificate(&host, &port, &user, &password).await;
 
     let observer: Arc<dyn AppObserver> = Arc::new(super::CountingObserver::default());

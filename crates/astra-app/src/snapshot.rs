@@ -6,21 +6,20 @@
 //! The pane projection is one walk: every configured account's whole tree, read through
 //! the row cache, sorted by the shared view-model, truncated to the visible window, and
 //! stamped with the persisted expansion at publish time. The message list is the
-//! selected folder's slice of one account's windowed read (plus, threaded, the thread
-//! index's completion of the conversations it touched), projected by `list_rows`.
+//! selected folder's slice of one account's windowed read, or every account's inbox
+//! rows merged newest first on the unified scope (plus, threaded, the thread index's
+//! completion of the conversations touched), projected by `list_rows` and loaded by
+//! `snapshot_rows`.
 
 use std::{
-    collections::{BTreeSet, HashSet},
     sync::{atomic::Ordering, Arc},
     time::Instant,
 };
 
 use astra_viewmodel::{sorted_folder_rows, AccountFolderRow, MailboxListSnapshot};
-use engine_api::{AccountId, MailListRow, Mailbox, Provider, ThreadId};
+use engine_api::{AccountId, Mailbox, Provider};
 
-use crate::{
-    list_rows, reference::FolderRef, Account, App, CachedMailRows, CachedRows, Scope, ViewMode,
-};
+use crate::{reference::FolderRef, Account, App, CachedRows, Scope, ViewMode};
 
 impl<P: Provider> App<P> {
     /// The mailbox-list snapshot, for the host's pull after a
@@ -100,8 +99,11 @@ impl<P: Provider> App<P> {
 
     /// The mailbox list for the current window: every account's tree, read through the
     /// row cache, truncated across the flattened pane rows so only the visible window
-    /// is built and crossed the IPC. When the scope is one folder, the same window reads
-    /// that folder's account and projects its newest rows into the list.
+    /// is built and crossed the IPC. The folder view reads that folder's account and
+    /// projects its newest rows into the list; the unified view merges every account's
+    /// inbox rows, newest first, the same row shape per row. A whole-account view is a
+    /// later slice, and a snapshot built for the pane alone crosses with exactly the
+    /// shape it always had.
     async fn mailbox_snapshot(
         &self,
         handles: &[Arc<Account<P>>],
@@ -112,153 +114,27 @@ impl<P: Provider> App<P> {
     ) -> MailboxListSnapshot {
         let trees = self.load_rows(ids).await;
         let account_folders = account_folder_rows(handles, &trees, limit);
-        // The list fields stay at rest outside a folder view: a whole-account or
-        // unified list is a later slice, and a snapshot built for the pane alone crosses
-        // with exactly the shape it always had.
-        let Scope::Folder(folder) = scope else {
+        let rows = match scope {
+            Scope::Folder(folder) => Some(self.folder_rows(folder, mode, limit).await),
+            Scope::AllInboxes => Some(self.unified_rows(ids, &trees, mode, limit).await),
+            Scope::Account(_) => None,
+        };
+        let Some(rows) = rows else {
             return MailboxListSnapshot {
                 account_folders,
                 ..Default::default()
             };
         };
-        let rows = self.folder_rows(folder, mode, limit).await;
         MailboxListSnapshot {
             account_folders,
             rows,
-            // The selection is Task 3's to drive; nothing selects a row from inside the
-            // core yet, and `None` is the field's at-rest value.
+            // Nothing selects a row from inside the core; `None` is the
+            // field's at-rest value.
             selection: None,
             visible_limit: u32::try_from(limit).unwrap_or(u32::MAX),
             view_mode: mode,
             search: None,
         }
-    }
-
-    /// The selected folder's message rows: the account's windowed rows, completed (in
-    /// the threaded view) with the conversations' out-of-window members, projected into
-    /// `mode` and truncated to the visible window.
-    async fn folder_rows(
-        &self,
-        folder: &FolderRef,
-        mode: ViewMode,
-        limit: usize,
-    ) -> Vec<astra_viewmodel::MessageRowView> {
-        let window = self.load_window();
-        let base = self.load_mail_rows(&folder.account, window).await;
-        let rows = self.complete_threads(&folder.account, mode, base).await;
-        list_rows::project(mode, &rows, &folder.key, limit)
-    }
-
-    /// The newest `window` rows of `account`, from the in-memory cache; one ordered
-    /// store read on first use, reused for every later rebuild of the same list at the
-    /// same depth or shallower.
-    ///
-    /// A cached load is reused when it spans exactly this account at a **deeper or
-    /// equal** window (a wider window is a superset; the projection truncates); a
-    /// different account, or a deeper [`Intent::ShowMore`](crate::Intent::ShowMore)
-    /// than the cache holds, reloads.
-    /// [`invalidate_list_cache`](Self::invalidate_list_cache) drops it after a sync or
-    /// a write, so it never serves stale rows.
-    async fn load_mail_rows(
-        &self,
-        account: &AccountId,
-        window: usize,
-    ) -> Arc<Vec<Arc<MailListRow>>> {
-        if let Some(cached) = self
-            .mail_row_cache
-            .lock()
-            .expect("mail-row-cache mutex poisoned")
-            .as_ref()
-            .filter(|cached| cached.serves(account, window))
-        {
-            return Arc::clone(&cached.rows);
-        }
-        // Miss: snapshot the cache generation, then read from the store without holding
-        // the lock across the await. Each row is wrapped in its own `Arc` so a rebuild
-        // re-projects it without deep-copying it.
-        let generation = self.row_cache_generation.load(Ordering::SeqCst);
-        let load_start = Instant::now();
-        let rows: Arc<Vec<Arc<MailListRow>>> = Arc::new(
-            self.engine
-                .mail_window(std::slice::from_ref(account), window)
-                .await
-                .unwrap_or_default()
-                .into_iter()
-                .map(Arc::new)
-                .collect(),
-        );
-        log::debug!(
-            "list rows: read {} mail row(s) at window {window} in {}ms (cache miss)",
-            rows.len(),
-            load_start.elapsed().as_millis(),
-        );
-        // If the store returned fewer rows than the window asked for, this is everything
-        // the account holds; cache it as satisfying an unbounded window, so scrolling
-        // deeper reuses it instead of re-reading the same full set every step.
-        let effective_window = if rows.len() < window {
-            usize::MAX
-        } else {
-            window
-        };
-        // Only publish this load if nothing invalidated the cache while it was in
-        // flight; otherwise a slow pre-sync read could land after the invalidation and
-        // resurrect stale rows. On a mismatch, return the freshly-read rows for this
-        // one snapshot without caching them.
-        if self.row_cache_generation.load(Ordering::SeqCst) == generation {
-            *self
-                .mail_row_cache
-                .lock()
-                .expect("mail-row-cache mutex poisoned") = Some(CachedMailRows {
-                account: account.clone(),
-                window: effective_window,
-                rows: Arc::clone(&rows),
-            });
-        }
-        rows
-    }
-
-    /// Completes the windowed read for the threaded view: every *other* member of the
-    /// conversations the window touches, pulled from the store's thread index in one
-    /// indexed read, so a thread row counts its whole history even when older members
-    /// fall outside the window. The flat view lists messages, not conversations, and
-    /// needs no completion.
-    async fn complete_threads(
-        &self,
-        account: &AccountId,
-        mode: ViewMode,
-        base: Arc<Vec<Arc<MailListRow>>>,
-    ) -> Vec<Arc<MailListRow>> {
-        if mode != ViewMode::Threaded {
-            return base.to_vec();
-        }
-        let threads: BTreeSet<&str> = base
-            .iter()
-            .filter_map(|row| row.mail.thread_id.as_ref().map(ThreadId::as_str))
-            .collect();
-        if threads.is_empty() {
-            return base.to_vec();
-        }
-        // Keyed on `(account, key)`: a provider key is unique within an account, not
-        // across the several a unified list spans.
-        let present: HashSet<(&str, &str)> = base
-            .iter()
-            .map(|row| (row.account.as_str(), row.mail.key.as_str()))
-            .collect();
-        let extra = self
-            .engine
-            .mail_on_threads(std::slice::from_ref(account), threads)
-            .await
-            .unwrap_or_default();
-        let mut rows = base.to_vec();
-        rows.extend(
-            extra
-                .into_iter()
-                .filter(|member| {
-                    !present.contains(&(member.account.as_str(), member.mail.key.as_str()))
-                })
-                .map(Arc::new),
-        );
-        rows
     }
 
     /// Re-reads each account's folder-tree expansion **at publish time**, overwriting
@@ -412,26 +288,27 @@ impl<P: Provider> App<P> {
             .view_mode()
     }
 
-    /// Records the selection and persists the selected folder (or its clearing).
+    /// Records the selection and persists the scope it names: the folder, the
+    /// account, or the unified view, so a relaunch reopens whichever was
+    /// showing.
     pub(crate) fn set_scope(&self, scope: Scope) {
+        let (folder, account) = match &scope {
+            Scope::Folder(folder) => (Some(folder.clone()), None),
+            Scope::Account(account) => (None, Some(account.clone())),
+            Scope::AllInboxes => (None, None),
+        };
         self.pane
             .lock()
             .expect("preferences mutex poisoned")
-            .set_selected_folder(match &scope {
-                Scope::Folder(folder) => Some(folder.clone()),
-                Scope::AllInboxes | Scope::Account(_) => None,
-            });
+            .set_selected_scope(folder, account);
         *self.scope.lock().expect("scope mutex poisoned") = scope;
     }
 
-    /// The selected folder, or `None` on a whole-account or unified view; for tests
-    /// asserting what a fresh app seeded from the preferences file.
+    /// The scope the list is showing, whole; for tests asserting what a fresh
+    /// app seeded from the preferences file and what a write moved it to.
     #[cfg(test)]
-    pub(crate) fn scope_for_test(&self) -> Option<FolderRef> {
-        match &*self.scope.lock().expect("scope mutex poisoned") {
-            Scope::Folder(folder) => Some(folder.clone()),
-            Scope::AllInboxes | Scope::Account(_) => None,
-        }
+    pub(crate) fn scope_for_test(&self) -> Scope {
+        self.scope.lock().expect("scope mutex poisoned").clone()
     }
 }
 
@@ -440,7 +317,7 @@ impl<P: Provider> App<P> {
 /// later ones wait for a ShowMore, the same contract the merged message list
 /// follows. The folder view and the search view draw the same pane, so both
 /// project through here.
-pub(crate) fn account_folder_rows<P>(
+pub(crate) fn account_folder_rows<P: Provider>(
     handles: &[Arc<Account<P>>],
     trees: &[Arc<Vec<Mailbox>>],
     limit: usize,
@@ -459,6 +336,12 @@ pub(crate) fn account_folder_rows<P>(
             // Open until the publisher stamps the persisted state over it; see
             // `AccountFolderRow::expanded`.
             expanded: true,
+            // The pane's edit verbs ride the provider's own capability, so a
+            // surface never offers a tree change the account cannot apply.
+            can_edit_folders: account
+                .providers
+                .first()
+                .is_some_and(|provider| provider.connection_info().capabilities.mailbox_writes()),
             folders,
         });
     }

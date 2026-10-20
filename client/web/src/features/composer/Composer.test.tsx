@@ -463,6 +463,11 @@ describe('the app start resume', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     });
 
+    // The submit reads the staged bytes before it dispatches, so the intent
+    // crosses one microtask after the click.
+    await act(async () => {
+      await Promise.resolve();
+    });
     expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
       '{"submit_rich_mail":{"from":"work","to":"you@test.local","cc":"cc@test.local","bcc":"quiet@test.local","subject":"Later",' +
         `"document":{"blocks":[{"Paragraph":{"content":[${plainRun('Half written')}]}},{"Paragraph":{"content":[${plainRun(

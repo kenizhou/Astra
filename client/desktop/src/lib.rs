@@ -34,6 +34,11 @@ mod observer;
 #[cfg(test)]
 mod commands_fakes;
 
+// The one log capture the test binary shares, for the tests whose contract
+// is what a code path logs rather than what it answers.
+#[cfg(test)]
+mod log_capture;
+
 use tauri::{Emitter, Manager};
 
 pub(crate) use account_ops::HostAccountStore;
@@ -81,6 +86,7 @@ pub fn run() {
             commands::mailbox_list,
             commands::sync_progress,
             commands::reading,
+            commands::attachments::save_attachment,
             commands::drafts::draft_status,
             commands::drafts::draft_resume,
             commands::sending::sending,

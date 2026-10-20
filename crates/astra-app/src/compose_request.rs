@@ -26,13 +26,11 @@
 use std::collections::HashSet;
 
 use astra_composer::{
-    Block, ComposerDocument, InlineContent, Paragraph, Quote, QuoteAttribution, QuoteHeader,
-    QuoteStyle, TextRun,
+    Block, ComposerDocument, InlineContent, Paragraph, Quote, QuoteStyle, TextRun,
 };
 use astra_viewmodel::{ComposeKind, ComposeRequestSnapshot};
 use engine_api::{
     AccountId, EmailAddress, Message, MessageBody, MessageIdHeader, Provider, ProviderKey,
-    UtcDateTime,
 };
 
 use crate::{reading::resolve, reference::MessageRef, sanitise, App, ComposeIntent};
@@ -45,16 +43,16 @@ mod text;
 // opens, split out for the same limit.
 mod agent_draft;
 
+// The forward's carried attachments, split out for the same limit.
+pub(crate) mod carry;
+
+// The quote attribution's own formatting: the sender and date spellings the
+// line and the header block draw from, split out for the same limit.
+mod attribution;
+
 pub use agent_draft::OpenDraftError;
 
 use text::to_plain;
-
-/// The month names the attribution line's date spells out. The core has no
-/// locale (the same rule that keeps the `Re:` prefix untranslated), so one
-/// English spelling everywhere.
-const MONTHS: [&str; 12] = [
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-];
 
 impl<P: Provider> App<P> {
     /// The compose-request snapshot, for the host's pull after a
@@ -83,14 +81,17 @@ impl<P: Provider> App<P> {
 
     /// Routes one [`ComposeIntent`]: every variant builds and publishes one
     /// compose request from the message it names, so a host opening its
-    /// composer on the signal pulls the whole prefill as one thing.
+    /// composer on the signal pulls the whole prefill as one thing. A
+    /// forward's `carry` names the original's parts the request's document
+    /// opens holding as removable attachments.
     pub(crate) async fn dispatch_compose(&self, intent: ComposeIntent) {
-        let (message, kind) = match intent {
-            ComposeIntent::Reply { message } => (message, ComposeKind::Reply),
-            ComposeIntent::ReplyAll { message } => (message, ComposeKind::ReplyAll),
-            ComposeIntent::Forward { message } => (message, ComposeKind::Forward),
+        let (message, kind, carry) = match intent {
+            ComposeIntent::Reply { message } => (message, ComposeKind::Reply, Vec::new()),
+            ComposeIntent::ReplyAll { message } => (message, ComposeKind::ReplyAll, Vec::new()),
+            ComposeIntent::Forward { message, carry } => (message, ComposeKind::Forward, carry),
         };
-        self.publish_compose_request(&message, kind, None).await;
+        self.publish_compose_request(&message, kind, None, &carry)
+            .await;
     }
 
     /// Publishes the reply composition one accepted smart-reply chip opens:
@@ -103,7 +104,7 @@ impl<P: Provider> App<P> {
             account: account.clone(),
             key: key.clone(),
         };
-        self.publish_compose_request(&message, ComposeKind::Reply, Some(draft))
+        self.publish_compose_request(&message, ComposeKind::Reply, Some(draft), &[])
             .await;
     }
 
@@ -113,11 +114,14 @@ impl<P: Provider> App<P> {
     /// open, and an empty one would be a composer the user cannot trust. A
     /// body that cannot be fetched still publishes; the prefill needs only the
     /// headers, and the document opens on no quote rather than none at all.
+    /// A forward's `carry` pre-attaches the named parts onto the document and
+    /// waits beside the source for the submit to resolve them.
     async fn publish_compose_request(
         &self,
         message: &MessageRef,
         kind: ComposeKind,
         draft: Option<&str>,
+        carry: &[u32],
     ) {
         let Some(handle) = self.account_handle(&message.account).await else {
             return;
@@ -154,13 +158,22 @@ impl<P: Provider> App<P> {
             body.as_ref(),
             draft,
         );
+        let carried =
+            carry::carried_attachments(&self.engine, provider, &message.account, &original, carry)
+                .await;
+        let snapshot = carry::with_carried(snapshot, carried);
         // The submit arms re-resolve this message to thread the outgoing
         // reply or forward under the original's chain; the snapshot carries
-        // no reference, so the original is held here beside it.
+        // no reference, so the original is held here beside it, with the
+        // carry naming the parts a forward is still holding onto.
         *self
             .compose_source
             .lock()
             .expect("compose-source mutex poisoned") = Some(message.clone());
+        *self
+            .compose_carry
+            .lock()
+            .expect("compose-carry mutex poisoned") = carry.to_vec();
         self.compose_request.publish(Some(snapshot));
     }
 }
@@ -357,98 +370,10 @@ fn draft_paragraphs(draft: &str) -> Vec<Block> {
 fn quote(kind: ComposeKind, original: &Message, quoted: String) -> Quote {
     Quote {
         style: QuoteStyle::default(),
-        attribution: attribution(kind, original),
+        attribution: attribution::attribution(kind, original),
         body_html: plain_html(&quoted),
         body_plain: quoted,
     }
-}
-
-/// The attribution above a quoted original, in both renderings a host can flip
-/// between: the one-line a reply shows ("On `<date>`, `<sender>` wrote:", or
-/// just the sender when the original carries no instant) and the labelled
-/// header block a forward's style shows, which is the same for either kind.
-fn attribution(kind: ComposeKind, original: &Message) -> QuoteAttribution {
-    let sender = original
-        .envelope
-        .from
-        .first()
-        .map_or_else(String::new, display_address);
-    let date = display_instant(original.received_at.or(original.sent_at));
-    let line = match (kind, &date) {
-        (ComposeKind::Forward, _) => "Forwarded message".to_owned(),
-        (_, Some(date)) => format!("On {date}, {sender} wrote:"),
-        (_, None) => format!("{sender} wrote:"),
-    };
-    let mut headers = vec![QuoteHeader {
-        label: "From".to_owned(),
-        value: sender,
-    }];
-    if let Some(date) = date {
-        headers.push(QuoteHeader {
-            label: "Sent".to_owned(),
-            value: date,
-        });
-    }
-    let to = display_addresses(&original.envelope.to);
-    if !to.is_empty() {
-        headers.push(QuoteHeader {
-            label: "To".to_owned(),
-            value: to,
-        });
-    }
-    let cc = display_addresses(&original.envelope.cc);
-    if !cc.is_empty() {
-        headers.push(QuoteHeader {
-            label: "Cc".to_owned(),
-            value: cc,
-        });
-    }
-    headers.push(QuoteHeader {
-        label: "Subject".to_owned(),
-        value: original.envelope.subject.clone().unwrap_or_default(),
-    });
-    QuoteAttribution { line, headers }
-}
-
-/// One address as a header shows it: `Name <address>`, or the bare address when
-/// the header carried no usable name.
-fn display_address(addr: &EmailAddress) -> String {
-    match addr
-        .name
-        .as_deref()
-        .map(str::trim)
-        .filter(|n| !n.is_empty())
-    {
-        Some(name) => format!("{name} <{}>", addr.email),
-        None => addr.email.clone(),
-    }
-}
-
-/// The addresses as a header shows them, comma-joined.
-fn display_addresses(addresses: &[EmailAddress]) -> String {
-    addresses
-        .iter()
-        .map(display_address)
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-/// The instant as the attribution shows it: `9 Oct 2026 at 08:00`, the same
-/// instant the list row and the reading pane order and stamp by (delivery date,
-/// falling back to the `Date` header). `None` when neither is known.
-fn display_instant(instant: Option<UtcDateTime>) -> Option<String> {
-    let instant = instant?;
-    let month = MONTHS
-        .get(usize::from(instant.month().saturating_sub(1)))
-        .copied()
-        .unwrap_or_default();
-    Some(format!(
-        "{} {month} {} at {:02}:{:02}",
-        instant.day(),
-        instant.year(),
-        instant.hour(),
-        instant.minute(),
-    ))
 }
 
 /// The text a quote carries: the body's plain part when it has one (the engine

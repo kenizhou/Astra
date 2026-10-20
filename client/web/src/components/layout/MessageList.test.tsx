@@ -309,7 +309,9 @@ describe('the message list', () => {
     render(<MessageList />);
 
     fireEvent.click(screen.getByText('Ada Lovelace'));
-    fireEvent.click(screen.getByRole('button', { name: 'Flag' }));
+    // The row's own flag glyph, scoped past the bulk bar the selection
+    // raised: both are named Flag, only one is the row's.
+    fireEvent.click(within(screen.getByRole('listbox')).getByRole('button', { name: 'Flag' }));
 
     expect(ipc.dispatch).toHaveBeenCalledWith({
       set_flagged: { row: { thread: { account: 'work', thread_id: 'th-7' } }, flagged: true },

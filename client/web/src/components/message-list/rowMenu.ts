@@ -17,7 +17,15 @@ import {
 } from '@/components/icons';
 import { placeholderItem, type ContextMenuItem } from '@/components/ui/ContextMenu';
 import { dispatch, intents, type MessageRef } from '@/services/ipc';
-import type { MessageRowView, ViewMode } from '@/services/surfaces';
+import type { FolderRow, MessageRowView, ViewMode } from '@/services/surfaces';
+
+/** The account the move-to picker offers: the selection's own account, the
+ *  folders the pane holds for it, and the folder the rows sit in. */
+export interface MoveToContext {
+  account: string;
+  currentKey: string | null;
+  folders: FolderRow[];
+}
 
 /** Fires one intent per target row, fire-and-forget: the snapshots carry
  *  the outcomes back. */
@@ -46,8 +54,48 @@ function copy(text: string): void {
   void navigator.clipboard?.writeText(text);
 }
 
+/** The move-to item: the account's other folders as a flyout, each choice
+ *  moving the whole target set in one batch. Hidden while the targets span
+ *  accounts (moves stay within one) or the account holds no other folder,
+ *  disabled with the conversation reason while a target is a conversation,
+ *  which a move batch cannot name. */
+function moveItem(targets: MessageRowView[], context: MoveToContext | undefined): ContextMenuItem | null {
+  if (context === undefined) {
+    return null;
+  }
+  const oneAccount = targets.every((row) => row.account_id === context.account);
+  if (!oneAccount) {
+    return null;
+  }
+  const destinations = context.folders.filter((folder) => folder.key !== context.currentKey);
+  if (destinations.length === 0) {
+    return null;
+  }
+  if (targets.some((row) => 'thread' in row.key)) {
+    const reason = 'A whole conversation cannot be moved for this yet';
+    return { label: 'Move to folder', disabled: true, title: reason, description: reason };
+  }
+  const refs: MessageRef[] = messageRefs(targets);
+  return {
+    label: 'Move to folder',
+    children: destinations.map((folder) => ({
+      label: folder.name,
+      onSelect: () => void dispatch(intents.moveMessages(refs, { account: context.account, key: folder.key })),
+    })),
+  };
+}
+
+/** The message half of every target: the batch the move intent names. */
+function messageRefs(targets: MessageRowView[]): MessageRef[] {
+  return targets.flatMap((row) => ('message' in row.key ? [row.key.message] : []));
+}
+
 /** The menu one message row (or a batch of them) opens. */
-export function buildRowMenu(targets: MessageRowView[], viewMode: ViewMode): ContextMenuItem[] {
+export function buildRowMenu(
+  targets: MessageRowView[],
+  viewMode: ViewMode,
+  moveTo: MoveToContext | undefined = undefined,
+): ContextMenuItem[] {
   const one = single(targets);
   const oneMessage = singleMessage(targets);
   const composeReason =
@@ -61,6 +109,7 @@ export function buildRowMenu(targets: MessageRowView[], viewMode: ViewMode): Con
   const noun = viewMode === 'threaded' ? 'conversations' : 'messages';
   const anyUnread = targets.some((row) => row.unread);
   const allFlagged = targets.every((row) => row.flagged);
+  const move = moveItem(targets, moveTo);
 
   return [
     placeholderItem('Open in New Window', 'Opening a message in its own window arrives with a future slice'),
@@ -100,7 +149,7 @@ export function buildRowMenu(targets: MessageRowView[], viewMode: ViewMode): Con
       onSelect: () => forEach(targets, (row) => void dispatch(intents.setFlagged(row.key, !allFlagged))),
     },
     { separator: true },
-    placeholderItem('Move to folder', 'Moving mail between folders arrives with a future slice'),
+    ...(move !== null ? [move] : []),
     placeholderItem('Junk', 'Junk reporting arrives with a future slice'),
     { separator: true },
     {

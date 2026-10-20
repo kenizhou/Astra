@@ -40,7 +40,7 @@ async fn search_hits_the_seeded_notes_through_the_real_engine() {
         eprintln!("skipping live harness test: ASTRA_LIVE_HARNESS is not 1");
         return;
     };
-    let (account_id, providers) =
+    let (account_id, providers, ..) =
         dial_with_accepted_certificate(&host, &port, &user, &password).await;
 
     let observer: Arc<dyn AppObserver> = Arc::new(CountingObserver::default());

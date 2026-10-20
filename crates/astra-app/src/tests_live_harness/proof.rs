@@ -139,9 +139,9 @@ pub(super) async fn both_accounts_app(
     user: &str,
     password: &str,
 ) -> (App<Box<dyn Provider>>, AccountId, AccountId) {
-    let (sender, sender_providers) =
+    let (sender, sender_providers, ..) =
         dial_with_accepted_certificate(host, port, user, password).await;
-    let (recipient, recipient_providers) =
+    let (recipient, recipient_providers, ..) =
         dial_with_accepted_certificate(host, port, RECIPIENT, password).await;
     let observer: Arc<dyn AppObserver> = Arc::new(CountingObserver::default());
     let app = App::new(

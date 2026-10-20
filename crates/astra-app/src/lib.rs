@@ -18,11 +18,13 @@ mod ai_docs;
 mod ai_replies;
 mod ai_results;
 mod ai_rules;
+mod attachments;
 mod boot;
 mod calendar;
 mod compose_request;
 mod dispatch;
 mod drafts;
+mod folder_writes;
 mod list_rows;
 mod mail_writes;
 mod outbox;
@@ -37,6 +39,7 @@ mod sanitise;
 mod search;
 mod settings;
 mod snapshot;
+mod snapshot_rows;
 mod submit;
 mod surfaced;
 mod sync;
@@ -132,6 +135,7 @@ pub use ai_rules::{
     Category, MailContext, MatchResult, RulesError, CATEGORISE_PROMPT_VERSION, COLD_JUDGE_VERSION,
     MATCH_CONTEXT_BODY_CAP, RULES_MATCH_VERSION, RULES_PROMPT_VERSION,
 };
+pub use attachments::{AttachmentContent, AttachmentReadError};
 pub use boot::{boot, BootError, SpawnedTask};
 pub use calendar::{
     generate_meeting_brief, meeting_brief_prompt, BriefDocumentError, BriefMeeting,
@@ -141,6 +145,7 @@ pub use calendar::{
 pub use compose_request::OpenDraftError;
 pub use dispatch::AppError;
 pub use drafts::{DraftResume, DRAFT_AUTOSAVE_IDLE};
+pub use folder_writes::FolderWriteError;
 pub use mail_writes::MailWriteError;
 pub use people::avatar::AvatarView;
 pub use preferences::{load_preferences, preferences_path, save_preferences, Preferences};
@@ -205,6 +210,11 @@ pub struct App<P> {
     /// outgoing reply or forward under the original's `References` chain.
     /// Replaced by each request that publishes, like the snapshot beside it.
     compose_source: Mutex<Option<crate::reference::MessageRef>>,
+    /// The original's part ids the pending compose request's forward is
+    /// holding onto, set beside `compose_source` by the request that
+    /// published and read by the forward's submit to resolve the carried
+    /// rows' bytes off the original. Empty for every other kind.
+    compose_carry: Mutex<Vec<u32>>,
     /// The sending snapshot and its signal: every account's queued sends, one
     /// list, published on each transition of the queue. See `outbox`.
     sending: Surfaced<astra_viewmodel::SendingSnapshot>,
@@ -343,6 +353,7 @@ impl<P: Provider> App<P> {
             draft_status: Surfaced::new(Surface::DraftStatus, Arc::clone(&observer)),
             compose_request: Surfaced::new(Surface::ComposeRequest, Arc::clone(&observer)),
             compose_source: Mutex::new(None),
+            compose_carry: Mutex::new(Vec::new()),
             calendar: Surfaced::new(Surface::Calendar, Arc::clone(&observer)),
             calendar_state: Mutex::new(calendar::CalendarState::new()),
             people: Surfaced::new(Surface::People, Arc::clone(&observer)),
@@ -374,17 +385,23 @@ impl<P: Provider> App<P> {
     }
 
     /// Names the preferences file the app persists through. Call it before the first
-    /// dispatch: the view mode, the expansion map, and the selected folder load from
+    /// dispatch: the view mode, the expansion map, and the selected scope load from
     /// here (defaults while unnamed, as an in-memory build wants), and a persisted
-    /// selection seeds the scope so a relaunch reopens the folder that was showing.
+    /// selection seeds the scope so a relaunch reopens the folder, the account, or
+    /// the unified view that was showing.
     #[must_use]
     pub fn with_prefs_path(mut self, path: Option<PathBuf>) -> Self {
         let pane = Mutex::new(PreferencesState::new(path));
-        let scope = pane
-            .lock()
-            .expect("preferences mutex poisoned")
-            .selected_folder()
-            .map_or_else(Scope::default, Scope::Folder);
+        let scope = {
+            let pane = pane.lock().expect("preferences mutex poisoned");
+            pane.selected_folder().map_or_else(
+                || {
+                    pane.selected_account()
+                        .map_or_else(Scope::default, Scope::Account)
+                },
+                Scope::Folder,
+            )
+        };
         self.pane = pane;
         self.scope = Mutex::new(scope);
         self

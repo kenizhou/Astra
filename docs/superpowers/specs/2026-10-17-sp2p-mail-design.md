@@ -65,7 +65,8 @@ SaveAttachment intent carries the row reference and the attachment id; the
 app core reads the bytes through the engine's message_attachment; the
 desktop host answers with its save dialog and returns the path; the web
 surface shows the saved path or the refusal. The composer side: an attach
-button opens the host file picker (the multi-select dialog), each picked
+button opens the file picker (the webview's own multi-select input, so the
+bytes never round-trip through the host), each picked
 file becomes a DraftAttachment carried in the document, the actions row
 lists them with sizes and a remove control, and the send carries the blobs
 (the wire and the core's resolution already ship; the composer stops
@@ -90,6 +91,17 @@ genuinely attached calendar file still lists.
 
 - Folder drag over IMAP reparents by rename (the protocol's only move);
   the receipt's key re-selection is the contract.
+- A conversation cannot be moved: the row menu's verb disables with the
+  reason, and a drag holding a conversation row refuses the drop (the
+  source declares the shape beside its keys, so the hover can refuse what
+  the protected drag store hides). Message-row moves only.
+- An invitation that carries a second, distinct attached calendar file
+  loses that chip too: the hide rule discriminates by media type because
+  no part identity crosses the engine's scheduling read, and
+  part-identity discrimination is a later engine surface.
+- The folder intents carry the folder key as a bare string beside their
+  `AccountId`, extending the create intent's established shape; a
+  versioned move to `FolderRef` everywhere is a later wire decision.
 - Attachment preview opens only what the host shell can open (the saved
   path); no in-app preview rides this slice.
 - The unified list holds inboxes only (the scope's own name); a
@@ -97,6 +109,8 @@ genuinely attached calendar file still lists.
 - Offline folder edits queue behind the engine's outbox; a queued edit's
   menu shows the pending state, and a refused replay surfaces as the
   conflict the engine answers.
+- A forward carries the original's attachments as files; inline-image
+  preservation across a forward is not served by this slice.
 
 ## Test-first
 

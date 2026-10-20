@@ -60,7 +60,7 @@ pub(super) async fn people_suite(
     let mut legs = Vec::new();
     let mut ids = Vec::new();
     for login in [user.to_owned(), proof::RECIPIENT.to_owned()] {
-        let (account_id, mut providers) =
+        let (account_id, mut providers, ..) =
             super::dial_with_accepted_certificate(host, port, &login, password).await;
         let dav = connect_dav_providers(&dav_config(host, port, &login, password))
             .await

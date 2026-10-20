@@ -57,9 +57,15 @@ pub struct Preferences {
     #[serde(default)]
     pub collapsed_folders: BTreeMap<String, BTreeSet<String>>,
     /// The folder that was showing when the app last stopped, so a relaunch reopens it;
-    /// `None` for the unified "all inboxes" view.
+    /// `None` outside a folder view.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_folder: Option<FolderRef>,
+    /// The account whose own view was showing when the app last stopped, so a
+    /// relaunch reopens it; `None` beside a folder selection or the unified
+    /// "all inboxes" view. An older preferences file holds no entry, which is
+    /// the unified default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_account: Option<engine_api::AccountId>,
     /// The persisted theme: follow the host, or an explicit light or dark
     /// override.
     #[serde(default)]
@@ -95,6 +101,7 @@ impl Default for Preferences {
             collapsed_accounts: BTreeSet::new(),
             collapsed_folders: BTreeMap::new(),
             selected_folder: None,
+            selected_account: None,
             theme: ThemeMode::default(),
             twenty_four_clock: false,
             zone: default_zone(),
@@ -184,15 +191,29 @@ impl Preferences {
         }
     }
 
-    /// Records the folder the list is showing, or `None` for the unified view.
+    /// Records the folder the list is showing, or `None` outside a folder view.
     pub fn set_selected_folder(&mut self, folder: Option<FolderRef>) {
         self.selected_folder = folder;
     }
 
-    /// Drops every expansion this account holds, and its selected folder when the
-    /// selection pointed inside it: used when the account is removed, so a later re-add
-    /// opens showing its folders rather than inheriting a shut tree nobody remembers
-    /// shutting. Returns whether anything was stored for it.
+    /// The account whose own view was showing, or `None` beside a folder
+    /// selection or the unified view.
+    #[must_use]
+    pub fn selected_account(&self) -> Option<engine_api::AccountId> {
+        self.selected_account.clone()
+    }
+
+    /// Records the account whose own view the list is showing, or `None`
+    /// beside a folder selection or the unified view.
+    pub fn set_selected_account(&mut self, account: Option<engine_api::AccountId>) {
+        self.selected_account = account;
+    }
+
+    /// Drops every expansion this account holds, its selected folder when the
+    /// selection pointed inside it, and its own selected view: used when the
+    /// account is removed, so a later re-add opens showing its folders rather
+    /// than inheriting a shut tree nobody remembers shutting. Returns whether
+    /// anything was stored for it.
     pub fn remove_account(&mut self, account: &str) -> bool {
         let tree = self.collapsed_accounts.remove(account);
         let folders = self.collapsed_folders.remove(account).is_some();
@@ -200,7 +221,11 @@ impl Preferences {
             .selected_folder
             .take_if(|folder| folder.account.as_str() == account)
             .is_some();
-        tree || folders || selected
+        let viewed = self
+            .selected_account
+            .take_if(|held| held.as_str() == account)
+            .is_some();
+        tree || folders || selected || viewed
     }
 }
 
@@ -303,14 +328,27 @@ impl PreferencesState {
         true
     }
 
-    /// The persisted selected folder, or `None` for the unified view.
+    /// The persisted selected folder, or `None` outside a folder view.
     pub(crate) fn selected_folder(&self) -> Option<FolderRef> {
         self.prefs.selected_folder.clone()
     }
 
-    /// Records (or clears, with `None`) the selected folder and persists it.
-    pub(crate) fn set_selected_folder(&mut self, folder: Option<FolderRef>) {
+    /// The persisted account whose own view was showing, or `None` beside a
+    /// folder selection or the unified view.
+    pub(crate) fn selected_account(&self) -> Option<engine_api::AccountId> {
+        self.prefs.selected_account()
+    }
+
+    /// Records the selected scope, folder, account, or unified view, as one
+    /// write and persists it: the pair moves together, so neither half of the
+    /// choice can land on disk without the other.
+    pub(crate) fn set_selected_scope(
+        &mut self,
+        folder: Option<FolderRef>,
+        account: Option<engine_api::AccountId>,
+    ) {
         self.prefs.set_selected_folder(folder);
+        self.prefs.set_selected_account(account);
         self.persist();
     }
 
@@ -415,6 +453,9 @@ impl PreferencesState {
         on_disk
             .selected_folder
             .clone_from(&self.prefs.selected_folder);
+        on_disk
+            .selected_account
+            .clone_from(&self.prefs.selected_account);
         on_disk.theme = self.prefs.theme;
         on_disk.twenty_four_clock = self.prefs.twenty_four_clock;
         on_disk.zone.clone_from(&self.prefs.zone);

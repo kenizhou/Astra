@@ -32,7 +32,13 @@ pub use astra_viewmodel::SearchScope;
 /// What the folder pane asks the runtime to do to an account's folders.
 ///
 /// Each change goes through the engine's outbox, so one made offline is drawn in the pane
-/// at once, marked pending, and reaches the server when the device is back online.
+/// at once, marked pending, and reaches the server when the device is back online. A
+/// change that names an existing folder carries where the user saw it, so a replay after
+/// the folder moved elsewhere is refused as a conflict rather than applied to whatever
+/// the folder has become.
+///
+/// The folder key travels as a bare string beside its `AccountId`, extending `Create`'s
+/// established shape; the message-side intents carry the stricter `FolderRef`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
@@ -46,6 +52,41 @@ pub enum FolderIntent {
         parent: Option<String>,
         /// The new folder's own name.
         name: String,
+    },
+    /// Call a folder `name`, where it is staying put.
+    Rename {
+        /// The account whose tree holds the folder.
+        account: AccountId,
+        /// The folder to rename, a key of `account`'s.
+        folder: String,
+        /// The folder's new own name.
+        name: String,
+    },
+    /// Put a folder inside `parent`, keeping its name; `None` makes it a root.
+    Move {
+        /// The account whose tree holds the folder.
+        account: AccountId,
+        /// The folder to move, a key of `account`'s.
+        folder: String,
+        /// The folder to move it inside, a key of `account`'s, or `None` for the top
+        /// level.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        parent: Option<String>,
+    },
+    /// Put a folder, its subfolders and their mail in the account's Trash.
+    Trash {
+        /// The account whose tree holds the folder.
+        account: AccountId,
+        /// The folder to trash, a key of `account`'s.
+        folder: String,
+    },
+    /// Remove a folder, its subfolders and their mail for good: the verb the Trash's own
+    /// menu offers, behind a confirm.
+    Delete {
+        /// The account whose tree holds the folder.
+        account: AccountId,
+        /// The folder to remove, a key of `account`'s.
+        folder: String,
     },
 }
 
@@ -132,6 +173,16 @@ pub enum Intent {
     MoveToTrash {
         /// The row to trash, bound to its owning account.
         row: RowRef,
+    },
+    /// Move a set of messages to one folder of their own account. Every row
+    /// must belong to the destination folder's account, the row's own
+    /// constraint; a move to the folder a row already sits in is a no-op the
+    /// app answers without queueing anything.
+    MoveMessages {
+        /// The rows to move, each bound to its owning account.
+        rows: Vec<MessageRef>,
+        /// The destination folder, bound to its owning account.
+        folder: FolderRef,
     },
     /// Read one message in the reading pane: fetch its body, sanitise the HTML,
     /// resolve the inline images, and publish the reading snapshot. Opening also

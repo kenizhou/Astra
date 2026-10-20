@@ -13,7 +13,7 @@ vi.mock('@/services/ipc', async (importOriginal) => ({
 }));
 
 import { buildDraftMenu, buildRowMenu } from './rowMenu';
-import type { MessageRowView, RowKey } from '@/services/surfaces';
+import type { FolderRow, MessageRowView, RowKey } from '@/services/surfaces';
 
 function row(key: RowKey, over: Partial<MessageRowView> = {}): MessageRowView {
   return {
@@ -34,6 +34,15 @@ const m1 = row({ message: { account: 'work', key: 'k1' } });
 const m2 = row({ message: { account: 'work', key: 'k2' } });
 const th = row({ thread: { account: 'work', thread_id: 'th-1' } });
 
+/** The picker context the account's pane holds: one destination folder. */
+const moveCtx = {
+  account: 'work',
+  currentKey: 'INBOX',
+  folders: [
+    { key: 'Archive', name: 'Archive', unread: 0, depth: 0, has_children: false, expanded: false },
+  ] as FolderRow[],
+};
+
 /** The labels of the menu's items, separators as '|'. */
 function labels(items: ReturnType<typeof buildRowMenu>): string[] {
   return items.map((item) => (item.separator ? '|' : (item.label ?? '?')));
@@ -45,7 +54,7 @@ beforeEach(() => {
 
 describe('buildRowMenu', () => {
   it('holds the ported order', () => {
-    expect(labels(buildRowMenu([m1], 'flat'))).toEqual([
+    expect(labels(buildRowMenu([m1], 'flat', moveCtx))).toEqual([
       'Open in New Window',
       '|',
       'Reply',
@@ -71,10 +80,77 @@ describe('buildRowMenu', () => {
     expect(openWindow.disabled).toBe(true);
     expect(openWindow.title).toContain('future slice');
     expect(openWindow.description).toBe(openWindow.title);
-    const move = items.find((item) => item.label === 'Move to folder')!;
-    expect(move.disabled).toBe(true);
     const junk = items.find((item) => item.label === 'Junk')!;
     expect(junk.disabled).toBe(true);
+  });
+
+  it('offers the account folders as the move-to submenu, the sitting folder out', () => {
+    const folders: FolderRow[] = [
+      { key: 'INBOX', name: 'Inbox', role: 'inbox', unread: 0, depth: 0, has_children: false, expanded: false },
+      { key: 'Archive', name: 'Archive', unread: 0, depth: 0, has_children: false, expanded: false },
+      { key: 'Clients', name: 'Clients', unread: 0, depth: 0, has_children: false, expanded: false },
+    ];
+    const items = buildRowMenu([m1], 'flat', { account: 'work', currentKey: 'INBOX', folders });
+
+    const move = items.find((item) => item.label === 'Move to folder')!;
+    expect(move.disabled).toBeUndefined();
+    expect(move.children?.map((child) => child.label)).toEqual(['Archive', 'Clients']);
+
+    move.children![1]!.onSelect!();
+    expect(ipc.dispatch).toHaveBeenCalledTimes(1);
+    expect(ipc.dispatch).toHaveBeenCalledWith({
+      move_messages: {
+        rows: [{ account: 'work', key: 'k1' }],
+        folder: { account: 'work', key: 'Clients' },
+      },
+    });
+  });
+
+  it('moves the whole selection from the submenu', () => {
+    const folders: FolderRow[] = [
+      { key: 'Archive', name: 'Archive', unread: 0, depth: 0, has_children: false, expanded: false },
+    ];
+    const items = buildRowMenu([m1, m2], 'flat', { account: 'work', currentKey: 'INBOX', folders });
+
+    items.find((item) => item.label === 'Move to folder')!.children![0]!.onSelect!();
+    expect(ipc.dispatch).toHaveBeenCalledWith({
+      move_messages: {
+        rows: [
+          { account: 'work', key: 'k1' },
+          { account: 'work', key: 'k2' },
+        ],
+        folder: { account: 'work', key: 'Archive' },
+      },
+    });
+  });
+
+  it('hides the move-to verb while no other folder stands in the account', () => {
+    const folders: FolderRow[] = [
+      { key: 'INBOX', name: 'Inbox', role: 'inbox', unread: 0, depth: 0, has_children: false, expanded: false },
+    ];
+    const items = buildRowMenu([m1], 'flat', { account: 'work', currentKey: 'INBOX', folders });
+    expect(items.find((item) => item.label === 'Move to folder')).toBeUndefined();
+  });
+
+  it('hides the move-to verb for a selection that spans accounts', () => {
+    const other = row({ message: { account: 'home', key: 'k9' } }, { account_id: 'home' });
+    const items = buildRowMenu([m1, other], 'flat', moveCtx);
+    expect(items.find((item) => item.label === 'Move to folder')).toBeUndefined();
+  });
+
+  it('disables the move-to verb with the conversation reason on a thread target', () => {
+    const items = buildRowMenu([th], 'threaded', moveCtx);
+    expect(items.find((item) => item.label === 'Move to folder')).toEqual({
+      label: 'Move to folder',
+      disabled: true,
+      title: 'A whole conversation cannot be moved for this yet',
+      description: 'A whole conversation cannot be moved for this yet',
+    });
+  });
+
+  it('holds no move-to item while the picker has no context', () => {
+    const items = buildRowMenu([m1], 'flat');
+    expect(items.find((item) => item.label === 'Move to folder')).toBeUndefined();
   });
 
   it('flips Mark as Read on an unread target', () => {

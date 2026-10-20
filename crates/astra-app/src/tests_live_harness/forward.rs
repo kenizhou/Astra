@@ -101,6 +101,7 @@ async fn the_forward_carries_the_chain_without_answering_and_cleans_up_after_its
     };
     app.dispatch(Intent::Compose(ComposeIntent::Forward {
         message: MessageRef { account, key },
+        carry: Vec::new(),
     }))
     .await
     .unwrap();

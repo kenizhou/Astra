@@ -290,7 +290,7 @@ describe('the inline route', () => {
     expect(useComposerStore.getState().fromLabel).toBe('ghost');
   });
 
-  it('saves the reply draft over the idle with its quote, then still threads the send', () => {
+  it('saves the reply draft over the idle with its quote, then still threads the send', async () => {
     renderHook(() => useComposeRequestHydration());
     render(<ComposerPane />);
     landInline(replyRequest());
@@ -310,6 +310,11 @@ describe('the inline route', () => {
 
     act(() => {
       fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    });
+    // The submit reads the staged bytes before it dispatches, so the intent
+    // crosses one microtask after the click.
+    await act(async () => {
+      await Promise.resolve();
     });
     expect(JSON.stringify(ipc.dispatch.mock.calls[1]?.[0])).toBe(
       '{"submit_rich_reply":{"from":"work","to":"ada@example.test","cc":"","in_reply_to":"orig-1@server.test","subject":"Re: Quarterly report",' +

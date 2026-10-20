@@ -209,3 +209,120 @@ async fn a_message_that_is_no_invitation_carries_no_block() {
         "a plain message is no invitation, whatever else it carries"
     );
 }
+
+/// A `METHOD:REQUEST` payload as iMIP carries it, for the boundary tests: the
+/// calendar part itself, ready to embed in whatever MIME shape the test wraps
+/// it in.
+const REQUEST_PAYLOAD: &[u8] = b"BEGIN:VCALENDAR\r\n\
+    VERSION:2.0\r\n\
+    METHOD:REQUEST\r\n\
+    BEGIN:VEVENT\r\n\
+    UID:gmail-1@test.local\r\n\
+    DTSTAMP:20260801T080000Z\r\n\
+    DTSTART;TZID=Europe/Berlin:20260730T163000\r\n\
+    DTEND;TZID=Europe/Berlin:20260730T173000\r\n\
+    SUMMARY:Sprint planning\r\n\
+    SEQUENCE:0\r\n\
+    ORGANIZER;CN=Boss:mailto:boss@test.local\r\n\
+    ATTENDEE;CN=Info;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:info@test.local\r\n\
+    END:VEVENT\r\n\
+    END:VCALENDAR\r\n";
+
+/// A `METHOD:PUBLISH` calendar file, the shape a genuinely attached `.ics`
+/// carries: a calendar to keep, not a meeting to answer.
+const PUBLISH_PAYLOAD: &[u8] = b"BEGIN:VCALENDAR\r\n\
+    VERSION:2.0\r\n\
+    METHOD:PUBLISH\r\n\
+    BEGIN:VEVENT\r\n\
+    UID:season-1@test.local\r\n\
+    DTSTAMP:20260801T080000Z\r\n\
+    DTSTART;TZID=Europe/Berlin:20260901T090000\r\n\
+    DTEND;TZID=Europe/Berlin:20260901T100000\r\n\
+    SUMMARY:Season kickoff\r\n\
+    SEQUENCE:0\r\n\
+    END:VEVENT\r\n\
+    END:VCALENDAR\r\n";
+
+/// The Gmail shape: the invitation as an alternative body part, plus a
+/// duplicate copy the sender explicitly attached as `invite.ics`.
+const GMAIL_INVITATION: &[u8] = b"From: boss@test.local\r\n\
+    To: everyone@test.local\r\n\
+    Delivered-To: info@test.local\r\n\
+    Subject: Sprint planning\r\n\
+    Message-ID: <gmail-1@test.local>\r\n\
+    Content-Type: multipart/mixed; boundary=\"mix\"\r\n\r\n\
+    --mix\r\n\
+    Content-Type: multipart/alternative; boundary=\"alt\"\r\n\r\n\
+    --alt\r\n\
+    Content-Type: text/plain; charset=\"utf-8\"\r\n\r\n\
+    When: 30 July\r\n\
+    --alt\r\n\
+    Content-Type: text/calendar; charset=\"utf-8\"; method=REQUEST\r\n\r\n";
+
+/// The dispositioned duplicate copy of the same invitation.
+const GMAIL_ATTACHMENT: &[u8] = b"--mix\r\n\
+    Content-Type: text/calendar; name=\"invite.ics\"\r\n\
+    Content-Disposition: attachment; filename=\"invite.ics\"\r\n\r\n";
+
+/// The ordinary attached calendar file: a plain message and a `.ics` the
+/// sender meant to send, carrying no invitation of its own.
+const ATTACHED_CALENDAR: &[u8] = b"From: coach@test.local\r\n\
+    To: info@test.local\r\n\
+    Subject: Season dates\r\n\
+    Message-ID: <season-1@test.local>\r\n\
+    Content-Type: multipart/mixed; boundary=\"mix\"\r\n\r\n\
+    --mix\r\n\
+    Content-Type: text/plain; charset=\"utf-8\"\r\n\r\n\
+    The dates for the season.\r\n\
+    --mix\r\n\
+    Content-Type: text/calendar; name=\"season.ics\"\r\n\
+    Content-Disposition: attachment; filename=\"season.ics\"\r\n\r\n";
+
+/// Stitches `head`, `payload`, and the closing boundary into one raw source.
+fn with_payload(head: &[u8], payload: &[u8], close: &[u8]) -> Vec<u8> {
+    let mut source = head.to_vec();
+    source.extend_from_slice(payload);
+    source.extend_from_slice(close);
+    source
+}
+
+#[tokio::test]
+async fn the_invitations_own_ics_part_does_not_list_as_an_attachment() {
+    let surfaces = Arc::new(Mutex::new(Vec::new()));
+    let mut source = with_payload(GMAIL_INVITATION, REQUEST_PAYLOAD, b"--alt--\r\n");
+    source.extend_from_slice(GMAIL_ATTACHMENT);
+    source.extend_from_slice(REQUEST_PAYLOAD);
+    source.extend_from_slice(b"--mix--\r\n");
+    let fake = holding_source(CalendarFake::with_calendar_and_mail(), "gmail-1", &source);
+    let app = opened_invitation(fake, &surfaces, "gmail-1").await;
+
+    let snapshot = app.reading().expect("the open invitation");
+    assert_eq!(
+        snapshot.invitation.as_ref().map(|block| block.kind),
+        Some(InvitationKind::Rsvp),
+        "the card stands in for the invitation"
+    );
+    assert!(
+        snapshot.attachments.is_empty(),
+        "the part the card consumed lists nowhere, the body part nor the attached \
+         duplicate: {:?}",
+        snapshot.attachments,
+    );
+}
+
+#[tokio::test]
+async fn an_ordinary_attached_calendar_file_keeps_its_row() {
+    let surfaces = Arc::new(Mutex::new(Vec::new()));
+    let source = with_payload(ATTACHED_CALENDAR, PUBLISH_PAYLOAD, b"--mix--\r\n");
+    let fake = holding_source(CalendarFake::with_calendar_and_mail(), "season-1", &source);
+    let app = opened_invitation(fake, &surfaces, "season-1").await;
+
+    let snapshot = app.reading().expect("the open message");
+    assert_eq!(
+        snapshot.invitation, None,
+        "a published calendar file is no invitation"
+    );
+    assert_eq!(snapshot.attachments.len(), 1);
+    assert_eq!(snapshot.attachments[0].file_name, "season.ics");
+    assert_eq!(snapshot.attachments[0].media_type, "text/calendar");
+}

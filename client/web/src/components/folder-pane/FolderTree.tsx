@@ -5,8 +5,11 @@
 // tree keeps no expansion state of its own, which is what keeps it in step with
 // the snapshot every pull brings. Each account's group closes with its Outbox
 // row, which leads the list's queue view instead of a folder. Right-clicking a
-// row opens its context menu; the menu's New Subfolder stands the tree's own
-// inline edit row beneath the folder it named.
+// row opens its context menu; the menu's New Subfolder and Rename stand the
+// tree's own inline edit rows. Folders drag: onto a same-account folder to
+// reparent, onto the account row to become a root, with the illegal targets
+// refusing before anything dispatches; message rows dropped from the list move
+// onto the folder they land on.
 
 import { useState, type ComponentType } from 'react';
 
@@ -24,13 +27,21 @@ import {
 import { ContextMenu } from '@/components/ui/ContextMenu';
 import { useContextMenu } from '@/components/ui/useContextMenu';
 import { dispatch, intents, type FolderRef } from '@/services/ipc';
-import type { AccountFolderRow, FolderRow, FolderRole } from '@/services/surfaces';
+import type { AccountFolderRow, FolderRow, FolderRole, RowKey } from '@/services/surfaces';
 import { useSettingsStore } from '@/features/settings/settingsStore';
 import { useFolderStore, visibleFolders } from '@/stores/folderStore';
+import { useListStore } from '@/stores/listStore';
 import { useSendingStore } from '@/stores/sendingStore';
 import { useUiStore } from '@/stores/uiStore';
 import { buildFolderMenu } from './folderMenu';
+import { folderDrop, messageRefsOf, type FolderDropTarget } from './folderDrag';
+import { CONVERSATIONS_DRAG_TYPE, ROWS_DRAG_TYPE } from '@/components/message-list/MessageRow';
 import { NewFolderRow } from './NewFolderRow';
+import { RenameFolderRow } from './RenameFolderRow';
+
+/** The dataTransfer type a folder drag carries: the dragged folder's ref,
+ *  keys only, never message content. */
+const FOLDER_DRAG_TYPE = 'application/x-astra-folder';
 
 /** One icon per role; a folder with no role draws the plain folder icon. */
 const ROLE_ICON: Record<FolderRole, ComponentType<IconProps>> = {
@@ -52,10 +63,26 @@ interface FolderTreeRowProps {
   accountId: string;
   row: FolderRow;
   selected: boolean;
+  /** Whether the drag hovering this row is a legal target: the highlight. */
+  dropTarget: boolean;
   onMenu: (row: FolderRow, event: React.MouseEvent) => void;
+  onDragStart: (row: FolderRow, event: React.DragEvent) => void;
+  onDragEnd: () => void;
+  onDragOver: (row: FolderRow, event: React.DragEvent) => void;
+  onDrop: (row: FolderRow, event: React.DragEvent) => void;
 }
 
-function FolderTreeRow({ accountId, row, selected, onMenu }: FolderTreeRowProps) {
+function FolderTreeRow({
+  accountId,
+  row,
+  selected,
+  dropTarget,
+  onMenu,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDrop,
+}: FolderTreeRowProps) {
   const ref: FolderRef = { account: accountId, key: row.key };
 
   const onSelect = () => {
@@ -74,14 +101,21 @@ function FolderTreeRow({ accountId, row, selected, onMenu }: FolderTreeRowProps)
       aria-expanded={row.has_children ? row.expanded : undefined}
       aria-level={row.depth + 1}
       data-depth={row.depth}
+      draggable
+      onDragStart={(event) => onDragStart(row, event)}
+      onDragEnd={onDragEnd}
+      onDragOver={(event) => onDragOver(row, event)}
+      onDrop={(event) => onDrop(row, event)}
       onContextMenu={(event) => {
         event.preventDefault();
         onMenu(row, event);
       }}
       className={`relative flex min-h-[var(--row-h)] items-center gap-2 rounded-lg pr-2 text-[13px] transition-colors ${
-        selected
-          ? 'bg-selected font-medium text-[var(--selected-text)]'
-          : 'text-foreground hover:bg-hover'
+        dropTarget
+          ? 'bg-selected text-[var(--selected-text)] outline-dashed outline-1 outline-ring'
+          : selected
+            ? 'bg-selected font-medium text-[var(--selected-text)]'
+            : 'text-foreground hover:bg-hover'
       }`}
       style={{ paddingLeft: `${12 + row.depth * 14}px` }}
     >
@@ -200,6 +234,11 @@ export function FolderTree({
   const menu = useContextMenu();
   const [menuRow, setMenuRow] = useState<FolderRow | null>(null);
   const [creatingUnder, setCreatingUnder] = useState<FolderRow | null>(null);
+  const [renaming, setRenaming] = useState<FolderRow | null>(null);
+  // The folder this tree is dragging, held beside the dataTransfer because a
+  // dragover cannot read the payload, only its type.
+  const [dragging, setDragging] = useState<FolderRef | null>(null);
+  const [dropOn, setDropOn] = useState<string | null>(null);
 
   const onToggleAccount = () => {
     void dispatch(intents.setAccountExpanded(account.account_id, !account.expanded));
@@ -221,15 +260,126 @@ export function FolderTree({
     setCreatingUnder(row);
   };
 
+  // The folder's listed rows, when this folder is the one the list shows:
+  // what Mark All as Read loops over.
+  const listedRowsOf = (row: FolderRow) =>
+    selected !== null &&
+    selected.account === account.account_id &&
+    selected.key === row.key
+      ? useListStore.getState().rows
+      : null;
+
   // A collapsed account still owes its reader the unread total: the rows are
   // hidden, so the header carries the sum until the tree is opened again.
   const collapsedUnread = account.expanded
     ? 0
     : account.folders.reduce((total, row) => total + row.unread, 0);
 
+  const onFolderDragStart = (row: FolderRow, event: React.DragEvent): void => {
+    if (account.can_edit_folders !== true) {
+      event.preventDefault();
+      return;
+    }
+    const ref = { account: account.account_id, key: row.key };
+    event.dataTransfer.setData(FOLDER_DRAG_TYPE, JSON.stringify(ref));
+    event.dataTransfer.effectAllowed = 'move';
+    setDragging(ref);
+  };
+
+  /** Whether the hover is a target the standing drag may legally land on. */
+  const legalTarget = (target: FolderDropTarget): boolean => {
+    if (dragging !== null) {
+      return folderDrop(dragging, target, account.folders) !== 'refuse';
+    }
+    // A message drag: any folder of the drag's own account takes it, and the
+    // drop itself keeps only the rows that belong here.
+    return target !== 'unified';
+  };
+
+  const onRowDragOver = (row: FolderRow, event: React.DragEvent): void => {
+    if (
+      dragging === null &&
+      !event.dataTransfer.types.includes(ROWS_DRAG_TYPE)
+    ) {
+      return;
+    }
+    // A selection holding a conversation declared it at the source: the
+    // hover refuses what the drop could not name, so no highlight invites a
+    // drop that would do nothing.
+    if (event.dataTransfer.types.includes(CONVERSATIONS_DRAG_TYPE)) {
+      return;
+    }
+    const target: FolderDropTarget = {
+      kind: 'folder',
+      account: account.account_id,
+      key: row.key,
+    };
+    if (legalTarget(target)) {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      setDropOn(row.key);
+    }
+  };
+
+  const onRowDrop = (row: FolderRow, event: React.DragEvent): void => {
+    const target: FolderDropTarget = {
+      kind: 'folder',
+      account: account.account_id,
+      key: row.key,
+    };
+    if (dragging !== null) {
+      const outcome = folderDrop(dragging, target, account.folders);
+      setDragging(null);
+      setDropOn(null);
+      if (outcome === 'reparent') {
+        void dispatch(intents.moveFolder(account.account_id, dragging.key, row.key));
+      }
+      return;
+    }
+    // A message drop moves the payload only when every key names a message:
+    // a conversation the batch cannot name refuses the whole drop, the same
+    // refusal the hover already gave it; the rest keep to their account.
+    const keys = droppedRowKeys(event);
+    if (keys.length > 0 && keys.every((key) => 'message' in key)) {
+      const refs = messageRefsOf(keys);
+      void dispatch(
+        intents.moveMessages(
+          refs.filter((ref) => ref.account === account.account_id),
+          { account: account.account_id, key: row.key },
+        ),
+      );
+    }
+    setDropOn(null);
+  };
+
+  const onAccountDragOver = (event: React.DragEvent): void => {
+    if (dragging === null) {
+      return;
+    }
+    if (folderDrop(dragging, { kind: 'account', account: account.account_id }, account.folders) !== 'refuse') {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      setDropOn('account');
+    }
+  };
+
+  const onAccountDrop = (): void => {
+    if (dragging === null) {
+      return;
+    }
+    void dispatch(intents.moveFolder(account.account_id, dragging.key));
+    setDragging(null);
+    setDropOn(null);
+  };
+
   return (
     <section aria-label={account.display_name} className="space-y-0.5 pb-1">
-      <div className="flex h-9 items-center gap-1 pl-2 pr-2">
+      <div
+        className={`flex h-9 items-center gap-1 pl-2 pr-2 ${dropOn === 'account' ? 'rounded-lg bg-selected' : ''}`}
+        onDragOver={onAccountDragOver}
+        onDragLeave={() => setDropOn((current) => (current === 'account' ? null : current))}
+        onDrop={onAccountDrop}
+      >
         <button
           type="button"
           onClick={onToggleAccount}
@@ -267,7 +417,15 @@ export function FolderTree({
               selected.account === account.account_id &&
               selected.key === row.key
             }
+            dropTarget={dropOn === row.key}
             onMenu={openMenu}
+            onDragStart={onFolderDragStart}
+            onDragEnd={() => {
+              setDragging(null);
+              setDropOn(null);
+            }}
+            onDragOver={onRowDragOver}
+            onDrop={onRowDrop}
           />
           {creatingUnder !== null && creatingUnder.key === row.key && (
             <NewFolderRow
@@ -277,6 +435,15 @@ export function FolderTree({
               onDone={() => setCreatingUnder(null)}
             />
           )}
+          {renaming !== null && renaming.key === row.key && (
+            <RenameFolderRow
+              account={account.account_id}
+              folder={row.key}
+              name={row.name}
+              depth={row.depth}
+              onDone={() => setRenaming(null)}
+            />
+          )}
         </div>
       ))}
       {account.expanded && <OutboxTreeRow accountId={account.account_id} />}
@@ -284,10 +451,32 @@ export function FolderTree({
         <ContextMenu
           x={menu.state.x}
           y={menu.state.y}
-          items={buildFolderMenu(menuRow, () => startCreate(menuRow))}
+          items={buildFolderMenu(menuRow, account, {
+            onCreateSubfolder: () => startCreate(menuRow),
+            onRename: () => setRenaming(menuRow),
+            listedRows: listedRowsOf(menuRow),
+          })}
           onClose={menu.close}
         />
       )}
     </section>
   );
+}
+
+/** The row keys a dropped selection carried, keys only, thread keys
+ *  included: the drop site decides what a batch can name. */
+function droppedRowKeys(event: React.DragEvent): RowKey[] {
+  try {
+    const raw = event.dataTransfer.getData(ROWS_DRAG_TYPE);
+    if (raw === '') {
+      return [];
+    }
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed as RowKey[];
+  } catch {
+    return [];
+  }
 }

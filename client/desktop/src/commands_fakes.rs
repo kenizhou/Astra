@@ -29,8 +29,8 @@ use std::{
 };
 
 use astra_app::{
-    AvatarView, Chip, ComposeIntent, ContactDraftInput, DraftResume, DraftsIntent, Intent,
-    OutboxIntent,
+    AttachmentContent, AttachmentReadError, AvatarView, Chip, ComposeIntent, ContactDraftInput,
+    DraftResume, DraftsIntent, Intent, OutboxIntent,
 };
 use astra_viewmodel::{
     CalendarSnapshot, ComposeKind, ComposeRequestSnapshot, DraftSaveState, DraftStatusSnapshot,
@@ -83,6 +83,12 @@ pub(crate) struct FakeApp {
     pub(crate) mailbox_list: MailboxListSnapshot,
     pub(crate) sync_progress: SyncProgressSnapshot,
     pub(crate) reading: Mutex<Option<ReadingSnapshot>>,
+    /// The attachment read's answer; `Err` stands in for the typed refusal.
+    pub(crate) attachment: Mutex<Result<Option<AttachmentContent>, AttachmentReadError>>,
+    /// The (account, key, id) triples the attachment read was asked for, so
+    /// a test can assert the command hands the webview's ids through to the
+    /// core.
+    pub(crate) attachment_into: Mutex<Vec<(String, String, u32)>>,
     /// The draft-status snapshot the pull answers with: what the fake's drafts
     /// dispatches last published.
     pub(crate) draft_status: Mutex<Option<DraftStatusSnapshot>>,
@@ -168,6 +174,8 @@ impl FakeApp {
             mailbox_list,
             sync_progress,
             reading: Mutex::new(None),
+            attachment: Mutex::new(Ok(None)),
+            attachment_into: Mutex::new(Vec::new()),
             draft_status: Mutex::new(None),
             compose_request: Mutex::new(None),
             stored_draft: Mutex::new(None),
@@ -261,7 +269,7 @@ impl FakeApp {
         let (kind, message) = match compose {
             ComposeIntent::Reply { message } => (ComposeKind::Reply, message),
             ComposeIntent::ReplyAll { message } => (ComposeKind::ReplyAll, message),
-            ComposeIntent::Forward { message } => (ComposeKind::Forward, message),
+            ComposeIntent::Forward { message, .. } => (ComposeKind::Forward, message),
             // The family is non-exhaustive; a verb the fake knows no prefill
             // for publishes nothing.
             _ => return,

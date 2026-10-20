@@ -1,0 +1,292 @@
+// SPDX-License-Identifier: GPL-3.0-only
+//! Tests for the attachments command: the save's three outcomes over the
+//! seam (the saved path answered and the bytes written under the row's
+//! suggested name, the reader's cancel, the failed read carrying the
+//! engine's own sentence), the outcome's wire shape, and the log contract
+//! (nothing about the read is logged beyond the saved path the reader
+//! chose). The fake app and the state builder live in `commands_fakes`,
+//! one compiled copy for every command test module.
+
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+
+use astra_app::{AttachmentContent, AttachmentReadError};
+
+use super::{save_attachment_of, SaveAttachmentOutcome, SaveHost};
+use crate::commands_fakes::{state, FakeApp, FakeStore};
+
+/// The account and provider key the save names: the same pair the reading
+/// fixtures use.
+fn key_parts() -> (engine_api::AccountId, engine_api::ProviderKey) {
+    (
+        engine_api::AccountId::try_from("work").expect("an account id"),
+        engine_api::ProviderKey::new("imap:v1:u42").expect("a provider key"),
+    )
+}
+
+/// The attachment content the fake core answers with: the reading
+/// fixture's own row, the pdf every byte test saves.
+fn content() -> AttachmentContent {
+    AttachmentContent {
+        file_name: "report.pdf".to_owned(),
+        bytes: b"PDF".to_vec(),
+    }
+}
+
+/// The path the fake dialog answers: named so no sentinel of the read (the
+/// account, the key, the suggested file name) appears inside it.
+const CHOSEN: &str = "C:\\saved\\elsewhere.bin";
+
+/// The seam's fake: answers the dialog from `answer`, records the suggested
+/// name, and writes into memory unless told to refuse.
+struct FakeSave {
+    answer: Option<PathBuf>,
+    refuse_write: Option<String>,
+    suggested: Mutex<Option<String>>,
+    written: Mutex<Vec<(PathBuf, Vec<u8>)>>,
+}
+
+impl FakeSave {
+    /// A host whose dialog answers the chosen path.
+    fn saving_to(path: &str) -> Self {
+        Self {
+            answer: Some(PathBuf::from(path)),
+            refuse_write: None,
+            suggested: Mutex::new(None),
+            written: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// A host whose dialog the reader cancels.
+    fn cancelled() -> Self {
+        Self {
+            answer: None,
+            refuse_write: None,
+            suggested: Mutex::new(None),
+            written: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// A host whose file write refuses with `sentence`.
+    fn refusing_write(sentence: &str) -> Self {
+        Self {
+            answer: Some(PathBuf::from(CHOSEN)),
+            refuse_write: Some(sentence.to_owned()),
+            suggested: Mutex::new(None),
+            written: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+impl SaveHost for FakeSave {
+    fn ask_save_path(&self, file_name: &str) -> Option<PathBuf> {
+        *self.suggested.lock().unwrap() = Some(file_name.to_owned());
+        self.answer.clone()
+    }
+
+    fn write(&self, path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
+        if let Some(sentence) = &self.refuse_write {
+            Err(sentence.clone())
+        } else {
+            self.written
+                .lock()
+                .unwrap()
+                .push((path.to_owned(), bytes.to_vec()));
+            Ok(())
+        }
+    }
+}
+
+/// A state whose fake core answers the fixture attachment.
+fn seeded(name: &str, app: &Arc<FakeApp>) -> crate::app_state::AppState {
+    *app.attachment.lock().unwrap() = Ok(Some(content()));
+    state(name, Arc::clone(app), FakeStore::accepting())
+}
+
+#[test]
+fn a_saved_attachment_answers_the_chosen_path_and_writes_the_bytes() {
+    let app = FakeApp::new();
+    let state = seeded("attach-save", &app);
+    let (account, key) = key_parts();
+    let host = FakeSave::saving_to(CHOSEN);
+
+    let outcome = state
+        .runtime
+        .block_on(|| save_attachment_of(&state, &account, &key, 0, &host));
+
+    assert_eq!(
+        outcome,
+        SaveAttachmentOutcome::Saved {
+            path: CHOSEN.to_owned(),
+        },
+        "the saved path is the answer"
+    );
+    assert_eq!(
+        *host.suggested.lock().unwrap(),
+        Some("report.pdf".to_owned()),
+        "the dialog opens on the row's own file name"
+    );
+    assert_eq!(
+        *host.written.lock().unwrap(),
+        vec![(PathBuf::from(CHOSEN), b"PDF".to_vec())],
+        "the decoded bytes land at the chosen path"
+    );
+    assert_eq!(
+        app.attachment_into.lock().unwrap().as_slice(),
+        [("work".to_owned(), "imap:v1:u42".to_owned(), 0u32)],
+        "the command hands the webview's ids through to the core"
+    );
+}
+
+#[test]
+fn a_cancelled_dialog_answers_cancelled_and_writes_nothing() {
+    let app = FakeApp::new();
+    let state = seeded("attach-cancel", &app);
+    let (account, key) = key_parts();
+    let host = FakeSave::cancelled();
+
+    let outcome = state
+        .runtime
+        .block_on(|| save_attachment_of(&state, &account, &key, 0, &host));
+
+    assert_eq!(outcome, SaveAttachmentOutcome::Cancelled);
+    assert!(
+        host.written.lock().unwrap().is_empty(),
+        "a cancelled dialog writes nothing"
+    );
+}
+
+#[test]
+fn a_failed_read_answers_failed_with_the_engines_sentence_and_never_asks() {
+    let app = FakeApp::new();
+    *app.attachment.lock().unwrap() = Err(AttachmentReadError::Fetch(
+        "the attachment could not be fetched: sync error: provider error: the fake holds no source for that key"
+            .to_owned(),
+    ));
+    let state = state("attach-refused", Arc::clone(&app), FakeStore::accepting());
+    let (account, key) = key_parts();
+    let host = FakeSave::saving_to(CHOSEN);
+
+    let outcome = state
+        .runtime
+        .block_on(|| save_attachment_of(&state, &account, &key, 0, &host));
+
+    let SaveAttachmentOutcome::Failed { reason } = outcome else {
+        panic!("the refused read answers failed: {outcome:?}");
+    };
+    assert!(
+        reason.contains("the fake holds no source for that key"),
+        "the engine's own sentence is the reason: {reason}"
+    );
+    assert!(
+        host.suggested.lock().unwrap().is_none(),
+        "a failed read never opens the dialog"
+    );
+    assert!(
+        host.written.lock().unwrap().is_empty(),
+        "a failed read writes nothing"
+    );
+}
+
+#[test]
+fn a_refused_write_answers_failed_with_the_write_sentence() {
+    let app = FakeApp::new();
+    let state = seeded("attach-write-refused", &app);
+    let (account, key) = key_parts();
+    let host = FakeSave::refusing_write("the disk is full");
+
+    let outcome = state
+        .runtime
+        .block_on(|| save_attachment_of(&state, &account, &key, 0, &host));
+
+    assert_eq!(
+        outcome,
+        SaveAttachmentOutcome::Failed {
+            reason: "the disk is full".to_owned(),
+        },
+        "the write's own sentence is the reason"
+    );
+}
+
+#[test]
+fn the_outcome_crosses_the_wire_as_the_snake_case_tag() {
+    let wire = serde_json::to_value(SaveAttachmentOutcome::Saved {
+        path: CHOSEN.to_owned(),
+    })
+    .expect("the saved outcome serialises");
+    assert_eq!(wire, serde_json::json!({"saved": {"path": CHOSEN}}));
+
+    let wire =
+        serde_json::to_value(SaveAttachmentOutcome::Cancelled).expect("the cancel serialises");
+    assert_eq!(wire, serde_json::json!("cancelled"));
+
+    let wire = serde_json::to_value(SaveAttachmentOutcome::Failed {
+        reason: "the disk is full".to_owned(),
+    })
+    .expect("the failure serialises");
+    assert_eq!(
+        wire,
+        serde_json::json!({"failed": {"reason": "the disk is full"}})
+    );
+}
+
+#[test]
+fn nothing_is_logged_beyond_the_saved_path_the_user_chose() {
+    let lines = crate::log_capture::captured();
+    let before = lines.lock().unwrap().len();
+    // The probe's own chosen path, unique to this test: the other attachment
+    // tests log their own saves concurrently into the same shared buffer.
+    let probe = "C:\\saved\\log-probe.bin";
+
+    // Drive all three outcomes: the saved path is logged, the cancel and
+    // the refusal carry only their sentences.
+    let saved_app = FakeApp::new();
+    let saved_state = seeded("attach-log-saved", &saved_app);
+    let (account, key) = key_parts();
+    let host = FakeSave::saving_to(probe);
+    let saved = saved_state
+        .runtime
+        .block_on(|| save_attachment_of(&saved_state, &account, &key, 0, &host));
+    assert!(matches!(saved, SaveAttachmentOutcome::Saved { .. }));
+
+    let cancelled_app = FakeApp::new();
+    let cancelled_state = seeded("attach-log-cancel", &cancelled_app);
+    let host = FakeSave::cancelled();
+    let cancelled = cancelled_state
+        .runtime
+        .block_on(|| save_attachment_of(&cancelled_state, &account, &key, 0, &host));
+    assert_eq!(cancelled, SaveAttachmentOutcome::Cancelled);
+
+    let failed_app = FakeApp::new();
+    *failed_app.attachment.lock().unwrap() = Err(AttachmentReadError::Unresolved);
+    let failed_state = state(
+        "attach-log-failed",
+        Arc::clone(&failed_app),
+        FakeStore::accepting(),
+    );
+    let host = FakeSave::saving_to(probe);
+    let failed = failed_state
+        .runtime
+        .block_on(|| save_attachment_of(&failed_state, &account, &key, 0, &host));
+    assert!(matches!(failed, SaveAttachmentOutcome::Failed { .. }));
+
+    let mine = lines
+        .lock()
+        .unwrap()
+        .iter()
+        .skip(before)
+        .map(|(_, message)| message.clone())
+        .filter(|message| message.contains("save-attachment"))
+        .collect::<Vec<_>>();
+    assert!(!mine.is_empty(), "the save's own lines are captured");
+    for line in &mine {
+        assert!(!line.contains("work"), "no account id: {line}");
+        assert!(!line.contains("imap:v1:u42"), "no message key: {line}");
+        assert!(!line.contains("report.pdf"), "no suggested name: {line}");
+    }
+    assert_eq!(
+        mine.iter().filter(|line| line.contains(probe)).count(),
+        1,
+        "the saved path is named exactly once, by the save that chose it: {mine:?}"
+    );
+}

@@ -1,28 +1,45 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The Unified inbox row (UI1 D4): the multi-account visual language ahead of
-// SP2p's behaviour. The row is inert in this slice: aria-disabled with normal
-// pointer events (a genuinely disabled control would swallow the tooltip),
-// focusable, and its tooltip answers both hover and keyboard focus. The badge
-// is live: the sum of the snapshot's unread counts, minus junk and trash.
+// The unified inbox row, live: clicking selects the unified scope (the
+// select-account-null family, persisted by the core across launches), the
+// unread badge keeps counting, and the row renders only while the pane holds
+// at least two accounts.
 
 import { InboxIcon } from '@/components/icons';
+import { dispatch, intents } from '@/services/ipc';
 import { unifiedUnread } from './unifiedSum';
+import { useFolderStore } from '@/stores/folderStore';
 import type { AccountFolderRow } from '@/services/surfaces';
 
 /** The row, rendered only while the pane holds at least two accounts. */
 export function UnifiedInboxRow({ accounts }: { accounts: AccountFolderRow[] }) {
+  const selected =
+    useFolderStore((s) => s.selected === null && s.outboxAccount === null && s.unified) &&
+    accounts.length >= 2;
   if (accounts.length < 2) {
     return null;
   }
   const unread = unifiedUnread(accounts);
+  const onSelect = () => {
+    useFolderStore.getState().selectUnified();
+    void dispatch(intents.selectAccount(null));
+  };
   return (
     <div
       role="treeitem"
-      aria-disabled="true"
-      aria-describedby="unified-inbox-note"
+      aria-selected={selected}
       tabIndex={0}
-      title="Unified inbox arrives with SP2p"
-      className="flex min-h-[var(--row-h)] items-center gap-2 rounded-lg px-2 text-[13px] text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onSelect();
+        }
+      }}
+      onClick={onSelect}
+      className={`flex min-h-[var(--row-h)] cursor-pointer items-center gap-2 rounded-lg px-2 text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+        selected
+          ? 'bg-selected font-medium text-[var(--selected-text)]'
+          : 'text-foreground hover:bg-hover'
+      }`}
     >
       <span aria-hidden="true" className="flex w-4 shrink-0 items-center justify-center">
         <InboxIcon size={15} />
@@ -33,9 +50,6 @@ export function UnifiedInboxRow({ accounts }: { accounts: AccountFolderRow[] }) 
           {unread}
         </span>
       )}
-      <span id="unified-inbox-note" className="sr-only">
-        Unified inbox arrives with SP2p; the row is a preview and does not open yet.
-      </span>
     </div>
   );
 }

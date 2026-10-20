@@ -21,6 +21,7 @@ import { dispatch, intents } from '@/services/ipc';
 import { useAccountStore } from '@/stores/accountStore';
 
 import { ComposerActionsRow } from './ComposerActionsRow';
+import { ComposerAttachments } from './ComposerAttachments';
 import { ComposerFields } from './ComposerFields';
 import { ComposerStatusBar } from './ComposerStatusBar';
 import { Editor } from './Editor';
@@ -198,15 +199,31 @@ export function ComposerPane({ showClose = false }: ComposerPaneProps) {
         onToggleBcc={() => setBccToggled((toggled) => !toggled)}
       />
       <EditorToolbar editor={editor} />
-      <Editor
-        key={composition}
-        initialContent={initialContent}
-        onChange={(doc) => useComposerStore.getState().setEditorContent(doc.content ?? [])}
-        onReady={(instance) => {
-          registerComposerEditor(instance);
-          setEditor(instance);
+      <div
+        className="flex min-h-0 flex-1 flex-col"
+        onDragOver={(event) => {
+          if (event.dataTransfer.types.includes('Files')) {
+            event.preventDefault();
+          }
         }}
-      />
+        onDrop={(event) => {
+          if (event.dataTransfer.files.length > 0) {
+            event.preventDefault();
+            useComposerStore.getState().dropFiles(Array.from(event.dataTransfer.files));
+          }
+        }}
+      >
+        <Editor
+          key={composition}
+          initialContent={initialContent}
+          onChange={(doc) => useComposerStore.getState().setEditorContent(doc.content ?? [])}
+          onReady={(instance) => {
+            registerComposerEditor(instance);
+            setEditor(instance);
+          }}
+        />
+        <ComposerAttachments />
+      </div>
       <ComposerStatusBar editor={editor} composition={composition} />
     </section>
   );

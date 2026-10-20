@@ -35,6 +35,10 @@ pub enum MailWriteError {
     /// The account has no folder of the role the move targets.
     #[error("that account has no folder to move the message to")]
     NoTargetFolder,
+    /// A move-to-folder batch named rows and a destination from different
+    /// accounts; a move stays within one account, the row's own constraint.
+    #[error("a move to a folder stays within one account")]
+    CrossAccount,
 }
 
 impl<P: Provider> App<P> {
@@ -86,6 +90,82 @@ impl<P: Provider> App<P> {
     /// move to; the account and provider errors of [`App::mark_read`].
     pub async fn move_to_trash(&self, row: RowRef) -> Result<(), MailWriteError> {
         self.move_row_to(row, &MailboxRole::Trash).await
+    }
+
+    /// Moves a set of messages to one folder of their own account: one move
+    /// edit per row, the same outbox discipline the single-row moves ride. A
+    /// row already sitting in the destination is a no-op answered without
+    /// queueing anything.
+    ///
+    /// # Errors
+    ///
+    /// [`MailWriteError::CrossAccount`] when the rows and the destination
+    /// folder name different accounts; the account and provider errors of
+    /// [`App::mark_read`].
+    pub async fn move_messages(
+        &self,
+        rows: Vec<crate::reference::MessageRef>,
+        folder: crate::reference::FolderRef,
+    ) -> Result<(), MailWriteError> {
+        if rows.iter().any(|row| row.account != folder.account) {
+            log::warn!("move: a move to a folder stays within one account");
+            return Err(MailWriteError::CrossAccount);
+        }
+        let account = folder.account.clone();
+        // The account handle is cloned out so the guard is released before the
+        // provider round-trip; an account the app no longer holds, or one
+        // whose provider is gone, cannot be written to.
+        let Some(handle) = self.account_handle(&account).await else {
+            log::warn!("move: the row's account is no longer configured");
+            return Err(MailWriteError::UnknownAccount);
+        };
+        let Some(provider) = handle.providers.first() else {
+            log::warn!("move: the row's account has no provider to write through");
+            return Err(MailWriteError::NoProvider);
+        };
+        // The destination must name a folder of the account's own tree: a
+        // well-formed key naming nothing would queue one refused edit per
+        // row, the silent no-op the typed forms exist to prevent.
+        let tree = self.engine.mailboxes(&account).await.unwrap_or_default();
+        if !tree.iter().any(|mailbox| mailbox.id.as_str() == folder.key) {
+            log::warn!("move: the destination key names no folder of the account");
+            return Err(MailWriteError::NoTargetFolder);
+        }
+        let Ok(destination) = MailboxId::try_from(folder.key.as_str()) else {
+            log::warn!("move: the destination key names no folder");
+            return Err(MailWriteError::NoTargetFolder);
+        };
+        let mut queued = false;
+        for row in rows {
+            // A row already sitting in the destination is a no-op: answered
+            // without queueing anything, the whole batch when every row is.
+            let filed_there = crate::reading::resolve(&self.engine, &row)
+                .await
+                .is_some_and(|stored| stored.mailboxes.contains(&destination));
+            if filed_there {
+                continue;
+            }
+            let edit = MailEdit::move_to(row.key.clone(), destination.clone());
+            // Discard-and-resync: whether the server took it or the op waits
+            // in the outbox, the snapshot below is what tells the user.
+            if let Err(err) = self
+                .engine
+                .edit_mail(provider, &account, &generated_idempotency(), &edit)
+                .await
+            {
+                log::warn!("move: the mail edit failed: {err}");
+            }
+            queued = true;
+        }
+        if !queued {
+            return Ok(());
+        }
+        // The write changed what the list shows, so an in-flight rebuild for the older
+        // state must not win by finishing last.
+        self.bump_generation();
+        self.invalidate_list_cache();
+        self.rebuild_snapshot().await;
+        Ok(())
     }
 
     /// Moves one row's every member key to the account's mailbox for `role`
@@ -223,7 +303,7 @@ impl<P: Provider> App<P> {
 /// account. It is deliberately last: a server that tags a real `\Archive`
 /// folder, or names one conventionally, still wins, so this can only turn a
 /// no-op into a move, never redirect an existing one.
-fn resolve_move_target(tree: &[Mailbox], role: &MailboxRole) -> Option<MailboxId> {
+pub(crate) fn resolve_move_target(tree: &[Mailbox], role: &MailboxRole) -> Option<MailboxId> {
     tree.iter()
         .find(|mailbox| mailbox.role.as_ref() == Some(role))
         .or_else(|| {

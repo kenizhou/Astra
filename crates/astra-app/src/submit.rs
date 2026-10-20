@@ -22,13 +22,14 @@
 
 use std::collections::HashMap;
 
-use astra_composer::{render, ComposerDocument};
+use astra_composer::{render, ComposerDocument, DraftBlobHandle};
 use engine_api::{
-    AccountId, Draft, DraftAttachment, EmailAddress, Message, MessageIdHeader, Provider,
-    SubmitOutcome,
+    AccountId, AttachmentPartId, Draft, DraftAttachment, EmailAddress, Message, MessageIdHeader,
+    Provider, SubmitOutcome,
 };
 
 use crate::{
+    compose_request::carry,
     drafts::{mint_message_id, parse_addresses},
     protocol::ComposerBlob,
     reading::resolve,
@@ -117,13 +118,15 @@ impl<P: Provider> App<P> {
 
     /// Sends the composer's document as a forward: the same path as the plain
     /// submit, with the draft carrying the original's whole chain and no
-    /// `In-Reply-To` ([`App::forward_references`]), because a forward
-    /// continues a conversation without answering a message.
+    /// `In-Reply-To`, because a forward continues a conversation without
+    /// answering a message.
     ///
     /// A forward whose original will not re-resolve sends nothing: it has no
     /// header of its own, so the original is the only source of the
     /// conversation it belongs to, and a forward without it is a new message
-    /// pretending to be one.
+    /// pretending to be one. The carried attachments resolve off the same
+    /// re-read: a standing row whose part will not come back refuses the
+    /// send, the same discipline a host blob that is missing serves.
     pub(crate) async fn submit_rich_forward(
         &self,
         from: AccountId,
@@ -140,16 +143,43 @@ impl<P: Provider> App<P> {
             log::warn!("send: the account has no provider to send through");
             return;
         };
-        let Some(references) = self.forward_references().await else {
+        let Some(original) = self.compose_original().await else {
             log::warn!("send: the original to forward is no longer in the store");
             return;
         };
+        let carry = self
+            .compose_carry
+            .lock()
+            .expect("compose-carry mutex poisoned")
+            .clone();
+        let mut blobs = blobs;
+        for id in carry::standing(&carry, &document) {
+            match self
+                .engine
+                .message_attachment(provider, &from, &original, AttachmentPartId::new(id))
+                .await
+            {
+                Ok(Some(content)) => blobs.push(ComposerBlob {
+                    handle: DraftBlobHandle::new(carry::handle_of(id))
+                        .expect("a minted carry handle is never empty"),
+                    bytes: content.into_bytes(),
+                }),
+                Ok(None) => {
+                    log::warn!("send: the original carries no such attachment to forward");
+                    return;
+                }
+                Err(err) => {
+                    log::warn!("send: the carried attachment could not be fetched: {err}");
+                    return;
+                }
+            }
+        }
         let Some(draft) = submit_draft(&handle.identity, &to, "", "", &subject, &document, &blobs)
         else {
             log::warn!("send: the message could not be built for sending");
             return;
         };
-        let draft = draft.with_references(references);
+        let draft = draft.with_references(original_chain(&original));
         self.submit_and_drain(&from, provider, draft).await;
     }
 
@@ -203,13 +233,6 @@ impl<P: Provider> App<P> {
             }
             _ => vec![parent.clone()],
         }
-    }
-
-    /// The `References` chain a forward carries: the original's whole chain
-    /// plus itself. `None` when the original will not re-resolve, which the
-    /// forward arm answers by sending nothing.
-    async fn forward_references(&self) -> Option<Vec<MessageIdHeader>> {
-        Some(original_chain(&self.compose_original().await?))
     }
 }
 

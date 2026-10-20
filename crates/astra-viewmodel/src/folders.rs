@@ -108,8 +108,23 @@ pub struct AccountFolderRow {
     /// its own, or the tree would disagree with itself between surfaces and across a
     /// restart.
     pub expanded: bool,
+    /// Whether the account's provider can change its folder tree: what decides whether
+    /// the pane offers the folder edit verbs at all. Absent reads as `false`, so a
+    /// provider that cannot have its tree edited never shows the verbs, and a snapshot
+    /// from before the field carries nothing rather than a lying `true`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub can_edit_folders: bool,
     /// The account's sorted folder rows, ready for the sidebar.
     pub folders: Vec<FolderRow>,
+}
+
+/// Whether the capability flag is off, the only shape the wire omits.
+// By reference because `skip_serializing_if` hands its predicate one; a
+// by-value signature, which clippy suggests for a copy this small, no longer
+// fits the call serde generates.
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// One mailbox's client-visible role, or `None` for an ordinary folder.

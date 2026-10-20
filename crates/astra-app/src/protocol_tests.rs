@@ -6,8 +6,8 @@ use astra_composer::{Block, ComposerDocument, DraftBlobHandle, InlineContent, Pa
 use engine_api::AccountId;
 
 use super::{
-    ComposeIntent, ComposerBlob, CompositionId, DraftsIntent, FolderIntent, Intent, OutboxIntent,
-    Surface, ViewMode,
+    ComposeIntent, ComposerBlob, CompositionId, DraftsIntent, Intent, OutboxIntent, Surface,
+    ViewMode,
 };
 use crate::reference::{FolderRef, MessageRef, QueuedRef, RowRef, ThreadRef};
 
@@ -121,27 +121,6 @@ fn set_flagged_carries_the_row_and_the_new_state() {
             flagged: false,
         },
         r#"{"set_flagged":{"row":{"thread":{"account":"home","thread_id":"th-7"}},"flagged":false}}"#,
-    );
-}
-
-#[test]
-fn folders_carries_the_folder_intent() {
-    // A top-level create omits `parent` entirely; a nested one carries it.
-    round_trips(
-        &Intent::Folders(FolderIntent::Create {
-            account: account("work"),
-            parent: None,
-            name: "Archive".to_owned(),
-        }),
-        r#"{"folders":{"create":{"account":"work","name":"Archive"}}}"#,
-    );
-    round_trips(
-        &Intent::Folders(FolderIntent::Create {
-            account: account("work"),
-            parent: Some("INBOX".to_owned()),
-            name: "Archive".to_owned(),
-        }),
-        r#"{"folders":{"create":{"account":"work","parent":"INBOX","name":"Archive"}}}"#,
     );
 }
 
@@ -463,6 +442,7 @@ fn the_compose_family_names_the_message_each_variant_answers() {
     round_trips(
         &Intent::Compose(ComposeIntent::Forward {
             message: MessageRef::from_parts("home", "jmap:e2".to_owned()).unwrap(),
+            carry: Vec::new(),
         }),
         r#"{"compose":{"forward":{"message":{"account":"home","key":"jmap:e2"}}}}"#,
     );

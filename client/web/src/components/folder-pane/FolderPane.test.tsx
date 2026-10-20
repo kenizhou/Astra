@@ -4,7 +4,7 @@
 // badges only where mail is unread, and selection and expansion crossing back
 // as intents. Each expanded account's group closes with its Outbox row, which
 // badges the sends still owed and leads the list's queue view.
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const ipc = vi.hoisted(() => ({
@@ -174,7 +174,7 @@ describe('the Unified inbox row', () => {
     render(<FolderPane />);
 
     const row = screen.getByRole('treeitem', { name: /Unified inbox/ });
-    expect(row.getAttribute('aria-disabled')).toBe('true');
+    expect(row.getAttribute('aria-disabled')).toBeNull();
     const expected = fixture.account_folders
       .flatMap((a) => a.folders)
       .filter((f) => f.role !== 'junk' && f.role !== 'trash')
@@ -193,13 +193,16 @@ describe('the Unified inbox row', () => {
     expect(screen.queryByRole('treeitem', { name: /Unified inbox/ })).toBeNull();
   });
 
-  it('describes its future to keyboard and screen-reader users', () => {
+  it('selects the unified scope on click, so the core persists it', () => {
     render(<FolderPane />);
 
     const row = screen.getByRole('treeitem', { name: /Unified inbox/ });
-    const describedBy = row.getAttribute('aria-describedby');
-    expect(describedBy).toBeTruthy();
-    expect(document.getElementById(describedBy!)!.textContent).toContain('SP2p');
+    fireEvent.click(row);
+
+    expect(ipc.dispatch).toHaveBeenCalledWith({ select_account: null });
+    expect(useFolderStore.getState().unified).toBe(true);
+    expect(useFolderStore.getState().selected).toBeNull();
+    expect(row.getAttribute('aria-selected')).toBe('true');
   });
 });
 
@@ -269,7 +272,18 @@ describe('the per-account refusal badge', () => {
 });
 
 describe('the folder context menu', () => {
-  it('opens on right-click with sync, create, and the placeholders', () => {
+  /** The fixture's accounts carry no capability flag, so a test that wants
+   *  the live verbs stamps the work account as an editor first. */
+  const workCanEdit = (): void => {
+    useFolderStore.setState((state) => ({
+      accounts: state.accounts.map((a) =>
+        a.account_id === 'work' ? { ...a, can_edit_folders: true } : a,
+      ),
+    }));
+  };
+
+  it('opens on right-click with the live verbs for an editing account', () => {
+    workCanEdit();
     render(<FolderPane />);
 
     fireEvent.contextMenu(screen.getByText('Acme'));
@@ -277,9 +291,21 @@ describe('the folder context menu', () => {
     expect(screen.getByRole('menu')).toBeTruthy();
     expect(screen.getByRole('menuitem', { name: 'Sync this folder' })).toBeTruthy();
     expect(screen.getByRole('menuitem', { name: 'New Subfolder' })).toBeTruthy();
-    expect(screen.getByRole('menuitem', { name: 'Mark All as Read' }).getAttribute('aria-disabled')).toBe('true');
-    expect(screen.getByRole('menuitem', { name: 'Rename Folder' }).getAttribute('aria-disabled')).toBe('true');
-    expect(screen.getByRole('menuitem', { name: 'Delete Folder' }).getAttribute('aria-disabled')).toBe('true');
+    expect(screen.getByRole('menuitem', { name: 'Rename Folder' }).getAttribute('aria-disabled')).toBeNull();
+    expect(screen.getByRole('menuitem', { name: 'Delete Folder' }).getAttribute('aria-disabled')).toBeNull();
+    // Mark All as Read stands only for the folder the list is showing.
+    expect(screen.queryByRole('menuitem', { name: 'Mark All as Read' })).toBeNull();
+  });
+
+  it('hides the tree-edit verbs when the account cannot edit its folders', () => {
+    render(<FolderPane />);
+
+    fireEvent.contextMenu(screen.getByText('Acme'));
+
+    expect(screen.getByRole('menuitem', { name: 'Sync this folder' })).toBeTruthy();
+    expect(screen.queryByRole('menuitem', { name: 'New Subfolder' })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: 'Rename Folder' })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: 'Delete Folder' })).toBeNull();
   });
 
   it('syncs from the menu', () => {
@@ -291,7 +317,31 @@ describe('the folder context menu', () => {
     expect(ipc.dispatch).toHaveBeenCalledWith('refresh_mail');
   });
 
-  it('stands the inline create row under the folder and commits the parent', () => {
+  it('moves a dropped message selection and refuses one holding a conversation', () => {
+    render(<FolderPane />);
+    const acme = screen.getByText('Acme');
+
+    const messages = [{ message: { account: 'work', key: 'k1' } }];
+    fireEvent.drop(acme, { dataTransfer: { getData: () => JSON.stringify(messages) } });
+    expect(ipc.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({ move_messages: expect.anything() }),
+    );
+
+    ipc.dispatch.mockClear();
+    const mixed = [
+      { thread: { account: 'work', thread_id: 'th-1' } },
+      { message: { account: 'work', key: 'k2' } },
+    ];
+    fireEvent.drop(acme, { dataTransfer: { getData: () => JSON.stringify(mixed) } });
+    expect(
+      ipc.dispatch.mock.calls.every(
+        (call) => typeof call[0] !== 'object' || call[0] === null || !('move_messages' in call[0]),
+      ),
+    ).toBe(true);
+  });
+
+  it('stands the inline create row under the folder and commits the parent', async () => {
+    workCanEdit();
     render(<FolderPane />);
 
     fireEvent.contextMenu(screen.getByText('Clients'));
@@ -305,6 +355,7 @@ describe('the folder context menu', () => {
     expect(ipc.dispatch).toHaveBeenCalledWith({
       folders: { create: { account: 'work', name: 'Invoices', parent: 'Clients' } },
     });
-    expect(screen.queryByLabelText('New folder name')).toBeNull();
+    // The row closes on the dispatch's settlement, never before.
+    await waitFor(() => expect(screen.queryByLabelText('New folder name')).toBeNull());
   });
 });

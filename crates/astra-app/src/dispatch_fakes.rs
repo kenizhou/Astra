@@ -21,8 +21,8 @@ use std::{
 use async_trait::async_trait;
 use engine_api::{
     AccountId, CalendarWrites, Capabilities, Draft, EmailAddress, Engine, Mailbox, MailboxEdit,
-    MailboxEditReceipt, MailboxId, MailboxRole, MailboxWrites, Message, Provider, ProviderKey,
-    SubmissionReceipt, SyncWindow, SystemKeyword, UtcDateTime,
+    MailboxId, Message, Provider, ProviderKey, SubmissionReceipt, SyncWindow, SystemKeyword,
+    UtcDateTime,
 };
 use engine_core::raw::RawMime;
 use engine_core::sync::{SyncState, SyncUpdate};
@@ -37,12 +37,17 @@ use crate::{Account, App, AppObserver, MailboxConnector, Surface};
 // module so this file stays under the 500-line limit beside the SMTP leg. The
 // re-export keeps every test module's `fakes::…` paths unchanged.
 mod mail;
+// The folder-tree fixtures and the tree-mutating half of the provider: a child
+// module for the same limit, holding the key/folder/inbox builders every test
+// names and the `MailboxWrites` leg a folder-edit test drives.
+mod tree;
 // The AI pass fixtures, its own child for the same limit, pathed `fakes::ai::…`.
 pub(crate) mod ai;
 pub(super) use mail::{
     delivered_at, flagged, folder_keys, mail, pane_rows, read, row, row_keys, row_keys_from,
     sending_signals, sent, sent_copy, threaded, trash,
 };
+pub(super) use tree::{folder, inbox, key};
 
 /// Records the surfaces the app signals, so a test can assert the loop fired.
 pub(super) struct RecordingObserver {
@@ -64,8 +69,10 @@ impl AppObserver for RecordingObserver {
 /// served, so a test can prove which path drove a sync. Raw RFC 5322 sources are
 /// served by provider key for the reading pipeline's body reads.
 pub(super) struct FakeProvider {
-    /// The account's whole tree, served as the first folder-list snapshot.
-    pub(super) mailboxes: Vec<Mailbox>,
+    /// The account's whole tree, served as the first folder-list snapshot and
+    /// mutated by the tree edits the fake accepts, the way a server's is.
+    /// Behind a mutex because the writes move it.
+    pub(super) mailboxes: Arc<Mutex<Vec<Mailbox>>>,
     /// The account's whole mailbox, served as the first email pass and re-presented
     /// as the present set afterwards. Behind a mutex so a test can model the
     /// server's copy moving between passes (a message deleted server-side).
@@ -99,6 +106,12 @@ pub(super) struct FakeProvider {
     /// Draft saves left to refuse as retryable ("no route to host"), so a test can model
     /// an outage the outbox rides out.
     offline_saves: Mutex<u32>,
+    /// Whether the adapter can change the account's folder tree (the
+    /// capability); `with_tree_writes` is the shape a folder-edit test drives.
+    pub(super) tree_writes: bool,
+    /// Every tree edit this provider was asked to apply, in order: the log the
+    /// folder-write assertions read.
+    pub(super) mailbox_edits: Arc<Mutex<Vec<MailboxEdit>>>,
 }
 
 /// How the fake's SMTP leg answers one submit attempt.
@@ -139,7 +152,7 @@ impl FakeProvider {
         sources: Vec<(String, Vec<u8>)>,
     ) -> Self {
         Self {
-            mailboxes,
+            mailboxes: Arc::new(Mutex::new(mailboxes)),
             messages: Arc::new(Mutex::new(messages)),
             updates: Arc::new(Mutex::new(Vec::new())),
             sources: Mutex::new(sources.into_iter().collect()),
@@ -150,7 +163,17 @@ impl FakeProvider {
             submits: Arc::new(Mutex::new(Vec::new())),
             send_script: Mutex::new(Vec::new()),
             offline_saves: Mutex::new(0),
+            tree_writes: false,
+            mailbox_edits: Arc::new(Mutex::new(Vec::new())),
         }
+    }
+
+    /// Marks the adapter as one that can change the account's folder tree,
+    /// accepting and applying tree edits the way a writable server does: the
+    /// provider shape every folder-write test drives.
+    pub(super) fn with_tree_writes(mut self) -> Self {
+        self.tree_writes = true;
+        self
     }
 
     /// Scripts the SMTP leg's answers to the next submits, one entry per
@@ -226,32 +249,31 @@ impl FakeProvider {
 #[async_trait]
 impl Provider for FakeProvider {
     fn connection_info(&self) -> ConnectionInfo {
-        ConnectionInfo::new(
-            Capabilities::none()
-                .with_mail()
-                .with_mail_drafts()
-                .with_submission(),
-        )
+        let mut capabilities = Capabilities::none()
+            .with_mail()
+            .with_mail_drafts()
+            .with_submission();
+        if self.tree_writes {
+            capabilities = capabilities.with_mailbox_writes();
+        }
+        ConnectionInfo::new(capabilities)
     }
 
     async fn sync_mailboxes(
         &self,
         _account: &AccountId,
-        cursor: Option<&SyncState>,
+        _cursor: Option<&SyncState>,
     ) -> ProviderResult<ScopeSync<Mailbox>> {
-        if cursor.is_some() {
-            return Ok(ScopeSync::new(
-                SyncUpdate::delta(Vec::new(), Vec::new()),
-                SyncState::new("mbox-2"),
-            ));
-        }
-        let present = self
-            .mailboxes
+        // The whole tree on every pass, the IMAP shape (a LIST): a tree the
+        // writes moved is presented as it stands, so a post-edit reconcile
+        // lands the new folders.
+        let mailboxes = self.mailboxes.lock().unwrap().clone();
+        let present = mailboxes
             .iter()
             .map(|mailbox| mailbox.id.key().clone())
             .collect();
         Ok(ScopeSync::new(
-            SyncUpdate::snapshot(self.mailboxes.clone(), present),
+            SyncUpdate::snapshot(mailboxes, present),
             SyncState::new("mbox-1"),
         ))
     }
@@ -409,21 +431,10 @@ impl Provider for FakeProvider {
     }
 }
 
-#[async_trait]
-impl MailboxWrites for FakeProvider {
-    async fn edit_mailbox(
-        &self,
-        _account: &AccountId,
-        _edit: &MailboxEdit,
-    ) -> ProviderResult<MailboxEditReceipt> {
-        Err(ProviderError::invalid_state("the fake holds no tree"))
-    }
-}
-
 impl CalendarWrites for FakeProvider {}
 
-/// The connector the fakes would dial on demand; one that never connects, which is the
-/// honest answer until the folder intents exist.
+/// The connector the fakes would dial on demand; one that never connects, the
+/// honest answer for fixtures whose every provider is in hand already.
 pub(super) struct NoConnector;
 
 #[async_trait]
@@ -435,23 +446,6 @@ impl MailboxConnector<FakeProvider> for NoConnector {
     ) -> Option<FakeProvider> {
         None
     }
-}
-
-/// A folder key, the way every fixture names one.
-pub(super) fn key(value: &str) -> MailboxId {
-    MailboxId::try_from(value).unwrap()
-}
-
-/// A plain top-level folder called `name`.
-pub(super) fn folder(key_value: &str, name: &str) -> Mailbox {
-    Mailbox::new(key(key_value), name)
-}
-
-/// The role-bearing Inbox every account's tree leads with.
-pub(super) fn inbox() -> Mailbox {
-    let mut mailbox = folder("inbox", "Inbox");
-    mailbox.role = Some(MailboxRole::Inbox);
-    mailbox
 }
 
 /// Wraps `provider` as an account `id` (its identity is `me@<id>.local`).

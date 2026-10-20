@@ -17,25 +17,33 @@ interface FolderStoreState {
   selected: FolderRef | null;
   /** The account whose outbox the list shows; null while a folder leads. */
   outboxAccount: string | null;
+  /** Whether the unified all-inboxes view leads the list. */
+  unified: boolean;
   /** Replaces the tree from a fresh mailbox-list snapshot. */
   applySnapshot: (snapshot: MailboxListSnapshot) => void;
   /** Records a folder selection the surface just dispatched. */
   select: (folder: FolderRef) => void;
   /** Records an outbox selection the surface just dispatched. */
   selectOutbox: (account: string) => void;
+  /** Records the unified selection the surface just dispatched. */
+  selectUnified: () => void;
 }
 
 export const useFolderStore = create<FolderStoreState>((set) => ({
   accounts: [],
   selected: null,
   outboxAccount: null,
+  unified: false,
 
   applySnapshot: (snapshot) => set({ accounts: snapshot.account_folders }),
 
-  // A folder and an outbox never lead at once: each selection clears the other.
-  select: (folder) => set({ selected: folder, outboxAccount: null }),
+  // A folder, an outbox, and the unified view never lead at once: each
+  // selection clears the others.
+  select: (folder) => set({ selected: folder, outboxAccount: null, unified: false }),
 
-  selectOutbox: (account) => set({ outboxAccount: account, selected: null }),
+  selectOutbox: (account) => set({ outboxAccount: account, selected: null, unified: false }),
+
+  selectUnified: () => set({ unified: true, selected: null, outboxAccount: null }),
 }));
 
 /**

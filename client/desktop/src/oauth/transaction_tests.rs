@@ -3,52 +3,17 @@
 //! a scripted store whose persist and delete can each be told to refuse
 //! independently (a real platform store refuses them for different
 //! reasons), and the synthetic grant round trip that proves the paths in
-//! sequence. The rotation's failure report is captured through an
+//! sequence. The rotation's failure report is captured through the shared
 //! installed logger, because "logged at error" is the contract, not a
 //! return value.
 
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 
 use engine_api::AccountId;
 
 use super::CredentialTransaction;
 use crate::credential_store::{AccountCredentialStore, CredentialStoreError};
-
-/// The captured log lines, one shared buffer for the whole test binary:
-/// the logger installs once and every test reads the same place.
-static LINES: OnceLock<Mutex<Vec<(log::Level, String)>>> = OnceLock::new();
-
-/// A capture logger over [`LINES`].
-struct Capture;
-
-impl log::Log for Capture {
-    fn enabled(&self, _metadata: &log::Metadata<'_>) -> bool {
-        true
-    }
-
-    fn log(&self, record: &log::Record<'_>) {
-        if let Some(lines) = LINES.get() {
-            lines
-                .lock()
-                .unwrap()
-                .push((record.level(), record.args().to_string()));
-        }
-    }
-
-    fn flush(&self) {}
-}
-
-/// The capture logger, as a static so the log crate's install takes it.
-static CAPTURE: Capture = Capture;
-
-/// Installs the capture (the first installer wins; later calls share it)
-/// and returns the shared lines.
-fn captured() -> &'static Mutex<Vec<(log::Level, String)>> {
-    let lines = LINES.get_or_init(|| Mutex::new(Vec::new()));
-    let _ = log::set_logger(&CAPTURE);
-    log::set_max_level(log::LevelFilter::max());
-    lines
-}
+use crate::log_capture::captured;
 
 /// A scripted store: every landed write and erase in order, with the
 /// refusal each half can be told to answer.

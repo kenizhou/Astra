@@ -222,7 +222,7 @@ pub(super) async fn settings_suite(
     user: &str,
     password: &str,
 ) -> (App<Box<dyn Provider>>, AccountId, Arc<DocumentAccountStore>) {
-    let (account_id, providers) =
+    let (account_id, providers, ..) =
         super::dial_with_accepted_certificate(host, port, user, password).await;
     let config = super::account(host, port, user, password, Vec::new());
     let store = Arc::new(DocumentAccountStore::installing(vec![config]));

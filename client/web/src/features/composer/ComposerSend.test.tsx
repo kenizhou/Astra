@@ -161,6 +161,11 @@ describe('the send button', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     });
 
+    // The submit reads the staged bytes before it dispatches, so the intent
+    // crosses one microtask after the click.
+    await act(async () => {
+      await Promise.resolve();
+    });
     expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
       '{"submit_rich_mail":{"from":"work","to":"you@test.local","cc":"","bcc":"","subject":"Launch",' +
         `"document":{"blocks":[{"Paragraph":{"content":[${plainRun('Sent words')}]}}],"attachments":[]},"blobs":[]}}`,
@@ -225,6 +230,11 @@ describe('the send button', () => {
     const send = screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement;
     expect(send.disabled).toBe(true);
 
+    // The in-flight submit's dispatch lands one microtask after the click;
+    // the held promise keeps it unsettled.
+    await act(async () => {
+      await Promise.resolve();
+    });
     act(() => {
       fireEvent.click(send);
     });
@@ -331,6 +341,9 @@ describe('the threaded sends', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     });
 
+    await act(async () => {
+      await Promise.resolve();
+    });
     expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
       '{"submit_rich_reply":{"from":"work","to":"ada@example.test","cc":"","in_reply_to":"orig-1@server.test","subject":"Re: Quarterly report",' +
         `"document":{"blocks":[${QUOTE_JSON}],"attachments":[]},"blobs":[]}}`,
@@ -345,7 +358,7 @@ describe('the threaded sends', () => {
     expect(useComposeRequestStore.getState().snapshot).toBeNull();
   });
 
-  it('submits a forward answering no one once the user names a recipient', () => {
+  it('submits a forward answering no one once the user names a recipient', async () => {
     openRequest(
       replyRequest({ kind: 'forward', to: '', subject: 'Fwd: Quarterly report', in_reply_to: undefined }),
     );
@@ -363,6 +376,9 @@ describe('the threaded sends', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     });
 
+    await act(async () => {
+      await Promise.resolve();
+    });
     expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
       '{"submit_rich_forward":{"from":"work","to":"bob@example.test","subject":"Fwd: Quarterly report",' +
         `"document":{"blocks":[${QUOTE_JSON}],"attachments":[]},"blobs":[]}}`,
@@ -390,6 +406,9 @@ describe('the threaded sends', () => {
     ipc.dispatch.mockClear();
     act(() => {
       fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    });
+    await act(async () => {
+      await Promise.resolve();
     });
     expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toContain('"submit_rich_reply"');
     expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toContain('"in_reply_to":"orig-1@server.test"');

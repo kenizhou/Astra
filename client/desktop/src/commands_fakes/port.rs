@@ -7,9 +7,10 @@
 
 use astra_ai::{AiDocumentKind, KnowledgeId};
 use astra_app::{
-    AppError, AvatarView, BriefDocumentError, CardRef, Chip, CompositionId, ContactDraftInput,
-    DigestView, DocumentError, DocumentView, DraftResume, ExtractionSummary, Intent, KnowledgeView,
-    MeetingBriefView, Snippet, SplitEntry, SummariseMessageError, TranslateLanguage,
+    AppError, AttachmentContent, AttachmentReadError, AvatarView, BriefDocumentError, CardRef,
+    Chip, CompositionId, ContactDraftInput, DigestView, DocumentError, DocumentView, DraftResume,
+    ExtractionSummary, Intent, KnowledgeView, MeetingBriefView, Snippet, SplitEntry,
+    SummariseMessageError, TranslateLanguage,
 };
 use astra_viewmodel::{
     CalendarSnapshot, ComposeKind, ComposeRequestSnapshot, DraftStatusSnapshot,
@@ -173,6 +174,20 @@ impl AppPort for FakeApp {
 
     fn reading(&self) -> Option<ReadingSnapshot> {
         self.reading.lock().unwrap().clone()
+    }
+
+    async fn attachment_content(
+        &self,
+        account: &AccountId,
+        key: &ProviderKey,
+        id: u32,
+    ) -> Result<Option<AttachmentContent>, AttachmentReadError> {
+        self.attachment_into.lock().unwrap().push((
+            account.as_str().to_owned(),
+            key.as_str().to_owned(),
+            id,
+        ));
+        self.attachment.lock().unwrap().clone()
     }
 
     fn draft_status(&self) -> Option<DraftStatusSnapshot> {

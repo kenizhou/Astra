@@ -301,6 +301,11 @@ describe('the compose mode', () => {
       fireEvent.click(send);
     });
 
+    // The submit reads the staged bytes before it dispatches, so the intent
+    // crosses one microtask after the click.
+    await act(async () => {
+      await Promise.resolve();
+    });
     expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toContain('"submit_rich_mail"');
     expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toContain('"to":"you@test.local"');
     // An accepted send clears the stored draft and closes the composition.
