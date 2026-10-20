@@ -196,6 +196,33 @@ describe('the composer attachments', () => {
     ]);
   });
 
+  it('fails the send with a sentence when a staged file will not read', async () => {
+    class UnreadableFile extends File {
+      override arrayBuffer(): Promise<ArrayBuffer> {
+        return Promise.reject(new Error('the file refused to read'));
+      }
+    }
+    useComposerStore.getState().newMessage({ id: 'work', label: 'Work' });
+    useComposerStore
+      .getState()
+      .attachFiles([new UnreadableFile([new Uint8Array([65])], 'gone.pdf', {
+        type: 'application/pdf',
+      })]);
+    useComposerStore.getState().setField('to', 'ada@example.test');
+
+    useComposerStore.getState().submit();
+    await vi.waitFor(() => {
+      const state = useComposerStore.getState();
+      expect(state.sending).toBe(false);
+      expect(state.sendError).toBeTruthy();
+    });
+
+    const sent = ipc.dispatch.mock.calls.find(
+      ([intent]) => JSON.stringify(intent).includes('submit_rich_mail'),
+    );
+    expect(sent).toBeUndefined();
+  });
+
   it('opens a forward holding the original attachments, removable one by one', () => {
     const request: ComposeRequestSnapshot = {
       kind: 'forward',

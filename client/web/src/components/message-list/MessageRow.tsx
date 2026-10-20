@@ -23,6 +23,11 @@ import { useSettingsStore } from '@/features/settings/settingsStore';
 /** The dataTransfer type a message drag carries: the selection's row keys. */
 export const ROWS_DRAG_TYPE = 'application/x-astra-rows';
 
+/** The type the same drag adds when the selection holds a conversation: a
+ *  hover reads types but never data, so the source declares the shape a
+ *  folder drop cannot take. */
+export const CONVERSATIONS_DRAG_TYPE = 'application/x-astra-rows-conversations';
+
 interface MessageRowProps {
   /** The row's snapshot data; the single source of everything drawn. */
   row: MessageRowView;
@@ -62,11 +67,16 @@ export function MessageRow({ row, selected, multiSelected = false, draft = false
   };
 
   // The drag carries the selection when the row rides it, itself otherwise:
-  // the Outlook semantics the selection model owns, keys only.
+  // the Outlook semantics the selection model owns, keys only. A selection
+  // holding a conversation declares it beside the keys, so a folder hover
+  // can refuse what its drop could not name.
   const onDragStart = (event: React.DragEvent): void => {
     const store = useListStore.getState();
     const keys = resolveTargets(store.selectedKeys, row.key);
     event.dataTransfer.setData(ROWS_DRAG_TYPE, JSON.stringify(keys));
+    if (keys.some((key) => 'thread' in key)) {
+      event.dataTransfer.setData(CONVERSATIONS_DRAG_TYPE, '');
+    }
     event.dataTransfer.effectAllowed = 'move';
   };
 

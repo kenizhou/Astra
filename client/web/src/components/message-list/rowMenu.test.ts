@@ -34,6 +34,15 @@ const m1 = row({ message: { account: 'work', key: 'k1' } });
 const m2 = row({ message: { account: 'work', key: 'k2' } });
 const th = row({ thread: { account: 'work', thread_id: 'th-1' } });
 
+/** The picker context the account's pane holds: one destination folder. */
+const moveCtx = {
+  account: 'work',
+  currentKey: 'INBOX',
+  folders: [
+    { key: 'Archive', name: 'Archive', unread: 0, depth: 0, has_children: false, expanded: false },
+  ] as FolderRow[],
+};
+
 /** The labels of the menu's items, separators as '|'. */
 function labels(items: ReturnType<typeof buildRowMenu>): string[] {
   return items.map((item) => (item.separator ? '|' : (item.label ?? '?')));
@@ -45,7 +54,7 @@ beforeEach(() => {
 
 describe('buildRowMenu', () => {
   it('holds the ported order', () => {
-    expect(labels(buildRowMenu([m1], 'flat'))).toEqual([
+    expect(labels(buildRowMenu([m1], 'flat', moveCtx))).toEqual([
       'Open in New Window',
       '|',
       'Reply',
@@ -71,8 +80,6 @@ describe('buildRowMenu', () => {
     expect(openWindow.disabled).toBe(true);
     expect(openWindow.title).toContain('future slice');
     expect(openWindow.description).toBe(openWindow.title);
-    const move = items.find((item) => item.label === 'Move to folder')!;
-    expect(move.disabled).toBe(true);
     const junk = items.find((item) => item.label === 'Junk')!;
     expect(junk.disabled).toBe(true);
   });
@@ -127,10 +134,22 @@ describe('buildRowMenu', () => {
 
   it('hides the move-to verb for a selection that spans accounts', () => {
     const other = row({ message: { account: 'home', key: 'k9' } }, { account_id: 'home' });
-    const folders: FolderRow[] = [
-      { key: 'Archive', name: 'Archive', unread: 0, depth: 0, has_children: false, expanded: false },
-    ];
-    const items = buildRowMenu([m1, other], 'flat', { account: 'work', currentKey: 'INBOX', folders });
+    const items = buildRowMenu([m1, other], 'flat', moveCtx);
+    expect(items.find((item) => item.label === 'Move to folder')).toBeUndefined();
+  });
+
+  it('disables the move-to verb with the conversation reason on a thread target', () => {
+    const items = buildRowMenu([th], 'threaded', moveCtx);
+    expect(items.find((item) => item.label === 'Move to folder')).toEqual({
+      label: 'Move to folder',
+      disabled: true,
+      title: 'A whole conversation cannot be moved for this yet',
+      description: 'A whole conversation cannot be moved for this yet',
+    });
+  });
+
+  it('holds no move-to item while the picker has no context', () => {
+    const items = buildRowMenu([m1], 'flat');
     expect(items.find((item) => item.label === 'Move to folder')).toBeUndefined();
   });
 

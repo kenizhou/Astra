@@ -35,7 +35,7 @@ import { useSendingStore } from '@/stores/sendingStore';
 import { useUiStore } from '@/stores/uiStore';
 import { buildFolderMenu } from './folderMenu';
 import { folderDrop, messageRefsOf, type FolderDropTarget } from './folderDrag';
-import { ROWS_DRAG_TYPE } from '@/components/message-list/MessageRow';
+import { CONVERSATIONS_DRAG_TYPE, ROWS_DRAG_TYPE } from '@/components/message-list/MessageRow';
 import { NewFolderRow } from './NewFolderRow';
 import { RenameFolderRow } from './RenameFolderRow';
 
@@ -303,6 +303,12 @@ export function FolderTree({
     ) {
       return;
     }
+    // A selection holding a conversation declared it at the source: the
+    // hover refuses what the drop could not name, so no highlight invites a
+    // drop that would do nothing.
+    if (event.dataTransfer.types.includes(CONVERSATIONS_DRAG_TYPE)) {
+      return;
+    }
     const target: FolderDropTarget = {
       kind: 'folder',
       account: account.account_id,
@@ -330,13 +336,15 @@ export function FolderTree({
       }
       return;
     }
-    // A message drop: the carried keys of this folder's own account move in
-    // one batch; the rest refuse by doing nothing.
-    const keys = messageDropKeys(event);
-    if (keys.length > 0) {
+    // A message drop moves the payload only when every key names a message:
+    // a conversation the batch cannot name refuses the whole drop, the same
+    // refusal the hover already gave it; the rest keep to their account.
+    const keys = droppedRowKeys(event);
+    if (keys.length > 0 && keys.every((key) => 'message' in key)) {
+      const refs = messageRefsOf(keys);
       void dispatch(
         intents.moveMessages(
-          keys.filter((key) => key.account === account.account_id),
+          refs.filter((ref) => ref.account === account.account_id),
           { account: account.account_id, key: row.key },
         ),
       );
@@ -455,8 +463,9 @@ export function FolderTree({
   );
 }
 
-/** The message keys a dropped selection carried, keys only. */
-function messageDropKeys(event: React.DragEvent): { account: string; key: string }[] {
+/** The row keys a dropped selection carried, keys only, thread keys
+ *  included: the drop site decides what a batch can name. */
+function droppedRowKeys(event: React.DragEvent): RowKey[] {
   try {
     const raw = event.dataTransfer.getData(ROWS_DRAG_TYPE);
     if (raw === '') {
@@ -466,7 +475,7 @@ function messageDropKeys(event: React.DragEvent): { account: string; key: string
     if (!Array.isArray(parsed)) {
       return [];
     }
-    return messageRefsOf(parsed as unknown as RowKey[]);
+    return parsed as RowKey[];
   } catch {
     return [];
   }

@@ -56,11 +56,12 @@ function copy(text: string): void {
 
 /** The move-to item: the account's other folders as a flyout, each choice
  *  moving the whole target set in one batch. Hidden while the targets span
- *  accounts (moves stay within one) or the account holds no other folder;
- *  the placeholder stands while the picker has no context to offer. */
+ *  accounts (moves stay within one) or the account holds no other folder,
+ *  disabled with the conversation reason while a target is a conversation,
+ *  which a move batch cannot name. */
 function moveItem(targets: MessageRowView[], context: MoveToContext | undefined): ContextMenuItem | null {
   if (context === undefined) {
-    return placeholderItem('Move to folder', 'Moving mail between folders arrives with a future slice');
+    return null;
   }
   const oneAccount = targets.every((row) => row.account_id === context.account);
   if (!oneAccount) {
@@ -69,6 +70,10 @@ function moveItem(targets: MessageRowView[], context: MoveToContext | undefined)
   const destinations = context.folders.filter((folder) => folder.key !== context.currentKey);
   if (destinations.length === 0) {
     return null;
+  }
+  if (targets.some((row) => 'thread' in row.key)) {
+    const reason = 'A whole conversation cannot be moved for this yet';
+    return { label: 'Move to folder', disabled: true, title: reason, description: reason };
   }
   const refs: MessageRef[] = messageRefs(targets);
   return {

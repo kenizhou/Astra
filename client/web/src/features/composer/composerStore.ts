@@ -453,28 +453,27 @@ export const useComposerStore = create<ComposerStoreState>((set, get) => ({
       return;
     }
     set({ sendError: null, sending: true });
+    // A settlement lands only against its own composition: one left in
+    // flight when the pane moved on can neither close the next
+    // composition nor stick its error under it.
+    const settle = (err: unknown): void => {
+      if (get().composition !== composition) {
+        return;
+      }
+      set({ sending: false, sendError: sendErrorMessage(err) });
+    };
     void submitIntent(state).then(
       (intent) =>
         void dispatch(intent).then(
           () => {
-            // A settlement lands only against its own composition: one left in
-            // flight when the pane moved on can neither close the next
-            // composition nor stick its error under it.
-            if (get().composition !== composition) {
-              return;
-            }
             // The submit carries no composition id, so the stored draft the
             // autosave left behind goes with an explicit discard.
             void dispatch(intents.discardDraft(composition));
             get().closePane();
           },
-          (err: unknown) => {
-            if (get().composition !== composition) {
-              return;
-            }
-            set({ sending: false, sendError: sendErrorMessage(err) });
-          },
+          settle,
         ),
+      settle,
     );
   },
 

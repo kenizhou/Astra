@@ -65,7 +65,10 @@ pub(crate) async fn carried_attachments<P: Provider>(
     let parts = engine
         .message_attachments(provider, account, original)
         .await
-        .unwrap_or_default();
+        .unwrap_or_else(|err| {
+            log::warn!("forward carry: the original's parts did not read: {err}");
+            Vec::new()
+        });
     carry
         .iter()
         .filter_map(|id| {

@@ -265,17 +265,16 @@ export function MessageList() {
       ? viewRows.filter((row) => selectedKeys.some((key) => sameRowKey(key, row.key)))
       : null;
 
-  // The move-to picker's context: the selection's own account and its
-  // folders, the sitting folder out; undefined when the menu has no context
-  // to offer (a cross-account selection, an account the pane does not hold).
+  // The move-to picker's context: the first target's account and its
+  // folders, the sitting folder out; undefined only when the pane holds no
+  // group for that account. A selection that spans accounts still gets its
+  // context, so the item's own one-account gate hides the verb rather than
+  // a placeholder misnaming a shipped feature.
   const moveToOf = (targets: MessageRowView[]): MoveToContext | undefined => {
     if (targets.length === 0) {
       return undefined;
     }
     const account = targets[0]!.account_id;
-    if (!targets.every((row) => row.account_id === account)) {
-      return undefined;
-    }
     const group = accounts.find((row) => row.account_id === account);
     if (group === undefined) {
       return undefined;

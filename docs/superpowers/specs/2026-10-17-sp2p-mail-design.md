@@ -91,6 +91,10 @@ genuinely attached calendar file still lists.
 
 - Folder drag over IMAP reparents by rename (the protocol's only move);
   the receipt's key re-selection is the contract.
+- A conversation cannot be moved: the row menu's verb disables with the
+  reason, and a drag holding a conversation row refuses the drop (the
+  source declares the shape beside its keys, so the hover can refuse what
+  the protected drag store hides). Message-row moves only.
 - An invitation that carries a second, distinct attached calendar file
   loses that chip too: the hide rule discriminates by media type because
   no part identity crosses the engine's scheduling read, and

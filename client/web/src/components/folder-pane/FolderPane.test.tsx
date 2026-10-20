@@ -317,6 +317,29 @@ describe('the folder context menu', () => {
     expect(ipc.dispatch).toHaveBeenCalledWith('refresh_mail');
   });
 
+  it('moves a dropped message selection and refuses one holding a conversation', () => {
+    render(<FolderPane />);
+    const acme = screen.getByText('Acme');
+
+    const messages = [{ message: { account: 'work', key: 'k1' } }];
+    fireEvent.drop(acme, { dataTransfer: { getData: () => JSON.stringify(messages) } });
+    expect(ipc.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({ move_messages: expect.anything() }),
+    );
+
+    ipc.dispatch.mockClear();
+    const mixed = [
+      { thread: { account: 'work', thread_id: 'th-1' } },
+      { message: { account: 'work', key: 'k2' } },
+    ];
+    fireEvent.drop(acme, { dataTransfer: { getData: () => JSON.stringify(mixed) } });
+    expect(
+      ipc.dispatch.mock.calls.every(
+        (call) => typeof call[0] !== 'object' || call[0] === null || !('move_messages' in call[0]),
+      ),
+    ).toBe(true);
+  });
+
   it('stands the inline create row under the folder and commits the parent', async () => {
     workCanEdit();
     render(<FolderPane />);
