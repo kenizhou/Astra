@@ -106,6 +106,10 @@ impl PreferencesState {
 /// person's words grow under the signature). A document already bearing a
 /// signature seeds nothing: a resumed draft or a re-opened composition owns
 /// the one it has.
+///
+/// The blocks are the core-built document, before a surface reorders its
+/// quotes: the position reads the core's order, and a surface that then
+/// lifts the quote above the typed words keeps the signature below both.
 #[must_use]
 pub fn seed_signature(blocks: Vec<Block>, signature: &Signature) -> Vec<Block> {
     if blocks
