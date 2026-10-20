@@ -122,6 +122,10 @@ async fn a_formatted_send_round_trips_its_marks() {
             && folded.contains(HIGHLIGHT_WORDS),
         "every run's words ride the received plain leg, unmarked: {folded:?}"
     );
+    assert!(
+        !folded.contains("font-size") && !folded.contains("background-color"),
+        "the plain leg carries no markup: {folded:?}"
+    );
     app.dispatch(Intent::CloseReading).await.unwrap();
 
     withdraw(&app, &sender, &recipient, FORMATTING_SUBJECT).await;
