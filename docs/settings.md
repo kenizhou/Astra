@@ -25,7 +25,7 @@ row that renders nothing invites a support answer nobody can give.
 | 1 | **General** | Appearance (Follow host, Light, Dark) · Clock (24-hour on, 12-hour off) |
 | 2 | **Calendar** | Display zone · First day of the week · Horizon · Default calendar |
 | 3 | **Reading** | Conversation grouping (flat or threaded) |
-| 4 | **Composing** | Quote style (the quoted original below or above the reply) |
+| 4 | **Composing** | Quote style (the quoted original below or above the reply) · Default send account (the app-level account the new-message button and the mailto entry open from) · Signatures (rich text, per-account new mail and reply slots, per signatures.md) |
 | 5 | **Accounts** | Every configured account, each opening its own page |
 | 6 | **Advanced** | AI assistant access (the MCP server): the on/off toggle, the per-account allowlist, the client-config snippet |
 | 7 | **About** | The version and the attributions, from the core, not the web's guess |

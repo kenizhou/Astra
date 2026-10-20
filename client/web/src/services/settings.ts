@@ -11,6 +11,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 
+import type { Signature } from './composerDocument';
 import type { ViewMode } from './surfaces';
 
 /** The theme the chrome renders; crosses as a snake_case word. */
@@ -35,6 +36,15 @@ export interface SettingsBlock {
   quote_below: boolean;
   view_mode: ViewMode;
   default_calendar?: DefaultCalendar;
+  /** The account plain compositions open from; absent is unpinned. */
+  default_send_account?: string;
+}
+
+/** One account's signature assignment: what its new mail and its replies
+ *  open with. Either slot may stand absent while the other holds one. */
+export interface AccountSignatures {
+  new_mail?: Signature;
+  reply?: Signature;
 }
 
 /** An account's kind; crosses as a snake_case word. */
@@ -79,6 +89,8 @@ export interface AccountSettingsRow {
    * grant needs the person to act. Absent is the healthy state.
    */
   grant?: GrantStateWord;
+  /** The account's signature assignment, when it holds one. */
+  signatures?: AccountSignatures;
 }
 
 /** The About block: the version and the attributions. */
@@ -133,7 +145,9 @@ export type SettingsIntentBody =
   | { set_view_mode: { mode: ViewMode } }
   | { set_default_calendar: { calendar: DefaultCalendar | null } }
   | { set_dav: { account: string; section: DavSectionInput | null } }
-  | { remove_account: { account: string } };
+  | { remove_account: { account: string } }
+  | { set_send_account: { account: string | null } }
+  | { set_signature: { account: string; reply: boolean; signature: Signature | null } };
 
 /**
  * The section constructor's omission discipline: a field the editor did
@@ -189,6 +203,15 @@ export const settingsIntents = {
   }),
   /** Remove an account: its stored config, its rows, and its legs go together. */
   removeAccount: (account: string) => ({ settings: { remove_account: { account } } }),
+  /** Pin the account plain compositions open from, or unpin it with null. */
+  setSendAccount: (account: string | null) => ({
+    settings: { set_send_account: { account } },
+  }),
+  /** Write one slot of an account's signature assignment, or clear it with
+   *  null; the last empty slot takes the account's row with it. */
+  setSignature: (account: string, reply: boolean, signature: Signature | null) => ({
+    settings: { set_signature: { account, reply, signature } },
+  }),
 };
 
 /** Pulls the settings snapshot. */

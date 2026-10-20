@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The trimmed editor: the extensions render the seeded document (paragraphs,
 // marks, links and both list kinds), the contenteditable carries the body
-// label, and the bare core editor built from the same extension set hands
-// its JSON to the change callback. What the schema accepts is pinned by the
-// document wire tests that round trip through a real editor.
+// label, the bare core editor built from the same extension set hands
+// its JSON to the change callback, and a pasted picture file crosses to
+// the paste callback while pasted text stays native. What the schema
+// accepts is pinned by the document wire tests that round trip through a
+// real editor.
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { JSONContent } from '@tiptap/react';
@@ -69,5 +71,36 @@ describe('the editor surface', () => {
     expect(onReady.mock.calls[0]?.[0]?.isEmpty).toBe(true);
     unmount();
     expect(onReady).toHaveBeenLastCalledWith(null);
+  });
+
+  it('hands a pasted picture file up and leaves pasted text native', () => {
+    const onPasteImages = vi.fn();
+    render(
+      <Editor
+        initialContent={[{ type: 'paragraph' }]}
+        onChange={() => undefined}
+        onPasteImages={onPasteImages}
+      />,
+    );
+    const body = screen.getByLabelText('Message body');
+    const picture = new File([new Uint8Array([1, 2, 3])], 'shot.png', { type: 'image/png' });
+
+    // jsdom builds no clipboard of its own, so the paste event carries the
+    // files through a defined property, the way a real DataTransfer would;
+    // the empty leg answers getData for the editor's own text paste.
+    const paste = (files: File[]): void => {
+      const event = new Event('paste', { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'clipboardData', {
+        value: { files, types: [], getData: () => '' },
+      });
+      body.dispatchEvent(event);
+    };
+
+    paste([picture]);
+    expect(onPasteImages).toHaveBeenCalledWith([picture]);
+
+    onPasteImages.mockClear();
+    paste([]);
+    expect(onPasteImages).not.toHaveBeenCalled();
   });
 });

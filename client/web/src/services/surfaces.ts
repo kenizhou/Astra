@@ -40,6 +40,8 @@ export interface AccountFolderRow {
   account_id: string;
   /** The label the pane shows on the group header. */
   display_name: string;
+  /** The account's sending address, the field a From picker offers. */
+  address: string;
   /** Whether this account's folder tree is open in the sidebar. */
   expanded: boolean;
   /**

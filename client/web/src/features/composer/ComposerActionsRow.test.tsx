@@ -50,7 +50,7 @@ import { useComposerStore } from './composerStore';
 import { documentToEditor } from './documentWire';
 
 function resetStores(): void {
-  useAccountStore.setState({ accounts: [{ accountId: 'work', displayName: 'Work' }] });
+  useAccountStore.setState({ accounts: [{ accountId: 'work', displayName: 'Work', address: 'me@work.example' }] });
   useComposeRequestStore.setState({ snapshot: null });
   useComposerStore.setState({
     open: false,

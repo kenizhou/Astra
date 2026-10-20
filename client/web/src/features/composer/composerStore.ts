@@ -19,13 +19,10 @@ import type { Editor as CoreEditor } from '@tiptap/core';
 import type { JSONContent } from '@tiptap/react';
 
 import type {
-  ComposeKind,
   ComposeRequestSnapshot,
   CompositionId,
-  ComposerBlob,
-  ComposerDocument,
-  Intent,
   ResumeView,
+  Signature,
 } from '@/services/ipc';
 import { dispatch, intents } from '@/services/ipc';
 import { useComposeRequestStore } from '@/stores/composeRequestStore';
@@ -43,33 +40,39 @@ import {
   stripInlineRefs,
   type StagedAttachment,
 } from './composerStaging';
+import {
+  fingerprintOf,
+  mintCompositionId,
+  prefillFields,
+  quoteOrdered,
+  type ComposePrefill,
+  type CompositionRequest,
+  type SendAccount,
+} from './composerOpening';
 import { normaliseRecipients } from './recipientTokens';
+import { REPLY_WITHOUT_ORIGIN, sendErrorMessage, submitIntent } from './composerSubmit';
+import {
+  seedSignatureBlocks,
+  signatureForAccount,
+  swapSeededSignature,
+} from './signatureSeeding';
+import { degradingLinkTargets, degradationSentence } from './sendLinks';
 
-/** Mints one composition's id: a UUID, unique across restarts. */
-export function mintCompositionId(): CompositionId {
-  return crypto.randomUUID();
-}
-
-/**
- * The one predicate the composer's opening caret runs on: in the body when
- * the composer was already addressed (a reply, a forward's quoted original,
- * a resumed draft), in To otherwise, where the work starts.
- */
-export function opensInBody(request: CompositionRequest | null, to: string): boolean {
-  return request !== null || to.trim() !== '';
-}
-
-/** The account a composition sends from. */
-interface SendAccount {
-  id: string;
-  label: string;
-}
-
-/** The reply or forward a composition is, when a compose request opened it. */
-export interface CompositionRequest {
-  kind: ComposeKind;
-  inReplyTo: string | null;
-}
+// The opening rules live in composerOpening; re-exported here so every
+// importer keeps the one path it always had.
+export {
+  fingerprintOf,
+  mintCompositionId,
+  opensInBody,
+  prefillFields,
+  quoteOrdered,
+} from './composerOpening';
+export type {
+  ComposePrefill,
+  CompositionRequest,
+  MailtoOpen,
+  SendAccount,
+} from './composerOpening';
 
 interface ComposerStoreState {
   /** Whether the composer pane is up. */
@@ -99,6 +102,17 @@ interface ComposerStoreState {
   savedFingerprint: string | null;
   /** The compose request this composition answers; null for a plain one. */
   request: CompositionRequest | null;
+  /**
+   * The signature the composition opened seeded, the baseline a From
+   * change swaps against; null when the open seeded nothing.
+   */
+  seeded: Signature | null;
+  /**
+   * The send-time link degradation sentence, named before the submit and
+   * rendered under the toolbar; null when every target stands. Never a
+   * blocked send: the core's degradation stays the send's floor.
+   */
+  linkWarning: string | null;
   /** Whether a send submit is in flight; one gesture cannot queue two sends. */
   sending: boolean;
   /** Why the last submit was refused, in words the pane can show. */
@@ -106,8 +120,14 @@ interface ComposerStoreState {
   /**
    * Opens a plain composition. `composition` is the caller-minted id of the
    * pop-out window the composition lives in; absent, one is minted here.
+   * `prefill`, the shape a mailto link fills, seeds the fields and the body;
+   * the composition stays request-free and sends as plain mail.
    */
-  newMessage: (account: SendAccount, composition?: CompositionId) => void;
+  newMessage: (
+    account: SendAccount,
+    composition?: CompositionId,
+    prefill?: ComposePrefill,
+  ) => void;
   /** Opens a resumed draft under the composition the resume pull named. */
   hydrate: (view: ResumeView, account: SendAccount, composition: CompositionId) => void;
   /**
@@ -123,12 +143,20 @@ interface ComposerStoreState {
   expectInlineReply: () => void;
   setField: (field: 'to' | 'cc' | 'bcc' | 'subject', value: string) => void;
   setEditorContent: (content: JSONContent[]) => void;
+  /**
+   * Changes the account the composition sends from: the fields move and a
+   * seeded signature the person has not touched swaps to the new
+   * account's own; an edited signature stays.
+   */
+  changeFrom: (account: SendAccount) => void;
   /** Stands each picked file as a removable document row. */
   attachFiles: (files: File[]) => void;
   /** Takes one dropped batch: documents attach, pictures ask first. */
   dropFiles: (files: File[]) => void;
   /** Answers the dropped pictures' ask: inline content or a file row. */
   answerPendingImages: (inline: boolean) => void;
+  /** Stages pasted pictures inline, exactly as a drop's inline answer does. */
+  pasteImages: (files: File[]) => void;
   /** Removes one attachment row, its staged bytes, and its references. */
   removeAttachment: (id: string) => void;
   /** Submits the current document to the durable outbox, the send's one path. */
@@ -137,44 +165,6 @@ interface ComposerStoreState {
 }
 
 const emptyEditor = (): EditorDocument => documentToEditor(documentFromPlainText(''));
-
-/**
- * Orders a request's quote blocks per the quote-style setting: `below`
- * leaves the document as the core built it (the reply's words above the
- * quoted original), otherwise each quote moves to the top so the reply is
- * typed under it. The setting seeds only the opening order: the document
- * the composer then edits and saves is the per-message truth.
- */
-export function quoteOrdered(document: ComposerDocument, below: boolean): ComposerDocument {
-  if (below) {
-    return document;
-  }
-  const quotes = document.blocks.filter((block) => 'Quote' in block);
-  if (quotes.length === 0) {
-    return document;
-  }
-  const rest = document.blocks.filter((block) => !('Quote' in block));
-  return { ...document, blocks: [...quotes, ...rest] };
-}
-
-/** What a handover would carry, as comparable text. */
-export function fingerprintOf(state: {
-  from: string;
-  to: string;
-  cc: string;
-  bcc: string;
-  subject: string;
-  editor: EditorDocument;
-}): string {
-  return JSON.stringify([
-    state.from,
-    state.to,
-    state.cc,
-    state.bcc,
-    state.subject,
-    editorToDocument(state.editor),
-  ]);
-}
 
 const closedState = {
   open: false,
@@ -191,95 +181,14 @@ const closedState = {
   pendingImages: [],
   savedFingerprint: null,
   request: null,
+  seeded: null,
+  linkWarning: null,
   sending: false,
   sendError: null,
 };
 
-/** A refused send in words the pane can show, whatever the host handed back. */
-function sendErrorMessage(err: unknown): string {
-  if (err instanceof Error) {
-    return err.message;
-  }
-  if (typeof err === 'string') {
-    return err;
-  }
-  return 'The message was not sent';
-}
-
-/** A reply whose original arrived with no Message-ID: nothing to thread under. */
-const REPLY_WITHOUT_ORIGIN = 'The original message has no Message-ID to reply under';
-
-/**
- * The submit intent the composition's origin calls for. A plain composition
- * sends as a fresh mail; one a request opened sends through its own threaded
- * submit, the reply under its original, the forward answering no one. The
- * threaded wires carry no bcc and the forward's no cc either, so those fields
- * are the plain send's alone. The blobs hold the standing staged rows' bytes,
- * read at click time.
- */
-async function submitIntent(state: {
-  request: CompositionRequest | null;
-  from: string;
-  to: string;
-  cc: string;
-  bcc: string;
-  subject: string;
-  editor: EditorDocument;
-  files: Record<string, File>;
-}): Promise<Intent> {
-  const document = editorToDocument(state.editor);
-  const blobs = await stagedBlobs(state);
-  if (state.request === null) {
-    return intents.submitRichMail({
-      from: state.from,
-      to: state.to,
-      cc: state.cc,
-      bcc: state.bcc,
-      subject: state.subject,
-      document,
-      blobs,
-    });
-  }
-  if (state.request.kind === 'forward') {
-    return intents.submitRichForward({
-      from: state.from,
-      to: state.to,
-      subject: state.subject,
-      document,
-      blobs,
-    });
-  }
-  return intents.submitRichReply({
-    from: state.from,
-    to: state.to,
-    cc: state.cc,
-    in_reply_to: state.request.inReplyTo ?? '',
-    subject: state.subject,
-    document,
-    blobs,
-  });
-}
-
-/** The bytes of every staged file whose row still stands, keyed by the
- *  handle the document names. A removed row drops out here; a forward's
- *  pre-attached originals hold no staged file, so the core resolves them. */
-async function stagedBlobs(state: {
-  editor: EditorDocument;
-  files: Record<string, File>;
-}): Promise<ComposerBlob[]> {
-  const standing = new Set(
-    state.editor.attachments
-      .map((row) => row.blob)
-      .filter((blob): blob is string => blob !== null),
-  );
-  const blobs: ComposerBlob[] = [];
-  for (const [handle, file] of Object.entries(state.files)) {
-    if (standing.has(handle)) {
-      blobs.push({ handle, bytes: Array.from(new Uint8Array(await file.arrayBuffer())) });
-    }
-  }
-  return blobs;
-}
+/** The submit path's own helpers live in composerSubmit; the store holds
+ *  the gesture: one click, one send, settled against its own composition. */
 
 /** The live editor the open composition types into; null while none stands. */
 let activeEditor: CoreEditor | null = null;
@@ -323,14 +232,26 @@ export const useComposerStore = create<ComposerStoreState>((set, get) => ({
   ...closedState,
   resumeAttempted: false,
 
-  newMessage: (account, composition) =>
+  newMessage: (account, composition, prefill) => {
+    // A plain composition seeds the account's new-mail signature at the
+    // top of the document, so the person's words grow under it.
+    const seeded = signatureForAccount(account.id, false);
+    const plain = documentFromPlainText(prefill?.body ?? '');
+    const document =
+      seeded === null ? plain : { ...plain, blocks: seedSignatureBlocks(plain.blocks, seeded) };
     set({
       ...closedState,
       open: true,
       composition: composition ?? mintCompositionId(),
       from: account.id,
       fromLabel: account.label,
-    }),
+      seeded,
+      // A mailto link's prefill seeds the same normalised fields a hand
+      // typed open would hold; no prefill crosses, the blank state stands.
+      ...(prefill === undefined ? {} : prefillFields(prefill)),
+      editor: documentToEditor(document),
+    });
+  },
 
   hydrate: (view, account, composition) => {
     // A resumed composition is a plain one: whatever request the pane held,
@@ -338,11 +259,13 @@ export const useComposerStore = create<ComposerStoreState>((set, get) => ({
     // rides the plain submit with the resumed fields. The recipient fields
     // normalise their opening value at seed time, so every supplied address
     // is a finished pill, nothing sits in progress, and the fingerprint
-    // compares against the normalised value.
+    // compares against the normalised value. A resumed draft owns the
+    // document it comes with, so nothing seeds here.
     useComposeRequestStore.getState().dismiss();
     set(() => {
       const editor = documentToEditor(documentFromPlainText(view.body_text));
       const state = {
+        ...closedState,
         open: true,
         composition,
         from: account.id,
@@ -357,7 +280,16 @@ export const useComposerStore = create<ComposerStoreState>((set, get) => ({
     });
   },
 
-  openRequest: (snapshot, fromLabel, composition) =>
+  openRequest: (snapshot, fromLabel, composition) => {
+    // A request seeds the account's reply signature beneath the quoted
+    // original, BEFORE the quote ordering moves anything, so the pinned
+    // pipeline holds: the signature stays below the typed words whatever
+    // the quote-style setting does to the quote itself.
+    const seeded = signatureForAccount(snapshot.from, true);
+    const seededDocument =
+      seeded === null
+        ? snapshot.document
+        : { ...snapshot.document, blocks: seedSignatureBlocks(snapshot.document.blocks, seeded) };
     set({
       ...closedState,
       open: true,
@@ -368,13 +300,15 @@ export const useComposerStore = create<ComposerStoreState>((set, get) => ({
       cc: normaliseRecipients(snapshot.cc),
       subject: snapshot.subject,
       editor: documentToEditor(
-        quoteOrdered(snapshot.document, useSettingsStore.getState().settings.quote_below),
+        quoteOrdered(seededDocument, useSettingsStore.getState().settings.quote_below),
       ),
       request: { kind: snapshot.kind, inReplyTo: snapshot.in_reply_to ?? null },
+      seeded,
       // Nothing is stored yet, so the prefilled composition counts as dirty
       // from birth: the idle autosave gives it its first save unedited.
       savedFingerprint: null,
-    }),
+    });
+  },
 
   expectInlineReply: () => set({ inlineExpected: true }),
 
@@ -382,6 +316,24 @@ export const useComposerStore = create<ComposerStoreState>((set, get) => ({
 
   setEditorContent: (content) =>
     set((state) => ({ editor: { ...state.editor, content } })),
+
+  changeFrom: (account) =>
+    set((state) => {
+      // The swap honours the composition's own kind: a request seeds the
+      // reply slot, a plain composition the new-mail one. A signature the
+      // person edited no longer equals the seeded baseline and stays, and
+      // the baseline stays stale with it, so later changes keep leaving the
+      // person's words alone.
+      const incoming = signatureForAccount(account.id, state.request !== null);
+      const editor = swapSeededSignature(state.editor, state.seeded, incoming);
+      const swapped = editor !== state.editor;
+      return {
+        from: account.id,
+        fromLabel: account.label,
+        editor,
+        seeded: swapped ? incoming : state.seeded,
+      };
+    }),
 
   attachFiles: (files) =>
     set((state) => stage(state, files.map((file) => attachFile(file, false)))),
@@ -410,6 +362,21 @@ export const useComposerStore = create<ComposerStoreState>((set, get) => ({
         }
       }
       return { ...next, pendingImages: [] };
+    }),
+
+  pasteImages: (files) =>
+    set((state) => {
+      // A paste into the editor carries the inline intent already, so it
+      // takes the drop's inline answer directly: the inline disposition,
+      // the cid binding, the removable row. No ask stands.
+      let next = stage(state, files.map((file) => attachFile(file, true)));
+      const added = next.editor.attachments.slice(state.editor.attachments.length);
+      for (const row of added) {
+        if (typeof row.disposition !== 'string') {
+          next = { ...next, editor: inlineRef(next.editor, row.id, row.file_name) };
+        }
+      }
+      return next;
     }),
 
   removeAttachment: (id) =>
@@ -453,6 +420,13 @@ export const useComposerStore = create<ComposerStoreState>((set, get) => ({
       return;
     }
     set({ sendError: null, sending: true });
+    // The send-time link check runs before the submit: the document's
+    // targets are validated against the core's allowlist and any that
+    // degrade are named in the sentence under the toolbar. The send is
+    // never blocked by it; the core's degradation to plain text stays the
+    // send's own floor.
+    const warning = degradationSentence(degradingLinkTargets(editorToDocument(state.editor)));
+    set({ linkWarning: warning });
     // A settlement lands only against its own composition: one left in
     // flight when the pane moved on can neither close the next
     // composition nor stick its error under it.

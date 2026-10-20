@@ -79,6 +79,21 @@ async fn refresh_mail_syncs_every_account() {
 }
 
 #[tokio::test]
+async fn the_account_rows_carry_their_sending_address() {
+    let surfaces = Arc::new(Mutex::new(Vec::new()));
+    let provider = fakes::FakeProvider::with(vec![inbox()]);
+    let app = app(vec![account("work", provider)], &surfaces);
+
+    app.dispatch(Intent::RefreshMail).await.unwrap();
+
+    let work = &app.mailbox_list().account_folders[0];
+    assert_eq!(
+        work.address, "me@work.local",
+        "the row the From picker reads carries the address mail leaves from"
+    );
+}
+
+#[tokio::test]
 async fn select_folder_persists_to_preferences_and_rebuilds_the_list() {
     let dir = scratch("select-folder");
     let prefs_path = dir.join("preferences.toml");

@@ -7,10 +7,12 @@ import { create } from 'zustand';
 
 import type { MailboxListSnapshot } from '@/services/surfaces';
 
-/** One account as the shell knows it: an identity and a label. */
+/** One account as the shell knows it: an identity, a label, and the address
+ *  mail leaves from. */
 export interface AccountRow {
   accountId: string;
   displayName: string;
+  address: string;
 }
 
 interface AccountStoreState {
@@ -28,6 +30,7 @@ export const useAccountStore = create<AccountStoreState>((set) => ({
       accounts: snapshot.account_folders.map((account) => ({
         accountId: account.account_id,
         displayName: account.display_name,
+        address: account.address,
       })),
     }),
 }));

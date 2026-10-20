@@ -5,9 +5,12 @@
 
 use engine_api::{AccountId, CalendarId};
 
+use astra_composer::Signature;
+
 use crate::{
-    AboutBlock, AccountKind, AccountLegs, AccountSettingsRow, DavSectionRow, DefaultCalendar,
-    GrantState, SettingsBlock, SettingsError, SettingsSnapshot, ThemeMode, ViewMode, WeekdayWire,
+    AboutBlock, AccountKind, AccountLegs, AccountSettingsRow, AccountSignatures, DavSectionRow,
+    DefaultCalendar, GrantState, SettingsBlock, SettingsError, SettingsSnapshot, ThemeMode,
+    ViewMode, WeekdayWire,
 };
 
 /// A well-formed account id, the way every settings test names one.
@@ -35,6 +38,7 @@ fn the_snapshot_crosses_its_full_shape_and_reads_back() {
                 account: account("work"),
                 key: calendar("cal-1"),
             }),
+            default_send_account: Some(account("work")),
         },
         accounts: vec![AccountSettingsRow {
             account: account("work"),
@@ -56,6 +60,13 @@ fn the_snapshot_crosses_its_full_shape_and_reads_back() {
                     .to_owned(),
             ),
             grant: None,
+            signatures: Some(AccountSignatures {
+                new_mail: Some(Signature {
+                    body_html: "<p>Ada</p>".to_owned(),
+                    body_plain: "Ada".to_owned(),
+                }),
+                reply: None,
+            }),
         }],
         about: AboutBlock {
             version: "0.1.0".to_owned(),
@@ -80,7 +91,8 @@ fn the_snapshot_crosses_its_full_shape_and_reads_back() {
                 "horizon_days": 31,
                 "quote_below": false,
                 "view_mode": "threaded",
-                "default_calendar": { "account": "work", "key": "cal-1" }
+                "default_calendar": { "account": "work", "key": "cal-1" },
+                "default_send_account": "work"
             },
             "accounts": [
                 {
@@ -94,7 +106,8 @@ fn the_snapshot_crosses_its_full_shape_and_reads_back() {
                         "dav_password_set": true
                     },
                     "dav_error": "the re-dial could not reach the origin",
-                    "refresh_error": "the diary could not be re-expanded under the new zone; set the zone again to retry"
+                    "refresh_error": "the diary could not be re-expanded under the new zone; set the zone again to retry",
+                    "signatures": { "new_mail": { "body_html": "<p>Ada</p>", "body_plain": "Ada" } }
                 }
             ],
             "about": {
@@ -208,6 +221,7 @@ fn the_grant_states_cross_both_ways_and_absent_means_healthy() {
         dav_error: None,
         refresh_error: None,
         grant: None,
+        signatures: None,
     };
     let wire = serde_json::to_value(&healthy).expect("the healthy row serialises");
     assert!(
@@ -254,6 +268,7 @@ fn a_row_s_dav_echo_never_carries_the_password_back() {
         dav_error: None,
         refresh_error: None,
         grant: None,
+        signatures: None,
     };
     let wire = serde_json::to_value(&row).expect("the row serialises");
     assert!(
@@ -289,6 +304,7 @@ fn an_unpinned_default_calendar_and_empty_attributions_cross_no_key() {
         quote_below: true,
         view_mode: ViewMode::Flat,
         default_calendar: None,
+        default_send_account: None,
     };
     let wire = serde_json::to_value(&block).expect("the block serialises");
     assert!(

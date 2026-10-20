@@ -19,6 +19,7 @@ import { draftResume } from '@/services/ipc';
 import { isTauri } from '@/events/surfaceEvents';
 import { dispatch, intents } from '@/services/ipc';
 import { useAccountStore } from '@/stores/accountStore';
+import { useSettingsStore } from '@/features/settings/settingsStore';
 
 import { ComposerActionsRow } from './ComposerActionsRow';
 import { ComposerAttachments } from './ComposerAttachments';
@@ -81,7 +82,7 @@ interface ComposerPaneProps {
 export function ComposerPane({ showClose = false }: ComposerPaneProps) {
   const open = useComposerStore((s) => s.open);
   const composition = useComposerStore((s) => s.composition);
-  const fromLabel = useComposerStore((s) => s.fromLabel);
+  const from = useComposerStore((s) => s.from);
   const to = useComposerStore((s) => s.to);
   const cc = useComposerStore((s) => s.cc);
   const bcc = useComposerStore((s) => s.bcc);
@@ -89,6 +90,20 @@ export function ComposerPane({ showClose = false }: ComposerPaneProps) {
   const initialContent = useComposerStore((s) => s.editor.content);
   const request = useComposerStore((s) => s.request);
   const sendError = useComposerStore((s) => s.sendError);
+  const linkWarning = useComposerStore((s) => s.linkWarning);
+  const accounts = useAccountStore((s) => s.accounts);
+  const defaultSendAccount = useSettingsStore((s) => s.settings.default_send_account);
+  // The picker's rows: every standing account, the default send account
+  // first. A composition a request opened keeps its own account but the
+  // picker stays available, so the choice is always the person's.
+  const fromAccounts = [
+    ...accounts.filter((account) => account.accountId === defaultSendAccount),
+    ...accounts.filter((account) => account.accountId !== defaultSendAccount),
+  ].map((account) => ({
+    id: account.accountId,
+    label: account.displayName,
+    address: account.address,
+  }));
   // A field's visibility is derived from its data: a toggle the user pressed
   // opens it, and a value the draft carries keeps it open, so a resumed
   // draft never hides the recipients it came with. The kind the composition
@@ -184,7 +199,8 @@ export function ComposerPane({ showClose = false }: ComposerPaneProps) {
       )}
       <ComposerFields
         key={`fields-${composition}`}
-        fromLabel={fromLabel}
+        from={from}
+        fromAccounts={fromAccounts}
         to={to}
         cc={cc}
         bcc={bcc}
@@ -195,10 +211,24 @@ export function ComposerPane({ showClose = false }: ComposerPaneProps) {
         bccShown={bccShown}
         toInputRef={toInputRef}
         onField={(field, value) => useComposerStore.getState().setField(field, value)}
+        onChangeFrom={(id) => {
+          const row = fromAccounts.find((account) => account.id === id);
+          if (row !== undefined) {
+            useComposerStore.getState().changeFrom({ id: row.id, label: row.label });
+          }
+        }}
         onToggleCc={() => setCcToggled((toggled) => !toggled)}
         onToggleBcc={() => setBccToggled((toggled) => !toggled)}
       />
       <EditorToolbar editor={editor} />
+      {linkWarning !== null && (
+        <p
+          role="status"
+          className="shrink-0 border-b border-border bg-background px-3 py-1.5 text-xs text-[var(--warning)]"
+        >
+          {linkWarning}
+        </p>
+      )}
       <div
         className="flex min-h-0 flex-1 flex-col"
         onDragOver={(event) => {
@@ -221,6 +251,7 @@ export function ComposerPane({ showClose = false }: ComposerPaneProps) {
             registerComposerEditor(instance);
             setEditor(instance);
           }}
+          onPasteImages={(files) => useComposerStore.getState().pasteImages(files)}
         />
         <ComposerAttachments />
       </div>

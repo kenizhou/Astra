@@ -7,6 +7,7 @@
 //! what is on screen.
 
 mod calendar;
+mod compose_open;
 mod compose_request;
 mod drafts;
 mod folders;
@@ -23,6 +24,7 @@ pub use calendar::{
     CalendarRow, CalendarSnapshot, CalendarWriteRow, CalendarWriteState, NowLineData,
     OccurrenceAccuracy, OccurrenceRow, Participation, ReplyPromptRow,
 };
+pub use compose_open::MailtoOpen;
 pub use compose_request::{ComposeKind, ComposeRequestSnapshot};
 pub use drafts::{DraftSaveState, DraftStatusSnapshot};
 pub use folders::{folder_role, sorted_folder_rows, AccountFolderRow, FolderRole, FolderRow};
@@ -37,8 +39,9 @@ pub use rows::{MessageRowView, RowKey, ViewMode};
 pub use search::{SearchScope, SearchState};
 pub use sending::{queued_row, QueuedKey, QueuedRow, QueuedState, SendingSnapshot};
 pub use settings::{
-    AboutBlock, AccountKind, AccountLegs, AccountSettingsRow, DavSectionRow, DefaultCalendar,
-    GrantState, SettingsBlock, SettingsError, SettingsSnapshot, ThemeMode, WeekdayWire,
+    AboutBlock, AccountKind, AccountLegs, AccountSettingsRow, AccountSignatures, DavSectionRow,
+    DefaultCalendar, GrantState, SettingsBlock, SettingsError, SettingsSnapshot, ThemeMode,
+    WeekdayWire,
 };
 pub use sync_progress::{AccountSyncProgress, AccountSyncState, SyncProgressSnapshot};
 pub use view::MailboxListSnapshot;

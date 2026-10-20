@@ -8,10 +8,23 @@ import { useState } from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.hoisted(() => {
+  // The Tauri sentinel: a mailto anchor routes into the composer ask only
+  // inside Tauri, so the jsdom test stands in as one.
+  (globalThis as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+});
+
 const opener = vi.hoisted(() => ({ openUrl: vi.fn() }));
 
 vi.mock('@tauri-apps/plugin-opener', () => ({
   openUrl: opener.openUrl,
+}));
+
+const mailto = vi.hoisted(() => ({ askMailtoOpen: vi.fn() }));
+
+vi.mock('@/features/composer/mailtoOpen', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  askMailtoOpen: mailto.askMailtoOpen,
 }));
 
 import {
@@ -56,6 +69,8 @@ afterEach(cleanup);
 beforeEach(() => {
   opener.openUrl.mockReset();
   opener.openUrl.mockResolvedValue(undefined);
+  mailto.askMailtoOpen.mockReset();
+  mailto.askMailtoOpen.mockResolvedValue(undefined);
 });
 
 describe('the message body', () => {
@@ -200,6 +215,16 @@ describe('the body menu', () => {
     expect(opener.openUrl).toHaveBeenCalledWith('https://example.test/x');
   });
 
+  it('routes a clicked mailto anchor into the composer ask, never the OS mail app', () => {
+    const link = 'mailto:ada@example.test?subject=Lunch';
+    render(<Harness html={`<p><a href="${link}">write in</a></p>`} count={0} />);
+
+    fireEvent.click(frameDocument(`<p><a href="${link}">write in</a></p>`).querySelector('a')!);
+
+    expect(mailto.askMailtoOpen).toHaveBeenCalledWith(link);
+    expect(opener.openUrl).not.toHaveBeenCalled();
+  });
+
   it('opens the menu link in the system browser', () => {
     render(<Harness html='<p><a href="https://example.test/x">read more</a></p>' count={0} />);
 
@@ -207,5 +232,16 @@ describe('the body menu', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: 'Open link' }));
 
     expect(opener.openUrl).toHaveBeenCalledWith('https://example.test/x');
+  });
+
+  it("routes the menu's mailto open through the composer ask", () => {
+    const link = 'mailto:ada@example.test';
+    render(<Harness html={`<p><a href="${link}">write in</a></p>`} count={0} />);
+
+    fireEvent.contextMenu(frameDocument(`<p><a href="${link}">write in</a></p>`).querySelector('a')!);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Open link' }));
+
+    expect(mailto.askMailtoOpen).toHaveBeenCalledWith(link);
+    expect(opener.openUrl).not.toHaveBeenCalled();
   });
 });

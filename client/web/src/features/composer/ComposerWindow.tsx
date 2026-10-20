@@ -2,7 +2,8 @@
 // The pop-out composer window's root: main.tsx mounts it in place of the app
 // shell when the URL carries a composition id. It hydrates its own session
 // from the host: the accounts and settings pulls (the settings apply the
-// theme class), the draft-status pull for the save hint, and the consuming
+// theme class), the draft-status pull for the save hint, the transfer's
+// resumed draft, the mailto prefill straight off the URL, and the consuming
 // take of the pending compose request the reply and forward flows published
 // for exactly this window; no pending request means a plain new message on
 // the first account. The draft-status surface keeps the status bar's save
@@ -28,7 +29,8 @@ import { useSettingsStore } from '@/features/settings/settingsStore';
 
 import { ComposerPane } from './Composer';
 import { ComposerTitleBar } from './ComposerTitleBar';
-import { useComposerStore } from './composerStore';
+import { defaultSendAccount } from './composeWindow';
+import { useComposerStore, type MailtoOpen } from './composerStore';
 import { fromLabelFor } from './useComposeRequest';
 
 // One hydration per window, StrictMode safe: the double-mounted effect's
@@ -36,22 +38,22 @@ import { fromLabelFor } from './useComposeRequest';
 let hydratedFor: CompositionId | null = null;
 
 /** Opens the window's composition: the transfer's resumed draft, the
- *  pending request's, or a blank one. */
+ *  URL's mailto prefill, the pending request's, or a blank one. */
 async function openComposerSession(
   composition: CompositionId,
   resumeAccount: string | null,
+  prefill: MailtoOpen | null,
 ): Promise<void> {
   if (hydratedFor === composition) {
     return;
   }
   hydratedFor = composition;
   if (!isTauri) {
-    // A plain browser holds no host to pull from; open blank.
-    const account = useAccountStore.getState().accounts[0];
+    // A plain browser holds no host to pull from; open blank from the
+    // default send account the store already holds.
+    const account = defaultSendAccount();
     if (account !== undefined) {
-      useComposerStore
-        .getState()
-        .newMessage({ id: account.accountId, label: account.displayName }, composition);
+      useComposerStore.getState().newMessage(account, composition);
     }
     return;
   }
@@ -83,6 +85,15 @@ async function openComposerSession(
         return;
       }
     }
+    if (prefill !== null) {
+      // A mailto window: the host already parsed the link and resolved the
+      // default send account, so the prefill seeds the composition here and
+      // no request is asked for or spent.
+      useComposerStore
+        .getState()
+        .newMessage({ id: prefill.from, label: fromLabelFor(prefill.from) }, composition, prefill);
+      return;
+    }
     const request = await takeComposeRequest();
     if (request !== null) {
       useComposeRequestStore.getState().dismiss();
@@ -91,11 +102,9 @@ async function openComposerSession(
         .openRequest(request, fromLabelFor(request.from), composition);
       return;
     }
-    const account = useAccountStore.getState().accounts[0];
+    const account = defaultSendAccount();
     if (account !== undefined) {
-      useComposerStore
-        .getState()
-        .newMessage({ id: account.accountId, label: account.displayName }, composition);
+      useComposerStore.getState().newMessage(account, composition);
     }
   } catch (err) {
     console.error('composer: the window hydration failed', err);
@@ -107,15 +116,21 @@ interface ComposerWindowProps {
   composition: CompositionId;
   /** The account a transfer resumes the latest draft of, from the URL. */
   resumeAccount?: string | null;
+  /** The mailto prefill this window opens from, from the URL. */
+  prefill?: MailtoOpen | null;
 }
 
-export function ComposerWindow({ composition, resumeAccount = null }: ComposerWindowProps) {
+export function ComposerWindow({
+  composition,
+  resumeAccount = null,
+  prefill = null,
+}: ComposerWindowProps) {
   const open = useComposerStore((s) => s.open && s.composition !== null);
   const subject = useComposerStore((s) => s.subject);
 
   useEffect(() => {
-    void openComposerSession(composition, resumeAccount);
-  }, [composition, resumeAccount]);
+    void openComposerSession(composition, resumeAccount, prefill);
+  }, [composition, resumeAccount, prefill]);
 
   // The save hint's surface, the one live feed the window needs.
   useEffect(() => {

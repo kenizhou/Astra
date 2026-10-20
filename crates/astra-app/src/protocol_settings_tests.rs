@@ -212,6 +212,45 @@ fn remove_account_names_the_account() {
 }
 
 #[test]
+fn set_send_account_names_the_account_or_clears_it() {
+    round_trips(
+        &Intent::Settings(SettingsIntent::SetSendAccount {
+            account: Some(account("work")),
+        }),
+        r#"{"settings":{"set_send_account":{"account":"work"}}}"#,
+    );
+    // `None` unpins: the explicit null, not an absent key.
+    round_trips(
+        &Intent::Settings(SettingsIntent::SetSendAccount { account: None }),
+        r#"{"settings":{"set_send_account":{"account":null}}}"#,
+    );
+}
+
+#[test]
+fn set_signature_carries_one_slot_or_clears_it() {
+    let signature = astra_composer::Signature {
+        body_html: "<p>Ada</p>".to_owned(),
+        body_plain: "Ada".to_owned(),
+    };
+    round_trips(
+        &Intent::Settings(SettingsIntent::SetSignature {
+            account: account("work"),
+            reply: false,
+            signature: Some(signature),
+        }),
+        r#"{"settings":{"set_signature":{"account":"work","reply":false,"signature":{"body_html":"<p>Ada</p>","body_plain":"Ada"}}}}"#,
+    );
+    round_trips(
+        &Intent::Settings(SettingsIntent::SetSignature {
+            account: account("work"),
+            reply: true,
+            signature: None,
+        }),
+        r#"{"settings":{"set_signature":{"account":"work","reply":true,"signature":null}}}"#,
+    );
+}
+
+#[test]
 fn a_malformed_account_id_is_refused_on_the_wire() {
     // The account half validates on the way in, the same rule every family's
     // references follow.

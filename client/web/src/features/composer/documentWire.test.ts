@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The document wire: the literals each block variant crosses with, byte for
-// byte against astra-composer's serde (field order is the Rust declaration
-// order, optionals cross as null, variants are externally tagged CamelCase),
-// the two way round trip through TipTap JSON, and the loud reject that keeps
-// an unrepresentable shape from being dropped in silence.
+// The document wire: the split into editor content and retained blocks, the
+// two way round trip of every run mark through TipTap JSON, and the loud
+// reject that keeps an unrepresentable shape from being dropped in silence.
+// The byte for byte literal pins of each block variant live in
+// documentWire.literals.test.ts, split so each file keeps under the cap.
 import { describe, expect, it } from 'vitest';
 import { Editor as CoreEditor } from '@tiptap/core';
 
@@ -61,110 +61,6 @@ function inlineAttachment() {
   };
 }
 
-describe('the block literals on the wire', () => {
-  it('carries a paragraph with one marked sized run', () => {
-    const block: Block = {
-      Paragraph: { content: [{ Text: { ...run('Half written'), bold: true, font_size: 'Large' } }] },
-    };
-    expect(JSON.stringify(block)).toBe(
-      '{"Paragraph":{"content":[{"Text":{"text":"Half written","bold":true,"italic":false,"underline":false,"font_size":"Large","color":null,"highlight":null,"link":null}}]}}',
-    );
-  });
-
-  it('spells every font size word the union allows', () => {
-    const sizes = ['Small', 'Normal', 'Large', 'Huge'] as const;
-    for (const size of sizes) {
-      const block: Block = { Paragraph: { content: [{ Text: { ...run('sized'), font_size: size } }] } };
-      expect(JSON.stringify(block)).toBe(
-        `{"Paragraph":{"content":[{"Text":{"text":"sized","bold":false,"italic":false,"underline":false,"font_size":"${size}","color":null,"highlight":null,"link":null}}]}}`,
-      );
-    }
-  });
-
-  it('carries a bullet list with the child spelled null', () => {
-    const block: Block = { List: { kind: 'Bullet', items: [{ content: [{ Text: run('one') }], child: null }] } };
-    expect(JSON.stringify(block)).toBe(
-      `{"List":{"kind":"Bullet","items":[{"content":[${plainRun('one')}],"child":null}]}}`,
-    );
-  });
-
-  it('carries an ordered list with a nested bullet child', () => {
-    const block: Block = {
-      List: {
-        kind: 'Ordered',
-        items: [
-          {
-            content: [{ Text: run('first') }],
-            child: { kind: 'Bullet', items: [{ content: [{ Text: run('nested') }], child: null }] },
-          },
-        ],
-      },
-    };
-    expect(JSON.stringify(block)).toBe(
-      `{"List":{"kind":"Ordered","items":[{"content":[${plainRun('first')}],"child":{"kind":"Bullet","items":[{"content":[${plainRun('nested')}],"child":null}]}}]}}`,
-    );
-  });
-
-  it('carries a table of rows and cells with inline content', () => {
-    const block: Block = {
-      Table: {
-        rows: [
-          { cells: [{ content: [{ Text: run('a') }] }, { content: [] }] },
-          { cells: [{ content: [] }, { content: [{ Text: run('d') }] }] },
-        ],
-      },
-    };
-    expect(JSON.stringify(block)).toBe(
-      `{"Table":{"rows":[{"cells":[{"content":[${plainRun('a')}]},{"content":[]}]},{"cells":[{"content":[]},{"content":[${plainRun('d')}]}]}]}}`,
-    );
-  });
-
-  it('carries both quote styles with the attribution and both bodies', () => {
-    const headers = [{ label: 'From', value: 'Alice <a@x.test>' }];
-    expect(JSON.stringify(quoteBlock('Indented'))).toBe(
-      '{"Quote":{"style":"Indented","attribution":{"line":"On 30 Jun 2026 at 14:03, Alice wrote:","headers":[]},"body_html":"<p>Original</p>","body_plain":"Original"}}',
-    );
-    const withHeader: Block = {
-      Quote: {
-        style: 'LineAndHeader',
-        attribution: { line: '', headers },
-        body_html: '<p>Original</p>',
-        body_plain: 'Original',
-      },
-    };
-    expect(JSON.stringify(withHeader)).toBe(
-      '{"Quote":{"style":"LineAndHeader","attribution":{"line":"","headers":[{"label":"From","value":"Alice <a@x.test>"}]},"body_html":"<p>Original</p>","body_plain":"Original"}}',
-    );
-  });
-
-  it('carries a signature block', () => {
-    expect(JSON.stringify(signatureBlock())).toBe(
-      '{"Signature":{"body_html":"<p>Ada Lovelace</p>","body_plain":"Ada Lovelace"}}',
-    );
-  });
-
-  it('carries one inline disposition attachment and one regular file', () => {
-    const doc: ComposerDocument = {
-      blocks: [{ Paragraph: { content: [] } }],
-      attachments: [
-        inlineAttachment(),
-        {
-          id: 'att-2',
-          blob: null,
-          file_name: 'notes.pdf',
-          media_type: 'application/pdf',
-          size: null,
-          disposition: 'Attachment',
-          data_url: null,
-        },
-      ],
-    };
-    expect(JSON.stringify(doc.attachments)).toBe(
-      '[{"id":"att-1","blob":"blob-7","file_name":"chart.png","media_type":"image/png","size":2048,"disposition":{"Inline":{"cid":"chart@astra"}},"data_url":null},{"id":"att-2","blob":null,"file_name":"notes.pdf","media_type":"application/pdf","size":null,"disposition":"Attachment","data_url":null}]',
-    );
-  });
-});
-
 describe('the wire to the editor', () => {
   it('splits the document into editor content and retained blocks', () => {
     const editable: Block = {
@@ -191,18 +87,42 @@ describe('the wire to the editor', () => {
     ]);
   });
 
-  it('retains tables, quotes, signatures, images and marked runs', () => {
-    const styled: Block = { Paragraph: { content: [{ Text: { ...run('big'), font_size: 'Large' } }] } };
+  it('retains tables, quotes, signatures and images', () => {
     const withImage: Block = {
       Paragraph: { content: [{ Image: { attachment_id: 'att-1', alt_text: 'chart', width_px: 320 } }] },
     };
     const seeded = documentToEditor({
-      blocks: [styled, tableBlock(), quoteBlock(), signatureBlock(), withImage],
+      blocks: [tableBlock(), quoteBlock(), signatureBlock(), withImage],
       attachments: [],
     });
 
     expect(seeded.content).toEqual([]);
-    expect(seeded.retained.map((entry) => entry.index)).toEqual([0, 1, 2, 3, 4]);
+    expect(seeded.retained.map((entry) => entry.index)).toEqual([0, 1, 2, 3]);
+  });
+
+  it('seeds the three widened marks as editable content, not retained blocks', () => {
+    const marked: Block = {
+      Paragraph: {
+        content: [
+          { Text: { ...run('big'), font_size: 'Large' } },
+          { Text: { ...run('tinted'), color: '#112233' } },
+          { Text: { ...run('marked'), highlight: '#ffd700' } },
+        ],
+      },
+    };
+    const seeded = documentToEditor({ blocks: [marked], attachments: [] });
+
+    expect(seeded.retained).toEqual([]);
+    expect(seeded.content).toEqual([
+      {
+        type: 'paragraph',
+        content: [
+          { type: 'text', marks: [{ type: 'fontSize', attrs: { size: 'Large' } }], text: 'big' },
+          { type: 'text', marks: [{ type: 'color', attrs: { color: '#112233' } }], text: 'tinted' },
+          { type: 'text', marks: [{ type: 'highlight', attrs: { color: '#ffd700' } }], text: 'marked' },
+        ],
+      },
+    ]);
   });
 });
 
@@ -325,6 +245,47 @@ describe('the editor back to the wire', () => {
     );
   });
 
+  it('maps the three widened marks back into their runs, merging only equal ones', () => {
+    const content = [
+      {
+        type: 'paragraph',
+        content: [
+          { type: 'text', marks: [{ type: 'fontSize', attrs: { size: 'Huge' } }], text: 'headline' },
+          { type: 'text', marks: [{ type: 'fontSize', attrs: { size: 'Huge' } }], text: ' more' },
+          {
+            type: 'text',
+            marks: [
+              { type: 'color', attrs: { color: '#ff0000' } },
+              { type: 'highlight', attrs: { color: '#ffff00' } },
+            ],
+            text: ' alarm',
+          },
+        ],
+      },
+    ];
+
+    expect(JSON.stringify(editorToDocument({ ...emptyRest, content }))).toBe(
+      '{"blocks":[{"Paragraph":{"content":[' +
+        `{"Text":{"text":"headline more","bold":false,"italic":false,"underline":false,"font_size":"Huge","color":null,"highlight":null,"link":null}},` +
+        `{"Text":{"text":" alarm","bold":false,"italic":false,"underline":false,"font_size":null,"color":"#ff0000","highlight":"#ffff00","link":null}}` +
+        ']}}],"attachments":[]}',
+    );
+  });
+
+  it('rejects a font size word outside the four the wire carries loudly', () => {
+    expect(() =>
+      editorToDocument({
+        ...emptyRest,
+        content: [
+          {
+            type: 'paragraph',
+            content: [{ type: 'text', marks: [{ type: 'fontSize', attrs: { size: 'Giant' } }], text: 'no' }],
+          },
+        ],
+      }),
+    ).toThrow(DocumentWireError);
+  });
+
   it('rejects an unknown node, an unknown mark and a double nested list loudly', () => {
     const itemWithTwoLists = {
       type: 'bulletList',
@@ -421,6 +382,28 @@ describe('the round trip through the trimmed schema', () => {
     editor.destroy();
   });
 
+  it('round trips a run carrying every widened mark unchanged', () => {
+    const doc: ComposerDocument = {
+      blocks: [
+        {
+          Paragraph: {
+            content: [
+              { Text: { ...run('the '), font_size: 'Small' } },
+              { Text: { ...run('whole'), font_size: 'Large', color: '#123456', highlight: '#654321', bold: true } },
+              { Text: { ...run(' idea'), link: 'https://astra.example', color: '#123456' } },
+            ],
+          },
+        },
+      ],
+      attachments: [],
+    };
+
+    const seeded = documentToEditor(doc);
+
+    expect(seeded.retained).toEqual([]);
+    expect(JSON.stringify(editorToDocument(seeded))).toBe(JSON.stringify(doc));
+  });
+
   it('round trips a document whose unproducible blocks are retained untouched', () => {
     const doc: ComposerDocument = {
       blocks: [
@@ -437,5 +420,58 @@ describe('the round trip through the trimmed schema', () => {
     expect(seeded.content).toHaveLength(2);
 
     expect(JSON.stringify(editorToDocument(seeded))).toBe(JSON.stringify(doc));
+  });
+
+  it('applies the three widened marks live and reads them back over the wire', () => {
+    const editor = new CoreEditor({
+      element: document.createElement('div'),
+      extensions: trimmedExtensions(),
+      content: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: 'hello' }] }],
+      },
+    });
+    editor.commands.selectAll();
+    editor.commands.setMark('fontSize', { size: 'Huge' });
+    editor.commands.setMark('color', { color: '#7a6ff0' });
+    editor.commands.setMark('highlight', { color: '#f59e0b' });
+
+    const doc = editorToDocument({
+      content: editor.getJSON().content ?? [],
+      retained: [],
+      attachments: [],
+    });
+    expect(doc.blocks[0]).toEqual({
+      Paragraph: {
+        content: [
+          {
+            Text: {
+              text: 'hello',
+              bold: false,
+              italic: false,
+              underline: false,
+              font_size: 'Huge',
+              color: '#7a6ff0',
+              highlight: '#f59e0b',
+              link: null,
+            },
+          },
+        ],
+      },
+    });
+
+    // The marked run crosses into a second live editor and back unchanged,
+    // so a run another client formatted stays editable, never frozen.
+    const seeded = documentToEditor(doc);
+    const second = new CoreEditor({
+      element: document.createElement('div'),
+      extensions: trimmedExtensions(),
+      content: { type: 'doc', content: seeded.content },
+    });
+    expect(
+      JSON.stringify(editorToDocument({ ...seeded, content: second.getJSON().content ?? [] })),
+    ).toBe(JSON.stringify(doc));
+    editor.destroy();
+    second.destroy();
   });
 });

@@ -60,7 +60,9 @@ import { useComposeRequestStore } from '@/stores/composeRequestStore';
 
 import { ComposerPane } from './Composer';
 import { opensInBody, useComposerStore } from './composerStore';
+import { quoteOrdered } from './composerOpening';
 import { documentToEditor } from './documentWire';
+import type { Block, ComposerDocument } from '@/services/composerDocument';
 
 /** A pending request, standing in the store while the composer is open. */
 const pendingRequest: ComposeRequestSnapshot = {
@@ -74,7 +76,7 @@ const pendingRequest: ComposeRequestSnapshot = {
 };
 
 function resetStores(): void {
-  useAccountStore.setState({ accounts: [{ accountId: 'work', displayName: 'Work' }] });
+  useAccountStore.setState({ accounts: [{ accountId: 'work', displayName: 'Work', address: 'me@work.example' }] });
   useComposeRequestStore.setState({ snapshot: null });
   useComposerStore.setState({
     open: false,
@@ -193,5 +195,36 @@ describe('the caret predicate', () => {
 
     expect(editorStub.focus).toHaveBeenCalled();
     expect(document.activeElement).not.toBe(screen.getByRole('textbox', { name: 'To' }));
+  });
+});
+
+describe('the seeded order against the quote setting', () => {
+  /** The core-built seeded reply: the typed words, the quote, the seeded
+   *  signature under it, the order the seeding rule names. */
+  const seeded: ComposerDocument = {
+    blocks: [
+      { Paragraph: { content: [] } },
+      {
+        Quote: {
+          style: 'Indented',
+          attribution: { line: '', headers: [] },
+          body_html: '',
+          body_plain: '',
+        },
+      },
+      { Signature: { body_html: '<p>Ada</p>', body_plain: 'Ada' } },
+    ],
+    attachments: [],
+  };
+  const shapeOf = (block: Block): string => Object.keys(block)[0]!;
+
+  it('keeps the signature below the typed words for the below-quote setting', () => {
+    const ordered = quoteOrdered(seeded, true);
+    expect(ordered.blocks.map(shapeOf)).toEqual(['Paragraph', 'Quote', 'Signature']);
+  });
+
+  it('keeps the signature below the typed words when the quote lifts to the top', () => {
+    const ordered = quoteOrdered(seeded, false);
+    expect(ordered.blocks.map(shapeOf)).toEqual(['Quote', 'Paragraph', 'Signature']);
   });
 });

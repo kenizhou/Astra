@@ -333,6 +333,9 @@ pub(crate) fn account_folder_rows<P: Provider>(
         account_folders.push(AccountFolderRow {
             account_id: account.id.clone(),
             display_name: account.identity.email.clone(),
+            // The sending address beside the label, the field a From picker
+            // offers; the identity's own address, never one a link dictated.
+            address: account.identity.email.clone(),
             // Open until the publisher stamps the persisted state over it; see
             // `AccountFolderRow::expanded`.
             expanded: true,

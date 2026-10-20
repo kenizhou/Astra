@@ -117,7 +117,7 @@ function land(request: ComposeRequestSnapshot): void {
 }
 
 function resetStores(): void {
-  useAccountStore.setState({ accounts: [{ accountId: 'work', displayName: 'Work' }] });
+  useAccountStore.setState({ accounts: [{ accountId: 'work', displayName: 'Work', address: 'me@work.example' }] });
   useDraftStore.setState({ snapshot: null });
   useComposerStore.setState({
     open: false,
@@ -280,7 +280,9 @@ describe('the inline route', () => {
     expect((screen.getByRole('textbox', { name: 'Subject' }) as HTMLInputElement).value).toBe(
       'Re: Quarterly report',
     );
-    expect(screen.getByText('Work')).toBeTruthy();
+    expect((screen.getByRole('combobox', { name: 'From' }) as HTMLSelectElement).value).toBe(
+      'work',
+    );
   });
 
   it('labels the from with the account id when no account is known', () => {

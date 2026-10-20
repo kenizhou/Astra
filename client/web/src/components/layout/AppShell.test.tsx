@@ -103,7 +103,7 @@ beforeEach(() => {
   });
   useUiStore.getState().setShellView('mail');
   useUiStore.getState().setSettingsOpen(false);
-  useAccountStore.setState({ accounts: [{ accountId: 'work', displayName: 'Work' }] });
+  useAccountStore.setState({ accounts: [{ accountId: 'work', displayName: 'Work', address: 'me@work.example' }] });
   useComposerStore.setState({
     open: false,
     inlineExpected: false,

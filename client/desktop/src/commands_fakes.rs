@@ -34,8 +34,8 @@ use astra_app::{
 };
 use astra_viewmodel::{
     CalendarSnapshot, ComposeKind, ComposeRequestSnapshot, DraftSaveState, DraftStatusSnapshot,
-    MailboxListSnapshot, PeopleSnapshot, ReadingSnapshot, SendingSnapshot, SettingsSnapshot,
-    SyncProgressSnapshot,
+    MailboxListSnapshot, MailtoOpen, PeopleSnapshot, ReadingSnapshot, SendingSnapshot,
+    SettingsSnapshot, SyncProgressSnapshot,
 };
 use engine_api::RecipientSuggestion;
 
@@ -95,6 +95,12 @@ pub(crate) struct FakeApp {
     /// The compose-request snapshot the pull answers with: what the fake's
     /// compose dispatches last published into the single slot.
     pub(crate) compose_request: Mutex<Option<ComposeRequestSnapshot>>,
+    /// The mailto open's answer: the prefill a link opens, or `None` when
+    /// no account stands.
+    pub(crate) mailto_open: Mutex<Option<MailtoOpen>>,
+    /// The links the mailto open was asked to open, so a test can assert
+    /// the host hands the raw link through to the core.
+    pub(crate) mailto_into: Mutex<Vec<String>>,
     /// The stored draft the resume answers with, emptied by a discard.
     pub(crate) stored_draft: Mutex<Option<DraftResume>>,
     /// The (account, composition) pairs the resume was asked to open, so a test
@@ -178,6 +184,8 @@ impl FakeApp {
             attachment_into: Mutex::new(Vec::new()),
             draft_status: Mutex::new(None),
             compose_request: Mutex::new(None),
+            mailto_open: Mutex::new(None),
+            mailto_into: Mutex::new(Vec::new()),
             stored_draft: Mutex::new(None),
             resumed_into: Mutex::new(Vec::new()),
             sending: Mutex::new(SendingQueue::default()),
@@ -405,6 +413,7 @@ pub(crate) fn state(name: &str, app: Arc<FakeApp>, store: Arc<FakeStore>) -> App
         credential_store: store,
         oauth: crate::oauth::wiring::offline_surface(),
         refusals: Arc::new(crate::oauth::grant_refusals::GrantRefusals::new()),
+        pending_mailto: Mutex::new(None),
         runtime: crate::runtime::build_runtime().expect("the test runtime builds"),
     }
 }

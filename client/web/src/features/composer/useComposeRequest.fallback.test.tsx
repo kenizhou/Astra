@@ -39,7 +39,7 @@ function replyRequest(): ComposeRequestSnapshot {
 beforeEach(() => {
   ipc.dispatch.mockReset();
   ipc.dispatch.mockResolvedValue(undefined);
-  useAccountStore.setState({ accounts: [{ accountId: 'work', displayName: 'Work' }] });
+  useAccountStore.setState({ accounts: [{ accountId: 'work', displayName: 'Work', address: 'me@work.example' }] });
   useComposeRequestStore.setState({ snapshot: null });
   useComposerStore.getState().closePane();
 });

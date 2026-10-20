@@ -33,6 +33,7 @@ function account(over: Partial<AccountFolderRow> = {}): AccountFolderRow {
   return {
     account_id: 'work',
     display_name: 'me@work.example',
+    address: 'me@work.example',
     expanded: true,
     can_edit_folders: true,
     folders: [],
