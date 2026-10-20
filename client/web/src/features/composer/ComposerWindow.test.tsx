@@ -1,12 +1,25 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The pop-out composer window's root: it hydrates its own session from the
 // host under the URL's composition id (the pending request's prefill through
-// the consuming take, or a blank new message on the first account), the
-// hydration is StrictMode safe, a failed pull leaves the placeholder, and
-// the composition leaving the store closes the OS window.
+// the consuming take, a mailto window's prefill straight from the URL, or a
+// blank new message on the first account), the hydration is StrictMode
+// safe, a failed pull leaves the placeholder, and the composition leaving
+// the store closes the OS window.
 import { StrictMode } from 'react';
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.hoisted(() => {
+  // jsdom gives no layout: the opening caret's scroll-to-selection reads
+  // rects off the DOM ranges, text nodes, and empty-paragraph elements
+  // the position arithmetic resolves to, so all three gaps are patched
+  // shut for every test this file mounts.
+  const empty = () => [] as unknown as DOMRectList;
+  const zero = () => new DOMRect(0, 0, 0, 0);
+  Object.assign(Range.prototype, { getClientRects: empty, getBoundingClientRect: zero });
+  Object.assign(Text.prototype, { getClientRects: empty, getBoundingClientRect: zero });
+  Object.assign(Element.prototype, { getClientRects: empty, getBoundingClientRect: zero });
+});
 
 const ipc = vi.hoisted(() => ({
   dispatch: vi.fn(),
@@ -120,6 +133,13 @@ async function settle(): Promise<void> {
     await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
+    // The opening caret's focus command rides requestAnimationFrame chains
+    // under real timers; flushing two frames keeps them inside the test,
+    // where the rect patches hold, instead of escaping uncaught between
+    // tests.
+    await new Promise((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve(null))),
+    );
   });
 }
 
@@ -183,6 +203,37 @@ describe('the window hydration', () => {
     expect(state.to).toBe('ada@example.test');
     expect(state.subject).toBe('Re: Quarterly report');
     expect(screen.getByText('Re: Quarterly report')).toBeTruthy();
+  });
+
+  it('seeds the prefilled new message the URL carries, never asking the take', async () => {
+    render(
+      <ComposerWindow
+        composition="compose-49"
+        prefill={{
+          from: 'work',
+          to: 'ada@example.test',
+          cc: 'tim@example.test',
+          bcc: '',
+          subject: 'Lunch',
+          body: 'Noon?',
+        }}
+      />,
+    );
+
+    await settle();
+
+    expect(ipc.takeComposeRequest).not.toHaveBeenCalled();
+    const state = useComposerStore.getState();
+    expect(state.open).toBe(true);
+    expect(state.composition).toBe('compose-49');
+    expect(state.from).toBe('work');
+    expect(state.fromLabel).toBe('Work');
+    expect(state.to).toBe('ada@example.test');
+    expect(state.cc).toBe('tim@example.test');
+    expect(state.subject).toBe('Lunch');
+    expect(state.request).toBeNull();
+    expect(JSON.stringify(state.editor)).toContain('Noon?');
+    expect(screen.getByText('Lunch')).toBeTruthy();
   });
 
   it('falls through to the blank tail when the marked draft is already gone', async () => {

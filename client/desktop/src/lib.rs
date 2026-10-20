@@ -22,6 +22,7 @@ mod detection;
 mod dial_table;
 mod exit;
 mod headless;
+mod mailto;
 mod mcp;
 mod oauth;
 mod observer;
@@ -81,6 +82,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .on_page_load(mailto::on_page_load)
         .invoke_handler(tauri::generate_handler![
             commands::dispatch,
             commands::mailbox_list,

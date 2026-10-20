@@ -10,14 +10,17 @@
 // (`sandbox="allow-same-origin"`), the config kylins' renderer documents:
 // sanitisation upstream, no script execution here, and the parent free
 // to attach the listeners the body's own affordances need: links open
-// in the system browser through the opener plugin, and the context menu
-// offers open and copy beside Copy and Select All.
+// in the system browser through the opener plugin, a mailto link routed
+// into the composer's ask instead, and the context menu offers open and
+// copy beside Copy and Select All.
 
 import { useEffect, useRef, useState } from 'react';
 
 import { openUrl } from '@tauri-apps/plugin-opener';
 
 import { ContextMenu, type ContextMenuItem } from '@/components/ui/ContextMenu';
+import { isTauri } from '@/events/surfaceEvents';
+import { askMailtoOpen, isMailtoHref } from '@/features/composer/mailtoOpen';
 
 /** The framed document's barrier while remote references stay gated. */
 export const READING_CSP_GATED =
@@ -37,12 +40,26 @@ export function enableRemoteImages(html: string): string {
   return html.replaceAll('data-astra-src=', 'src=').replaceAll('data-astra-style-url:', '');
 }
 
+/**
+ * Routes one body link: a mailto link opens the prefilled composer through
+ * the host's parse (the link is never read here), every other scheme still
+ * goes to the OS, and outside Tauri the OS mail app takes the mailto link
+ * as it always did.
+ */
+function openBodyLink(href: string): void {
+  if (isTauri && isMailtoHref(href)) {
+    void askMailtoOpen(href);
+    return;
+  }
+  void openUrl(href);
+}
+
 /** The body menu's items over whatever the click landed on. */
 function bodyItems(link: string | null, selection: string, selectAll: () => void): ContextMenuItem[] {
   const items: ContextMenuItem[] = [];
   if (link !== null) {
     items.push(
-      { label: 'Open link', onSelect: () => void openUrl(link) },
+      { label: 'Open link', onSelect: () => openBodyLink(link) },
       { label: 'Copy link', onSelect: () => void navigator.clipboard?.writeText(link) },
       { separator: true },
     );
@@ -61,10 +78,10 @@ function bodyItems(link: string | null, selection: string, selectAll: () => void
 }
 
 /** Wires the body menu into one frame document: contextmenu opens it,
- *  anchor clicks route to the system browser. The listeners attach on the
- *  frame's load, not at mount: the srcdoc document replaces the initial
- *  empty one asynchronously, and handlers on the replaced document die
- *  with it. */
+ *  anchor clicks route to the composer or the system browser. The listeners
+ *  attach on the frame's load, not at mount: the srcdoc document replaces
+ *  the initial empty one asynchronously, and handlers on the replaced
+ *  document die with it. */
 function useBodyFrame(doc: string) {
   const frameRef = useRef<HTMLIFrameElement>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; link: string | null; selection: string } | null>(null);
@@ -86,7 +103,7 @@ function useBodyFrame(doc: string) {
           event.preventDefault();
           const href = anchor.getAttribute('href');
           if (href !== null && href !== '') {
-            void openUrl(href);
+            openBodyLink(href);
           }
         }
       };

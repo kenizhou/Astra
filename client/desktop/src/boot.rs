@@ -153,6 +153,7 @@ pub(crate) fn assemble_state(
         credential_store: credentials,
         oauth,
         refusals,
+        pending_mailto: std::sync::Mutex::new(None),
         runtime,
     })
 }
@@ -235,13 +236,17 @@ pub(crate) fn setup_host(app: &mut tauri::App) -> Result<(), Box<dyn std::error:
         oauth_rx,
         oauth_tx,
     ));
-    let state = assemble_state(&data_dir, observer, agent_sink, draft_sink, oauth)?;
-
-    log::info!(
-        "boot: the app core is up over {} account(s)",
-        state.connections.ids().len(),
-    );
+    let mut state = assemble_state(&data_dir, observer, agent_sink, draft_sink, oauth)?;
+    // The mailto entry's host leg: the launch link, when the process was
+    // started by one, is held for the page-load drain, and the deep-link
+    // and reading-pane roads are wired once the state they read stands.
+    crate::mailto::hold_launch_link(app.handle(), &mut state);
+    let accounts = state.connections.ids().len();
+    let handle = app.handle().clone();
     app.manage(state);
+    crate::mailto::listen(&handle);
+
+    log::info!("boot: the app core is up over {accounts} account(s)");
     Ok(())
 }
 

@@ -58,7 +58,7 @@ this row ports.
 | Composer | Paste a picture into the message or a signature, sent as an inline cid: part | ⬜ | composer-security.md |
 | Composer | Resize a pasted or quoted picture by dragging a corner; ratio kept | ⬜ | composer-security.md |
 | Composer | Drag files onto the composer: a document attaches, a picture asks inline or file | ✅ | a dropped document attaches outright, a picture gets the one-ask inline-or-file answer whose inline arm rides the document, and the send the staged rows feed is proven live; composer-security.md |
-| Composer | mailto: links open the composer prefilled; extra headers dropped | ⬜ | composer-security.md |
+| Composer | mailto: links open the composer prefilled; extra headers dropped | 🚧 | the host leg ships: the deep-link plugin's deliveries (a running instance's event, the launch argument a cold start hands the plugin, and the second launch's argv the single-instance callback forwards) and the reading pane's own mailto anchors both reach the core's parser, whose five-field prefill opens the composer from the default send account (a pop-out window, the prefill riding the window URL); the offline seam proofs and the reading-pane routing pin ship, and the live deep-link proof (the OS handing a real mailto link over) waits on an installed build; composer-security.md |
 | Composer | Share files into a new message from the OS share sheet; unsafe names and types dropped | ⬜ | os-integration.md |
 | Platform | Offer to become the default mail app, asked once, changeable in settings | ⬜ | os-integration.md |
 | Composer | Reply and forward quoting below the original, app default with per-message override | 🚧 | sending.md |

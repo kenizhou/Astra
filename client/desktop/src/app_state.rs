@@ -13,7 +13,7 @@ use astra_app::{
     SummariseMessageError, TranslateLanguage,
 };
 use astra_viewmodel::{
-    CalendarSnapshot, ComposeRequestSnapshot, DraftStatusSnapshot, MailboxListSnapshot,
+    CalendarSnapshot, ComposeRequestSnapshot, DraftStatusSnapshot, MailboxListSnapshot, MailtoOpen,
     PeopleSnapshot, ReadingSnapshot, SendingSnapshot, SettingsSnapshot, SyncProgressSnapshot,
 };
 use async_trait::async_trait;
@@ -91,6 +91,11 @@ pub(crate) trait AppPort: Send + Sync {
     /// composer window's pull, so a later window never re-reads a spent
     /// request.
     fn take_compose_request(&self) -> Option<ComposeRequestSnapshot>;
+
+    /// The composition a `mailto:` link opens: the parser's five fields
+    /// under the default send account, or `None` when no account stands
+    /// or the link is not a mailto link at all.
+    async fn open_mailto(&self, uri: &str) -> Option<MailtoOpen>;
 
     /// The published sending snapshot, for the host's pull: every account's
     /// sends that have not gone out, or nothing outstanding.
@@ -291,6 +296,10 @@ impl AppPort for App<HostProvider> {
         App::take_compose_request(self)
     }
 
+    async fn open_mailto(&self, uri: &str) -> Option<MailtoOpen> {
+        App::open_mailto(self, uri).await
+    }
+
     fn sending(&self) -> SendingSnapshot {
         App::sending(self)
     }
@@ -463,6 +472,11 @@ pub(crate) struct AppState {
     /// completions learn about every Microsoft account's grant, read by
     /// the host account store the settings rows render through.
     pub(crate) refusals: Arc<crate::oauth::grant_refusals::GrantRefusals>,
+    /// The launch mailto link, when the process was started by one: the
+    /// plugin consumed the launch argument before any listener stood, so
+    /// the link is held here until the main page's load drains it into
+    /// the open the web's listener hears.
+    pub(crate) pending_mailto: std::sync::Mutex<Option<String>>,
     /// The app's async runtime: dispatches, first syncs and blocking dials run on it.
     pub(crate) runtime: AppRuntime,
 }

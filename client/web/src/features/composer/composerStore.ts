@@ -64,6 +64,7 @@ export {
 export type {
   ComposePrefill,
   CompositionRequest,
+  MailtoOpen,
   SendAccount,
 } from './composerOpening';
 

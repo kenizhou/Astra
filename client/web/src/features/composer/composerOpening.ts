@@ -52,6 +52,13 @@ export interface ComposePrefill {
   body: string;
 }
 
+/** The prefill a mailto link opens, as the host's event carries it: the
+ *  parser's five fields under the default send account the host resolved,
+ *  so the composer opens from it without re-picking. */
+export interface MailtoOpen extends ComposePrefill {
+  from: string;
+}
+
 /**
  * The opening state a prefill seeds: the recipient fields normalised the way
  * every open normalises them (each supplied address a finished pill, nothing

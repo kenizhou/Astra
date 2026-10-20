@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The pop-out composer window's mechanics: the query param the main window
-// reads the composition id from, the URL and label the window opens with
-// (the id alone crossing, the capability wildcard matching the label), and
-// the New message route opening a window rather than touching the inline
+// The pop-out composer window's mechanics: the query params the main
+// window reads (the composition id, the transfer's resume account, a
+// mailto window's prefill), the URL and label the window opens with
+// (the id and, for a mailto window, the host-parsed prefill crossing,
+// the capability wildcard matching the label), and the New message and
+// mailto routes opening a window rather than touching the inline
 // composer while under Tauri.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -36,17 +38,32 @@ vi.mock('@/events/surfaceEvents', async (importOriginal) => ({
 
 import { useAccountStore } from '@/stores/accountStore';
 
-import { useComposerStore } from './composerStore';
+import { useComposerStore, type MailtoOpen } from './composerStore';
+import { openMailtoComposer } from './mailtoOpen';
 import {
   composerWindowLabel,
   composerWindowUrl,
   openComposerWindow,
   openNewMessageComposer,
   readComposerParam,
+  readPrefillParam,
   readResumeParam,
 } from './composeWindow';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** The prefill a mailto link opens, as the host's event carries it. */
+const prefill: MailtoOpen = {
+  from: 'work',
+  to: 'ada@example.test',
+  cc: 'tim@example.test',
+  bcc: '',
+  subject: 'Lunch',
+  body: 'Noon?',
+};
+
+/** The encoded prefill param the URL carries. */
+const encodedPrefill = encodeURIComponent(JSON.stringify(prefill));
 
 beforeEach(() => {
   webviewWindow.instances.length = 0;
@@ -83,6 +100,28 @@ describe('the resume query param', () => {
   });
 });
 
+describe('the prefill query param', () => {
+  it('reads the prefill the URL carries', () => {
+    expect(readPrefillParam(`?composer=compose-9&prefill=${encodedPrefill}`)).toEqual(prefill);
+  });
+
+  it('reads nothing for a plain pop-out', () => {
+    expect(readPrefillParam('?composer=compose-9')).toBeNull();
+    expect(readPrefillParam('?composer=compose-9&prefill=')).toBeNull();
+  });
+
+  it('refuses a prefill that is not the wire shape', () => {
+    expect(
+      readPrefillParam(`?composer=compose-9&prefill=${encodeURIComponent('not json')}`),
+    ).toBeNull();
+    expect(
+      readPrefillParam(
+        `?composer=compose-9&prefill=${encodeURIComponent(JSON.stringify({ from: 'work' }))}`,
+      ),
+    ).toBeNull();
+  });
+});
+
 describe('the window address', () => {
   it('carries the composition id alone in the URL', () => {
     expect(composerWindowUrl('compose-9')).toBe('index.html?composer=compose-9');
@@ -91,6 +130,12 @@ describe('the window address', () => {
   it('marks the resume account on a transfer', () => {
     expect(composerWindowUrl('compose-9', 'work')).toBe(
       'index.html?composer=compose-9&resume=work',
+    );
+  });
+
+  it('carries the prefill a mailto window opens from', () => {
+    expect(composerWindowUrl('compose-9', undefined, prefill)).toBe(
+      `index.html?composer=compose-9&prefill=${encodedPrefill}`,
     );
   });
 
@@ -126,6 +171,15 @@ describe('the window opening', () => {
       url: 'index.html?composer=compose-9&resume=work',
     });
   });
+
+  it('carries the prefill onto the URL for a mailto window', async () => {
+    await openComposerWindow('compose-9', 'Lunch', undefined, prefill);
+
+    const [window] = webviewWindow.instances;
+    expect(window?.options).toMatchObject({
+      url: `index.html?composer=compose-9&prefill=${encodedPrefill}`,
+    });
+  });
 });
 
 describe('the New message route', () => {
@@ -146,5 +200,28 @@ describe('the New message route', () => {
     await openNewMessageComposer();
 
     expect(webviewWindow.instances).toHaveLength(0);
+  });
+});
+
+describe('the mailto route', () => {
+  it('opens a prefilled window titled by the subject on a minted composition', async () => {
+    await openMailtoComposer(prefill);
+
+    expect(webviewWindow.instances).toHaveLength(1);
+    const [window] = webviewWindow.instances;
+    expect(window?.label).toMatch(/^composer-/);
+    expect(window?.label.replace('composer-', '')).toMatch(UUID);
+    expect(window?.options).toMatchObject({
+      url: `index.html?composer=${window?.label.replace('composer-', '')}&prefill=${encodedPrefill}`,
+      title: 'Lunch',
+    });
+    expect(useComposerStore.getState().open).toBe(false);
+  });
+
+  it('titles a subjectless prefill New message', async () => {
+    await openMailtoComposer({ ...prefill, subject: '' });
+
+    const [window] = webviewWindow.instances;
+    expect(window?.options).toMatchObject({ title: 'New message' });
   });
 });

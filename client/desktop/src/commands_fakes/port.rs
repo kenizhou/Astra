@@ -14,8 +14,8 @@ use astra_app::{
 };
 use astra_viewmodel::{
     CalendarSnapshot, ComposeKind, ComposeRequestSnapshot, DraftStatusSnapshot,
-    MailboxListSnapshot, PeopleSnapshot, ReadingSnapshot, SendingSnapshot, SettingsSnapshot,
-    SyncProgressSnapshot,
+    MailboxListSnapshot, MailtoOpen, PeopleSnapshot, ReadingSnapshot, SendingSnapshot,
+    SettingsSnapshot, SyncProgressSnapshot,
 };
 use engine_api::{AccountId, CalendarDate, ProviderKey, RecipientSuggestion};
 
@@ -200,6 +200,11 @@ impl AppPort for FakeApp {
 
     fn take_compose_request(&self) -> Option<ComposeRequestSnapshot> {
         self.compose_request.lock().unwrap().take()
+    }
+
+    async fn open_mailto(&self, uri: &str) -> Option<MailtoOpen> {
+        self.mailto_into.lock().unwrap().push(uri.to_owned());
+        self.mailto_open.lock().unwrap().clone()
     }
 
     fn sending(&self) -> SendingSnapshot {

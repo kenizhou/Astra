@@ -78,10 +78,40 @@ surface held), and a standing row whose part will not come back refuses
 the send, the same discipline a host blob that is missing serves. A
 removed row simply does not ride the send.
 
+## The mailto entry
+
+A `mailto:` link opens the composer prefilled, exactly one parse serving
+every road. The host hands the raw link to the core's parser (RFC 6068's
+five honoured fields, every other header dropped, a `from` the link names
+never trusted), which answers the prefill under the default send account:
+the persisted preference when it names a standing account, the first
+account otherwise, and nothing at all when no account stands, so a
+refused link opens nothing rather than a blank composer. The prefill
+crosses to the web as one event and opens the composition the New message
+entry opens: a pop-out window whose URL carries the prefill beside the
+composition id, the fields seeded the way a hand-typed open holds them,
+request-free and sending as plain mail.
+
+Three roads reach the parser. The deep-link plugin's event carries a link
+the OS delivered to the running app, which on Windows includes a second
+launch's argv the single-instance callback hands the plugin; the OAuth
+capture's filter on the same deliveries is untouched, each road keeping
+its own scheme. A link that started the app arrives as the launch
+argument the plugin consumed before any listener stood, so its held
+value is drained once the main page has loaded and the web's listener
+can hear. And a `mailto:` anchor in the reading pane routes internally:
+the pane asks the host with the raw link (the parse never happens in the
+surface), every other scheme still going to the OS, and the OS mail app
+keeps the link only outside the desktop host.
+
 ## Known gaps
 
 - **Inline images are not preserved across a forward**: the carried parts
   ride as files, and the original's inline `cid:` pictures do not arrive
   as inline content in the forward.
-- **Link editing, pasted-picture capture, image resize, and mailto:
-  prefill** stand as future rows this document will own as they land.
+- **The live deep-link proof waits on an installed build**: the mailto
+  roads are pinned offline at their seams, and a real OS delivery (the
+  protocol registration, the cold launch, the second launch's argv) has
+  no harness yet.
+- **Link editing, pasted-picture capture, and image resize** stand as
+  future rows this document will own as they land.
