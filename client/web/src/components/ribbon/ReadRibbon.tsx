@@ -24,7 +24,7 @@ import { openNewMessageComposer } from '@/features/composer/composeWindow';
 import { dispatch, intents, type Intent, type MessageRef } from '@/services/ipc';
 import { useAccountStore } from '@/stores/accountStore';
 import { useListStore } from '@/stores/listStore';
-import { useReadingStore } from '@/stores/readingStore';
+import { carriedAttachmentIds, useReadingStore } from '@/stores/readingStore';
 
 import { RibbonButton, RibbonGroup } from './RibbonPrimitives';
 
@@ -36,7 +36,13 @@ const COMPOSE_ACTIONS: ReadonlyArray<{
 }> = [
   { label: 'Reply', icon: ReplyIcon, verb: intents.replyTo },
   { label: 'Reply all', icon: ReplyAllIcon, verb: intents.replyAllTo },
-  { label: 'Forward', icon: ForwardIcon, verb: intents.forward },
+  {
+    label: 'Forward',
+    icon: ForwardIcon,
+    // The forward carries exactly the parts the reading pane lists, read at
+    // click time so the carry matches what the reader sees.
+    verb: (message) => intents.forward(message, carriedAttachmentIds()),
+  },
 ];
 
 export function ReadRibbon({ iconOnly }: { iconOnly: boolean }) {

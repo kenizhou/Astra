@@ -105,6 +105,8 @@ genuinely attached calendar file still lists.
 - Offline folder edits queue behind the engine's outbox; a queued edit's
   menu shows the pending state, and a refused replay surfaces as the
   conflict the engine answers.
+- A forward carries the original's attachments as files; inline-image
+  preservation across a forward is not served by this slice.
 
 ## Test-first
 

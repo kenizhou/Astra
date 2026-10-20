@@ -22,6 +22,7 @@ import type {
   ComposeKind,
   ComposeRequestSnapshot,
   CompositionId,
+  ComposerBlob,
   ComposerDocument,
   Intent,
   ResumeView,
@@ -36,6 +37,12 @@ import {
   editorToDocument,
   type EditorDocument,
 } from './documentWire';
+import {
+  attachFile,
+  inlineRef,
+  stripInlineRefs,
+  type StagedAttachment,
+} from './composerStaging';
 import { normaliseRecipients } from './recipientTokens';
 
 /** Mints one composition's id: a UUID, unique across restarts. */
@@ -84,6 +91,10 @@ interface ComposerStoreState {
   subject: string;
   /** The document split for the editor, retained blocks and attachments. */
   editor: EditorDocument;
+  /** The composer's own staged files, keyed by the row's blob handle. */
+  files: Record<string, File>;
+  /** Dropped pictures awaiting the inline-or-file answer, newest drop. */
+  pendingImages: File[];
   /** What the last handover carried; equal content costs no dispatch. */
   savedFingerprint: string | null;
   /** The compose request this composition answers; null for a plain one. */
@@ -112,6 +123,14 @@ interface ComposerStoreState {
   expectInlineReply: () => void;
   setField: (field: 'to' | 'cc' | 'bcc' | 'subject', value: string) => void;
   setEditorContent: (content: JSONContent[]) => void;
+  /** Stands each picked file as a removable document row. */
+  attachFiles: (files: File[]) => void;
+  /** Takes one dropped batch: documents attach, pictures ask first. */
+  dropFiles: (files: File[]) => void;
+  /** Answers the dropped pictures' ask: inline content or a file row. */
+  answerPendingImages: (inline: boolean) => void;
+  /** Removes one attachment row, its staged bytes, and its references. */
+  removeAttachment: (id: string) => void;
   /** Submits the current document to the durable outbox, the send's one path. */
   submit: () => void;
   closePane: () => void;
@@ -168,6 +187,8 @@ const closedState = {
   bcc: '',
   subject: '',
   editor: emptyEditor(),
+  files: {},
+  pendingImages: [],
   savedFingerprint: null,
   request: null,
   sending: false,
@@ -193,9 +214,10 @@ const REPLY_WITHOUT_ORIGIN = 'The original message has no Message-ID to reply un
  * sends as a fresh mail; one a request opened sends through its own threaded
  * submit, the reply under its original, the forward answering no one. The
  * threaded wires carry no bcc and the forward's no cc either, so those fields
- * are the plain send's alone.
+ * are the plain send's alone. The blobs hold the standing staged rows' bytes,
+ * read at click time.
  */
-function submitIntent(state: {
+async function submitIntent(state: {
   request: CompositionRequest | null;
   from: string;
   to: string;
@@ -203,8 +225,10 @@ function submitIntent(state: {
   bcc: string;
   subject: string;
   editor: EditorDocument;
-}): Intent {
+  files: Record<string, File>;
+}): Promise<Intent> {
   const document = editorToDocument(state.editor);
+  const blobs = await stagedBlobs(state);
   if (state.request === null) {
     return intents.submitRichMail({
       from: state.from,
@@ -213,7 +237,7 @@ function submitIntent(state: {
       bcc: state.bcc,
       subject: state.subject,
       document,
-      blobs: [],
+      blobs,
     });
   }
   if (state.request.kind === 'forward') {
@@ -222,7 +246,7 @@ function submitIntent(state: {
       to: state.to,
       subject: state.subject,
       document,
-      blobs: [],
+      blobs,
     });
   }
   return intents.submitRichReply({
@@ -232,12 +256,58 @@ function submitIntent(state: {
     in_reply_to: state.request.inReplyTo ?? '',
     subject: state.subject,
     document,
-    blobs: [],
+    blobs,
   });
+}
+
+/** The bytes of every staged file whose row still stands, keyed by the
+ *  handle the document names. A removed row drops out here; a forward's
+ *  pre-attached originals hold no staged file, so the core resolves them. */
+async function stagedBlobs(state: {
+  editor: EditorDocument;
+  files: Record<string, File>;
+}): Promise<ComposerBlob[]> {
+  const standing = new Set(
+    state.editor.attachments
+      .map((row) => row.blob)
+      .filter((blob): blob is string => blob !== null),
+  );
+  const blobs: ComposerBlob[] = [];
+  for (const [handle, file] of Object.entries(state.files)) {
+    if (standing.has(handle)) {
+      blobs.push({ handle, bytes: Array.from(new Uint8Array(await file.arrayBuffer())) });
+    }
+  }
+  return blobs;
 }
 
 /** The live editor the open composition types into; null while none stands. */
 let activeEditor: CoreEditor | null = null;
+
+/** Folds staged attachments into the state: their rows onto the document,
+ *  their files behind the minted handles. */
+function stage(
+  state: { editor: EditorDocument; files: Record<string, File> },
+  staged: StagedAttachment[],
+): { editor: EditorDocument; files: Record<string, File> } {
+  if (staged.length === 0) {
+    return state;
+  }
+  const files = { ...state.files };
+  for (const entry of staged) {
+    if (entry.file !== undefined && entry.row.blob !== null) {
+      files[entry.row.blob] = entry.file;
+    }
+  }
+  return {
+    ...state,
+    editor: {
+      ...state.editor,
+      attachments: [...state.editor.attachments, ...staged.map((entry) => entry.row)],
+    },
+    files,
+  };
+}
 
 /** Records the editor the composer pane just mounted or unmounted. */
 export function registerComposerEditor(editor: CoreEditor | null): void {
@@ -313,6 +383,52 @@ export const useComposerStore = create<ComposerStoreState>((set, get) => ({
   setEditorContent: (content) =>
     set((state) => ({ editor: { ...state.editor, content } })),
 
+  attachFiles: (files) =>
+    set((state) => stage(state, files.map((file) => attachFile(file, false)))),
+
+  dropFiles: (files) => {
+    const pictures = files.filter((file) => file.type.startsWith('image/'));
+    const documents = files.filter((file) => !file.type.startsWith('image/'));
+    set((state) => ({
+      ...stage(state, documents.map((file) => attachFile(file, false))),
+      // One ask covers the whole drop: every picture in it takes the same
+      // answer, so a mixed batch is one decision, not one per file.
+      pendingImages: pictures,
+    }));
+  },
+
+  answerPendingImages: (inline) =>
+    set((state) => {
+      let next = stage(
+        state,
+        state.pendingImages.map((file) => attachFile(file, inline)),
+      );
+      const added = next.editor.attachments.slice(state.editor.attachments.length);
+      for (const row of added) {
+        if (inline && typeof row.disposition !== 'string') {
+          next = { ...next, editor: inlineRef(next.editor, row.id, row.file_name) };
+        }
+      }
+      return { ...next, pendingImages: [] };
+    }),
+
+  removeAttachment: (id) =>
+    set((state) => {
+      const row = state.editor.attachments.find((attachment) => attachment.id === id);
+      if (row === undefined) {
+        return state;
+      }
+      const files = { ...state.files };
+      if (row.blob !== null) {
+        delete files[row.blob];
+      }
+      const editor = stripInlineRefs(
+        { ...state.editor, attachments: state.editor.attachments.filter((attachment) => attachment.id !== id) },
+        id,
+      );
+      return { ...state, files, editor };
+    }),
+
   submit: () => {
     // The submit reads the store at click time, so the document is the one
     // on screen. A blank To would be refused before the queue with nothing
@@ -337,25 +453,28 @@ export const useComposerStore = create<ComposerStoreState>((set, get) => ({
       return;
     }
     set({ sendError: null, sending: true });
-    void dispatch(submitIntent(state)).then(
-      () => {
-        // A settlement lands only against its own composition: one left in
-        // flight when the pane moved on can neither close the next
-        // composition nor stick its error under it.
-        if (get().composition !== composition) {
-          return;
-        }
-        // The submit carries no composition id, so the stored draft the
-        // autosave left behind goes with an explicit discard.
-        void dispatch(intents.discardDraft(composition));
-        get().closePane();
-      },
-      (err: unknown) => {
-        if (get().composition !== composition) {
-          return;
-        }
-        set({ sending: false, sendError: sendErrorMessage(err) });
-      },
+    void submitIntent(state).then(
+      (intent) =>
+        void dispatch(intent).then(
+          () => {
+            // A settlement lands only against its own composition: one left in
+            // flight when the pane moved on can neither close the next
+            // composition nor stick its error under it.
+            if (get().composition !== composition) {
+              return;
+            }
+            // The submit carries no composition id, so the stored draft the
+            // autosave left behind goes with an explicit discard.
+            void dispatch(intents.discardDraft(composition));
+            get().closePane();
+          },
+          (err: unknown) => {
+            if (get().composition !== composition) {
+              return;
+            }
+            set({ sending: false, sendError: sendErrorMessage(err) });
+          },
+        ),
     );
   },
 

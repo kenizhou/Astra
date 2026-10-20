@@ -13,7 +13,7 @@ vi.mock('@/services/ipc', async (importOriginal) => ({
 }));
 
 import { buildDraftMenu, buildRowMenu } from './rowMenu';
-import type { MessageRowView, RowKey } from '@/services/surfaces';
+import type { FolderRow, MessageRowView, RowKey } from '@/services/surfaces';
 
 function row(key: RowKey, over: Partial<MessageRowView> = {}): MessageRowView {
   return {
@@ -75,6 +75,63 @@ describe('buildRowMenu', () => {
     expect(move.disabled).toBe(true);
     const junk = items.find((item) => item.label === 'Junk')!;
     expect(junk.disabled).toBe(true);
+  });
+
+  it('offers the account folders as the move-to submenu, the sitting folder out', () => {
+    const folders: FolderRow[] = [
+      { key: 'INBOX', name: 'Inbox', role: 'inbox', unread: 0, depth: 0, has_children: false, expanded: false },
+      { key: 'Archive', name: 'Archive', unread: 0, depth: 0, has_children: false, expanded: false },
+      { key: 'Clients', name: 'Clients', unread: 0, depth: 0, has_children: false, expanded: false },
+    ];
+    const items = buildRowMenu([m1], 'flat', { account: 'work', currentKey: 'INBOX', folders });
+
+    const move = items.find((item) => item.label === 'Move to folder')!;
+    expect(move.disabled).toBeUndefined();
+    expect(move.children?.map((child) => child.label)).toEqual(['Archive', 'Clients']);
+
+    move.children![1]!.onSelect!();
+    expect(ipc.dispatch).toHaveBeenCalledTimes(1);
+    expect(ipc.dispatch).toHaveBeenCalledWith({
+      move_messages: {
+        rows: [{ account: 'work', key: 'k1' }],
+        folder: { account: 'work', key: 'Clients' },
+      },
+    });
+  });
+
+  it('moves the whole selection from the submenu', () => {
+    const folders: FolderRow[] = [
+      { key: 'Archive', name: 'Archive', unread: 0, depth: 0, has_children: false, expanded: false },
+    ];
+    const items = buildRowMenu([m1, m2], 'flat', { account: 'work', currentKey: 'INBOX', folders });
+
+    items.find((item) => item.label === 'Move to folder')!.children![0]!.onSelect!();
+    expect(ipc.dispatch).toHaveBeenCalledWith({
+      move_messages: {
+        rows: [
+          { account: 'work', key: 'k1' },
+          { account: 'work', key: 'k2' },
+        ],
+        folder: { account: 'work', key: 'Archive' },
+      },
+    });
+  });
+
+  it('hides the move-to verb while no other folder stands in the account', () => {
+    const folders: FolderRow[] = [
+      { key: 'INBOX', name: 'Inbox', role: 'inbox', unread: 0, depth: 0, has_children: false, expanded: false },
+    ];
+    const items = buildRowMenu([m1], 'flat', { account: 'work', currentKey: 'INBOX', folders });
+    expect(items.find((item) => item.label === 'Move to folder')).toBeUndefined();
+  });
+
+  it('hides the move-to verb for a selection that spans accounts', () => {
+    const other = row({ message: { account: 'home', key: 'k9' } }, { account_id: 'home' });
+    const folders: FolderRow[] = [
+      { key: 'Archive', name: 'Archive', unread: 0, depth: 0, has_children: false, expanded: false },
+    ];
+    const items = buildRowMenu([m1, other], 'flat', { account: 'work', currentKey: 'INBOX', folders });
+    expect(items.find((item) => item.label === 'Move to folder')).toBeUndefined();
   });
 
   it('flips Mark as Read on an unread target', () => {

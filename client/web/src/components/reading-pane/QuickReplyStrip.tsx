@@ -10,7 +10,7 @@
 import { useComposerStore } from '@/features/composer/composerStore';
 import { ForwardIcon, ReplyAllIcon, ReplyIcon } from '@/components/icons';
 import { dispatch, intents, type Intent } from '@/services/ipc';
-import { useReadingStore } from '@/stores/readingStore';
+import { carriedAttachmentIds, useReadingStore } from '@/stores/readingStore';
 
 /** One affordance's click: the next landed request opens inline, on this
  *  message, with the verb it names. */
@@ -26,7 +26,11 @@ function startQuickCompose(verb: () => Intent): void {
 const VERBS = [
   { label: 'Reply', icon: ReplyIcon, intent: () => intents.replyTo(messageOf()) },
   { label: 'Reply all', icon: ReplyAllIcon, intent: () => intents.replyAllTo(messageOf()) },
-  { label: 'Forward', icon: ForwardIcon, intent: () => intents.forward(messageOf()) },
+  {
+    label: 'Forward',
+    icon: ForwardIcon,
+    intent: () => intents.forward(messageOf(), carriedAttachmentIds()),
+  },
 ] as const;
 
 /** The open message's ref; the verbs are only rendered while one stands. */

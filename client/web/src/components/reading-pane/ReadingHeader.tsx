@@ -23,6 +23,7 @@ import { useAppearanceStore, type ReadingPosition } from '@/services/appearance'
 import { dispatch, intents, type MessageRef } from '@/services/ipc';
 import { Avatar } from '@/features/people/Avatar';
 import { useSettingsStore } from '@/features/settings/settingsStore';
+import { carriedAttachmentIds } from '@/stores/readingStore';
 
 /** The month abbreviations the stamp uses, in UTC order. */
 const MONTHS = [
@@ -141,7 +142,11 @@ function VerbRow({ message }: { message: MessageRef }) {
   const verbs = [
     { label: 'Reply', icon: ReplyIcon, intent: () => intents.replyTo(message) },
     { label: 'Reply all', icon: ReplyAllIcon, intent: () => intents.replyAllTo(message) },
-    { label: 'Forward', icon: ForwardIcon, intent: () => intents.forward(message) },
+    {
+      label: 'Forward',
+      icon: ForwardIcon,
+      intent: () => intents.forward(message, carriedAttachmentIds()),
+    },
   ] as const;
   return (
     <div className="mt-3 flex items-center gap-1">

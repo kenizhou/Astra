@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The shared context menu: a floating panel of actions rendered in a portal
 // at the cursor, with keyboard navigation (roving tabindex, arrows, Home and
-// End, typeahead), the three dismissals (Escape, pointer down outside,
-// window blur), and the honest-disable channel: a disabled item names its
-// reason in a tooltip and a screen-reader description, and stays in the
-// keyboard order so the reason is discoverable. Flyout submenus and
-// checkbox items arrive with the first consumer that needs them.
+// End, typeahead, ArrowRight into a flyout submenu), the three dismissals
+// (Escape, pointer down outside, window blur), and the honest-disable
+// channel: a disabled item names its reason in a tooltip and a screen-reader
+// description, and stays in the keyboard order so the reason is discoverable.
 
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -26,6 +25,10 @@ export interface ContextMenuItem {
   title?: string;
   /** The screen-reader leg of that channel, wired via aria-describedby. */
   description?: string;
+  /** A flyout the item opens instead of acting: its children render in a
+   *  nested panel on hover or ArrowRight, and choosing a child closes the
+   *  whole menu. */
+  children?: ContextMenuItem[];
 }
 
 interface ContextMenuProps {
@@ -61,6 +64,7 @@ const PANEL_W = 200;
 export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [activeIndex, setActiveIndex] = useState(-1);
+  const [openSubmenu, setOpenSubmenu] = useState<ContextMenuItem | null>(null);
   const typeahead = useRef({ text: '', at: 0 });
 
   const actionable = items
@@ -117,6 +121,16 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
       move(activeIndex, -1);
       return;
     }
+    if (event.key === 'ArrowRight') {
+      // ArrowRight opens the active item's flyout, the submenu's own keyboard
+      // entry; the panel itself follows the pointer's hover discipline.
+      const active = activeIndex >= 0 ? items[activeIndex] : undefined;
+      if (active !== undefined && active.children !== undefined) {
+        event.preventDefault();
+        setOpenSubmenu(active);
+      }
+      return;
+    }
     if (event.key === 'Home') {
       event.preventDefault();
       if (actionable.length > 0) {
@@ -159,6 +173,11 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
     if (item.disabled === true || item.separator === true) {
       return;
     }
+    if (item.children !== undefined) {
+      // A submenu parent opens its flyout rather than acting.
+      setOpenSubmenu((current) => (current === item ? current : item));
+      return;
+    }
     item.onSelect?.();
     onClose();
   };
@@ -199,11 +218,14 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
             }
             const Icon = item.icon;
             const active = index === activeIndex;
+            const submenu = openSubmenu === item ? item.children : undefined;
             return (
               <div
                 role="menuitem"
                 key={item.label ?? `item-${index}`}
                 data-menu-index={index}
+                aria-haspopup={item.children !== undefined || undefined}
+                aria-expanded={submenu !== undefined || undefined}
                 aria-disabled={item.disabled === true || undefined}
                 aria-describedby={item.description !== undefined ? descriptionId(item) : undefined}
                 tabIndex={active ? 0 : -1}
@@ -211,9 +233,14 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
                 onMouseEnter={() => {
                   if (item.disabled !== true) {
                     setActiveIndex(index);
+                    if (item.children !== undefined) {
+                      setOpenSubmenu(item);
+                    } else {
+                      setOpenSubmenu(null);
+                    }
                   }
                 }}
-                className={`flex min-h-8 w-full cursor-pointer items-center gap-2 px-3 text-left text-[13px] focus-visible:outline-none ${
+                className={`relative flex min-h-8 w-full cursor-pointer items-center gap-2 px-3 text-left text-[13px] focus-visible:outline-none ${
                   item.disabled === true
                     ? 'cursor-default text-muted-text opacity-50'
                     : item.danger === true
@@ -233,6 +260,45 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
                 <span className="flex-1 truncate" title={item.title}>
                   {item.label}
                 </span>
+                {item.children !== undefined && (
+                  <span aria-hidden="true" className="shrink-0 text-muted-text">
+                    ›
+                  </span>
+                )}
+                {/* The flyout: absolute against the parent item, opening below
+                    it and left-aligned, so hover and keyboard share one panel. */}
+                {submenu !== undefined && (
+                  <div
+                    role="menu"
+                    aria-label={item.label}
+                    className="absolute left-2 top-full z-[calc(var(--z-popover)+1)] mt-0.5 min-w-[160px] rounded-[var(--radius-sm)] border border-border-subtle bg-surface-floating py-1 shadow-[var(--shadow-lg)]"
+                  >
+                    {submenu.map((child, childIndex) => (
+                      <div
+                        role="menuitem"
+                        key={child.label ?? `child-${childIndex}`}
+                        aria-disabled={child.disabled === true || undefined}
+                        tabIndex={-1}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          if (child.disabled !== true) {
+                            child.onSelect?.();
+                            onClose();
+                          }
+                        }}
+                        className={`flex min-h-8 w-full cursor-pointer items-center gap-2 px-3 text-left text-[13px] ${
+                          child.disabled === true
+                            ? 'cursor-default text-muted-text opacity-50'
+                            : 'text-foreground hover:bg-hover'
+                        }`}
+                      >
+                        <span className="flex-1 truncate" title={child.title}>
+                          {child.label}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             );
           })}

@@ -38,9 +38,17 @@ pub enum ComposeIntent {
     },
     /// Compose a forward of the original: the prefill names no recipient (they
     /// are the user's to choose) and quotes the original under a forwarded
-    /// marker rather than a reply's attribution.
+    /// marker rather than a reply's attribution. `carry` names the original's
+    /// downloadable parts (the ids the reading snapshot's attachment rows
+    /// carry) the forward opens holding as removable attachments; the parts
+    /// ride the send as regular files, and a row the composer removed simply
+    /// does not ride.
     Forward {
         /// The message to forward, bound to its owning account.
         message: MessageRef,
+        /// The original's part ids to pre-attach; empty crosses as the bare
+        /// forward the wire has always carried.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        carry: Vec<u32>,
     },
 }

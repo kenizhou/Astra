@@ -317,7 +317,7 @@ impl<P: Provider> App<P> {
 /// later ones wait for a ShowMore, the same contract the merged message list
 /// follows. The folder view and the search view draw the same pane, so both
 /// project through here.
-pub(crate) fn account_folder_rows<P>(
+pub(crate) fn account_folder_rows<P: Provider>(
     handles: &[Arc<Account<P>>],
     trees: &[Arc<Vec<Mailbox>>],
     limit: usize,
@@ -336,6 +336,12 @@ pub(crate) fn account_folder_rows<P>(
             // Open until the publisher stamps the persisted state over it; see
             // `AccountFolderRow::expanded`.
             expanded: true,
+            // The pane's edit verbs ride the provider's own capability, so a
+            // surface never offers a tree change the account cannot apply.
+            can_edit_folders: account
+                .providers
+                .first()
+                .is_some_and(|provider| provider.connection_info().capabilities.mailbox_writes()),
             folders,
         });
     }

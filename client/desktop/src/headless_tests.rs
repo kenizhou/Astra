@@ -43,6 +43,7 @@ fn snapshot(folders: &[&str]) -> MailboxListSnapshot {
             account_id: account("slice@example.test"),
             display_name: "slice@example.test".to_owned(),
             expanded: true,
+            can_edit_folders: false,
             folders: folders.iter().map(|name| row(name)).collect(),
         }],
         ..Default::default()
@@ -80,12 +81,14 @@ fn the_tree_diff_counts_a_folder_held_by_any_account() {
                 account_id: account("one@example.test"),
                 display_name: "one@example.test".to_owned(),
                 expanded: true,
+                can_edit_folders: false,
                 folders: vec![row("INBOX")],
             },
             AccountFolderRow {
                 account_id: account("two@example.test"),
                 display_name: "two@example.test".to_owned(),
                 expanded: true,
+                can_edit_folders: false,
                 folders: vec![row("Projects")],
             },
         ],

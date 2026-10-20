@@ -13,6 +13,13 @@ vi.mock('@/features/settings/settingsStore', () => ({
   useSettingsStore: { getState: () => settingsState },
 }));
 
+const ipc = vi.hoisted(() => ({ dispatch: vi.fn() }));
+
+vi.mock('@/services/ipc', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  ...ipc,
+}));
+
 import { useComposerStore } from './composerStore';
 import type { Block, ComposeRequestSnapshot } from '@/services/ipc';
 
@@ -122,5 +129,102 @@ describe('the inline expectation', () => {
     useComposerStore.getState().expectInlineReply();
     useComposerStore.getState().closePane();
     expect(useComposerStore.getState().inlineExpected).toBe(false);
+  });
+});
+
+// The composer's attachments: picked files stand as document rows with their
+// bytes staged client-side, a removed row drops both, and the send reads the
+// standing rows' bytes into blobs. A forward's pre-attached originals ride
+// the document the request carried, removable one by one.
+describe('the composer attachments', () => {
+  /** One picked file with real bytes the send can read. */
+  function file(name: string, bytes: Uint8Array<ArrayBuffer>, type = 'application/pdf'): File {
+    return new File([bytes], name, { type });
+  }
+
+  beforeEach(() => {
+    ipc.dispatch.mockReset();
+    // The send settles its dispatch, so the seam always answers.
+    ipc.dispatch.mockResolvedValue(undefined);
+  });
+
+  it('stands each picked file as a removable document row', () => {
+    useComposerStore.getState().newMessage({ id: 'work', label: 'Work' });
+    useComposerStore.getState().attachFiles([file('report.pdf', new Uint8Array([80, 68, 70]))]);
+
+    const state = useComposerStore.getState();
+    expect(state.editor.attachments).toHaveLength(1);
+    const row = state.editor.attachments[0]!;
+    expect(row.file_name).toBe('report.pdf');
+    expect(row.media_type).toBe('application/pdf');
+    expect(row.size).toBe(3);
+    expect(row.blob).not.toBeNull();
+    expect(row.disposition).toBe('Attachment');
+  });
+
+  it('drops a removed row and its staged bytes', () => {
+    useComposerStore.getState().newMessage({ id: 'work', label: 'Work' });
+    useComposerStore.getState().attachFiles([file('report.pdf', new Uint8Array([1]))]);
+    const id = useComposerStore.getState().editor.attachments[0]!.id;
+
+    useComposerStore.getState().removeAttachment(id);
+
+    const state = useComposerStore.getState();
+    expect(state.editor.attachments).toHaveLength(0);
+    expect(Object.keys(state.files)).toHaveLength(0);
+  });
+
+  it('carries the standing rows bytes as blobs at send', async () => {
+    useComposerStore.getState().newMessage({ id: 'work', label: 'Work' });
+    useComposerStore.getState().attachFiles([
+      file('report.pdf', new Uint8Array([80, 68, 70])),
+      file('notes.txt', new Uint8Array([97])),
+    ]);
+    const state = useComposerStore.getState();
+    useComposerStore.getState().setField('to', 'ada@example.test');
+    const handleToKeep = state.editor.attachments[0]!.blob!;
+    useComposerStore.getState().removeAttachment(state.editor.attachments[1]!.id);
+
+    useComposerStore.getState().submit();
+    await vi.waitFor(() => expect(ipc.dispatch).toHaveBeenCalled());
+    const sent = ipc.dispatch.mock.calls.find(
+      ([intent]) => JSON.stringify(intent).includes('submit_rich_mail'),
+    )?.[0] as { submit_rich_mail: { blobs: { handle: string; bytes: number[] }[] } };
+
+    expect(sent.submit_rich_mail.blobs).toEqual([
+      { handle: handleToKeep, bytes: [80, 68, 70] },
+    ]);
+  });
+
+  it('opens a forward holding the original attachments, removable one by one', () => {
+    const request: ComposeRequestSnapshot = {
+      kind: 'forward',
+      from: 'work',
+      to: '',
+      cc: '',
+      subject: 'Fwd: Launch',
+      document: {
+        blocks: [paragraph('Look at this')],
+        attachments: [
+          {
+            id: 'carry-0',
+            blob: 'carry:0',
+            file_name: 'report.pdf',
+            media_type: 'application/pdf',
+            size: 3,
+            disposition: 'Attachment',
+            data_url: null,
+          },
+        ],
+      },
+    };
+    useComposerStore.getState().openRequest(request, 'Work');
+
+    const state = useComposerStore.getState();
+    expect(state.editor.attachments).toHaveLength(1);
+    expect(state.files).toEqual({});
+
+    useComposerStore.getState().removeAttachment('carry-0');
+    expect(useComposerStore.getState().editor.attachments).toHaveLength(0);
   });
 });

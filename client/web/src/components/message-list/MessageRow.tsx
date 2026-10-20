@@ -5,7 +5,9 @@
 // unread, 450 read; the A3 type voice), so the column needs no ribbons and
 // no monograms. The row's own actions (mark read, flag) ride the trailing
 // edge and show while the row is hovered or selected, with a flagged row
-// keeping its flag visible so the state never hides.
+// keeping its flag visible so the state never hides. The whole row drags:
+// the drag carries the selection it rides in (itself alone otherwise), keys
+// only, never content.
 
 import { useState } from 'react';
 
@@ -13,9 +15,13 @@ import { FlagIcon, PaperclipIcon } from '@/components/icons';
 import { dispatch, intents } from '@/services/ipc';
 import { useListStore } from '@/stores/listStore';
 import type { RowKey, MessageRowView } from '@/services/surfaces';
+import { resolveTargets } from './listSelection';
 import { DENSITY_ROW_CLASS } from './density';
 import { formatSentAt } from './sentAt';
 import { useSettingsStore } from '@/features/settings/settingsStore';
+
+/** The dataTransfer type a message drag carries: the selection's row keys. */
+export const ROWS_DRAG_TYPE = 'application/x-astra-rows';
 
 interface MessageRowProps {
   /** The row's snapshot data; the single source of everything drawn. */
@@ -55,10 +61,21 @@ export function MessageRow({ row, selected, multiSelected = false, draft = false
     void dispatch(intents.setFlagged(row.key, !row.flagged));
   };
 
+  // The drag carries the selection when the row rides it, itself otherwise:
+  // the Outlook semantics the selection model owns, keys only.
+  const onDragStart = (event: React.DragEvent): void => {
+    const store = useListStore.getState();
+    const keys = resolveTargets(store.selectedKeys, row.key);
+    event.dataTransfer.setData(ROWS_DRAG_TYPE, JSON.stringify(keys));
+    event.dataTransfer.effectAllowed = 'move';
+  };
+
   return (
     <div
       role="option"
       aria-selected={selected}
+      draggable
+      onDragStart={onDragStart}
       onClick={(event) => onSelect(row.key, event)}
       onContextMenu={(event) => {
         if (onContextMenu !== undefined) {

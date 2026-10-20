@@ -8,10 +8,20 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { SearchState } from '@/services/surfaces';
+const ipc = vi.hoisted(() => ({ dispatch: vi.fn() }));
+
+vi.mock('@/services/ipc', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  ...ipc,
+}));
+
+import type { MessageRowView, SearchState } from '@/services/surfaces';
 import { ListToolbar } from './ListToolbar';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  ipc.dispatch.mockReset();
+});
 
 const COUNTS = { all: 12, unread: 5, flagged: 3, attachments: 2 };
 
@@ -27,6 +37,21 @@ function renderToolbar(overrides: Partial<Parameters<typeof ListToolbar>[0]> = {
       {...overrides}
     />,
   );
+}
+
+/** One selected message row for the bulk bar's actions. */
+function row(key: string, unread = false, flagged = false): MessageRowView {
+  return {
+    key: { message: { account: 'work', key } },
+    account_id: 'work',
+    sender_name: 'Ada',
+    sender_address: 'ada@example.test',
+    subject: 'Report',
+    sent_at: '2026-10-08T16:05:00Z',
+    unread,
+    flagged,
+    has_attachments: false,
+  };
 }
 
 describe('the filter control', () => {
@@ -101,5 +126,58 @@ describe('the search header', () => {
 
     expect(screen.getByText('0 results')).toBeTruthy();
     expect(screen.queryByText(/^Searched the last/)).toBeNull();
+  });
+});
+
+describe('the bulk bar', () => {
+  const bulk = {
+    rows: [row('m1', true), row('m2'), row('m3')],
+    onSelectAll: vi.fn(),
+    onClear: vi.fn(),
+  };
+
+  it('draws nothing while no selection stands', () => {
+    renderToolbar();
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Clear' })).toBeNull();
+  });
+
+  it('states the count with Select All and Clear while a selection stands', () => {
+    renderToolbar({ bulk });
+
+    expect(screen.getByText('3 selected')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Select All' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Clear' })).toBeTruthy();
+  });
+
+  it('hands Select All and Clear to the list', () => {
+    renderToolbar({ bulk });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Select All' }));
+    expect(bulk.onSelectAll).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+    expect(bulk.onClear).toHaveBeenCalledTimes(1);
+  });
+
+  it('loops the batch actions per row exactly as the row menu does', () => {
+    renderToolbar({ bulk });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mark as Read' }));
+    expect(ipc.dispatch).toHaveBeenCalledTimes(3);
+    expect(ipc.dispatch).toHaveBeenCalledWith({
+      mark_read: { row: { message: { account: 'work', key: 'm1' } }, read: true },
+    });
+
+    ipc.dispatch.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    expect(ipc.dispatch).toHaveBeenCalledWith({
+      move_to_trash: { row: { message: { account: 'work', key: 'm3' } } },
+    });
+
+    ipc.dispatch.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Flag' }));
+    expect(ipc.dispatch).toHaveBeenCalledWith({
+      set_flagged: { row: { message: { account: 'work', key: 'm2' } }, flagged: true },
+    });
   });
 });

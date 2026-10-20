@@ -442,6 +442,7 @@ fn the_compose_family_names_the_message_each_variant_answers() {
     round_trips(
         &Intent::Compose(ComposeIntent::Forward {
             message: MessageRef::from_parts("home", "jmap:e2".to_owned()).unwrap(),
+            carry: Vec::new(),
         }),
         r#"{"compose":{"forward":{"message":{"account":"home","key":"jmap:e2"}}}}"#,
     );

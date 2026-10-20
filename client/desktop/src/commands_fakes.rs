@@ -269,7 +269,7 @@ impl FakeApp {
         let (kind, message) = match compose {
             ComposeIntent::Reply { message } => (ComposeKind::Reply, message),
             ComposeIntent::ReplyAll { message } => (ComposeKind::ReplyAll, message),
-            ComposeIntent::Forward { message } => (ComposeKind::Forward, message),
+            ComposeIntent::Forward { message, .. } => (ComposeKind::Forward, message),
             // The family is non-exhaustive; a verb the fake knows no prefill
             // for publishes nothing.
             _ => return,

@@ -132,7 +132,7 @@ export function ReadingPane() {
           This message has no readable body.
         </p>
       )}
-      <AttachmentList attachments={snapshot.attachments ?? []} />
+      <AttachmentList attachments={snapshot.attachments ?? []} message={snapshot.message} />
       <QuickReplyStrip />
       {plainMenu.state !== null && (
         <ContextMenu

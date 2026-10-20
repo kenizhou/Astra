@@ -278,3 +278,27 @@ async fn a_delete_of_a_key_the_tree_does_not_hold_is_refused_typed() {
 
     assert_eq!(outcome, Err(FolderWriteError::UnknownFolder));
 }
+
+#[tokio::test]
+async fn the_pane_row_answers_whether_the_account_can_edit_its_tree() {
+    let surfaces = Arc::new(Mutex::new(Vec::new()));
+    let (app, _edits) = writable_tree(&surfaces, vec![inbox()]).await;
+    let read_only = {
+        let surfaces = Arc::new(Mutex::new(Vec::new()));
+        let provider = fakes::FakeProvider::with(vec![inbox()]);
+        let read_only = fakes::app(vec![account("work", provider)], &surfaces);
+        read_only.dispatch(Intent::RefreshMail).await.unwrap();
+        read_only
+    };
+
+    let capable = &app.mailbox_list().account_folders[0];
+    assert!(
+        capable.can_edit_folders,
+        "a tree-writing provider answers true, so the pane offers the verbs"
+    );
+    let incapable = &read_only.mailbox_list().account_folders[0];
+    assert!(
+        !incapable.can_edit_folders,
+        "a read-only provider answers false, so the pane hides them"
+    );
+}

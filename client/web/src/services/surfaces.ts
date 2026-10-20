@@ -42,6 +42,12 @@ export interface AccountFolderRow {
   display_name: string;
   /** Whether this account's folder tree is open in the sidebar. */
   expanded: boolean;
+  /**
+   * Whether the account's provider can change its folder tree: what decides
+   * whether the pane offers the folder edit verbs. Absent reads as false, so
+   * an incapable account never shows the verbs.
+   */
+  can_edit_folders?: boolean;
   /** The account's sorted folder rows, ready for the sidebar. */
   folders: FolderRow[];
 }

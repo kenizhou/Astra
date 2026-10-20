@@ -33,7 +33,7 @@ import {
 import { DENSITY_ROW_PX } from '@/components/message-list/density';
 import { filteredRows, filterCounts } from '@/components/message-list/listFilter';
 import { allKeys, rangeKeys, resolveTargets, toggleKey } from '@/components/message-list/listSelection';
-import { buildDraftMenu, buildRowMenu } from '@/components/message-list/rowMenu';
+import { buildDraftMenu, buildRowMenu, type MoveToContext } from '@/components/message-list/rowMenu';
 import { sameRowKey } from '@/components/message-list/rowIdentity';
 import { OutboxQueue } from '@/features/outbox/OutboxQueue';
 import { dispatch, intents } from '@/services/ipc';
@@ -258,6 +258,35 @@ export function MessageList() {
     }
   };
 
+  // The bulk bar's rows: the selection resolved against the rows the pane is
+  // showing, whichever set that is.
+  const bulkRows =
+    selectedKeys.length > 0
+      ? viewRows.filter((row) => selectedKeys.some((key) => sameRowKey(key, row.key)))
+      : null;
+
+  // The move-to picker's context: the selection's own account and its
+  // folders, the sitting folder out; undefined when the menu has no context
+  // to offer (a cross-account selection, an account the pane does not hold).
+  const moveToOf = (targets: MessageRowView[]): MoveToContext | undefined => {
+    if (targets.length === 0) {
+      return undefined;
+    }
+    const account = targets[0]!.account_id;
+    if (!targets.every((row) => row.account_id === account)) {
+      return undefined;
+    }
+    const group = accounts.find((row) => row.account_id === account);
+    if (group === undefined) {
+      return undefined;
+    }
+    return {
+      account,
+      currentKey: folder !== null && folder.account === account ? folder.key : null,
+      folders: group.folders,
+    };
+  };
+
   const now = new Date();
 
   // The window compares against every row the snapshot sent, not the
@@ -280,6 +309,18 @@ export function MessageList() {
         onFilter={(tab) => useListFilterStore.getState().setFilter(tab)}
         search={search}
         outbox={outboxMode}
+        bulk={
+          bulkRows !== null
+            ? {
+                rows: bulkRows,
+                onSelectAll: () =>
+                  useListStore
+                    .getState()
+                    .setSelection(allKeys(withDateHeaders(shownRows, now)), null),
+                onClear: () => useListStore.getState().setSelection([], null),
+              }
+            : null
+        }
       />
       {outboxMode ? (
         <OutboxQueue account={outboxAccount} />
@@ -303,7 +344,9 @@ export function MessageList() {
           x={menu.state.x}
           y={menu.state.y}
           items={
-            draftFolder ? buildDraftMenu() : buildRowMenu(menuTargets.current, viewMode)
+            draftFolder
+              ? buildDraftMenu()
+              : buildRowMenu(menuTargets.current, viewMode, moveToOf(menuTargets.current))
           }
           onClose={menu.close}
         />

@@ -17,6 +17,8 @@ import type {
 } from './composeRequest';
 import { sendingIntents } from './sending';
 import type { MailSubmission, OutboxIntent, SendingSnapshot } from './sending';
+import { foldersIntents } from './folders';
+import type { FolderIntentBody } from './folders';
 import type { CalendarIntentBody, InvitationBlock } from './calendar';
 import { calendarIntents } from './calendar';
 import type { PeopleIntentBody } from './people';
@@ -37,6 +39,10 @@ export * from './composeRequest';
 // The sending half (the submit payload, the outbox family, and the queue's
 // snapshot types), under the same re-export and split out for the line cap.
 export * from './sending';
+
+// The folder half (the folder intent family's carrying verbs and the
+// move-to-folder batch), under the same re-export and split for the cap.
+export * from './folders';
 
 // The account-setup half (the connection and credential vocabulary, the
 // setup form's fields, the detection recommendation views, and the three
@@ -142,9 +148,10 @@ export type Intent =
   | { set_flagged: { row: RowRef; flagged: boolean } }
   | { archive_message: { row: RowRef } }
   | { move_to_trash: { row: RowRef } }
+  | { move_messages: { rows: MessageRef[]; folder: FolderRef } }
   | { open_message: { message: MessageRef } }
   | 'close_reading'
-  | { folders: { create: { account: string; name: string; parent?: string } } }
+  | { folders: FolderIntentBody }
   | { compose: ComposeIntent }
   | { submit_rich_mail: MailSubmission }
   | { submit_rich_reply: ReplySubmission }
@@ -203,6 +210,9 @@ export const intents = {
   // The submit and the outbox family, in the enum's own order between the
   // compose family and the drafts.
   ...sendingIntents,
+  // The folder family's carrying verbs and the move-to-folder batch, in the
+  // enum's own order beside the create.
+  ...foldersIntents,
   // The calendar family, appended after the search verbs in the enum's own
   // order.
   ...calendarIntents,

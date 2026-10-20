@@ -76,7 +76,10 @@ fn compose(kind: ComposeKind) -> Intent {
     Intent::Compose(match kind {
         ComposeKind::Reply => ComposeIntent::Reply { message },
         ComposeKind::ReplyAll => ComposeIntent::ReplyAll { message },
-        ComposeKind::Forward => ComposeIntent::Forward { message },
+        ComposeKind::Forward => ComposeIntent::Forward {
+            message,
+            carry: Vec::new(),
+        },
     })
 }
 

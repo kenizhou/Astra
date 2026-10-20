@@ -20,12 +20,15 @@ export type ComposeKind = 'reply' | 'reply_all' | 'forward';
 /**
  * What the reading pane asks the runtime to compose from one message, nested
  * under the `compose` tag of the intent that carries it. Every verb names the
- * original by reference, the account and provider key bound together.
+ * original by reference, the account and provider key bound together. A
+ * forward's `carry` names the original's attachment part ids (the reading
+ * snapshot's row ids) the composition opens holding as removable rows; it
+ * crosses only when non-empty, so the bare forward stays the old wire shape.
  */
 export type ComposeIntent =
   | { reply: { message: MessageRef } }
   | { reply_all: { message: MessageRef } }
-  | { forward: { message: MessageRef } };
+  | { forward: { message: MessageRef; carry?: number[] } };
 
 /** The fields a reply submit carries, beside the composer document itself. */
 export interface ReplySubmission {
@@ -94,8 +97,17 @@ export const composeIntents = {
   replyTo: (message: MessageRef) => ({ compose: { reply: { message } } }),
   /** Compose a reply to the sender and every other recipient of the original. */
   replyAllTo: (message: MessageRef) => ({ compose: { reply_all: { message } } }),
-  /** Compose a forward of the original, its recipients the user's to name. */
-  forward: (message: MessageRef) => ({ compose: { forward: { message } } }),
+  /**
+   * Compose a forward of the original, its recipients the user's to name. The
+   * carried part ids are the reading snapshot's attachment rows: exactly what
+   * the reader listed, pre-attached and removable one by one.
+   */
+  forward: (message: MessageRef, carry: number[] = []) => ({
+    compose:
+      carry.length === 0
+        ? { forward: { message } }
+        : { forward: { message, carry } },
+  }),
   /** Queue the reply for sending through the durable outbox, under the original. */
   submitRichReply: (reply: ReplySubmission) => ({
     submit_rich_reply: {

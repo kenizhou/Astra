@@ -210,6 +210,11 @@ pub struct App<P> {
     /// outgoing reply or forward under the original's `References` chain.
     /// Replaced by each request that publishes, like the snapshot beside it.
     compose_source: Mutex<Option<crate::reference::MessageRef>>,
+    /// The original's part ids the pending compose request's forward is
+    /// holding onto, set beside `compose_source` by the request that
+    /// published and read by the forward's submit to resolve the carried
+    /// rows' bytes off the original. Empty for every other kind.
+    compose_carry: Mutex<Vec<u32>>,
     /// The sending snapshot and its signal: every account's queued sends, one
     /// list, published on each transition of the queue. See `outbox`.
     sending: Surfaced<astra_viewmodel::SendingSnapshot>,
@@ -348,6 +353,7 @@ impl<P: Provider> App<P> {
             draft_status: Surfaced::new(Surface::DraftStatus, Arc::clone(&observer)),
             compose_request: Surfaced::new(Surface::ComposeRequest, Arc::clone(&observer)),
             compose_source: Mutex::new(None),
+            compose_carry: Mutex::new(Vec::new()),
             calendar: Surfaced::new(Surface::Calendar, Arc::clone(&observer)),
             calendar_state: Mutex::new(calendar::CalendarState::new()),
             people: Surfaced::new(Surface::People, Arc::clone(&observer)),

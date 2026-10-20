@@ -39,3 +39,12 @@ export const useReadingStore = create<ReadingStoreState>((set) => ({
 
   setShowRemoteImages: (show) => set({ showRemoteImages: show }),
 }));
+
+/**
+ * The open message's attachment part ids, the exact set the reading snapshot
+ * lists (the invitation rule already hid the parts it owns): what a forward
+ * carries, pre-attached and removable one by one.
+ */
+export function carriedAttachmentIds(): number[] {
+  return (useReadingStore.getState().snapshot?.attachments ?? []).map((row) => row.id);
+}

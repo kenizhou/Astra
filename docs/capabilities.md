@@ -26,14 +26,14 @@ this row ports.
 | Accounts | IMAP/SMTP sign in with your provider where the server offers it, discovered from the standards | ⬜ | mail-oauth.md |
 | Accounts | JMAP sign-in renewed in place, keeping mail, folders, and settings | ⬜ | jmap.md |
 | Accounts | Multi-account with unified inbox and account switcher | ⬜ | |
-| Mail | Unified mail as an All Accounts group in the folder pane, remembered across launches | 🚧 | the app core merges every account's inbox rows into the unified scope, newest first, and persists the chosen scope across launches; the pane's clickable group and badge are the surface slice's; folder-pane.md |
+| Mail | Unified mail as an All Accounts group in the folder pane, remembered across launches | 🚧 | the app core merges every account's inbox rows into the unified scope, newest first, and persists the chosen scope across launches; the pane's group is live: clicking selects the scope, the badge sums the inboxes, and the row stays hidden under two accounts; folder-pane.md |
 | Accounts | Per-account credential storage with in-app account removal | 🚧 | each account's config document sits in the host's credential store; the accounts page's confirmed removal deletes it; settings.md |
 | Accounts | Account list offered on the next device from a vendor account: address and servers, never a password | ⬜ | onboarding.md |
 | Accounts | Vendor account sign-in, creation, management, and deletion in its own settings category | ⬜ | allodia_license/entitlement.md |
 | Accounts | Subscription view: charges, renewal, retried payment, multiple-biller warning, cancel and restart under direct billing | ⬜ | allodia_license/purchasing.md |
-| Mail | Create, rename, move, and delete folders from the folder pane; queued offline; delete goes to Trash first | 🚧 | the four folder intents are wired through the app core onto the engine's outbox, capability-gated, with the selection following a renamed or moved folder's minted key; the pane's menus are the surface slice's; folder-pane.md |
-| Mail | Drag a folder into another folder or onto its account; drag messages onto a folder | ⬜ | folder-pane.md |
-| Mail | Move to folder action in the message row menu, within one account | 🚧 | the MoveMessages intent loops the engine's move edit per row within one account and answers a move onto the folder a row already sits in without queueing; the row menu's submenu is the surface slice's; folder-pane.md |
+| Mail | Create, rename, move, and delete folders from the folder pane; queued offline; delete goes to Trash first | 🚧 | the four folder intents are wired through the app core onto the engine's outbox, capability-gated, with the selection following a renamed or moved folder's minted key; the pane's menu offers the verbs live: the inline create and rename rows, delete behind its confirm (the permanent delete inside the Trash itself), and mark-all-read looping the folder's listed rows, with every edit verb hidden while the account's provider cannot edit its tree; folder-pane.md |
+| Mail | Drag a folder into another folder or onto its account; drag messages onto a folder | 🚧 | the tree drags with keys only: a folder onto a same-account folder reparents (a drop into its own subtree refused before anything dispatches), onto its account row makes it a root, and a message selection dropped on a folder moves in one batch; cross-account drops and the unified row refuse; folder-pane.md |
+| Mail | Move to folder action in the message row menu, within one account | 🚧 | the MoveMessages intent loops the engine's move edit per row within one account and answers a move onto the folder a row already sits in without queueing; the row menu's submenu offers the account's other folders and moves the standing selection in one batch, hidden for a selection that spans accounts; folder-pane.md |
 | Mail | Threaded conversation view: the whole conversation including your sent replies, across folders | 🚧 | mail-calendar capabilities |
 | Mail | Reading view with sanitised HTML, inline CID images, recipient headers, remote-image gating, and retry | 🚧 | |
 | Mail | Web and mail addresses in message text open in the browser or mail app; http, https, and mailto only | 🚧 | rendering-security.md |
@@ -44,9 +44,9 @@ this row ports.
 | Mail | Reading actions: reply, reply all, forward, archive, delete | 🚧 | sending.md |
 | Mail | Overflow menu with Save as .eml, writing the message exactly as delivered | ⬜ | reading-actions.md |
 | Mail | Print a message with subject and header lines through the platform print dialog | ⬜ | reading-actions.md |
-| Mail | Attachments: list, save, and open received files; attach files in the composer | 🚧 | the byte read through the engine, the desktop Save As command (the save dialog, the write, the saved, cancelled, failed typed outcome) and its web wire are in; the pane's Save As and Download All controls and the composer's webview picker are the surface slice's; reading-actions.md |
+| Mail | Attachments: list, save, and open received files; attach files in the composer | 🚧 | the byte read through the engine, the desktop Save As command (the save dialog, the write, the saved, cancelled, failed typed outcome) and its web wire are in; the reading pane's Save As shows the saved path or the refusal sentence and Download All loops it; the composer's attach button opens the webview's own multi-select picker, each file a removable row whose bytes ride the send as blobs; reading-actions.md |
 | Composer | Rich HTML composer for new mail, reply, reply all, and forward, with editable To, Cc, and Bcc | 🚧 | the composer opens in its own window; a quick reply docks under the reading pane |
-| Composer | A forward opens holding the original's attachments, removable one by one | ⬜ | sending.md |
+| Composer | A forward opens holding the original's attachments, removable one by one | 🚧 | the Forward intent carries the original's part ids and the core resolution reads the parts and appends them as file attachments (inline-image preservation across a forward is a recorded gap); the composer renders them as pre-attached removable rows, and a removed row simply does not ride the send; sending.md |
 | Composer | Drafts stored on the server while you type; one draft across devices; taken away on send | 🚧 | drafts.md |
 | Composer | A Drafts row opens back into the composer and saves over the same copy | ⬜ | |
 | Mail | Open a message in its own window carrying the whole reading view | ⬜ | reading-window.md |
@@ -57,14 +57,14 @@ this row ports.
 | Composer | Subject editable in replies and forwards, with derived Re: and Fwd: prefixes | 🚧 | sending.md |
 | Composer | Paste a picture into the message or a signature, sent as an inline cid: part | ⬜ | composer-security.md |
 | Composer | Resize a pasted or quoted picture by dragging a corner; ratio kept | ⬜ | composer-security.md |
-| Composer | Drag files onto the composer: a document attaches, a picture asks inline or file | ⬜ | composer-security.md |
+| Composer | Drag files onto the composer: a document attaches, a picture asks inline or file | 🚧 | a dropped document attaches outright; a dropped picture asks inline or file, the answer recorded on the row's disposition, an inline answer referencing the row from the document so the part rides the send as body content; composer-security.md |
 | Composer | mailto: links open the composer prefilled; extra headers dropped | ⬜ | composer-security.md |
 | Composer | Share files into a new message from the OS share sheet; unsafe names and types dropped | ⬜ | os-integration.md |
 | Platform | Offer to become the default mail app, asked once, changeable in settings | ⬜ | os-integration.md |
 | Composer | Reply and forward quoting below the original, app default with per-message override | 🚧 | sending.md |
 | Composer | Signature library with rich text and an inline logo; per-account for new mail and replies; auto-swapped with From | ⬜ | signatures.md |
 | Mail | Mail actions: read and unread, flag, archive, delete, trash | ⬜ | |
-| Mail | Select several messages and act on the lot: archive, trash, delete, read, unread, flag | ⬜ | list-selection.md |
+| Mail | Select several messages and act on the lot: archive, trash, delete, read, unread, flag | 🚧 | Ctrl and Shift clicks and Ctrl+A build the selection; the row menu loops the per-row intents over it and a bulk toolbar stands while it does (the count, Select All, Clear, and the batch actions: read, unread, flag, archive, and delete as move-to-trash); list-selection.md |
 | Mail | Mark as spam or not spam, reported to the provider so its filter learns | ⬜ | reporting.md |
 | MCP | MCP server over a local socket, opt-in and off by default: read and act on mail from an MCP client; no send verb to the agent, ever | 🚧 | the server, the account gate, and the Advanced settings panel ship (host-side state: off and empty at every boot, nothing persists); no send tool exists at all, the recorded cut; the end-to-end and live proofs land over the built relay against the harness; the relay bundle beside the app remains until the packaging pass; mcp.md |
 | Mail | Configurable swipe actions per direction, with undo | ⬜ | |

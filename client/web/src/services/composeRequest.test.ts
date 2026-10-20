@@ -56,6 +56,16 @@ describe('the compose family wire', () => {
       '{"compose":{"forward":{"message":{"account":"home","key":"jmap:e2"}}}}',
     );
   });
+
+  it('carries the forward with the carried part ids only when there are any', () => {
+    expect(JSON.stringify(intents.forward({ account: 'home', key: 'jmap:e2' }, [0, 2]))).toBe(
+      '{"compose":{"forward":{"message":{"account":"home","key":"jmap:e2"},"carry":[0,2]}}}',
+    );
+    // The empty carry stays the bare forward: the additive wire never moves.
+    expect(JSON.stringify(intents.forward({ account: 'home', key: 'jmap:e2' }, []))).toBe(
+      '{"compose":{"forward":{"message":{"account":"home","key":"jmap:e2"}}}}',
+    );
+  });
 });
 
 // Both literals are byte-for-byte the JSON astra-app's

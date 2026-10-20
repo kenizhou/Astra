@@ -75,7 +75,10 @@ fn compose(kind: ComposeKind) -> Intent {
     let message = m1();
     Intent::Compose(match kind {
         ComposeKind::Reply | ComposeKind::ReplyAll => ComposeIntent::Reply { message },
-        ComposeKind::Forward => ComposeIntent::Forward { message },
+        ComposeKind::Forward => ComposeIntent::Forward {
+            message,
+            carry: Vec::new(),
+        },
     })
 }
 
@@ -308,4 +311,149 @@ async fn a_reply_whose_header_disagrees_with_the_compose_source_threads_by_its_h
         ids(&["other-9@server.test"]),
         "a disagreeing source contributes no chain"
     );
+}
+
+/// The original's raw source beside the fixture original: a plain body and
+/// one pdf attachment, base64 `UERG`, the three bytes `PDF`, the part the
+/// reading snapshot lists as id 0 and a forward can carry.
+fn attached_source() -> Vec<u8> {
+    let mut raw = Vec::new();
+    raw.extend_from_slice(
+        b"Content-Type: multipart/mixed; boundary=\"mix\"\r\n\r\n\
+          --mix\r\nContent-Type: text/plain; charset=\"utf-8\"\r\n\r\n\
+          The launch is ready.\r\n",
+    );
+    raw.extend_from_slice(
+        b"--mix\r\nContent-Type: application/pdf; name=\"report.pdf\"\r\n\
+          Content-Disposition: attachment; filename=\"report.pdf\"\r\n\
+          Content-Transfer-Encoding: base64\r\n\r\nUERG\r\n",
+    );
+    raw.extend_from_slice(b"--mix--\r\n");
+    raw
+}
+
+/// An app over one `work` account holding the attached original, synced, so
+/// the compose arm, the store, and the part fetch all resolve.
+async fn app_over_attached(
+    script: Vec<ScriptedSend>,
+    surfaces: &Arc<Mutex<Vec<Surface>>>,
+) -> (App<fakes::FakeProvider>, Arc<Mutex<Vec<engine_api::Draft>>>) {
+    let provider = fakes::FakeProvider::with_sources(
+        vec![fakes::inbox()],
+        vec![original()],
+        vec![("m1".to_owned(), attached_source())],
+    )
+    .submitting(script);
+    let submits = provider.submits();
+    let app = fakes::app(vec![fakes::account("work", provider)], surfaces);
+    app.dispatch(Intent::RefreshMail).await.unwrap();
+    (app, submits)
+}
+
+/// The forward's submit over `document`: the composer's Send button with the
+/// document the request opened.
+fn forward_over(subject: &str, document: ComposerDocument) -> Intent {
+    Intent::SubmitRichForward {
+        from: account("work"),
+        to: "bob@example.test".to_owned(),
+        subject: subject.to_owned(),
+        document,
+        blobs: Vec::new(),
+    }
+}
+
+#[tokio::test]
+async fn a_forward_carries_the_originals_standing_parts_as_attachments() {
+    let surfaces = Arc::new(Mutex::new(Vec::new()));
+    let (app, submits) = app_over_attached(vec![ScriptedSend::Delivered], &surfaces).await;
+    app.dispatch(Intent::Compose(ComposeIntent::Forward {
+        message: m1(),
+        carry: vec![0],
+    }))
+    .await
+    .unwrap();
+    let document = app
+        .compose_request()
+        .expect("the forward's prefill")
+        .document;
+
+    app.dispatch(forward_over("Fwd: Quarterly report", document))
+        .await
+        .unwrap();
+
+    assert_eq!(submits.lock().unwrap().len(), 1, "the forward went out");
+    let draft = &submits.lock().unwrap()[0];
+    assert_eq!(
+        draft.attachments,
+        vec![engine_api::DraftAttachment::attachment(
+            "report.pdf",
+            "application/pdf",
+            b"PDF".to_vec(),
+        )],
+        "the carried part rides as a regular file attachment, bytes and all"
+    );
+}
+
+#[tokio::test]
+async fn a_removed_carry_row_does_not_ride_the_send() {
+    let surfaces = Arc::new(Mutex::new(Vec::new()));
+    let (app, submits) = app_over_attached(vec![ScriptedSend::Delivered], &surfaces).await;
+    app.dispatch(Intent::Compose(ComposeIntent::Forward {
+        message: m1(),
+        carry: vec![0],
+    }))
+    .await
+    .unwrap();
+    let mut document = app
+        .compose_request()
+        .expect("the forward's prefill")
+        .document;
+    // The composer's remove control dropped the pre-attached row.
+    document.attachments.clear();
+
+    app.dispatch(forward_over("Fwd: Quarterly report", document))
+        .await
+        .unwrap();
+
+    assert_eq!(submits.lock().unwrap().len(), 1, "the forward went out");
+    let draft = &submits.lock().unwrap()[0];
+    assert!(
+        draft.attachments.is_empty(),
+        "a removed row simply does not ride"
+    );
+}
+
+#[tokio::test]
+async fn a_carry_row_whose_part_will_not_resolve_refuses_the_send() {
+    let surfaces = Arc::new(Mutex::new(Vec::new()));
+    let (app, submits) = app_over_attached(Vec::new(), &surfaces).await;
+    app.dispatch(Intent::Compose(ComposeIntent::Forward {
+        message: m1(),
+        carry: vec![9],
+    }))
+    .await
+    .unwrap();
+    // The document a client hands back names a carried part the original
+    // does not hold: a send silently missing its file is worse than none.
+    let mut document = document("Look at this");
+    document.attachments.push(astra_composer::DraftAttachment {
+        id: astra_composer::AttachmentId::new("carry-9").unwrap(),
+        blob: Some(astra_composer::DraftBlobHandle::new("carry:9").unwrap()),
+        file_name: "ghost.pdf".to_owned(),
+        media_type: "application/pdf".to_owned(),
+        size: Some(3),
+        disposition: astra_composer::AttachmentDisposition::Attachment,
+        data_url: None,
+    });
+
+    app.dispatch(forward_over("Fwd: Quarterly report", document))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        submits.lock().unwrap().len(),
+        0,
+        "the carried row's bytes would not resolve, so nothing was sent"
+    );
+    assert_eq!(app.sending().rows.len(), 0, "nothing was queued either");
 }
