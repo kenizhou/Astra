@@ -28,7 +28,14 @@ function schemeOf(target: string): string | null {
 /** Whether one target survives the send as a link. */
 export function linkSurvivesSend(target: string): boolean {
   const value = target.trim();
-  if (value.length > MAX_LINK_LEN || /[\s]/.test(value) || /[\u0000-\u001f\u007f]/.test(value)) {
+  // The length and the control refusal mirror the core's own arithmetic:
+  // bytes, not UTF-16 units, and every control character including the C1
+  // range, so the sentence names everything the core will degrade.
+  if (
+    byteLength(value) > MAX_LINK_LEN ||
+    /[\s]/.test(value) ||
+    /[\u0000-\u001f\u007f-\u009f]/.test(value)
+  ) {
     return false;
   }
   const scheme = schemeOf(value);
@@ -37,6 +44,11 @@ export function linkSurvivesSend(target: string): boolean {
   }
   const rest = value.slice(value.indexOf(':') + 1).replace(/^\/+/, '');
   return rest !== '';
+}
+
+/** A string's length in UTF-8 bytes, the unit the core's bound counts. */
+function byteLength(value: string): number {
+  return new TextEncoder().encode(value).length;
 }
 
 /** The targets one block's inline content carries, in order. */

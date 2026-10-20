@@ -36,10 +36,15 @@ export function typedLinkTarget(word: string): string | null {
  * Commits the word before the caret as a link run when it is a delimited
  * address and not already linked. Returns whether a link was made; the
  * caret returns to where it stood, so the committing space or enter lands
- * exactly where the person typed it.
+ * exactly where the person typed it. A range selection never commits: the
+ * recogniser reads the caret's word, and a selection the person made is
+ * theirs to replace with the keystroke, not to collapse into a link.
  */
 export function commitTypedLink(editor: CoreEditor): boolean {
   const { selection } = editor.state;
+  if (!selection.empty) {
+    return false;
+  }
   const $from = selection.$from;
   const before = $from.parent.textBetween(0, $from.parentOffset, undefined, '\ufffc');
   const match = /(\S+)$/.exec(before);
@@ -47,6 +52,12 @@ export function commitTypedLink(editor: CoreEditor): boolean {
     return false;
   }
   const word = match[1]!;
+  // A leaf (a hard break, an inline image) inside the word joins it with
+  // the replacement character, which no address contains: refuse rather
+  // than commit an href carrying it.
+  if (word.includes('\ufffc')) {
+    return false;
+  }
   const target = typedLinkTarget(word);
   if (target === null) {
     return false;

@@ -230,6 +230,20 @@ describe('the From swap rule', () => {
     expect(state.seeded).toEqual(homeSignature);
   });
 
+  it('re-swaps across a return to the first account', () => {
+    useComposerStore.getState().newMessage({ id: 'work', label: 'Work' });
+
+    useComposerStore.getState().changeFrom({ id: 'home', label: 'Home' });
+    useComposerStore.getState().changeFrom({ id: 'work', label: 'Work' });
+
+    const state = useComposerStore.getState();
+    const document = editorToDocument(state.editor);
+    expect(document.blocks.filter((block) => 'Signature' in block)).toEqual([
+      { Signature: workSignature },
+    ]);
+    expect(state.seeded).toEqual(workSignature);
+  });
+
   it('drops the seeded signature when the new account seeds nothing', () => {
     useComposerStore.getState().newMessage({ id: 'work', label: 'Work' });
 

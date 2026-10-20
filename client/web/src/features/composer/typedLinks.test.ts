@@ -106,4 +106,44 @@ describe('the live commit', () => {
     expect(runs[1]?.marks).toBeUndefined();
     editor.destroy();
   });
+
+  it('never commits over a range selection', () => {
+    const editor = editorWith('see https://example.test now');
+    // The person selected the words after the address; the keystroke that
+    // fires the recogniser is theirs to spend on the selection.
+    editor.commands.setTextSelection({ from: 25, to: 28 });
+
+    expect(commitTypedLink(editor)).toBe(false);
+    expect(editor.getAttributes('link').href).toBeUndefined();
+    expect(editor.state.selection.empty).toBe(false);
+    editor.destroy();
+  });
+
+  it('never commits a word joined by a leaf, such as a hard break', () => {
+    const editor = createComposerEditor([
+      {
+        type: 'paragraph',
+        content: [
+          { type: 'text', text: 'https://one.test' },
+          { type: 'hardBreak' },
+          { type: 'text', text: 'tail' },
+        ],
+      },
+    ]);
+    editor.commands.focus('end');
+
+    expect(commitTypedLink(editor)).toBe(false);
+    expect(editor.getAttributes('link').href).toBeUndefined();
+    editor.destroy();
+  });
+
+  it('undoes the commit as one step', () => {
+    const editor = editorWith('see https://example.test');
+
+    expect(commitTypedLink(editor)).toBe(true);
+    editor.commands.undo();
+    expect(editor.getText()).toBe('see https://example.test');
+    expect(editor.getAttributes('link').href).toBeUndefined();
+    editor.destroy();
+  });
 });

@@ -55,4 +55,5 @@ is appended at send time.
 ## Known gaps recorded, not hidden
 
 - An inline logo does not ride: a picture in a signature needs the
-  attachment binding at seed time, which is its own change.
+  attachment binding at seed time, which is its own change. The editor
+  swallows a picture pasted into it silently, consistent with this gap.

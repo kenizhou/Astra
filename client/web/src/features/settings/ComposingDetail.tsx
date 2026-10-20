@@ -186,6 +186,12 @@ export function ComposingDetail() {
             type="button"
             onClick={() => {
               if (chosen !== undefined && current !== undefined) {
+                // Both slots take the editor's words: the button's name is
+                // the contract, and unsaved edits reach the current slot
+                // through it too, not only the other one.
+                void dispatch(
+                  intents.setSignature(chosen.account, slot === 'reply', signatureOf(current)),
+                );
                 void dispatch(
                   intents.setSignature(chosen.account, slot !== 'reply', signatureOf(current)),
                 );

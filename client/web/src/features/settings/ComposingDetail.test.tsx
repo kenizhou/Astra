@@ -153,17 +153,18 @@ describe('the signature editor', () => {
     );
   });
 
-  it('serves both slots from one editing pass', async () => {
+  it('serves both slots from one editing pass, the current one included', async () => {
     render(<ComposingDetail />);
     await screen.findByLabelText('Message body');
 
     fireEvent.click(screen.getByRole('button', { name: 'Use for both' }));
 
-    await waitFor(() => expect(ipc.dispatch).toHaveBeenCalledTimes(1));
-    const sent = ipc.dispatch.mock.calls[0]?.[0] as {
-      settings: { set_signature: { reply: boolean } };
-    };
-    expect(sent.settings.set_signature.reply).toBe(true);
+    await waitFor(() => expect(ipc.dispatch).toHaveBeenCalledTimes(2));
+    const slots = ipc.dispatch.mock.calls.map(
+      (call) => (call[0] as { settings: { set_signature: { reply: boolean } } }).settings
+        .set_signature,
+    );
+    expect(slots.map((slot) => slot.reply).sort()).toEqual([false, true]);
   });
 
   it('carries the persist failure sentence', () => {

@@ -152,3 +152,7 @@ inline intent already. Pasted text is untouched.
   no harness yet.
 - **Image resize** stands as a future row this document will own as it
   lands.
+- **A paste carrying both an image file and text** stages the image and
+  drops the text: some office applications produce the pair, and the
+  capture listener answers the whole clipboard at once. Paste the text
+  separately.
