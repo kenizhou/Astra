@@ -62,7 +62,14 @@
 //! the real `connect_dav_providers` over a scratch config mirroring the
 //! store's merge rule and dial-before-persist ordering, installs both legs,
 //! keeps what stood when a re-dial fails, and tears down on the clear; the
-//! zone proof pins the now line's zone id.
+//! zone proof pins the now line's zone id. The gated composer proofs
+//! (`composer_proof`) carry the composer's finishing surfaces over the same
+//! wire: a formatted send (a font size, a colour, and a highlight run) round
+//! trips with its inline CSS intact, a signature-bearing send round trips
+//! both legs (the RFC 3676 delimiter in the plain, the signature div in the
+//! html), and a link round trips both ways (a good https target arriving as
+//! an anchor, a javascript: target in the sent wire degrading to plain
+//! text), each proof withdrawing both copies like every delivery proof.
 //!
 //! The gated JMAP tests (`jmap`) prove the password account end to end over
 //! the harness's plaintext JMAP origin: the dial's session snapshot, the
@@ -114,6 +121,8 @@ mod calendar_brief;
 mod calendar_invite;
 #[path = "tests_live_harness/calendar_proof.rs"]
 mod calendar_proof;
+#[path = "tests_live_harness/composer_proof.rs"]
+mod composer_proof;
 #[path = "tests_live_harness/drafts.rs"]
 mod drafts;
 #[path = "tests_live_harness/folder_proof.rs"]
