@@ -10,6 +10,7 @@
 import { isTauri } from '@/events/surfaceEvents';
 import { dispatch, intents } from '@/services/ipc';
 import { CloseIcon, PopOutIcon, SentIcon } from '@/components/icons';
+import { PluginComposerActions } from '@/features/plugins/PluginComposerActions';
 
 import { useComposerStore } from './composerStore';
 import { popOutComposer } from './composeWindow';
@@ -69,6 +70,7 @@ export function ComposerActionsRow({ showClose = false }: ComposerActionsRowProp
         Send
       </button>
       <div className="flex-1" />
+      <PluginComposerActions />
       {!showClose && isTauri && (
         <button
           type="button"

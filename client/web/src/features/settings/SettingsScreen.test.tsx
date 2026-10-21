@@ -67,7 +67,7 @@ describe('the settings screen', () => {
     expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull();
   });
 
-  it('renders the eight categories that ship and no others', () => {
+  it('renders the nine categories that ship and no others', () => {
     render(<SettingsScreen />);
     const list = screen.getByLabelText('Settings categories');
     const labels = Array.from(list.querySelectorAll('button')).map((b) => b.textContent);
@@ -78,6 +78,7 @@ describe('the settings screen', () => {
       'Composing',
       'Shortcuts',
       'Accounts',
+      'Plugins',
       'Advanced',
       'About',
     ]);

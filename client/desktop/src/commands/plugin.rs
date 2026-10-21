@@ -67,3 +67,22 @@ pub(crate) fn plugin_approve(
         .approve(&id, permission)
         .map_err(|error| CommandError::Intent(error.to_string()))
 }
+
+/// Calls one activated plugin's declared method: the composer actions' and
+/// settings fields' whole reach, and the frame bridge's. The answer is the
+/// worker's result payload.
+// Tauri's command macro hands `State` by value; the wrapper only reads through it.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) async fn plugin_call(
+    state: State<'_, AppState>,
+    id: String,
+    method: String,
+    args: serde_json::Value,
+) -> Result<serde_json::Value, CommandError> {
+    state
+        .plugins
+        .call(&id, &method, args)
+        .await
+        .map_err(|error| CommandError::Intent(error.to_string()))
+}

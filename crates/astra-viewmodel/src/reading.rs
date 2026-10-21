@@ -141,6 +141,33 @@ pub struct ReadingSnapshot {
     /// above the body. Absent for every other message, crossing no key at all.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub invitation: Option<InvitationBlock>,
+    /// The plugin decode's security banner, when a decode-serving plugin had
+    /// something to say about this message: the banner a surface mounts above
+    /// the body. Absent when no plugin answered or it answered no banner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub security_banner: Option<SecurityBannerView>,
+}
+
+/// How much the reader should trust what a security banner says, crossing as a
+/// snake_case word.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SecurityLevelView {
+    /// Neutral context: the banner states a fact, good or neutral.
+    Info,
+    /// The message is usable but something about it did not verify.
+    Warning,
+    /// The message or its crypto is broken; the reader should distrust it.
+    Error,
+}
+
+/// The security banner a plugin's decode returned for the reading pane.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SecurityBannerView {
+    /// How much to trust the statement the banner makes.
+    pub level: SecurityLevelView,
+    /// The human-readable statement, for example "Signature invalid".
+    pub text: String,
 }
 
 /// What the open message means to this account's calendar: the two-condition

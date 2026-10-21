@@ -14,8 +14,16 @@
 //! restarts lands with the install/consent dialog of the distribution slice.
 
 pub(crate) mod gate;
+pub(crate) mod scheme;
 
+mod calls;
+
+mod decode;
+pub(crate) use decode::PluginDecoder;
 pub(crate) use gate::PluginGate;
+
+#[cfg(test)]
+pub(crate) mod testkit;
 
 use std::{
     collections::HashMap,
@@ -55,6 +63,13 @@ pub(crate) enum RegistryError {
     AlreadyGranted(Permission),
     /// The lifecycle machine refused the transition.
     Lifecycle(IllegalTransition),
+    /// A call into a plugin failed: the worker's refusal or error.
+    Call {
+        /// The plugin's id.
+        id: String,
+        /// What the call answered.
+        reason: String,
+    },
 }
 
 impl core::fmt::Display for RegistryError {
@@ -78,6 +93,9 @@ impl core::fmt::Display for RegistryError {
                 )
             }
             RegistryError::Lifecycle(error) => write!(f, "{error}"),
+            RegistryError::Call { id, reason } => {
+                write!(f, "the call into plugin {id} failed: {reason}")
+            }
         }
     }
 }
@@ -93,6 +111,11 @@ const RESTART_MAX: u32 = 3;
 /// The backoff base of the restart schedule (linear, capped at 4s by the
 /// supervision machine).
 const BACKOFF_BASE: Duration = Duration::from_secs(1);
+
+/// The cap on one UI-driven plugin call (a composer action or a settings
+/// field): generous enough for real work, short enough that a stuck worker
+/// does not hang a click.
+const GATE_CALL_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// One registry row as the command surface reports it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -110,6 +133,9 @@ pub(crate) struct PluginRow {
     pub(crate) grants: Vec<String>,
     /// The worker program the entry resolves to.
     pub(crate) program: String,
+    /// The UI descriptors the manifest declared, when it declared any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) ui: Option<astra_plugin::UiDescriptors>,
 }
 
 /// One activated plugin serving a method, as the gate consumes it.
@@ -126,6 +152,8 @@ pub(crate) struct ServingWorker {
 struct PluginEntry {
     manifest: PluginManifest,
     program: PathBuf,
+    /// The plugin's own directory: the frame scheme's only asset root.
+    dir: PathBuf,
     lifecycle: Lifecycle,
     grants: Vec<Permission>,
     host: Option<WorkerHost>,
@@ -174,6 +202,7 @@ impl PluginRegistry {
                     .map(|grant| grant.wire_name().to_string())
                     .collect(),
                 program: entry.program.to_string_lossy().into_owned(),
+                ui: entry.manifest.ui.clone(),
             })
             .collect();
         rows.sort_by(|a, b| a.id.cmp(&b.id));
@@ -309,54 +338,6 @@ impl PluginRegistry {
         Ok(())
     }
 
-    /// The worker host of one activated plugin, for the call sites later
-    /// slices add (the send gate first).
-    #[allow(dead_code)] // SP3b's send gate is the first caller.
-    pub(crate) fn worker_host(&self, id: &str) -> Option<WorkerHost> {
-        self.entries
-            .lock()
-            .expect("entries")
-            .get(id)
-            .and_then(|entry| entry.host.clone())
-    }
-
-    /// Every activated plugin serving `method` with `grant` granted, ready to
-    /// be called. The gate and the transform fold over this set; an
-    /// unactivated or ungranted plugin is simply not in it.
-    pub(crate) fn serving(&self, method: &str, grant: Permission) -> Vec<ServingWorker> {
-        self.entries
-            .lock()
-            .expect("entries")
-            .values()
-            .filter(|entry| {
-                entry.lifecycle == Lifecycle::Activated
-                    && entry
-                        .manifest
-                        .methods
-                        .iter()
-                        .any(|declared| declared == method)
-                    && entry.grants.contains(&grant)
-            })
-            .filter_map(|entry| {
-                entry.host.clone().map(|host| ServingWorker {
-                    id: entry.manifest.id.as_str().to_string(),
-                    mode: entry.manifest.before_send_mode,
-                    host,
-                })
-            })
-            .collect()
-    }
-
-    /// Whether one plugin holds a grant (the gate's auto-activation check:
-    /// `before_send` fires only for admin-granted plugins).
-    pub(crate) fn has_grant(&self, id: &str, permission: Permission) -> bool {
-        self.entries
-            .lock()
-            .expect("entries")
-            .get(id)
-            .is_some_and(|entry| entry.grants.contains(&permission))
-    }
-
     /// Shuts every running worker down. Called on the exit path, before the
     /// runtime drops (the drop order in `AppState` is load bearing).
     pub(crate) async fn shutdown_all(&self) {
@@ -393,6 +374,7 @@ impl PluginRegistry {
             entries.entry(id).or_insert(PluginEntry {
                 manifest,
                 program,
+                dir: dir.clone(),
                 lifecycle: Lifecycle::Discovered,
                 grants: Vec::new(),
                 host: None,

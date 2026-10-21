@@ -26,6 +26,7 @@ export type SettingsCategory =
   | 'composing'
   | 'shortcuts'
   | 'accounts'
+  | 'plugins'
   | 'advanced'
   | 'about';
 

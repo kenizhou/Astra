@@ -234,3 +234,70 @@ fn the_send_modes_parse_and_round_trip() {
         assert_eq!(value, serde_json::json!(name));
     }
 }
+
+#[test]
+fn the_ui_table_is_optional_and_strict() {
+    // Absent: no descriptors.
+    assert_eq!(PluginManifest::parse(VALID).expect("valid").ui, None);
+    // Present and full: every descriptor kind parses.
+    let text = format!(
+        r#"{VALID}
+[ui]
+composer_actions = [{{ id = "encrypt", label = "Encrypt", icon = "lock" }}]
+pages = [{{ id = "keys", title = "Key manager", entry = "keys.html" }}]
+
+[[ui.settings_sections]]
+id = "crypto"
+title = "Crypto"
+fields = [
+  {{ key = "sign", kind = "toggle", label = "Sign by default" }},
+  {{ key = "method", kind = "select", label = "Method", options = ["pgp", "smime"] }},
+  {{ key = "token", kind = "password", label = "Token PIN" }},
+  {{ key = "note", kind = "text", label = "Note" }},
+  {{ key = "import", kind = "action", label = "Import keys" }},
+]
+"#
+    );
+    let manifest = PluginManifest::parse(&text).expect("ui parses");
+    let ui = manifest.ui.expect("descriptors");
+    assert_eq!(ui.composer_actions.len(), 1);
+    assert_eq!(ui.composer_actions[0].id, "encrypt");
+    assert_eq!(ui.composer_actions[0].icon.as_deref(), Some("lock"));
+    assert_eq!(ui.pages[0].entry, "keys.html");
+    let section = &ui.settings_sections[0];
+    assert_eq!(section.fields.len(), 5);
+    assert_eq!(section.fields[1].kind, SettingsFieldKind::Select);
+    assert_eq!(
+        section.fields[1].options,
+        vec!["pgp".to_string(), "smime".to_string()]
+    );
+    assert!(section.fields[0].options.is_empty());
+    // Strict: an unknown field beside the table is rejected.
+    let bad = format!("{text}stray = true\n");
+    assert!(PluginManifest::parse(&bad).is_err());
+    let bad_inner = text.replace(
+        "{ key = \"sign\", kind = \"toggle\", label = \"Sign by default\" }",
+        "{ key = \"sign\", kind = \"toggle\", label = \"Sign by default\", sneaky = true }",
+    );
+    assert!(PluginManifest::parse(&bad_inner).is_err());
+    // An unknown field kind is rejected.
+    let bad_kind = text.replace("kind = \"toggle\"", "kind = \"dial\"");
+    assert!(PluginManifest::parse(&bad_kind).is_err());
+}
+
+#[test]
+fn the_ui_descriptors_round_trip_on_the_wire() {
+    let text = format!(
+        "{VALID}\n[ui]\ncomposer_actions = [{{ id = \"encrypt\", label = \"Encrypt\" }}]\n"
+    );
+    let manifest = PluginManifest::parse(&text).expect("ui parses");
+    let value = serde_json::to_value(&manifest).expect("serialises");
+    assert_eq!(
+        value["ui"],
+        serde_json::json!({
+            "composer_actions": [{ "id": "encrypt", "label": "Encrypt" }],
+            "settings_sections": [],
+            "pages": [],
+        })
+    );
+}

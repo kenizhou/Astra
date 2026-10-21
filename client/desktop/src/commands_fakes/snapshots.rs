@@ -30,6 +30,7 @@ pub(crate) fn open_snapshot() -> ReadingSnapshot {
         }],
         remote_image_count: 2,
         invitation: None,
+        security_banner: None,
     }
 }
 

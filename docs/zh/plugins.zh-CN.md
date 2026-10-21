@@ -116,6 +116,26 @@ manifest 声明模式（`before_send_mode`，声明处理器时必填）：
 跑闸门；撤回丢弃待决。变换按注册表顺序运行，每个看到上一个的输出；失
 败或不可用的变换使发送失败关闭（未变换的邮件绝不发出）。
 
+## UI 贡献模型
+
+描述符优先：manifest 的可选 `[ui]` 表声明静态形态，由 Astra chrome 渲
+染。`composer_actions` 成为编写器 chrome 中的按钮；`settings_sections`
+成为设置页 Plugins 详情中的分类（每个字段按其种类的控件：toggle、
+text、select、password、action）；`pages` 在沙箱 frame 中打开。一次点
+击或字段变更即一次对 worker 已声明自定义方法（`plugin.<id>.<name>`）的
+`plugin_call`，应答为 worker 自己的 payload；动作的效果经应答呈现（例
+如开关的 `pressed`），因为 worker 绝不直接触碰草稿。
+
+阅读窗格的横幅槽位（`PluginBanner`）渲染 decode 应答的
+`security_banner` 腿：插件的级别与措辞，挂在正文上方。
+
+富页面运行在 `PluginFrame` 中：`astra-plugin://` scheme 上的 iframe，仅
+在该插件自己的目录内解析 `astra-plugin://<plugin-id>/<path>`（拒绝穿越
+与跨插件读取，缺失文件 404，HTML 携带 `default-src 'none'` 加仅包内
+脚本/样式/图片/字体的 CSP）。页面经窄 postMessage 桥（`frame_call` /
+`frame_result` / `frame_error`）与其 worker 通信，桥只服务 frame 自己窗
+口的消息，并受与一切调用相同的已声明方法门控。
+
 ## 已记录的已知缺口
 
 - 在 `before_send` 处理器激活前已入队的 op 不做追溯过闸；drain 内的逐
@@ -129,5 +149,7 @@ manifest 声明模式（`before_send_mode`，声明处理器时必填）：
 - blob 缓存的配额与淘汰已在契约中点名；缓存本身随第一个需要它的
   payload 落地。
 - 授权尚不跨重启持久化。
-- UI 贡献模型（描述符、沙箱 iframe）是 SP3c；签名包与安装对话框是
-  SP3d。
+- decode 接缝已在阅读流水线中落地（`MessageDecoder` 端口、原始源交给服
+  务中的插件、解出的腿走完全相同的消毒流水线、横幅进入阅读快照）；尚
+  缺的是一个真正执行解码的已发布插件（加密模块为内置，Track B）。
+- 签名包与安装对话框是 SP3d。

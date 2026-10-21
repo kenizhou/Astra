@@ -420,6 +420,7 @@ async fn boot_primes_the_cached_list_and_spawns_each_accounts_first_sync() {
         None,
         None,
         None,
+        None,
     )
     .await
     .unwrap();

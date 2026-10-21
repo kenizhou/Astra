@@ -14,9 +14,13 @@
 //! stays empty, which is the honest answer over a snapshot that would claim the
 //! message carries no body at all.
 
+use std::sync::Arc;
+
 use astra_ai::CorrelationId;
 use astra_viewmodel::{AttachmentRow, InvitationBlock, MessageKey, Participation, ReadingSnapshot};
-use engine_api::{addresses_match, Engine, Message, MessageAttachment, Provider, SystemKeyword};
+use engine_api::{
+    addresses_match, AccountId, Engine, Message, MessageAttachment, Provider, SystemKeyword,
+};
 
 use crate::{
     calendar::{classify, matched_attendee, supersede, InvitationKind},
@@ -152,7 +156,8 @@ impl<P: Provider> App<P> {
     async fn render_open(&self, message: &MessageRef) -> Option<ReadingSnapshot> {
         let handle = self.account_handle(&message.account).await?;
         let provider = handle.providers.first()?;
-        let (mut snapshot, original) = render_reading(&self.engine, provider, message).await?;
+        let (mut snapshot, original) =
+            render_reading(&self.engine, provider, message, self.decoder.as_ref()).await?;
         snapshot.invitation = self.reading_invitation(provider, message, &original).await;
         hide_invitation_parts(&mut snapshot);
         Some(snapshot)
@@ -260,6 +265,7 @@ pub(crate) async fn render_reading<P: Provider>(
     engine: &Engine,
     provider: &P,
     message: &MessageRef,
+    decoder: Option<&Arc<dyn crate::decode::MessageDecoder>>,
 ) -> Option<(ReadingSnapshot, Message)> {
     let original = resolve(engine, message).await?;
     let body = engine
@@ -277,23 +283,43 @@ pub(crate) async fn render_reading<P: Provider>(
     // pass that also tells us whether the body references inline images), fetch
     // the parts only when it does, then resolve them into the body and gate the
     // remote references. `plain` is the text view and passes through untouched.
-    let (html, remote_image_count) = match body.html() {
-        Some(raw) => {
-            let cleaned = sanitise::sanitise(raw);
-            let parts = if cleaned.has_cid_references {
-                engine
-                    .message_inline_parts(provider, &message.account, &original)
-                    .await
-                    .unwrap_or_default()
-            } else {
-                Vec::new()
-            };
-            let inlined = sanitise::inline_cid_images(&cleaned.html, &parts);
-            let gated = sanitise::gate_remote_sources(&inlined);
-            (Some(gated.html), gated.remote_image_count)
-        }
+    let (mut html, mut remote_image_count) = match body.html() {
+        Some(raw) => render_html_leg(engine, provider, &message.account, &original, raw).await,
         None => (None, 0),
     };
+    let mut plain = body.plain().map(str::to_owned);
+    // The decode seam: a serving plugin reads the raw source and its answer's
+    // legs replace the rendered ones (the decoded HTML through the identical
+    // pipeline above), its banner riding the snapshot. No answer, an error, or
+    // a missing source leaves the store's own rendering untouched.
+    let mut security_banner = None;
+    if let Some(decoder) = decoder {
+        if let Ok(source) = engine
+            .message_source(provider, &message.account, &original)
+            .await
+        {
+            if let Some(outcome) = decoder.decode(message, source.as_bytes()).await {
+                if outcome.html.is_some() || outcome.plain.is_some() || outcome.banner.is_some() {
+                    if let Some(decoded) = outcome.html {
+                        let (leg, count) = render_html_leg(
+                            engine,
+                            provider,
+                            &message.account,
+                            &original,
+                            &decoded,
+                        )
+                        .await;
+                        html = leg;
+                        remote_image_count = count;
+                    }
+                    if let Some(text) = outcome.plain {
+                        plain = Some(text);
+                    }
+                    security_banner = outcome.banner;
+                }
+            }
+        }
+    }
     let attachments = engine
         .message_attachments(provider, &message.account, &original)
         .await
@@ -323,12 +349,39 @@ pub(crate) async fn render_reading<P: Provider>(
             .or(original.sent_at)
             .map_or_else(String::new, format_instant),
         html,
-        plain: body.plain().map(str::to_owned),
+        plain,
         attachments,
         remote_image_count,
         invitation: None,
+        security_banner,
     })
     .map(|snapshot| (snapshot, original))
+}
+
+/// Renders one HTML leg through the shared pipeline: sanitise first (the cheap
+/// pass that also tells us whether the body references inline images), fetch
+/// the parts only when it does, then resolve them into the body and gate the
+/// remote references. The store's own body and a plugin's decoded answer take
+/// this identical path, so a decoded leg is never trusted raw.
+async fn render_html_leg<P: Provider>(
+    engine: &Engine,
+    provider: &P,
+    account: &AccountId,
+    original: &Message,
+    raw: &str,
+) -> (Option<String>, u32) {
+    let cleaned = sanitise::sanitise(raw);
+    let parts = if cleaned.has_cid_references {
+        engine
+            .message_inline_parts(provider, account, original)
+            .await
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let inlined = sanitise::inline_cid_images(&cleaned.html, &parts);
+    let gated = sanitise::gate_remote_sources(&inlined);
+    (Some(gated.html), gated.remote_image_count)
 }
 
 /// Resolves `message` to its stored [`Message`], the read every body fetch is
@@ -396,6 +449,10 @@ fn is_calendar_media(media_type: &str) -> bool {
 #[cfg(test)]
 #[path = "reading_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "reading_decode_tests.rs"]
+mod decode_tests;
 
 // The invitation block's tests, split from the pipeline's own so each file
 // stays under the line cap.

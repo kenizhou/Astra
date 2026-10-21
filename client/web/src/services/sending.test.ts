@@ -102,6 +102,21 @@ describe('the outbox wire', () => {
       '{"outbox":{"confirm_not_sent":{"queued":{"account":"home","op":2}}}}',
     );
   });
+
+  it('names the held send every gate verb acts on', () => {
+    expect(JSON.stringify(intents.answerGate('hold-7', true))).toBe(
+      '{"outbox":{"answer_gate":{"hold":"hold-7","send_anyway":true}}}',
+    );
+    expect(JSON.stringify(intents.answerGate('hold-7', false))).toBe(
+      '{"outbox":{"answer_gate":{"hold":"hold-7","send_anyway":false}}}',
+    );
+    expect(JSON.stringify(intents.retryHeld('hold-2'))).toBe(
+      '{"outbox":{"retry_held":{"hold":"hold-2"}}}',
+    );
+    expect(JSON.stringify(intents.withdrawHeld('hold-2'))).toBe(
+      '{"outbox":{"withdraw_held":{"hold":"hold-2"}}}',
+    );
+  });
 });
 
 // Both literals are byte-for-byte the JSON astra-viewmodel's sending_tests.rs

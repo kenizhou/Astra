@@ -9,6 +9,7 @@
 // judged by the snapshot that follows when the engine answers.
 
 import { dispatch, intents, type Intent, type QueuedKey, type QueuedRow } from '@/services/ipc';
+import type { HeldSend } from '@/services/sending';
 import { useSendingStore } from '@/stores/sendingStore';
 
 import { useSendResultStore } from './sendResult';
@@ -93,18 +94,81 @@ function OutboxQueueRow({ row }: { row: QueuedRow }) {
   );
 }
 
-/** The account's queue as the list pane's body. */
+/** One held send's state word, as the hold spells it. */
+const heldWord: Record<HeldSend['state'], string> = {
+  checking: 'Checking',
+  needs_answer: 'Needs your answer',
+  blocked: 'Held',
+};
+
+/** The one stable empty list a held-free snapshot selects (a fresh `[]` per
+ * render would spin the store's equality check). */
+const NO_HELD: HeldSend[] = [];
+
+/** One send the plugin gate is holding: the reason, the plugin named, and the
+ * actions the hold's state accepts. */
+function HeldRow({ held }: { held: HeldSend }) {
+  const actions: Array<{ label: string; run: () => void }> = [];
+  if (held.state === 'needs_answer') {
+    actions.push({
+      label: 'Send anyway',
+      run: () => void dispatch(intents.answerGate(held.hold, true)),
+    });
+    actions.push({
+      label: 'Deny',
+      run: () => void dispatch(intents.answerGate(held.hold, false)),
+    });
+  }
+  if (held.state === 'blocked') {
+    actions.push({ label: 'Retry', run: () => void dispatch(intents.retryHeld(held.hold)) });
+    actions.push({ label: 'Withdraw', run: () => void dispatch(intents.withdrawHeld(held.hold)) });
+  }
+  return (
+    <li
+      className="flex flex-col gap-1 border-b border-border px-3 py-2 last:border-b-0"
+      data-held={held.state}
+    >
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="min-w-0 truncate text-xs text-foreground">
+          {held.subject === '' ? '(no subject)' : held.subject}
+        </span>
+        <span className="shrink-0 text-xs text-muted-foreground">{heldWord[held.state]}</span>
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        <span className="min-w-0 truncate text-[11px] text-muted-foreground">
+          {held.state === 'checking'
+            ? `Waiting on ${held.plugin}`
+            : `${held.plugin}: ${held.reason}`}
+        </span>
+        <div className="flex items-center gap-1">
+          {actions.map((action) => (
+            <button key={action.label} type="button" onClick={action.run} className={actionClass}>
+              {action.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    </li>
+  );
+}
+
+/** The account's queue as the list pane's body, with the gate's held sends below it. */
 export function OutboxQueue({ account }: { account: string }) {
   const rows = useSendingStore((s) => s.snapshot.rows);
+  const held = useSendingStore((s) => s.snapshot.held);
   const own = rows.filter((row) => row.queued.account === account);
+  const heldOwn = (held ?? NO_HELD).filter((row) => row.account === account);
 
-  if (own.length === 0) {
+  if (own.length === 0 && heldOwn.length === 0) {
     return <p className="p-4 text-sm text-muted-foreground">No sends waiting</p>;
   }
   return (
     <ul aria-label="Outbox" className="min-h-0 flex-1 overflow-y-auto">
       {own.map((row) => (
         <OutboxQueueRow key={`${row.queued.account}/${row.queued.op}`} row={row} />
+      ))}
+      {heldOwn.map((row) => (
+        <HeldRow key={row.hold} held={row} />
       ))}
     </ul>
   );
