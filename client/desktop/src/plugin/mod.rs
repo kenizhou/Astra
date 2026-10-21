@@ -60,6 +60,13 @@ pub(crate) enum RegistryError {
     AlreadyGranted(Permission),
     /// The lifecycle machine refused the transition.
     Lifecycle(IllegalTransition),
+    /// A call into a plugin failed: the worker's refusal or error.
+    Call {
+        /// The plugin's id.
+        id: String,
+        /// What the call answered.
+        reason: String,
+    },
 }
 
 impl core::fmt::Display for RegistryError {
@@ -83,6 +90,9 @@ impl core::fmt::Display for RegistryError {
                 )
             }
             RegistryError::Lifecycle(error) => write!(f, "{error}"),
+            RegistryError::Call { id, reason } => {
+                write!(f, "the call into plugin {id} failed: {reason}")
+            }
         }
     }
 }
@@ -98,6 +108,11 @@ const RESTART_MAX: u32 = 3;
 /// The backoff base of the restart schedule (linear, capped at 4s by the
 /// supervision machine).
 const BACKOFF_BASE: Duration = Duration::from_secs(1);
+
+/// The cap on one UI-driven plugin call (a composer action or a settings
+/// field): generous enough for real work, short enough that a stuck worker
+/// does not hang a click.
+const GATE_CALL_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// One registry row as the command surface reports it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -115,6 +130,9 @@ pub(crate) struct PluginRow {
     pub(crate) grants: Vec<String>,
     /// The worker program the entry resolves to.
     pub(crate) program: String,
+    /// The UI descriptors the manifest declared, when it declared any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) ui: Option<astra_plugin::UiDescriptors>,
 }
 
 /// One activated plugin serving a method, as the gate consumes it.
@@ -179,6 +197,7 @@ impl PluginRegistry {
                     .map(|grant| grant.wire_name().to_string())
                     .collect(),
                 program: entry.program.to_string_lossy().into_owned(),
+                ui: entry.manifest.ui.clone(),
             })
             .collect();
         rows.sort_by(|a, b| a.id.cmp(&b.id));
@@ -360,6 +379,50 @@ impl PluginRegistry {
             .expect("entries")
             .get(id)
             .is_some_and(|entry| entry.grants.contains(&permission))
+    }
+
+    /// Calls one activated plugin's declared method through its worker: the
+    /// composer actions' and settings fields' whole reach. The method must be
+    /// declared in the manifest (the worker's router enforces the rest), and
+    /// the call is capped at the gate's handler timeout.
+    pub(crate) async fn call(
+        &self,
+        id: &str,
+        method: &str,
+        args: serde_json::Value,
+    ) -> Result<serde_json::Value, RegistryError> {
+        let host = {
+            let entries = self.entries.lock().expect("entries");
+            let entry = entries
+                .get(id)
+                .ok_or_else(|| RegistryError::UnknownPlugin(id.to_string()))?;
+            if entry.lifecycle != Lifecycle::Activated {
+                return Err(RegistryError::NotActive(id.to_string()));
+            }
+            if !entry
+                .manifest
+                .methods
+                .iter()
+                .any(|declared| declared == method)
+            {
+                return Err(RegistryError::Call {
+                    id: id.to_string(),
+                    reason: format!("method {method} is not declared in the manifest"),
+                });
+            }
+            entry.host.clone()
+        };
+        let host = host.ok_or_else(|| RegistryError::NotActive(id.to_string()))?;
+        tokio::time::timeout(GATE_CALL_TIMEOUT, host.call(None, method, args))
+            .await
+            .map_err(|_| RegistryError::Call {
+                id: id.to_string(),
+                reason: "the plugin did not answer in time".to_string(),
+            })?
+            .map_err(|error| RegistryError::Call {
+                id: id.to_string(),
+                reason: error.to_string(),
+            })
     }
 
     /// Shuts every running worker down. Called on the exit path, before the

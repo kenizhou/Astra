@@ -3,5 +3,11 @@ name = "Echo (conformance fixture)"
 version = "0.1.0"
 api_level = 1
 aom_version = 1
-methods = ["plugin.dev.astra.echo.ping", "message.markRead"]
-permissions = ["read_mailbox"]
+methods = [
+  "plugin.dev.astra.echo.ping",
+  "before_send",
+  "composer.transform",
+  "message.decode",
+]
+permissions = ["read_item", "read_mailbox", "compose_edit", "send", "admin"]
+before_send_mode = "block"

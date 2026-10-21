@@ -138,7 +138,8 @@ pub fn run() {
             commands::plugin::plugin_list,
             commands::plugin::plugin_enable,
             commands::plugin::plugin_disable,
-            commands::plugin::plugin_approve
+            commands::plugin::plugin_approve,
+            commands::plugin::plugin_call
         ])
         .setup(boot::setup_host)
         .build(tauri::generate_context!())

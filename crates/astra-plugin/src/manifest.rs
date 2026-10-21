@@ -37,6 +37,94 @@ pub enum SendMode {
     PromptUser,
 }
 
+/// The kind of one settings field a plugin declares.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SettingsFieldKind {
+    /// An on/off switch.
+    Toggle,
+    /// A free-text input.
+    Text,
+    /// A choice among `options`.
+    Select,
+    /// A secret input, masked on screen.
+    Password,
+    /// A button the plugin answers.
+    Action,
+}
+
+/// One field of a plugin's settings section.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SettingsFieldDescriptor {
+    /// The field's key, the name the worker's answers name it by.
+    pub key: String,
+    /// Its kind.
+    pub kind: SettingsFieldKind,
+    /// Its label.
+    pub label: String,
+    /// The choices a `select` field offers; empty for every other kind.
+    #[serde(default)]
+    pub options: Vec<String>,
+}
+
+/// One settings section a plugin declares: a category in the settings screen.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SettingsSectionDescriptor {
+    /// The section's id.
+    pub id: String,
+    /// Its title.
+    pub title: String,
+    /// Its fields.
+    #[serde(default)]
+    pub fields: Vec<SettingsFieldDescriptor>,
+}
+
+/// One composer action a plugin declares: a button in the composer chrome.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ComposerActionDescriptor {
+    /// The action's id; its click calls the worker's `plugin.<id>.<id>`
+    /// custom method.
+    pub id: String,
+    /// Its label.
+    pub label: String,
+    /// Its icon name, when it carries one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+}
+
+/// One rich page a plugin declares: rendered inside the sandboxed frame over
+/// the `astra-plugin://` scheme.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PageDescriptor {
+    /// The page's id.
+    pub id: String,
+    /// Its title.
+    pub title: String,
+    /// Its entry HTML inside the plugin's bundle (for example `keys.html`).
+    pub entry: String,
+}
+
+/// The UI descriptors a manifest may declare. Static shapes only: the content
+/// a banner shows arrives at runtime (a decode answer or a plugin event),
+/// never from this table.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UiDescriptors {
+    /// The composer chrome buttons.
+    #[serde(default)]
+    pub composer_actions: Vec<ComposerActionDescriptor>,
+    /// The settings categories.
+    #[serde(default)]
+    pub settings_sections: Vec<SettingsSectionDescriptor>,
+    /// The rich pages for the sandboxed frame.
+    #[serde(default)]
+    pub pages: Vec<PageDescriptor>,
+}
+
 /// A plugin's identity, stable across versions: the id the host keys registry
 /// entries and permission grants by. Declared once in the manifest and never
 /// derived from anything. Parsing rejects ids that are blank or carry
@@ -198,6 +286,9 @@ pub struct PluginManifest {
     /// `before_send` method.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub before_send_mode: Option<SendMode>,
+    /// The UI descriptors the plugin declares, when it declares any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ui: Option<UiDescriptors>,
     /// The worker executable inside the plugin's directory, when the manifest
     /// sits beside its binary. Absent in tests and in manifests that name
     /// their binary by convention (the last id segment plus the OS suffix).
