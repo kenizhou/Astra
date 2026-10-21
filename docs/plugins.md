@@ -157,6 +157,39 @@ postMessage bridge (`frame_call` / `frame_result` / `frame_error`), served
 only from the frame's own window and gated by the same declared-method rule
 as every call.
 
+## Distribution
+
+A `.astra-plugin` is an uncompressed tar of the plugin's directory plus
+`publisher.pub` and `signature.bin`: the signature is ed25519 over the
+canonical digest (the sha256 of the sorted `(path, sha256(content))` pairs,
+the signature itself excluded, the publisher key included). Verification is
+tamper-evidence plus identity: the signature must verify against the bundle's
+publisher key, and that key must equal the manifest's `publisher` field. The
+fingerprint the consent dialog shows is the sha256 of the publisher key,
+first eight bytes, hex. This is deliberately not a certificate chain: the
+trust decision is the human's at install.
+
+Production builds (no `ASTRA_PLUGIN_DEV`, a release) refuse unsigned or
+unverifiable bundles; dev mode accepts unsigned directory trees as before.
+`cargo run -p xtask -- bundle-keygen <key-file>` mints a publisher key and
+prints the manifest's `publisher` field; `bundle-plugin <dir> <key-file>`
+packs and signs.
+
+Install is offer-then-consent: `plugin_install_offer` verifies and names
+everything (id, name, version, the publisher fingerprint, the requested
+permissions, the privacy policy URL), the consent dialog's checkboxes start
+unchecked (fail closed), and `plugin_install` re-verifies, unpacks into the
+managed directory, and records exactly the checked grants. Installed plugins
+land disabled until enabled by hand.
+
+Grants and the enabled flag write through to `grants.toml` beside the
+registry root; the boot reads them and re-enables the enabled set (a worker
+that now fails lands Failed, never a failed boot). A production build never
+enables a plugin declaring a proposed method. The `plugins_enabled`
+preference (the settings snapshot's block, default on) is the admin policy
+switch: off means the boot enables nothing, `enable` refuses, and the gate,
+decoder, and call surfaces answer as if no plugin were serving.
+
 ## Known gaps, recorded
 
 - Ops queued before a `before_send` handler activates are not retro-gated;
@@ -173,10 +206,11 @@ as every call.
   no astra-app event feeds them yet.
 - The blob cache's quota and eviction are named in the contract; the cache
   itself lands with the first payload that needs it.
-- Grants are not persisted across restarts yet.
 - The decode seam is live in the reading pipeline (the `MessageDecoder` port,
   the raw source handed to the serving plugin, decoded legs through the
   identical sanitise pipeline, the banner in the reading snapshot); what is
   not there yet is a shipped plugin that decodes anything (the crypto module
   is built-in, Track B).
-- Signed bundles and the install dialog are SP3d.
+- The publisher key is self-asserted (sideload trust); a curated store with
+  publisher identity verification, key rotation, revocation, and auto-update
+  is the plan's "later".
