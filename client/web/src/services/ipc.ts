@@ -302,6 +302,8 @@ export interface ReadingSnapshot {
    * above the body. Absent for every other message.
    */
   invitation?: InvitationBlock;
+  /** The plugin decode's security banner, when a serving plugin had something to say. */
+  security_banner?: import('./plugins').SecurityBannerView;
 }
 
 /** The state of a composition's most recent draft save. */

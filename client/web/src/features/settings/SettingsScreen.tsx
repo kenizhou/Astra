@@ -17,6 +17,7 @@ import {
   CloseIcon,
   ComposeIcon,
   PeopleIcon,
+  PluginIcon,
   ReadingIcon,
   SettingsIcon,
   ShortcutsIcon,
@@ -30,6 +31,7 @@ import { AdvancedDetail } from './AdvancedDetail';
 import { CalendarDetail } from './CalendarDetail';
 import { ComposingDetail } from './ComposingDetail';
 import { GeneralDetail } from './GeneralDetail';
+import { PluginsDetail } from './PluginsDetail';
 import { ReadingDetail } from './ReadingDetail';
 import { ShortcutsDetail } from './ShortcutsDetail';
 import { useSettingsStore, type SettingsCategory } from './settingsStore';
@@ -48,6 +50,7 @@ const CATEGORIES: ReadonlyArray<{
   { id: 'composing', label: 'Composing', Icon: ComposeIcon },
   { id: 'shortcuts', label: 'Shortcuts', Icon: ShortcutsIcon },
   { id: 'accounts', label: 'Accounts', Icon: PeopleIcon },
+  { id: 'plugins', label: 'Plugins', Icon: PluginIcon },
   { id: 'advanced', label: 'Advanced', Icon: AdvancedIcon },
   { id: 'about', label: 'About', Icon: AboutIcon },
 ];
@@ -157,6 +160,7 @@ export function SettingsScreen() {
               {category === 'composing' && <ComposingDetail />}
               {category === 'shortcuts' && <ShortcutsDetail />}
               {category === 'accounts' && <AccountsDetail />}
+              {category === 'plugins' && <PluginsDetail />}
               {category === 'advanced' && <AdvancedDetail />}
               {category === 'about' && <AboutDetail />}
             </div>

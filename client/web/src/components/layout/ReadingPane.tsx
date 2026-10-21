@@ -18,6 +18,7 @@ import { ReadingHeader } from '@/components/reading-pane/ReadingHeader';
 import { SmartReplies } from '@/components/reading-pane/SmartReplies';
 import { SummaryBlock } from '@/components/reading-pane/SummaryBlock';
 import { TranslateBlock } from '@/components/reading-pane/TranslateBlock';
+import { PluginBanner } from '@/features/plugins/PluginBanner';
 import { ContextMenu, type ContextMenuItem } from '@/components/ui/ContextMenu';
 import { useContextMenu } from '@/components/ui/useContextMenu';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -108,6 +109,9 @@ export function ReadingPane() {
       />
       {snapshot.invitation !== undefined && (
         <InvitationCard message={snapshot.message} invitation={snapshot.invitation} />
+      )}
+      {snapshot.security_banner !== undefined && (
+        <PluginBanner banner={snapshot.security_banner} />
       )}
       <SmartReplies />
       <SummaryBlock />

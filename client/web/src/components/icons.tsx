@@ -9,6 +9,7 @@ import {
   ArchiveArrowUpIcon as ArchiveArrowUpIconData,
   ArchiveIcon as ArchiveIconData,
   ArrowExpandDiagonal01Icon as PopOutIconData,
+  PuzzleIcon as PluginIconData,
   BookOpen02Icon as ReadingIconData,
   Calendar03Icon,
   Cancel01Icon,
@@ -109,3 +110,4 @@ export const RedoIcon = makeIcon(RedoIconData);
 export const RefreshIcon = makeIcon(RefreshIconData);
 export const MoreIcon = makeIcon(MoreIconData);
 export const PopOutIcon = makeIcon(PopOutIconData);
+export const PluginIcon = makeIcon(PluginIconData);

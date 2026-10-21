@@ -13,6 +13,7 @@ import { PopOutIcon, SentIcon, TrashIcon } from '@/components/icons';
 import { SaveBadge } from '@/features/composer/Composer';
 import { popOutComposer } from '@/features/composer/composeWindow';
 import { useComposerStore } from '@/features/composer/composerStore';
+import { PluginComposerActions } from '@/features/plugins/PluginComposerActions';
 import { dispatch, intents } from '@/services/ipc';
 
 import { RibbonButton, RibbonGroup } from './RibbonPrimitives';
@@ -45,6 +46,7 @@ export function ComposeRibbon({ iconOnly }: { iconOnly: boolean }) {
         />
         {composition !== null && <SaveBadge composition={composition} />}
       </RibbonGroup>
+      <PluginComposerActions />
       <RibbonGroup>
         {isTauri && (
           <RibbonButton

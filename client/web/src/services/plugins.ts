@@ -62,6 +62,17 @@ export interface UiDescriptors {
   pages: PageDescriptor[];
 }
 
+/** How much the reader should trust what a security banner says. */
+export type SecurityLevelView = 'info' | 'warning' | 'error';
+
+/** The security banner a plugin's decode returned for the reading pane. */
+export interface SecurityBannerView {
+  /** How much to trust the statement the banner makes. */
+  level: SecurityLevelView;
+  /** The human-readable statement. */
+  text: string;
+}
+
 /** One registry row as the host reports it. */
 export interface PluginRow {
   /** The plugin's id. */
