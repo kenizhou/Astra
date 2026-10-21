@@ -271,7 +271,7 @@ async fn render_reading_answers_none_for_a_message_the_store_does_not_hold() {
 
     let gone = MessageRef::from_parts("work", "m-none".to_owned()).unwrap();
     assert!(
-        super::render_reading(&app.engine, provider, &gone)
+        super::render_reading(&app.engine, provider, &gone, None)
             .await
             .is_none(),
         "an unresolved message renders nothing"

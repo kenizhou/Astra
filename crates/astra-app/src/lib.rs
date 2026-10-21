@@ -23,6 +23,7 @@ mod boot;
 mod calendar;
 mod compose_open;
 mod compose_request;
+mod decode;
 mod dispatch;
 mod drafts;
 mod folder_writes;
@@ -146,6 +147,7 @@ pub use calendar::{
     BRIEF_INVITATION_SCAN_LIMIT, MEETING_BRIEF_PROMPT_VERSION,
 };
 pub use compose_request::OpenDraftError;
+pub use decode::{DecodeOutcome, MessageDecoder};
 pub use dispatch::AppError;
 pub use drafts::{DraftResume, DRAFT_AUTOSAVE_IDLE};
 pub use folder_writes::FolderWriteError;
@@ -325,11 +327,14 @@ pub struct App<P> {
     reply_armed: tokio::sync::Notify,
     /// The plugin send gate: every submit checks with it before queueing.
     /// `None` (the default) and a submit costs nothing.
-    send_gate: Option<Arc<dyn crate::gate::BeforeSendGate>>,
+    pub(crate) send_gate: Option<Arc<dyn crate::gate::BeforeSendGate>>,
     /// The plugin compose transform: every submit's rendered legs pass it
     /// before the gate. `None` (the default) sends what the composer
     /// rendered.
-    compose_transform: Option<Arc<dyn crate::gate::ComposeTransform>>,
+    pub(crate) compose_transform: Option<Arc<dyn crate::gate::ComposeTransform>>,
+    /// The plugin message decoder: every reading open's raw source passes it
+    /// before the render. `None` (the default) renders the store's own read.
+    pub(crate) decoder: Option<Arc<dyn crate::decode::MessageDecoder>>,
 }
 
 impl<P> core::fmt::Debug for App<P> {
@@ -395,6 +400,7 @@ impl<P: Provider> App<P> {
             reply_armed: tokio::sync::Notify::new(),
             send_gate: None,
             compose_transform: None,
+            decoder: None,
         }
     }
 
@@ -442,21 +448,8 @@ impl<P: Provider> App<P> {
         self.ai = pass.map(Arc::new);
         self
     }
-
-    /// Names the plugin gate and transform every submit consults, or `None`
-    /// for both (the default) to send ungated and untransformed. Call it
-    /// before the first dispatch; the host's gate reads its plugin registry
-    /// at call time, so plugins enabled later join without a reinstall.
-    #[must_use]
-    pub fn with_send_gate(
-        mut self,
-        gate: Option<Arc<dyn crate::gate::BeforeSendGate>>,
-        transform: Option<Arc<dyn crate::gate::ComposeTransform>>,
-    ) -> Self {
-        self.send_gate = gate;
-        self.compose_transform = transform;
-        self
-    }
+    // The plugin ports' builders (`with_send_gate`, `with_decoder`) live in
+    // their own modules, beside the ports they install.
 }
 
 /// The mailbox list's scope. An account is always named alongside a folder, so the
