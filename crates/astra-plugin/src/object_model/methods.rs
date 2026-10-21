@@ -14,6 +14,8 @@
 
 use crate::permissions::Permission;
 
+use super::refs::HandleKind;
+
 /// The object-model node a method sits on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NodeKind {
@@ -62,7 +64,8 @@ pub enum Stability {
 }
 
 /// One registered method: its dotted name, the node it sits on, the
-/// permission it costs, and its stability.
+/// permission it costs, the handle it takes (and of which kind), and its
+/// stability.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MethodDef {
     /// The dotted wire name a manifest declares and an `object_call` carries.
@@ -71,6 +74,9 @@ pub struct MethodDef {
     pub node: NodeKind,
     /// The permission a plugin must be granted to call it.
     pub permission: Permission,
+    /// The handle the call must carry, and the kind it must be. `None` means
+    /// the call names no object and must not carry one.
+    pub handle: Option<HandleKind>,
     /// Whether the backing intent exists today.
     pub stability: Stability,
 }
@@ -79,139 +85,30 @@ pub struct MethodDef {
 /// stable rows map to intents that exist today; the proposed rows are the
 /// plan's placeholders (send gate, transform, decode, the AI plane), promoted
 /// as their slices land.
+#[rustfmt::skip]
 pub const METHODS: &[MethodDef] = &[
-    MethodDef {
-        name: "message.markRead",
-        node: NodeKind::Message,
-        permission: Permission::ReadMailbox,
-        stability: Stability::Stable,
-    },
-    MethodDef {
-        name: "message.setFlagged",
-        node: NodeKind::Message,
-        permission: Permission::ReadMailbox,
-        stability: Stability::Stable,
-    },
-    MethodDef {
-        name: "message.archive",
-        node: NodeKind::Message,
-        permission: Permission::ReadMailbox,
-        stability: Stability::Stable,
-    },
-    MethodDef {
-        name: "message.moveToTrash",
-        node: NodeKind::Message,
-        permission: Permission::ReadMailbox,
-        stability: Stability::Stable,
-    },
-    MethodDef {
-        name: "message.reply",
-        node: NodeKind::Message,
-        permission: Permission::ComposeEdit,
-        stability: Stability::Stable,
-    },
-    MethodDef {
-        name: "message.replyAll",
-        node: NodeKind::Message,
-        permission: Permission::ComposeEdit,
-        stability: Stability::Stable,
-    },
-    MethodDef {
-        name: "message.forward",
-        node: NodeKind::Message,
-        permission: Permission::ComposeEdit,
-        stability: Stability::Stable,
-    },
-    MethodDef {
-        name: "message.send",
-        node: NodeKind::Message,
-        permission: Permission::Send,
-        stability: Stability::Proposed,
-    },
-    MethodDef {
-        name: "message.decode",
-        node: NodeKind::Message,
-        permission: Permission::ReadItem,
-        stability: Stability::Proposed,
-    },
-    MethodDef {
-        name: "folder.createSubfolder",
-        node: NodeKind::Folder,
-        permission: Permission::ReadMailbox,
-        stability: Stability::Stable,
-    },
-    MethodDef {
-        name: "explorer.selectFolder",
-        node: NodeKind::Explorer,
-        permission: Permission::ReadItem,
-        stability: Stability::Stable,
-    },
-    MethodDef {
-        name: "explorer.openMessage",
-        node: NodeKind::Explorer,
-        permission: Permission::ReadItem,
-        stability: Stability::Stable,
-    },
-    MethodDef {
-        name: "session.getItemFromID",
-        node: NodeKind::Session,
-        permission: Permission::ReadMailbox,
-        stability: Stability::Stable,
-    },
-    MethodDef {
-        name: "session.getFolderFromID",
-        node: NodeKind::Session,
-        permission: Permission::ReadMailbox,
-        stability: Stability::Stable,
-    },
-    MethodDef {
-        name: "composer.transform",
-        node: NodeKind::Composer,
-        permission: Permission::ComposeEdit,
-        stability: Stability::Proposed,
-    },
-    MethodDef {
-        name: "composer.setOption",
-        node: NodeKind::Composer,
-        permission: Permission::ComposeEdit,
-        stability: Stability::Proposed,
-    },
-    MethodDef {
-        name: "before_send",
-        node: NodeKind::AstraMail,
-        permission: Permission::Send,
-        stability: Stability::Proposed,
-    },
-    MethodDef {
-        name: "agent.summarize",
-        node: NodeKind::Agent,
-        permission: Permission::AiInfer,
-        stability: Stability::Proposed,
-    },
-    MethodDef {
-        name: "agent.classify",
-        node: NodeKind::Agent,
-        permission: Permission::AiInfer,
-        stability: Stability::Proposed,
-    },
-    MethodDef {
-        name: "agent.replySuggest",
-        node: NodeKind::Agent,
-        permission: Permission::AiInfer,
-        stability: Stability::Proposed,
-    },
-    MethodDef {
-        name: "agent.composeAssist",
-        node: NodeKind::Agent,
-        permission: Permission::AiInfer,
-        stability: Stability::Proposed,
-    },
-    MethodDef {
-        name: "agent.agentTask",
-        node: NodeKind::Agent,
-        permission: Permission::AiInfer,
-        stability: Stability::Proposed,
-    },
+    MethodDef { name: "message.markRead", node: NodeKind::Message, permission: Permission::ReadMailbox, handle: Some(HandleKind::Message), stability: Stability::Stable },
+    MethodDef { name: "message.setFlagged", node: NodeKind::Message, permission: Permission::ReadMailbox, handle: Some(HandleKind::Message), stability: Stability::Stable },
+    MethodDef { name: "message.archive", node: NodeKind::Message, permission: Permission::ReadMailbox, handle: Some(HandleKind::Message), stability: Stability::Stable },
+    MethodDef { name: "message.moveToTrash", node: NodeKind::Message, permission: Permission::ReadMailbox, handle: Some(HandleKind::Message), stability: Stability::Stable },
+    MethodDef { name: "message.reply", node: NodeKind::Message, permission: Permission::ComposeEdit, handle: Some(HandleKind::Message), stability: Stability::Stable },
+    MethodDef { name: "message.replyAll", node: NodeKind::Message, permission: Permission::ComposeEdit, handle: Some(HandleKind::Message), stability: Stability::Stable },
+    MethodDef { name: "message.forward", node: NodeKind::Message, permission: Permission::ComposeEdit, handle: Some(HandleKind::Message), stability: Stability::Stable },
+    MethodDef { name: "message.send", node: NodeKind::Message, permission: Permission::Send, handle: Some(HandleKind::Message), stability: Stability::Proposed },
+    MethodDef { name: "message.decode", node: NodeKind::Message, permission: Permission::ReadItem, handle: Some(HandleKind::Message), stability: Stability::Proposed },
+    MethodDef { name: "folder.createSubfolder", node: NodeKind::Folder, permission: Permission::ReadMailbox, handle: Some(HandleKind::Folder), stability: Stability::Stable },
+    MethodDef { name: "explorer.selectFolder", node: NodeKind::Explorer, permission: Permission::ReadItem, handle: Some(HandleKind::Folder), stability: Stability::Stable },
+    MethodDef { name: "explorer.openMessage", node: NodeKind::Explorer, permission: Permission::ReadItem, handle: Some(HandleKind::Message), stability: Stability::Stable },
+    MethodDef { name: "session.getItemFromID", node: NodeKind::Session, permission: Permission::ReadMailbox, handle: Some(HandleKind::Account), stability: Stability::Stable },
+    MethodDef { name: "session.getFolderFromID", node: NodeKind::Session, permission: Permission::ReadMailbox, handle: Some(HandleKind::Account), stability: Stability::Stable },
+    MethodDef { name: "composer.transform", node: NodeKind::Composer, permission: Permission::ComposeEdit, handle: Some(HandleKind::Draft), stability: Stability::Proposed },
+    MethodDef { name: "composer.setOption", node: NodeKind::Composer, permission: Permission::ComposeEdit, handle: Some(HandleKind::Draft), stability: Stability::Proposed },
+    MethodDef { name: "before_send", node: NodeKind::AstraMail, permission: Permission::Send, handle: None, stability: Stability::Proposed },
+    MethodDef { name: "agent.summarize", node: NodeKind::Agent, permission: Permission::AiInfer, handle: Some(HandleKind::Message), stability: Stability::Proposed },
+    MethodDef { name: "agent.classify", node: NodeKind::Agent, permission: Permission::AiInfer, handle: None, stability: Stability::Proposed },
+    MethodDef { name: "agent.replySuggest", node: NodeKind::Agent, permission: Permission::AiInfer, handle: Some(HandleKind::Message), stability: Stability::Proposed },
+    MethodDef { name: "agent.composeAssist", node: NodeKind::Agent, permission: Permission::AiInfer, handle: Some(HandleKind::Draft), stability: Stability::Proposed },
+    MethodDef { name: "agent.agentTask", node: NodeKind::Agent, permission: Permission::AiInfer, handle: None, stability: Stability::Proposed },
 ];
 
 /// The registry entry for a dotted method name, when the name is registered.

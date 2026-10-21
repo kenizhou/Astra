@@ -16,6 +16,7 @@ mod lifecycle;
 mod manifest;
 mod object_model;
 mod permissions;
+mod router;
 
 pub use hook_api::{
     AccountRef, ComposeTransformRequest, ComposeTransformResponse, DecodedPart, HookMetadata,
@@ -29,3 +30,4 @@ pub use object_model::{
     WorkerMessage, AOM_VERSION, METHODS, PLUGIN_API_LEVEL,
 };
 pub use permissions::{default_approval, Approval, Permission};
+pub use router::{RouteError, RoutedCall, Router};
