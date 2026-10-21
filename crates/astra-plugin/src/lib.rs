@@ -11,6 +11,7 @@
 //! [`Approval::NeedsApproval`], a human decides every grant, and a manifest
 //! that asks for a method without declaring its permission never parses.
 
+mod bundle;
 mod hook_api;
 mod lifecycle;
 mod manifest;
@@ -19,6 +20,9 @@ mod permissions;
 mod router;
 mod worker;
 
+pub use bundle::{
+    hex, pack, pack_and_sign, verify, verify_and_unpack, BundleError, VerifiedBundle,
+};
 pub use hook_api::{
     AccountRef, ComposeTransformRequest, ComposeTransformResponse, DecodedPart, HookMetadata,
     MessageDecodeRequest, MessageDecodeResponse, SecurityBanner, SecurityLevel,

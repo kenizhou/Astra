@@ -1,19 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Persisted app preferences: the mailbox-list view mode, which sidebar trees are shut,
-//! the selected folder, and the settings block (theme, clock, zone, first day of the
-//! week, horizon, quote style, default calendar). Host app preferences, not synced data,
-//! so they live in a small TOML file beside the engine store rather than in the store
-//! itself.
+//! Persisted app preferences: the list's view mode and expansion, the last
+//! selection, the settings block, the signature assignments, and the plugin
+//! policy switch. Host app preferences, not synced data, so they live in a
+//! small TOML file beside the engine store rather than in the store itself.
 //!
-//! The expansion map is stored **inverted** relative to the question every caller asks:
-//! the file holds what is collapsed, so an account or folder nobody has touched (and
-//! every one of them on a first launch) opens showing what is inside it. The accessors
-//! keep that inversion in one place, so no caller reads the set directly and gets the
-//! answer backwards.
+//! The expansion map is stored **inverted**: the file holds what is
+//! collapsed, so an untouched account or folder opens showing what is inside
+//! it; read through the accessors, never the set directly.
 //!
-//! [`PreferencesState`] is the runtime's in-memory copy plus the path it writes through:
-//! a toggle changes the copy, then persists with a read-modify-write against what is on
-//! disk right now, so a concurrent write to an unrelated preference is not clobbered.
+//! [`PreferencesState`] is the runtime's in-memory copy plus the path it
+//! writes through: a toggle changes the copy, then persists with a
+//! read-modify-write against what is on disk right now, so a concurrent write
+//! to an unrelated preference is not clobbered.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -57,8 +55,8 @@ pub struct Preferences {
     /// through [`Preferences::folder_expanded`].
     #[serde(default)]
     pub collapsed_folders: BTreeMap<String, BTreeSet<String>>,
-    /// The folder that was showing when the app last stopped, so a relaunch reopens it;
-    /// `None` outside a folder view.
+    /// The folder that was showing when the app last stopped, so a relaunch
+    /// reopens it; `None` outside a folder view.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_folder: Option<FolderRef>,
     /// The account whose own view was showing when the app last stopped, so a
@@ -95,16 +93,17 @@ pub struct Preferences {
     /// account answers; a request (reply, forward) always keeps its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_send_account: Option<engine_api::AccountId>,
-    /// Each account's signature assignment, by account id. An account
-    /// absent from the map seeds no signature, and its last empty slot
-    /// takes its row with it, so the file holds only live assignments.
+    /// Each account's signature assignment, by account id; the file holds
+    /// only live assignments.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub signatures: BTreeMap<engine_api::AccountId, AccountSignatures>,
+    /// Whether plugins run at all (the admin policy switch); on by default.
+    #[serde(default = "default_true")]
+    pub plugins_enabled: bool,
 }
 
 /// The shipped defaults, which the serde field defaults and a first launch
-/// name as one set. Manual rather than derived because the zone, the
-/// horizon, and the quote style are not the std defaults of their types.
+/// name as one set.
 impl Default for Preferences {
     fn default() -> Self {
         Self {
@@ -122,6 +121,7 @@ impl Default for Preferences {
             default_calendar: None,
             default_send_account: None,
             signatures: BTreeMap::new(),
+            plugins_enabled: true,
         }
     }
 }
@@ -135,7 +135,6 @@ fn default_zone() -> String {
 fn default_horizon() -> u32 {
     42
 }
-
 /// The shortest horizon a setting may name: a window shorter than a week
 /// cannot hold the week a cold grid paints.
 pub(crate) const HORIZON_MIN_DAYS: u32 = 7;
@@ -144,7 +143,7 @@ pub(crate) const HORIZON_MIN_DAYS: u32 = 7;
 /// window may be asked to materialise in one go.
 pub(crate) const HORIZON_MAX_DAYS: u32 = 365;
 
-/// The shipped composer default: the quoted original below the reply.
+/// The composer default and the policy switch share the on-by-default answer.
 fn default_true() -> bool {
     true
 }
@@ -433,6 +432,7 @@ impl PreferencesState {
             horizon_days: prefs.horizon_days,
             quote_below: prefs.quote_below,
             view_mode: prefs.view_mode,
+            plugins_enabled: prefs.plugins_enabled,
             default_calendar: prefs.default_calendar.as_ref().map(|pin| {
                 astra_viewmodel::DefaultCalendar {
                     account: pin.account.clone(),
@@ -489,6 +489,7 @@ impl PreferencesState {
         on_disk
             .default_send_account
             .clone_from(&self.prefs.default_send_account);
+        on_disk.plugins_enabled = self.prefs.plugins_enabled;
         on_disk.signatures.clone_from(&self.prefs.signatures);
         self.last_save_failed = save_preferences(path, &on_disk).is_err();
     }

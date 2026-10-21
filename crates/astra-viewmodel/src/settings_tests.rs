@@ -39,6 +39,7 @@ fn the_snapshot_crosses_its_full_shape_and_reads_back() {
                 key: calendar("cal-1"),
             }),
             default_send_account: Some(account("work")),
+            plugins_enabled: true,
         },
         accounts: vec![AccountSettingsRow {
             account: account("work"),
@@ -91,6 +92,7 @@ fn the_snapshot_crosses_its_full_shape_and_reads_back() {
                 "horizon_days": 31,
                 "quote_below": false,
                 "view_mode": "threaded",
+                "plugins_enabled": true,
                 "default_calendar": { "account": "work", "key": "cal-1" },
                 "default_send_account": "work"
             },
@@ -305,6 +307,7 @@ fn an_unpinned_default_calendar_and_empty_attributions_cross_no_key() {
         view_mode: ViewMode::Flat,
         default_calendar: None,
         default_send_account: None,
+        plugins_enabled: true,
     };
     let wire = serde_json::to_value(&block).expect("the block serialises");
     assert!(

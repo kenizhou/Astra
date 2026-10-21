@@ -38,6 +38,8 @@ export interface SettingsBlock {
   default_calendar?: DefaultCalendar;
   /** The account plain compositions open from; absent is unpinned. */
   default_send_account?: string;
+  /** Whether plugins run at all (the admin policy switch); on by default. */
+  plugins_enabled?: boolean;
 }
 
 /** One account's signature assignment: what its new mail and its replies
@@ -138,6 +140,7 @@ export type SettingsIntentBody =
   | 'refresh'
   | { set_theme: { mode: ThemeMode } }
   | { set_clock: { twenty_four: boolean } }
+  | { set_plugins_enabled: { enabled: boolean } }
   | { set_zone: { zone: string } }
   | { set_first_day_of_week: { weekday: WeekdayWire } }
   | { set_horizon: { days: number } }
@@ -175,6 +178,10 @@ export const settingsIntents = {
   /** Set the clock to 24-hour or 12-hour. */
   setClock: (twentyFour: boolean) => ({
     settings: { set_clock: { twenty_four: twentyFour } },
+  }),
+  /** Set whether plugins run at all (the admin policy switch). */
+  setPluginsEnabled: (enabled: boolean) => ({
+    settings: { set_plugins_enabled: { enabled } },
   }),
   /** Set the calendar's display zone; the core refuses an id it cannot resolve. */
   setZone: (zone: string) => ({ settings: { set_zone: { zone } } }),

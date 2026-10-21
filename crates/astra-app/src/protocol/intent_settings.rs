@@ -70,6 +70,11 @@ pub enum SettingsIntent {
         /// Whether the clock is 24-hour.
         twenty_four: bool,
     },
+    /// Set whether plugins run at all (the admin policy switch).
+    SetPluginsEnabled {
+        /// On or off.
+        enabled: bool,
+    },
     /// Set the calendar's display zone.
     SetZone {
         /// The IANA id, carried verbatim; the core validates it on dispatch.

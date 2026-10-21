@@ -136,6 +136,31 @@ text、select、password、action）；`pages` 在沙箱 frame 中打开。一�
 `frame_result` / `frame_error`）与其 worker 通信，桥只服务 frame 自己窗
 口的消息，并受与一切调用相同的已声明方法门控。
 
+## 分发
+
+`.astra-plugin` 是插件目录的未压缩 tar，外加 `publisher.pub` 与
+`signature.bin`：签名是对规范摘要的 ed25519（排序后 (路径,
+sha256(内容)) 对的 sha256，签名自身不参与，发布者密钥参与）。验证即防篡
+改加身份：签名必须对包内发布者密钥验证通过，且该密钥必须等于 manifest
+的 `publisher` 字段。同意对话框显示的指纹是发布者密钥 sha256 的前 8 字
+节（hex）。这有意不是证书链：信任决定在安装时由人做出。
+
+生产构建（无 `ASTRA_PLUGIN_DEV` 且为发布版）拒绝未签名或无法验证的包；
+开发模式照旧接受未签名目录树。`cargo run -p xtask -- bundle-keygen
+<key-file>` 铸造发布者密钥并打印 manifest 的 `publisher` 字段；
+`bundle-plugin <dir> <key-file>` 打包并签名。
+
+安装是先报价后同意：`plugin_install_offer` 验证并点名一切（id、名称、版
+本、发布者指纹、所请权限、隐私政策 URL），同意对话框的复选框默认不勾
+（失败关闭），`plugin_install` 重新验证、解入受管目录、恰好记录所勾授
+权。安装完成的插件保持停用，直至手动启用。
+
+授权与启用标记写穿到注册表根目录旁的 `grants.toml`；启动时读取并重新启
+用已启用集合（如今失败的 worker 落入 Failed，绝不使启动失败）。生产构
+建绝不启用声明了 proposed 方法的插件。`plugins_enabled` 偏好（设置快照
+的块，默认开）即管理策略开关：关则启动不启用任何插件、`enable` 被拒、
+闸门/解码器/调用端面视同没有任何插件在服务。
+
 ## 已记录的已知缺口
 
 - 在 `before_send` 处理器激活前已入队的 op 不做追溯过闸；drain 内的逐
@@ -148,8 +173,8 @@ text、select、password、action）；`pages` 在沙箱 frame 中打开。一�
 - 事件流仅以 envelope 类型与订阅簿记存在；尚无 astra-app 事件喂入。
 - blob 缓存的配额与淘汰已在契约中点名；缓存本身随第一个需要它的
   payload 落地。
-- 授权尚不跨重启持久化。
 - decode 接缝已在阅读流水线中落地（`MessageDecoder` 端口、原始源交给服
   务中的插件、解出的腿走完全相同的消毒流水线、横幅进入阅读快照）；尚
   缺的是一个真正执行解码的已发布插件（加密模块为内置，Track B）。
-- 签名包与安装对话框是 SP3d。
+- 发布者密钥是自我声明的（侧载信任）；带发布者身份验证的策划商店、密
+  钥轮换、吊销与自动更新是计划中的"以后"。

@@ -7,10 +7,21 @@
 
 import { useEffect, useState } from 'react';
 
-import { pluginDisable, pluginEnable, type PluginRow } from '@/services/plugins';
+import { open as openFile } from '@tauri-apps/plugin-dialog';
+
+import {
+  pluginDisable,
+  pluginEnable,
+  pluginInstallOffer,
+  type InstallOffer,
+  type PluginRow,
+} from '@/services/plugins';
+import { dispatch, intents } from '@/services/ipc';
 import { PluginFrame } from '@/features/plugins/PluginFrame';
+import { InstallConsentDialog } from '@/features/plugins/InstallConsentDialog';
 import { PluginSettingsSections } from '@/features/plugins/PluginSettingsSection';
 import { usePluginStore } from '@/stores/pluginStore';
+import { useSettingsStore } from './settingsStore';
 
 /** One plugin's row: its name, state, grants, and the verb its state allows. */
 function PluginRowView({ row }: { row: PluginRow }) {
@@ -67,17 +78,54 @@ function PluginRowView({ row }: { row: PluginRow }) {
   );
 }
 
-/** The plugins detail: the registry rows, then the declared sections. */
+/** The plugins detail: the policy switch and install entry, then the
+ * registry rows, then the declared sections. */
 export function PluginsDetail() {
   const rows = usePluginStore((s) => s.rows);
   const refresh = usePluginStore((s) => s.refresh);
+  const pluginsEnabled = useSettingsStore((s) => s.settings.plugins_enabled ?? true);
+  const [offer, setOffer] = useState<{ path: string; offer: InstallOffer } | null>(null);
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  const installFromFile = async (): Promise<void> => {
+    const path = await openFile({
+      filters: [{ name: 'Astra plugin', extensions: ['astra-plugin'] }],
+    });
+    if (typeof path !== 'string') {
+      return;
+    }
+    try {
+      setOffer({ path, offer: await pluginInstallOffer(path) });
+    } catch (err) {
+      console.error('plugins: the install offer failed', err);
+    }
+  };
+
   return (
     <div className="space-y-4">
+      <label className="flex items-center gap-2 text-xs text-foreground">
+        <input
+          type="checkbox"
+          checked={pluginsEnabled}
+          onChange={(event) =>
+            void dispatch(intents.setPluginsEnabled(event.target.checked))
+          }
+        />
+        Run plugins
+      </label>
       <div className="space-y-2">
-        <h3 className="text-xs font-medium text-muted-foreground">Plugins</h3>
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-medium text-muted-foreground">Plugins</h3>
+          <button
+            type="button"
+            onClick={() => void installFromFile()}
+            className="rounded-[var(--radius-xs)] px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            Install from file…
+          </button>
+        </div>
         {rows.length === 0 ? (
           <p className="text-xs text-muted-foreground">No plugins discovered.</p>
         ) : (
@@ -85,6 +133,18 @@ export function PluginsDetail() {
         )}
       </div>
       <PluginSettingsSections />
+      {offer !== null && (
+        <InstallConsentDialog
+          offer={offer.offer}
+          path={offer.path}
+          onDone={(installed) => {
+            setOffer(null);
+            if (installed) {
+              void refresh();
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

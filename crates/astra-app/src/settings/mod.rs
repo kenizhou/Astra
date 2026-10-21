@@ -133,6 +133,10 @@ impl<P: Provider> App<P> {
                 self.set_setting(|prefs| prefs.twenty_four_clock = twenty_four)
                     .await;
             }
+            SettingsIntent::SetPluginsEnabled { enabled } => {
+                self.set_setting(|prefs| prefs.plugins_enabled = enabled)
+                    .await;
+            }
             SettingsIntent::SetZone { zone } => self.set_zone(zone).await,
             SettingsIntent::SetFirstDayOfWeek { weekday } => {
                 self.set_setting(|prefs| prefs.first_day_of_week = weekday)

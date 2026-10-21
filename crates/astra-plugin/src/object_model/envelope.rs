@@ -29,8 +29,9 @@ pub enum HostMessage {
     /// pinned versions, and the worker's private data directory. The worker
     /// must never see another plugin's.
     PluginInit {
-        /// The parsed manifest.
-        manifest: PluginManifest,
+        /// The parsed manifest. Boxed: the init dwarfs the other variants,
+        /// and it crosses once per worker lifetime.
+        manifest: Box<PluginManifest>,
         /// The permissions the host granted.
         grants: Vec<Permission>,
         /// The plugin API level the host speaks.

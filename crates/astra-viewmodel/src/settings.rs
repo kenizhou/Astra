@@ -93,6 +93,14 @@ pub struct SettingsBlock {
     /// account answers; a request (reply, forward) always keeps its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_send_account: Option<AccountId>,
+    /// Whether plugins run at all (the admin policy switch). On by default.
+    #[serde(default = "default_plugins_enabled")]
+    pub plugins_enabled: bool,
+}
+
+/// The switch's default: plugins run unless the preference says otherwise.
+fn default_plugins_enabled() -> bool {
+    true
 }
 
 /// The theme the chrome renders: follow the host, or an explicit override.

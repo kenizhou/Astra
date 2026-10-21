@@ -10,3 +10,7 @@ workspace = true
 
 [dependencies]
 image = "0.25.10"
+# The bundle verbs pack and sign through the contract crate's own functions.
+astra-plugin = { path = "../crates/astra-plugin" }
+# The publisher key's algorithm (the workspace's ring line).
+ring.workspace = true

@@ -33,6 +33,7 @@ fn the_settings_pull_round_trips_the_published_snapshot() {
             view_mode: ViewMode::Threaded,
             default_calendar: None,
             default_send_account: None,
+            plugins_enabled: true,
         },
         accounts: vec![AccountSettingsRow {
             account: account(),

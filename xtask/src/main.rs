@@ -4,16 +4,20 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+mod bundle;
 mod checks;
 mod icons;
 
 fn main() -> ExitCode {
     let root = repo_root();
     let mut args = env::args().skip(1);
-    match (args.next().as_deref(), args.next().as_deref()) {
-        (Some("gate"), None) => gate(&root),
-        (Some("check"), Some(name)) => one(&root, name),
-        (Some("icons"), None) => {
+    let verb = args.next();
+    match verb.as_deref() {
+        Some("gate") => gate(&root),
+        Some("check") => one(&root, args.next().as_deref().unwrap_or("")),
+        Some("bundle-keygen") => bundle::keygen(args.next().as_deref()),
+        Some("bundle-plugin") => bundle::bundle(args.next().as_deref(), args.next().as_deref()),
+        Some("icons") => {
             let written = icons::generate(
                 &root.join("branding/icon-source.jpg"),
                 &root.join("client/desktop/icons"),
@@ -32,7 +36,9 @@ fn main() -> ExitCode {
             }
         }
         _ => {
-            eprintln!("usage: cargo run -p xtask -- gate | check <name> | icons");
+            eprintln!(
+                "usage: cargo run -p xtask -- gate | check <name> | icons | bundle-keygen <key-file> | bundle-plugin <dir> <key-file>"
+            );
             ExitCode::FAILURE
         }
     }

@@ -136,6 +136,7 @@
 | 消息 decode 接缝与阅读窗格安全横幅 | 🚧 | MessageDecoder 端口把原始源交给服务中的插件，应答的腿走完全相同的消毒流水线渲染，横幅随阅读快照进入 PluginBanner；echo 插件经真实 worker 协议应答；plugins.md |
 | 插件 UI 描述符：编写器动作、设置分区与 Plugins 设置页 | 🚧 | manifest 的 `[ui]` 表严格解析并经 plugin_list 呈现；chrome 渲染动作（点击即自定义命名空间调用）与分区字段，Plugins 设置页列出每个已发现插件及其动词；plugins.md |
 | 沙箱富页面：astra-plugin:// 上的 PluginFrame | 🚧 | scheme 只在插件自己的目录内解析（拒绝穿越与跨插件读取，HTML 携带锁定的 CSP），frame 的 postMessage 桥只应答已声明的自定义方法；plugins.md |
+| 签名包、安装同意、持久授权与策略开关 | 🚧 | ed25519 签名 tar 验证发布者身份与完整性（篡改、错误密钥、生产版未签名各自被拒），报价/同意流程恰好安装所勾授权，授权与启用标记跨重启持久（启动时重新启用），生产构建绝不启用 proposed 方法插件，plugins_enabled 开关令所有端面静默；plugins.md |
 | 桌面注册表：发现、启停、授权审批 | 🚧 | 受管理的插件目录加 ASTRA_PLUGIN_DEV 路径、生命周期机、四条精简命令；授权在分发切片的同意对话框落地前为会话状态；plugins.md |
 | echo 符合性插件 | 🚧 | 桩 worker 在进程内与真实 spawn 进程两种形态下完成 envelope 往返；随仓库提供，绝不进入构建 |
 | S/MIME 签名与加密 | ⬜ | 已定为内置（2026-10-20），不做插件：crates/astra-crypto，SP-CRYPTO |

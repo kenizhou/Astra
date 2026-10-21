@@ -71,6 +71,10 @@ fn set_clock_and_set_quote_style_carry_their_flag() {
         &Intent::Settings(SettingsIntent::SetQuoteStyle { below: false }),
         r#"{"settings":{"set_quote_style":{"below":false}}}"#,
     );
+    round_trips(
+        &Intent::Settings(SettingsIntent::SetPluginsEnabled { enabled: false }),
+        r#"{"settings":{"set_plugins_enabled":{"enabled":false}}}"#,
+    );
 }
 
 #[test]

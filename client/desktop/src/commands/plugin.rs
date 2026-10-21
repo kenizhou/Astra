@@ -11,7 +11,10 @@ use tauri::State;
 use astra_plugin::Permission;
 
 use super::CommandError;
-use crate::{plugin::PluginRow, AppState};
+use crate::{
+    plugin::{InstallOffer, PluginRow},
+    AppState,
+};
 
 /// Lists the discovered plugins.
 // Tauri's command macro hands `State` by value; the wrapper only reads through it.
@@ -84,5 +87,34 @@ pub(crate) async fn plugin_call(
         .plugins
         .call(&id, &method, args)
         .await
+        .map_err(|error| CommandError::Intent(error.to_string()))
+}
+
+/// The install offer for one bundle: verified and parsed, nothing unpacked.
+// Tauri's command macro hands `State` by value; the wrapper only reads through it.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) fn plugin_install_offer(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<InstallOffer, CommandError> {
+    state
+        .plugins
+        .install_offer(std::path::Path::new(&path))
+        .map_err(|error| CommandError::Intent(error.to_string()))
+}
+
+/// Installs one bundle with the consented grants; the plugin lands disabled.
+// Tauri's command macro hands `State` by value; the wrapper only reads through it.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) fn plugin_install(
+    state: State<'_, AppState>,
+    path: String,
+    grants: Vec<Permission>,
+) -> Result<(), CommandError> {
+    state
+        .plugins
+        .install(std::path::Path::new(&path), &grants)
         .map_err(|error| CommandError::Intent(error.to_string()))
 }

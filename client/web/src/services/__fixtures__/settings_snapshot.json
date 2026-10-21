@@ -7,14 +7,21 @@
     "horizon_days": 31,
     "quote_below": false,
     "view_mode": "threaded",
-    "default_calendar": { "account": "work", "key": "cal-1" }
+    "default_calendar": {
+      "account": "work",
+      "key": "cal-1"
+    },
+    "plugins_enabled": true
   },
   "accounts": [
     {
       "account": "work",
       "address": "ada@example.test",
       "kind": "imap_smtp",
-      "legs": { "calendar": true, "contacts": false },
+      "legs": {
+        "calendar": true,
+        "contacts": false
+      },
       "dav": {
         "caldav_url": "https://dav.example.test",
         "username": "ada@example.test",
@@ -26,7 +33,11 @@
   ],
   "about": {
     "version": "0.1.0",
-    "attributions": ["email-calendar-sync-engine", "pi", "web"]
+    "attributions": [
+      "email-calendar-sync-engine",
+      "pi",
+      "web"
+    ]
   },
   "error": "persist_failed"
 }

@@ -342,7 +342,7 @@ pub(crate) async fn spawn_and_init_once(shared: &Arc<Shared>) -> Result<(), Work
         killer,
     } = pipes;
     let init = HostMessage::PluginInit {
-        manifest: shared.manifest.clone(),
+        manifest: Box::new(shared.manifest.clone()),
         grants: shared.router.grants().iter().copied().collect(),
         api_level: PLUGIN_API_LEVEL,
         aom_version: AOM_VERSION,
