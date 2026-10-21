@@ -57,14 +57,21 @@ pub async fn run(
 }
 
 /// The echo's answer for one call: the send gate gets its allow verdict, the
-/// compose transform gets its own bodies back in the response's shape, and
-/// every other method gets its args verbatim.
+/// compose transform gets its own bodies back in the response's shape, the
+/// message decode gets the raw source back as one plain part with no banner,
+/// and every other method gets its args verbatim.
 fn answer_for(method: &str, args: serde_json::Value) -> serde_json::Value {
     match method {
         "before_send" => serde_json::json!({ "verdict": "allow" }),
         "composer.transform" => serde_json::json!({
             "html": args["composer_html"],
             "plain": args["composer_plain"],
+        }),
+        "message.decode" => serde_json::json!({
+            "decoded_parts": [{
+                "mime_type": "text/plain",
+                "content": args["raw_message"].as_str().unwrap_or_default(),
+            }],
         }),
         _ => args,
     }
@@ -193,6 +200,24 @@ mod tests {
             transformed["value"],
             serde_json::json!({ "html": "<p>hi</p>", "plain": "hi" }),
             "the transform answers in the response's shape"
+        );
+
+        say(
+            &mut host,
+            serde_json::json!({
+                "type": "object_call",
+                "id": "c4",
+                "handle": "msg.dev.astra.echo.1.1",
+                "method": "message.decode",
+                "args": { "raw_message": "From: a@b.test\r\n\r\nhi", "metadata": {} },
+            }),
+        )
+        .await;
+        let decoded = hear(&mut host).await;
+        assert_eq!(
+            decoded["value"]["decoded_parts"],
+            serde_json::json!([{ "mime_type": "text/plain", "content": "From: a@b.test\r\n\r\nhi" }]),
+            "the decode echoes the raw as one plain part"
         );
 
         say(&mut host, serde_json::json!({ "type": "plugin_shutdown" })).await;

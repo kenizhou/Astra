@@ -113,6 +113,9 @@ pub(crate) fn assemble_state(
     ));
     let gate_for_boot: Arc<dyn astra_app::BeforeSendGate> = gate.clone();
     let transform_for_boot: Arc<dyn astra_app::ComposeTransform> = gate;
+    let decoder_for_boot: Arc<dyn astra_app::MessageDecoder> = Arc::new(
+        crate::plugin::PluginDecoder::new(Arc::clone(&plugins), GATE_HANDLER_TIMEOUT),
+    );
     let core = runtime.block_on(|| {
         astra_app::boot(
             &engine_path,
@@ -123,6 +126,7 @@ pub(crate) fn assemble_state(
             ai_pass,
             Some(gate_for_boot),
             Some(transform_for_boot),
+            Some(decoder_for_boot),
         )
     })?;
     // The settings seam: the account store the settings surface reads the

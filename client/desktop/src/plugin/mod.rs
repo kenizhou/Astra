@@ -15,7 +15,12 @@
 
 pub(crate) mod gate;
 
+mod decode;
+pub(crate) use decode::PluginDecoder;
 pub(crate) use gate::PluginGate;
+
+#[cfg(test)]
+pub(crate) mod testkit;
 
 use std::{
     collections::HashMap,

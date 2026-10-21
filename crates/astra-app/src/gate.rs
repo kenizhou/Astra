@@ -18,8 +18,12 @@
 //! its recipients, or its subject; the held row carries the plugin's id and
 //! its reason, never the body.
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
-use engine_api::{AccountId, EmailAddress};
+use engine_api::{AccountId, EmailAddress, Provider};
+
+use crate::App;
 
 /// One composition at the send gate: the built draft's envelope and both
 /// rendered bodies, everything a handler vets or rewrites.
@@ -95,4 +99,21 @@ pub trait ComposeTransform: Send + Sync {
         &self,
         composition: GateComposition,
     ) -> Result<GateComposition, TransformFailure>;
+}
+
+impl<P: Provider> App<P> {
+    /// Names the plugin gate and transform every submit consults, or `None`
+    /// for both (the default) to send ungated and untransformed. Call it
+    /// before the first dispatch; the host's gate reads its plugin registry
+    /// at call time, so plugins enabled later join without a reinstall.
+    #[must_use]
+    pub fn with_send_gate(
+        mut self,
+        gate: Option<Arc<dyn BeforeSendGate>>,
+        transform: Option<Arc<dyn ComposeTransform>>,
+    ) -> Self {
+        self.send_gate = gate;
+        self.compose_transform = transform;
+        self
+    }
 }

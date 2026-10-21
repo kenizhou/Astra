@@ -34,6 +34,7 @@ pub use people::{
 };
 pub use reading::{
     AttachmentRow, InvitationBlock, InvitationKind, MessageKey, NotAMessageRow, ReadingSnapshot,
+    SecurityBannerView, SecurityLevelView,
 };
 pub use rows::{MessageRowView, RowKey, ViewMode};
 pub use search::{SearchScope, SearchState};

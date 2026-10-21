@@ -12,11 +12,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use astra_app::{BeforeSendGate, ComposeTransform, GateComposition, GateVerdict};
-use astra_plugin::{Permission, SpawnFn};
+use astra_plugin::Permission;
 use engine_api::{AccountId, EmailAddress};
-use tokio::io::{duplex, AsyncBufReadExt, AsyncWriteExt, DuplexStream};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, DuplexStream};
 
-use super::{PluginGate, PluginRegistry};
+use crate::plugin::{testkit, PluginGate, PluginRegistry};
 
 /// The verdict a scripted worker answers `before_send` with, or hangs. The
 /// allow path is the echo plugin's job (the conformance counterparty), so the
@@ -74,87 +74,6 @@ fn scripted_worker(
     }
 }
 
-/// A spawn function driving one scripted worker over a duplex pair.
-fn spawn_of(
-    worker: impl Fn(DuplexStream) -> tokio::task::JoinHandle<()> + Send + Sync + 'static,
-) -> SpawnFn {
-    Arc::new(move || {
-        let (host_end, worker_end) = duplex(4096);
-        let (read, write) = tokio::io::split(host_end);
-        worker(worker_end);
-        Box::pin(async move {
-            Ok(astra_plugin::WorkerPipes {
-                reader: Box::new(tokio::io::BufReader::new(read)),
-                writer: Box::new(write),
-                killer: Box::new(|| Box::pin(async {})),
-            })
-        })
-    })
-}
-
-/// The echo plugin over a duplex pair: the conformance counterparty itself.
-fn spawn_echo() -> SpawnFn {
-    spawn_of(|stream| {
-        let (read, write) = tokio::io::split(stream);
-        tokio::spawn(async move {
-            let _ = astra_plugin_echo::run(tokio::io::BufReader::new(read), write).await;
-        })
-    })
-}
-
-fn scratch(name: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "astra-desktop-gate-{}-{}",
-        name,
-        std::process::id()
-    ));
-    std::fs::create_dir_all(&dir).expect("scratch dir");
-    dir
-}
-
-/// A registry holding one plugin with the given mode and grants, its manifest
-/// written under the scratch root.
-async fn registry_with(
-    name: &str,
-    mode: &str,
-    grants: &[Permission],
-    spawn: SpawnFn,
-) -> Arc<PluginRegistry> {
-    let root = scratch(name);
-    let dir = root.join("dev.astra.gate");
-    std::fs::create_dir_all(&dir).expect("plugin dir");
-    std::fs::write(
-        dir.join("manifest.toml"),
-        // Every permission the methods need is declared; the grant table
-        // (what `grants` is approved into below) is what the gate checks.
-        format!(
-            r#"
-id = "dev.astra.gate"
-name = "Gate"
-version = "0.1.0"
-api_level = 1
-aom_version = 1
-methods = ["before_send", "composer.transform"]
-permissions = ["send", "admin", "compose_edit"]
-before_send_mode = "{mode}"
-"#
-        ),
-    )
-    .expect("manifest written");
-    let registry = Arc::new(PluginRegistry::new(root, vec![], true));
-    registry.list();
-    for grant in grants {
-        registry
-            .approve("dev.astra.gate", *grant)
-            .expect("declared grant");
-    }
-    registry
-        .enable_with("dev.astra.gate", spawn)
-        .await
-        .expect("the plugin enables");
-    registry
-}
-
 fn composition() -> GateComposition {
     GateComposition {
         account: AccountId::try_from("work").unwrap(),
@@ -176,11 +95,13 @@ fn gate(registry: &Arc<PluginRegistry>) -> PluginGate {
 fn the_echo_plugins_allow_folds_to_allow() {
     let runtime = crate::runtime::build_runtime().expect("the test runtime builds");
     runtime.block_on(|| async {
-        let registry = registry_with(
+        let registry = testkit::registry_with(
             "allow",
-            "block",
+            "dev.astra.gate",
+            &["before_send", "composer.transform"],
+            Some("block"),
             &[Permission::Send, Permission::Admin],
-            spawn_echo(),
+            testkit::spawn_echo(),
         )
         .await;
         let gate = gate(&registry);
@@ -216,11 +137,13 @@ fn a_block_verdict_blocks_and_a_prompt_mode_prompts() {
             ),
         ] {
             let seen = Arc::new(Mutex::new(0));
-            let registry = registry_with(
+            let registry = testkit::registry_with(
                 &format!("block-{mode}"),
-                mode,
+                "dev.astra.gate",
+                &["before_send", "composer.transform"],
+                Some(mode),
                 &[Permission::Send, Permission::Admin],
-                spawn_of(scripted_worker(Script::Block, seen)),
+                testkit::spawn_of(scripted_worker(Script::Block, seen)),
             )
             .await;
             let gate = gate(&registry);
@@ -244,11 +167,13 @@ fn an_unavailable_worker_blocks_block_mode_and_fails_the_rest_open() {
             ("soft_block", GateVerdict::Allow),
             ("prompt_user", GateVerdict::Allow),
         ] {
-            let registry = registry_with(
+            let registry = testkit::registry_with(
                 &format!("down-{mode}"),
-                mode,
+                "dev.astra.gate",
+                &["before_send", "composer.transform"],
+                Some(mode),
                 &[Permission::Send, Permission::Admin],
-                spawn_echo(),
+                testkit::spawn_echo(),
             )
             .await;
             // The worker dies: the gate must answer from the mode, not hang.
@@ -272,11 +197,13 @@ fn a_slow_handler_times_out_by_its_mode() {
             ("soft_block", false),
             ("prompt_user", false),
         ] {
-            let registry = registry_with(
+            let registry = testkit::registry_with(
                 &format!("slow-{mode}"),
-                mode,
+                "dev.astra.gate",
+                &["before_send", "composer.transform"],
+                Some(mode),
                 &[Permission::Send, Permission::Admin],
-                spawn_of(scripted_worker(Script::Hang, Arc::new(Mutex::new(0)))),
+                testkit::spawn_of(scripted_worker(Script::Hang, Arc::new(Mutex::new(0)))),
             )
             .await;
             let gate = gate(&registry);
@@ -295,11 +222,13 @@ fn a_slow_handler_times_out_by_its_mode() {
 fn a_malformed_answer_is_an_error_not_a_verdict() {
     let runtime = crate::runtime::build_runtime().expect("the test runtime builds");
     runtime.block_on(|| async {
-        let registry = registry_with(
+        let registry = testkit::registry_with(
             "malformed",
-            "block",
+            "dev.astra.gate",
+            &["before_send", "composer.transform"],
+            Some("block"),
             &[Permission::Send, Permission::Admin],
-            spawn_of(scripted_worker(Script::Malformed, Arc::new(Mutex::new(0)))),
+            testkit::spawn_of(scripted_worker(Script::Malformed, Arc::new(Mutex::new(0)))),
         )
         .await;
         let gate = gate(&registry);
@@ -315,11 +244,13 @@ fn a_plugin_without_the_admin_grant_is_never_called() {
     let runtime = crate::runtime::build_runtime().expect("the test runtime builds");
     runtime.block_on(|| async {
         let seen = Arc::new(Mutex::new(0));
-        let registry = registry_with(
+        let registry = testkit::registry_with(
             "no-admin",
-            "block",
+            "dev.astra.gate",
+            &["before_send", "composer.transform"],
+            Some("block"),
             &[Permission::Send], // declared, granted; admin withheld
-            spawn_of(scripted_worker(Script::Block, Arc::clone(&seen))),
+            testkit::spawn_of(scripted_worker(Script::Block, Arc::clone(&seen))),
         )
         .await;
         let gate = gate(&registry);
@@ -336,11 +267,13 @@ fn a_plugin_without_the_admin_grant_is_never_called() {
 fn the_transform_round_trips_through_the_echo_plugin() {
     let runtime = crate::runtime::build_runtime().expect("the test runtime builds");
     runtime.block_on(|| async {
-        let registry = registry_with(
+        let registry = testkit::registry_with(
             "transform",
-            "block",
+            "dev.astra.gate",
+            &["before_send", "composer.transform"],
+            Some("block"),
             &[Permission::Send, Permission::Admin, Permission::ComposeEdit],
-            spawn_echo(),
+            testkit::spawn_echo(),
         )
         .await;
         let gate = gate(&registry);
@@ -357,11 +290,13 @@ fn the_transform_round_trips_through_the_echo_plugin() {
 fn a_failing_transform_worker_fails_closed() {
     let runtime = crate::runtime::build_runtime().expect("the test runtime builds");
     runtime.block_on(|| async {
-        let registry = registry_with(
+        let registry = testkit::registry_with(
             "transform-down",
-            "block",
+            "dev.astra.gate",
+            &["before_send", "composer.transform"],
+            Some("block"),
             &[Permission::Send, Permission::Admin, Permission::ComposeEdit],
-            spawn_echo(),
+            testkit::spawn_echo(),
         )
         .await;
         registry

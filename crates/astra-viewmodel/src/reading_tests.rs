@@ -44,6 +44,7 @@ fn a_full_reading_snapshot_crosses_with_every_optional_key() {
         ],
         remote_image_count: 2,
         invitation: None,
+        security_banner: None,
     };
 
     let json = serde_json::to_string(&snapshot).unwrap();
@@ -69,6 +70,36 @@ fn a_full_reading_snapshot_crosses_with_every_optional_key() {
 }
 
 #[test]
+fn a_security_banner_crosses_with_level_and_text() {
+    let snapshot = ReadingSnapshot {
+        message: MessageKey {
+            account: account("work"),
+            key: key("imap:v1:u42"),
+        },
+        subject: "Quarterly report".to_owned(),
+        from_name: "Ada Lovelace".to_owned(),
+        from_address: "ada@example.test".to_owned(),
+        sent_at: "2026-10-09T08:30:00Z".to_owned(),
+        html: None,
+        plain: Some("See the report.".to_owned()),
+        attachments: Vec::new(),
+        remote_image_count: 0,
+        invitation: None,
+        security_banner: Some(SecurityBannerView {
+            level: SecurityLevelView::Warning,
+            text: "Signature invalid".to_owned(),
+        }),
+    };
+    let json = serde_json::to_string(&snapshot).unwrap();
+    assert!(
+        json.contains(r#""security_banner":{"level":"warning","text":"Signature invalid"}"#),
+        "{json}"
+    );
+    let back: ReadingSnapshot = serde_json::from_str(&json).unwrap();
+    assert_eq!(back, snapshot);
+}
+
+#[test]
 fn a_plain_only_reading_snapshot_crosses_with_no_optional_keys() {
     let snapshot = ReadingSnapshot {
         message: MessageKey {
@@ -84,6 +115,7 @@ fn a_plain_only_reading_snapshot_crosses_with_no_optional_keys() {
         attachments: Vec::new(),
         remote_image_count: 0,
         invitation: None,
+        security_banner: None,
     };
 
     let json = serde_json::to_string(&snapshot).unwrap();
@@ -203,6 +235,7 @@ fn an_invitation_block_crosses_after_the_body_with_snake_case_words() {
             summary: "Sprint planning".to_owned(),
             organizer: "boss@test.local".to_owned(),
         }),
+        security_banner: None,
     };
 
     let json = serde_json::to_string(&snapshot).unwrap();

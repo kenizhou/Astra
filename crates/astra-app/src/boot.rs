@@ -59,6 +59,7 @@ pub async fn boot<P, S>(
     ai: Option<AiPass>,
     gate: Option<Arc<dyn crate::gate::BeforeSendGate>>,
     transform: Option<Arc<dyn crate::gate::ComposeTransform>>,
+    decoder: Option<Arc<dyn crate::decode::MessageDecoder>>,
 ) -> Result<Arc<App<P>>, BootError>
 where
     P: Provider + 'static,
@@ -79,7 +80,8 @@ where
     let app = App::new(engine, accounts, connector, observer)
         .with_prefs_path(Some(prefs_path))
         .with_ai_pass(ai)
-        .with_send_gate(gate, transform);
+        .with_send_gate(gate, transform)
+        .with_decoder(decoder);
     let app = Arc::new(app);
     // Before anything can drain: a write the last run left mid-attempt is put back the
     // way the point it reached allows, so the first drain sends what never left and
