@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/*", "xtask", "cli", "client/desktop"]
+members = ["crates/*", "xtask", "cli", "client/desktop", "plugins/*"]
 # Bare `cargo build`/`test`/`run` stay on the engine-side crates; the desktop
 # host builds explicitly (`cargo build -p astra-desktop`) because its Tauri
 # dependency tree is heavy and needs the platform webview libraries.

@@ -17,7 +17,12 @@ serde.workspace = true
 toml.workspace = true
 # The envelope family's call arguments and event payloads are open JSON.
 serde_json.workspace = true
+# The worker host: process spawn, line IO, timeouts, and the channels its
+# supervision runs on.
+tokio = { workspace = true, features = ["process", "io-util", "sync", "time", "rt"] }
 
 [dev-dependencies]
 # Asserting the exact JSON wire shape of every hook contract in the tests.
 serde_json.workspace = true
+# The worker host's tests run scripted in-memory workers on a real runtime.
+tokio = { workspace = true, features = ["macros", "rt", "test-util"] }

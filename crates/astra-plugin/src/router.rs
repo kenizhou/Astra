@@ -151,6 +151,12 @@ impl Router {
         }
     }
 
+    /// The granted permission set this router was built with; the worker
+    /// host's init envelope reports exactly these to the plugin.
+    pub(crate) fn grants(&self) -> &HashSet<Permission> {
+        &self.grants
+    }
+
     /// Routes one call through the three gates.
     ///
     /// # Errors

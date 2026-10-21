@@ -17,6 +17,7 @@ mod manifest;
 mod object_model;
 mod permissions;
 mod router;
+mod worker;
 
 pub use hook_api::{
     AccountRef, ComposeTransformRequest, ComposeTransformResponse, DecodedPart, HookMetadata,
@@ -31,3 +32,6 @@ pub use object_model::{
 };
 pub use permissions::{default_approval, Approval, Permission};
 pub use router::{RouteError, RoutedCall, Router};
+pub use worker::{
+    Killer, SpawnFn, WorkerConfig, WorkerError, WorkerEvent, WorkerHost, WorkerPipes, WorkerState,
+};

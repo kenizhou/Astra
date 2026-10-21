@@ -1,0 +1,7 @@
+id = "dev.astra.echo"
+name = "Echo (conformance fixture)"
+version = "0.1.0"
+api_level = 1
+aom_version = 1
+methods = ["plugin.dev.astra.echo.ping", "message.markRead"]
+permissions = ["read_mailbox"]
