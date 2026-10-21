@@ -51,12 +51,8 @@ pub(crate) mod people;
 // The settings command surface (the snapshot pull), under the same split.
 pub(crate) mod settings;
 
-// The mcp command surface (the advanced panel's status pull and its two
-// host-side mutations), under the same split.
+// The mcp and plugin surfaces (the advanced panel's seam, the registry's verbs).
 pub(crate) mod mcp;
-
-// The plugin command surface (the registry's list / enable / disable /
-// approve verbs), under the same split.
 pub(crate) mod plugin;
 
 // The jmap add command surface (the wizard's JMAP form's password leg)
