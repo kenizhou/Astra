@@ -17,6 +17,7 @@ vi.mock('@/services/ipc', async (importOriginal) => ({
 }));
 
 import type { QueuedKey, QueuedRow } from '@/services/ipc';
+import type { HeldSend } from '@/services/sending';
 import { useSendingStore } from '@/stores/sendingStore';
 
 import { OutboxQueue } from './OutboxQueue';
@@ -210,5 +211,57 @@ describe('the row actions', () => {
       useSendingStore.getState().applySnapshot({ rows: [] });
     });
     expect(screen.getByRole('status').textContent).toBe('Message sent');
+  });
+});
+
+describe('the held rows', () => {
+  function held(state: HeldSend['state']): HeldSend {
+    return {
+      hold: 'hold-7',
+      account: 'work',
+      subject: 'Held report',
+      plugin: 'dev.astra.crypto',
+      reason: 'no ready key for ada@example.test',
+      state,
+    };
+  }
+
+  it('renders a checking hold with the plugin named and no actions', () => {
+    useSendingStore.getState().applySnapshot({ rows: [], held: [held('checking')] });
+    render(<OutboxQueue account="work" />);
+    expect(screen.getByText('Checking')).toBeTruthy();
+    expect(screen.getByText('Waiting on dev.astra.crypto')).toBeTruthy();
+    expect(screen.queryByRole('button')).toBeNull();
+  });
+
+  it('renders a needs_answer hold with Send anyway and Deny', () => {
+    useSendingStore.getState().applySnapshot({ rows: [], held: [held('needs_answer')] });
+    render(<OutboxQueue account="work" />);
+    expect(screen.getByText('dev.astra.crypto: no ready key for ada@example.test')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Send anyway' }));
+    expect(ipc.dispatch).toHaveBeenCalledWith({
+      outbox: { answer_gate: { hold: 'hold-7', send_anyway: true } },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Deny' }));
+    expect(ipc.dispatch).toHaveBeenCalledWith({
+      outbox: { answer_gate: { hold: 'hold-7', send_anyway: false } },
+    });
+  });
+
+  it('renders a blocked hold with Retry and Withdraw', () => {
+    useSendingStore.getState().applySnapshot({ rows: [], held: [held('blocked')] });
+    render(<OutboxQueue account="work" />);
+    expect(screen.getByText('Held')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(ipc.dispatch).toHaveBeenCalledWith({ outbox: { retry_held: { hold: 'hold-7' } } });
+    fireEvent.click(screen.getByRole('button', { name: 'Withdraw' }));
+    expect(ipc.dispatch).toHaveBeenCalledWith({ outbox: { withdraw_held: { hold: 'hold-7' } } });
+  });
+
+  it('shows the empty state only when neither leg has a row', () => {
+    useSendingStore.getState().applySnapshot({ rows: [], held: [held('blocked')] });
+    render(<OutboxQueue account="work" />);
+    expect(screen.queryByText('No sends waiting')).toBeNull();
+    expect(screen.getByText('Held report')).toBeTruthy();
   });
 });
