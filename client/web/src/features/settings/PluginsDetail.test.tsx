@@ -81,3 +81,29 @@ describe('the plugins detail', () => {
     expect(dead).toBeTruthy();
   });
 });
+
+describe('the plugin pages', () => {
+  it('opens a declared page in the sandboxed frame and closes it again', async () => {
+    api.pluginList.mockResolvedValue([
+      {
+        ...row('dev.astra.keys', 'activated'),
+        ui: {
+          composer_actions: [],
+          settings_sections: [],
+          pages: [{ id: 'keys', title: 'Key manager', entry: 'keys.html' }],
+        },
+      },
+    ]);
+    render(<PluginsDetail />);
+    const toggle = await screen.findByRole('button', { name: 'Key manager' });
+    toggle.click();
+    const frame = await screen.findByTitle('Key manager', { suggest: false });
+    expect(frame.tagName).toBe('IFRAME');
+    expect(frame.getAttribute('src')).toBe('astra-plugin://dev.astra.keys/keys.html');
+    expect(frame.getAttribute('sandbox')).toBe('allow-scripts allow-same-origin');
+    toggle.click();
+    await waitFor(() => {
+      expect(screen.queryByTitle('Key manager', { suggest: false })).toBeNull();
+    });
+  });
+});

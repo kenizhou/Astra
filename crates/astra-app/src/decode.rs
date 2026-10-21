@@ -4,9 +4,9 @@
 //!
 //! The seam sits in `render_reading`, between the resolve and the render: the
 //! raw source is read (`engine.message_source`, cache-first) and handed to
-//! the installed decoder, and the answer's parts replace the rendered legs —
+//! the installed decoder, and the answer's parts replace the rendered legs:
 //! the decoded HTML through the identical sanitise / inline-cid / remote-gate
-//! pipeline every other body takes, the decoded plain as the text view — with
+//! pipeline every other body takes, the decoded plain as the text view, with
 //! the answer's banner riding the snapshot's `security_banner` leg. No
 //! decoder, an error, or a timeout: today's rendering, no banner. The decode
 //! sees raw bytes only under the plugin's `read_item` grant, and the host
