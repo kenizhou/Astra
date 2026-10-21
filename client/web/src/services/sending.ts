@@ -48,7 +48,10 @@ export type OutboxIntent =
   | { cancel: { queued: QueuedRef } }
   | { send_now: { queued: QueuedRef } }
   | { confirm_sent: { queued: QueuedRef } }
-  | { confirm_not_sent: { queued: QueuedRef } };
+  | { confirm_not_sent: { queued: QueuedRef } }
+  | { answer_gate: { hold: string; send_anyway: boolean } }
+  | { retry_held: { hold: string } }
+  | { withdraw_held: { hold: string } };
 
 /** Where a queued send has got to; crosses as a plain snake_case word. */
 export type QueuedState = 'queued' | 'sending' | 'unconfirmed' | 'failed';
@@ -77,6 +80,27 @@ export interface QueuedRow {
 export interface SendingSnapshot {
   /** The outstanding sends, oldest queue position first within each account. */
   rows: QueuedRow[];
+  /** The sends the plugin gate is holding, in hold order; absent when none. */
+  held?: HeldSend[];
+}
+
+/** Where a held send stands; crosses as a plain snake_case word. */
+export type HeldState = 'checking' | 'needs_answer' | 'blocked';
+
+/** One send the plugin gate is holding back from the queue. */
+export interface HeldSend {
+  /** The hold's id: what an answer, a retry, or a withdraw names. */
+  hold: string;
+  /** The account the send would leave from. */
+  account: string;
+  /** The subject line, empty if the draft carried none. */
+  subject: string;
+  /** The plugin whose verdict is awaited or whose refusal holds the send. */
+  plugin: string;
+  /** The reason, in product words. */
+  reason: string;
+  /** Where the hold stands. */
+  state: HeldState;
 }
 
 /** The sending constructors, spread into ipc's `intents` in the enum's own order. */
@@ -105,4 +129,12 @@ export const sendingIntents = {
   confirmQueuedNotSent: (queued: QueuedRef) => ({
     outbox: { confirm_not_sent: { queued } },
   }),
+  /** Answer a prompt-user gate: Send Anyway queues without re-gating, Deny keeps the draft. */
+  answerGate: (hold: string, sendAnyway: boolean) => ({
+    outbox: { answer_gate: { hold, send_anyway: sendAnyway } },
+  }),
+  /** Re-run the gate over a held send. */
+  retryHeld: (hold: string) => ({ outbox: { retry_held: { hold } } }),
+  /** Drop a held send; the draft behind it stays in Drafts. */
+  withdrawHeld: (hold: string) => ({ outbox: { withdraw_held: { hold } } }),
 };
