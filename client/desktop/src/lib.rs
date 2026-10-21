@@ -83,6 +83,9 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .register_uri_scheme_protocol("astra-plugin", |context, request| {
+            plugin::scheme::handler(context.app_handle(), request)
+        })
         .on_page_load(mailto::on_page_load)
         .invoke_handler(tauri::generate_handler![
             commands::dispatch,
