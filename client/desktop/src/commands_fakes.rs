@@ -407,6 +407,11 @@ pub(crate) fn state(name: &str, app: Arc<FakeApp>, store: Arc<FakeStore>) -> App
         app,
         agent: relay,
         mcp: mcp_host::host(name),
+        plugins: Arc::new(crate::plugin::PluginRegistry::new(
+            scratch(name).join("plugins"),
+            vec![],
+            true,
+        )),
         llm: None,
         connections: Arc::new(AccountDials::empty(&scratch(name))),
         photo_root: scratch(name).join("photos"),

@@ -23,6 +23,11 @@ fn stub_state(name: &str, mode: &str) -> (crate::AppState, Arc<CollectingSink>) 
         app: FakeApp::new(),
         agent: relay,
         mcp: crate::commands_fakes::host(&format!("{name}-agent")),
+        plugins: Arc::new(crate::plugin::PluginRegistry::new(
+            scratch(name).join("plugins"),
+            vec![],
+            true,
+        )),
         llm: None,
         connections: Arc::new(crate::AccountDials::empty(&scratch(name))),
         photo_root: scratch(name).join("photos"),

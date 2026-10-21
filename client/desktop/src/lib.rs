@@ -26,6 +26,7 @@ mod mailto;
 mod mcp;
 mod oauth;
 mod observer;
+mod plugin;
 
 // The command-surface test fixtures: one compiled copy of the fake app, the
 // credential store, and the state builder, at the crate root so every command
@@ -133,7 +134,11 @@ pub fn run() {
             agent::commands::agent_prompt,
             agent::commands::agent_abort,
             agent::commands::agent_status,
-            agent::commands::permission_response
+            agent::commands::permission_response,
+            commands::plugin::plugin_list,
+            commands::plugin::plugin_enable,
+            commands::plugin::plugin_disable,
+            commands::plugin::plugin_approve
         ])
         .setup(boot::setup_host)
         .build(tauri::generate_context!())

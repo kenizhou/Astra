@@ -450,6 +450,10 @@ pub(crate) struct AppState {
     /// account gate. It carries a runtime of its own, so its drop
     /// carries no ordering constraint against the app runtime below.
     pub(crate) mcp: Arc<McpHost>,
+    /// The plugin registry: discovered plugins, the grant table, and the
+    /// worker hosts. Its workers' pumps run on the app runtime, so it
+    /// drops before it, beside the agent relay.
+    pub(crate) plugins: Arc<crate::plugin::PluginRegistry>,
     /// The background LLM client, when a tier table resolved at boot: the
     /// use-case chains, the provider keys, and the ledger its attempts
     /// land in.

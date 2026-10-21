@@ -167,6 +167,11 @@ pub struct PluginManifest {
     /// permissions are actually granted is the host's fail-closed decision,
     /// never the manifest's.
     pub permissions: Vec<Permission>,
+    /// The worker executable inside the plugin's directory, when the manifest
+    /// sits beside its binary. Absent in tests and in manifests that name
+    /// their binary by convention (the last id segment plus the OS suffix).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entrypoint: Option<String>,
 }
 
 impl PluginManifest {

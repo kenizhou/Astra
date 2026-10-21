@@ -79,9 +79,15 @@ pub(crate) async fn retry_loop(shared: &Arc<Shared>) -> Result<(), WorkerError> 
                     inner.attempts += 1;
                     inner.attempts
                 };
+                // A spawn that cannot start (a missing or refused binary)
+                // never fixes itself inside the backoff window, and a version
+                // or declaration mismatch never does either: all three are
+                // fatal, so the budget is not spent spinning on them.
                 let fatal = matches!(
                     error,
-                    WorkerError::VersionMismatch { .. } | WorkerError::UndeclaredMethods(_)
+                    WorkerError::Spawn(_)
+                        | WorkerError::VersionMismatch { .. }
+                        | WorkerError::UndeclaredMethods(_)
                 );
                 if fatal || attempts > shared.config.restart_max {
                     shared.set_state(WorkerState::Lost);

@@ -270,6 +270,7 @@ dependencies = [
  "astra-composer",
  "astra-mcp",
  "astra-oauth",
+ "astra-plugin",
  "astra-viewmodel",
  "async-trait",
  "engine-api",

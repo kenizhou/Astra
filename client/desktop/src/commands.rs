@@ -55,6 +55,10 @@ pub(crate) mod settings;
 // host-side mutations), under the same split.
 pub(crate) mod mcp;
 
+// The plugin command surface (the registry's list / enable / disable /
+// approve verbs), under the same split.
+pub(crate) mod plugin;
+
 // The jmap add command surface (the wizard's JMAP form's password leg)
 // and the attachments command surface (the reading pane's Save As), under
 // the same split.

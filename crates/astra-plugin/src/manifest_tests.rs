@@ -156,6 +156,20 @@ fn an_unknown_field_is_rejected() {
 }
 
 #[test]
+fn an_entrypoint_is_optional_and_round_trips() {
+    assert_eq!(
+        PluginManifest::parse(VALID).expect("valid").entrypoint,
+        None,
+        "absent entrypoint parses as None and is omitted on the wire"
+    );
+    let text = format!("{VALID}entrypoint = \"crypto-worker.exe\"\n");
+    let manifest = PluginManifest::parse(&text).expect("with entrypoint");
+    assert_eq!(manifest.entrypoint.as_deref(), Some("crypto-worker.exe"));
+    let value = serde_json::to_value(&manifest).expect("serialises");
+    assert_eq!(value["entrypoint"], serde_json::json!("crypto-worker.exe"));
+}
+
+#[test]
 fn the_retired_hooks_field_is_rejected() {
     // The hook era is over: a manifest written against hook_api v1 must fail
     // loudly (an unknown field or a missing api_level), never parse silently.
