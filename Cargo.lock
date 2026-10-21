@@ -271,6 +271,7 @@ dependencies = [
  "astra-mcp",
  "astra-oauth",
  "astra-plugin",
+ "astra-plugin-echo",
  "astra-viewmodel",
  "async-trait",
  "engine-api",

@@ -27,7 +27,8 @@ intent；快照发布）。
 
 **文件：** client/desktop/src/plugin/gate.rs（在注册表 worker 上实现两
 个端口：按插件超时与模式折叠、admin 授权检查）；boot 在激活服务插件时
-安装闸门；`plugin_gate_answer` 命令；echo 经 duplex 的集成测试。
+安装闸门；prompt 作答经既有 dispatch 路径（`AnswerGate` intent，不新增
+命令）；echo 经 duplex 的集成测试。
 
 - [ ] 先写测试；提交 `feat: fold the plugin workers into the send gate`。
 

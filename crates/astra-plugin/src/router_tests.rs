@@ -206,24 +206,14 @@ fn a_handle_is_refused_when_the_method_expects_none() {
 
 #[test]
 fn a_proposed_method_is_dev_build_only() {
-    let mut table = HandleTable::new(PluginId::new("dev.astra.echo".to_string()), 1);
-    let draft = table.mint(
-        HandleKind::Draft,
-        "work".to_string(),
-        "compose-1".to_string(),
-    );
+    let table = HandleTable::new(PluginId::new("dev.astra.echo".to_string()), 1);
     let released = Router::new(
         manifest(&["composer.transform"], &["compose_edit"]),
         &[Permission::ComposeEdit],
         false,
     );
     let error = released
-        .route(
-            &table,
-            &Some(draft.clone()),
-            "composer.transform",
-            &json!({}),
-        )
+        .route(&table, &None, "composer.transform", &json!({}))
         .expect_err("proposed refused in a release build");
     assert!(matches!(error, RouteError::ProposedMethod(m) if m == "composer.transform"));
 
@@ -233,7 +223,7 @@ fn a_proposed_method_is_dev_build_only() {
         true,
     );
     assert!(
-        dev.route(&table, &Some(draft), "composer.transform", &json!({}))
+        dev.route(&table, &None, "composer.transform", &json!({}))
             .is_ok(),
         "proposed routes in a dev build"
     );

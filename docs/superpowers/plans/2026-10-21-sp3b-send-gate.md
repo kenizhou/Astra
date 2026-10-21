@@ -29,7 +29,8 @@ prompt answer and held retry/withdraw intents; the snapshot publishing).
 **Files:** client/desktop/src/plugin/gate.rs (the two ports over the
 registry's workers, the per-plugin timeout and mode folding, the admin-grant
 check); the boot installs the gate when a serving plugin is activated; the
-`plugin_gate_answer` command; the echo-over-duplex integration test.
+prompt answer rides the existing dispatch path (the `AnswerGate` intent, no
+new command); the echo-over-duplex integration test.
 
 - [ ] Tests first; commit `feat: fold the plugin workers into the send gate`.
 

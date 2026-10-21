@@ -312,7 +312,6 @@ impl FakeApp {
                     row.queued.account == queued.account && row.queued.op == queued.op.get()
                 };
                 match action {
-                    OutboxIntent::Show => {}
                     OutboxIntent::Cancel { queued } | OutboxIntent::ConfirmSent { queued } => {
                         queue.snapshot.rows.retain(|row| !acted(row, queued));
                     }
@@ -330,8 +329,13 @@ impl FakeApp {
                             }
                         }
                     }
+                    // The gate intents are the app core's seam; the fake never
+                    // gates, so they change nothing here.
+                    _ => {}
                 }
             }
+            // Only the outbox family plays; every other intent is the app's,
+            // not the fake queue's.
             _ => {}
         }
     }

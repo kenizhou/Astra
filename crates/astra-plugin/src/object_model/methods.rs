@@ -101,7 +101,9 @@ pub const METHODS: &[MethodDef] = &[
     MethodDef { name: "explorer.openMessage", node: NodeKind::Explorer, permission: Permission::ReadItem, handle: Some(HandleKind::Message), stability: Stability::Stable },
     MethodDef { name: "session.getItemFromID", node: NodeKind::Session, permission: Permission::ReadMailbox, handle: Some(HandleKind::Account), stability: Stability::Stable },
     MethodDef { name: "session.getFolderFromID", node: NodeKind::Session, permission: Permission::ReadMailbox, handle: Some(HandleKind::Account), stability: Stability::Stable },
-    MethodDef { name: "composer.transform", node: NodeKind::Composer, permission: Permission::ComposeEdit, handle: Some(HandleKind::Draft), stability: Stability::Proposed },
+    // The send-seam transform is stateless: the payload carries the whole
+    // composition, so no draft handle rides the call.
+    MethodDef { name: "composer.transform", node: NodeKind::Composer, permission: Permission::ComposeEdit, handle: None, stability: Stability::Proposed },
     MethodDef { name: "composer.setOption", node: NodeKind::Composer, permission: Permission::ComposeEdit, handle: Some(HandleKind::Draft), stability: Stability::Proposed },
     MethodDef { name: "before_send", node: NodeKind::AstraMail, permission: Permission::Send, handle: None, stability: Stability::Proposed },
     MethodDef { name: "agent.summarize", node: NodeKind::Agent, permission: Permission::AiInfer, handle: Some(HandleKind::Message), stability: Stability::Proposed },
