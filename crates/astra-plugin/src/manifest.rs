@@ -289,6 +289,13 @@ pub struct PluginManifest {
     /// The UI descriptors the plugin declares, when it declares any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ui: Option<UiDescriptors>,
+    /// The publisher's ed25519 public key, lowercase hex. Signed bundles
+    /// verify against exactly this key (see `bundle`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publisher: Option<String>,
+    /// The publisher's privacy policy, shown at install consent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub privacy_policy_url: Option<String>,
     /// The worker executable inside the plugin's directory, when the manifest
     /// sits beside its binary. Absent in tests and in manifests that name
     /// their binary by convention (the last id segment plus the OS suffix).

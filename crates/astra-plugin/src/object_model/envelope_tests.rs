@@ -28,7 +28,7 @@ permissions = []
 #[test]
 fn plugin_init_carries_manifest_grants_versions_and_data_dir() {
     let message = HostMessage::PluginInit {
-        manifest: manifest(),
+        manifest: Box::new(manifest()),
         grants: vec![Permission::ReadItem],
         api_level: PLUGIN_API_LEVEL,
         aom_version: AOM_VERSION,

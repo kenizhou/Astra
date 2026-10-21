@@ -7,13 +7,16 @@
 
 use std::path::PathBuf;
 
-use astra_plugin::{Lifecycle, Permission, WorkerHost};
+#[cfg(test)]
+use astra_plugin::WorkerHost;
+use astra_plugin::{Lifecycle, Permission};
 
 use super::{PluginRegistry, RegistryError, ServingWorker, GATE_CALL_TIMEOUT};
 
 impl PluginRegistry {
-    /// The worker host of one activated plugin, for the call sites that drive
-    /// it directly (the gate's tests shut a worker down through it).
+    /// The worker host of one activated plugin; the tests shut a worker down
+    /// through it.
+    #[cfg(test)]
     pub(crate) fn worker_host(&self, id: &str) -> Option<WorkerHost> {
         self.entries
             .lock()
