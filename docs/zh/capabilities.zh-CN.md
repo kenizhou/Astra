@@ -132,6 +132,7 @@
 |---|---|---|
 | 插件平台：版本化 AOM envelope、宿主签发句柄、三道闸路由器 | 🚧 | 契约 crate 只放行 manifest 已声明、权限已授予、句柄在作用域内的调用，含评审后的权限拆分（compose_edit 与 send 分离）与仅限开发版的 proposed 层；plugins.md |
 | 带 sidecar 监督的 worker 宿主 | 🚧 | 每个插件一个进程外 worker，经 JSONL stdio：版本钉死的握手、代际号、重启预算、未决调用与订阅的 fail-closed 排空均已测试，含 spawn 失败即致命的规则；plugins.md |
+| 发送闸门：before_send 的 block/soft_block/prompt_user 模式与 composer.transform | 🚧 | 每次发送在入队前过闸与变换；被阻断的发送永不入队（发送快照中的待决行，草稿持久）；已用脚本化否决在 harness 上实机证明（否决下不到达，解除后重试到达），并由 echo 插件经真实 worker 协议验证；plugins.md |
 | 桌面注册表：发现、启停、授权审批 | 🚧 | 受管理的插件目录加 ASTRA_PLUGIN_DEV 路径、生命周期机、四条精简命令；授权在分发切片的同意对话框落地前为会话状态；plugins.md |
 | echo 符合性插件 | 🚧 | 桩 worker 在进程内与真实 spawn 进程两种形态下完成 envelope 往返；随仓库提供，绝不进入构建 |
 | S/MIME 签名与加密 | ⬜ | 已定为内置（2026-10-20），不做插件：crates/astra-crypto，SP-CRYPTO |

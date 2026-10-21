@@ -130,6 +130,7 @@ this row ports.
 |---|---|---|
 | Plugin platform: versioned AOM envelope, host-issued handles, three-gate router | 🚧 | the contract crate routes manifest-declared, permission-granted, in-scope calls only, with the reviewed permission split (compose_edit vs send) and the dev-gated proposed tier; plugins.md |
 | Worker host with sidecar supervision | 🚧 | one out-of-process worker per plugin over JSONL stdio: the pinned-version handshake, generations, the restart budget, and fail-closed draining of pending calls and subscriptions all tested, including a fatal-spawn rule; plugins.md |
+| Send gate: before_send with block/soft_block/prompt_user modes, and composer.transform | 🚧 | every send is gated and transformed before queueing; a blocked send never queues (held rows in the sending snapshot, the draft durable); proven live against the harness with a scripted veto (never delivered, delivered on retry after the veto lifts), and by the echo plugin over the real worker protocol; plugins.md |
 | Desktop registry: discovery, enable/disable, grant approvals | 🚧 | the managed plugins directory plus ASTRA_PLUGIN_DEV paths, the lifecycle machine, and the four thin commands; grants are session state until the distribution slice's consent dialog; plugins.md |
 | echo conformance plugin | 🚧 | the stub worker round-trips the envelope in-process and as a real spawned process; ships in the repo, never in a build |
 | S/MIME signing and encryption | ⬜ | decided built-in (2026-10-20), not a plugin: crates/astra-crypto, SP-CRYPTO |
