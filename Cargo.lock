@@ -281,6 +281,7 @@ dependencies = [
  "keyring",
  "log",
  "reqwest",
+ "ring",
  "rusqlite",
  "serde",
  "serde_json",

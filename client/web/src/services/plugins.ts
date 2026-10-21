@@ -119,3 +119,29 @@ export function pluginApprove(id: string, permission: string): Promise<void> {
 export function pluginCall(id: string, method: string, args: unknown): Promise<unknown> {
   return invoke('plugin_call', { id, method, args });
 }
+
+/** The install offer one bundle answers: everything the consent dialog shows. */
+export interface InstallOffer {
+  /** The plugin's id. */
+  id: string;
+  /** Its display name. */
+  name: string;
+  /** Its version. */
+  version: string;
+  /** The publisher key's fingerprint (empty for an unsigned dev bundle). */
+  publisher_fingerprint: string;
+  /** The permissions the manifest requests, as wire names. */
+  permissions: string[];
+  /** The publisher's privacy policy, when the bundle names one. */
+  privacy_policy_url?: string;
+}
+
+/** The install offer for one bundle: verified and parsed, nothing unpacked. */
+export function pluginInstallOffer(path: string): Promise<InstallOffer> {
+  return invoke('plugin_install_offer', { path });
+}
+
+/** Installs one bundle with the consented grants; the plugin lands disabled. */
+export function pluginInstall(path: string, grants: string[]): Promise<void> {
+  return invoke('plugin_install', { path, grants });
+}

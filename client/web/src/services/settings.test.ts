@@ -29,6 +29,7 @@ describe('the settings snapshot wire', () => {
       horizon_days: 31,
       quote_below: false,
       view_mode: 'threaded',
+      plugins_enabled: true,
       default_calendar: { account: 'work', key: 'cal-1' },
     });
     expect(snapshot.accounts).toEqual([
@@ -86,7 +87,7 @@ describe('the settings snapshot wire', () => {
 
   it('crosses an at-rest snapshot with no accounts and no error key', () => {
     const snapshot = JSON.parse(
-      '{"settings":{"theme":"follow_host","twenty_four_clock":false,"zone":"","first_day_of_week":"mo","horizon_days":0,"quote_below":false,"view_mode":"flat"},"about":{"version":""}}',
+      '{"settings":{"theme":"follow_host","twenty_four_clock":false,"zone":"","first_day_of_week":"mo","horizon_days":0,"quote_below":false,"view_mode":"flat","plugins_enabled":true},"about":{"version":""}}',
     ) as SettingsSnapshot;
     expect(snapshot.accounts).toBeUndefined();
     expect(snapshot.error).toBeUndefined();

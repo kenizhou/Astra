@@ -20,7 +20,9 @@ mod permissions;
 mod router;
 mod worker;
 
-pub use bundle::{hex, pack, pack_and_sign, verify_and_unpack, BundleError, VerifiedBundle};
+pub use bundle::{
+    hex, pack, pack_and_sign, verify, verify_and_unpack, BundleError, VerifiedBundle,
+};
 pub use hook_api::{
     AccountRef, ComposeTransformRequest, ComposeTransformResponse, DecodedPart, HookMetadata,
     MessageDecodeRequest, MessageDecodeResponse, SecurityBanner, SecurityLevel,

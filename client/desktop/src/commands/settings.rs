@@ -14,7 +14,11 @@ use crate::AppState;
 /// The published settings snapshot: the persisted settings block, one row
 /// per configured account, and the about block.
 pub(crate) fn settings_of(state: &AppState) -> SettingsSnapshot {
-    state.app.settings()
+    let snapshot = state.app.settings();
+    // The policy switch mirrors into the registry on every pull: the setting
+    // changes only through the settings intents, and the pull follows them.
+    state.plugins.set_active(snapshot.settings.plugins_enabled);
+    snapshot
 }
 
 /// Pulls the settings snapshot.

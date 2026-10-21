@@ -6,6 +6,8 @@
 
 use std::path::{Path, PathBuf};
 
+use ring::signature::KeyPair as _;
+
 use super::*;
 
 fn scratch(name: &str) -> PathBuf {
@@ -301,4 +303,121 @@ fn a_malformed_grants_file_reads_as_empty() {
         .find(|row| row.id == "dev.astra.echo")
         .expect("row");
     assert!(row.grants.is_empty(), "a malformed file is no grants");
+}
+
+#[test]
+fn the_offer_names_everything_and_the_install_persists_the_checked_grants() {
+    crate::runtime::build_runtime()
+        .expect("runtime")
+        .block_on(|| async {
+            // Build and sign a bundle of the fixture plugin in a scratch dir.
+            let key = {
+                let rng = ring::rand::SystemRandom::new();
+                let pkcs8 =
+                    ring::signature::Ed25519KeyPair::generate_pkcs8(&rng).expect("generated");
+                ring::signature::Ed25519KeyPair::from_pkcs8(pkcs8.as_ref()).expect("parsed")
+            };
+            let source = scratch("install-src").join("dev.astra.echo");
+            std::fs::create_dir_all(&source).expect("dir");
+            std::fs::write(
+                source.join("manifest.toml"),
+                format!(
+                    r#"
+id = "dev.astra.echo"
+name = "Echo"
+version = "0.1.0"
+api_level = 1
+aom_version = 1
+methods = ["plugin.dev.astra.echo.ping"]
+permissions = ["read_mailbox", "read_item"]
+publisher = "{}"
+privacy_policy_url = "https://example.test/privacy"
+entrypoint = "echo.exe"
+"#,
+                    astra_plugin::hex(key.public_key().as_ref())
+                ),
+            )
+            .expect("manifest written");
+            std::fs::write(source.join("echo.exe"), b"\x7fbin").expect("binary");
+            let bundle = scratch("install-src").join("echo.astra-plugin");
+            astra_plugin::pack_and_sign(&source, &bundle, &key).expect("signed");
+
+            let registry = PluginRegistry::new(scratch("install"), vec![], false);
+            let offer = registry.install_offer(&bundle).expect("the offer");
+            assert_eq!(offer.id, "dev.astra.echo");
+            assert_eq!(offer.name, "Echo");
+            assert_eq!(offer.permissions, vec!["read_mailbox", "read_item"]);
+            assert_eq!(
+                offer.privacy_policy_url.as_deref(),
+                Some("https://example.test/privacy")
+            );
+            assert!(!offer.publisher_fingerprint.is_empty());
+
+            registry
+                .install(&bundle, &[Permission::ReadMailbox])
+                .expect("the install");
+            let row = registry
+                .list()
+                .into_iter()
+                .find(|row| row.id == "dev.astra.echo")
+                .expect("discovered");
+            assert_eq!(row.grants, vec!["read_mailbox".to_string()]);
+            assert_eq!(
+                row.lifecycle, "discovered",
+                "installed, never enabled by the install"
+            );
+            // The persisted file carries the checked grants for the next boot.
+            let reloaded = PluginRegistry::new(scratch("install"), vec![], false);
+            let row = reloaded
+                .list()
+                .into_iter()
+                .find(|row| row.id == "dev.astra.echo")
+                .expect("row");
+            assert_eq!(row.grants, vec!["read_mailbox".to_string()]);
+        });
+}
+
+#[test]
+fn an_unsigned_bundle_is_refused_in_production_and_a_grant_outside_the_manifest_is_refused() {
+    crate::runtime::build_runtime()
+        .expect("runtime")
+        .block_on(|| async {
+            let source = scratch("unsigned-src").join("dev.astra.echo");
+            std::fs::create_dir_all(&source).expect("dir");
+            std::fs::write(
+                source.join("manifest.toml"),
+                r#"
+id = "dev.astra.echo"
+name = "Echo"
+version = "0.1.0"
+api_level = 1
+aom_version = 1
+methods = ["plugin.dev.astra.echo.ping"]
+permissions = ["read_mailbox"]
+entrypoint = "echo.exe"
+"#,
+            )
+            .expect("manifest written");
+            std::fs::write(source.join("echo.exe"), b"\x7fbin").expect("binary");
+            let bundle = scratch("unsigned-src").join("echo.astra-plugin");
+            astra_plugin::pack(&source, &bundle).expect("packed");
+
+            let registry = PluginRegistry::new(scratch("unsigned-install"), vec![], false);
+            assert!(
+                matches!(
+                    registry.install_offer(&bundle),
+                    Err(RegistryError::Install { .. })
+                ),
+                "production refuses the unsigned bundle"
+            );
+
+            // Dev builds answer the offer, and a grant the manifest never
+            // declared refuses at install.
+            let dev = PluginRegistry::new(scratch("unsigned-install-dev"), vec![], true);
+            assert!(dev.install_offer(&bundle).is_ok());
+            assert!(matches!(
+                dev.install(&bundle, &[Permission::Send]),
+                Err(RegistryError::Install { .. })
+            ));
+        });
 }

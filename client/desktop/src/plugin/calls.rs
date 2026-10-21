@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use astra_plugin::{Lifecycle, Permission, WorkerHost};
 
-use super::{PluginRegistry, RegistryError, ServingWorker, GATE_CALL_TIMEOUT};
+use super::{InstallOffer, PluginRegistry, RegistryError, ServingWorker, GATE_CALL_TIMEOUT};
 use astra_plugin::{LifecycleEvent, SpawnFn, WorkerConfig};
 
 /// The verbs' supervision knobs, shared with the registry's own file.
@@ -195,6 +195,9 @@ impl PluginRegistry {
     /// be called. The gate and the transform fold over this set; an
     /// unactivated or ungranted plugin is simply not in it.
     pub(crate) fn serving(&self, method: &str, grant: Permission) -> Vec<ServingWorker> {
+        if !self.is_active() {
+            return Vec::new();
+        }
         self.entries
             .lock()
             .expect("entries")
@@ -238,6 +241,9 @@ impl PluginRegistry {
         method: &str,
         args: serde_json::Value,
     ) -> Result<serde_json::Value, RegistryError> {
+        if !self.is_active() {
+            return Err(RegistryError::Disabled);
+        }
         let host = {
             let entries = self.entries.lock().expect("entries");
             let entry = entries
@@ -270,5 +276,77 @@ impl PluginRegistry {
                 id: id.to_string(),
                 reason: error.to_string(),
             })
+    }
+}
+
+impl PluginRegistry {
+    /// The install offer for one bundle: verified (signed bundles always;
+    /// unsigned only in dev builds), parsed, and named for the consent
+    /// dialog. Nothing is unpacked or registered here.
+    pub(crate) fn install_offer(
+        &self,
+        path: &std::path::Path,
+    ) -> Result<InstallOffer, RegistryError> {
+        let verified = astra_plugin::verify(path, !self.dev_build).map_err(|error| {
+            RegistryError::Install {
+                reason: error.to_string(),
+            }
+        })?;
+        Ok(InstallOffer {
+            id: verified.manifest.id.as_str().to_string(),
+            name: verified.manifest.name.clone(),
+            version: verified.manifest.version.clone(),
+            publisher_fingerprint: verified.publisher_fingerprint,
+            permissions: verified
+                .manifest
+                .permissions
+                .iter()
+                .map(|permission| permission.wire_name().to_string())
+                .collect(),
+            privacy_policy_url: verified.manifest.privacy_policy_url.clone(),
+        })
+    }
+
+    /// Installs one bundle: re-verified (the offer computes nothing the
+    /// install does not re-check), unpacked into the managed directory,
+    /// the consented grants recorded and persisted, and the plugin left
+    /// disabled until the person enables it. A grant the manifest never
+    /// declared refuses the whole install.
+    pub(crate) fn install(
+        &self,
+        path: &std::path::Path,
+        grants: &[Permission],
+    ) -> Result<(), RegistryError> {
+        let verified = astra_plugin::verify(path, !self.dev_build).map_err(|error| {
+            RegistryError::Install {
+                reason: error.to_string(),
+            }
+        })?;
+        for grant in grants {
+            if !verified.manifest.permissions.contains(grant) {
+                return Err(RegistryError::Install {
+                    reason: format!(
+                        "the consent grants {}, which the manifest never declared",
+                        grant.wire_name()
+                    ),
+                });
+            }
+        }
+        astra_plugin::verify_and_unpack(path, &self.root, !self.dev_build).map_err(|error| {
+            RegistryError::Install {
+                reason: error.to_string(),
+            }
+        })?;
+        self.refresh();
+        let id = verified.manifest.id.as_str().to_string();
+        {
+            let mut entries = self.entries.lock().expect("entries");
+            if let Some(entry) = entries.get_mut(&id) {
+                entry.grants = grants.to_vec();
+                entry.enabled = false;
+            }
+        }
+        self.persist();
+        Ok(())
     }
 }

@@ -104,6 +104,8 @@ astra-composer = { path = "../../crates/astra-composer" }
 # The echo plugin's loop, driven in-process over duplex streams by the gate
 # tests (the worker host's custom spawn path).
 astra-plugin-echo = { path = "../../plugins/echo" }
+# The install tests sign their fixture bundles for real.
+ring.workspace = true
 # The provider-side plumbing the boot dial tests name: ConnectionInfo for
 # the stand-in providers' connection answers, which engine-api re-exports
 # the traits of but not the type itself.

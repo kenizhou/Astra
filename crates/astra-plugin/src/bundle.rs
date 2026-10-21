@@ -227,23 +227,45 @@ fn publisher_key(manifest: &PluginManifest) -> Result<Vec<u8>, BundleError> {
         .ok_or(BundleError::PublisherMismatch)
 }
 
-/// Verifies and unpacks a bundle into `target/<manifest id>/`. With
-/// `require_signature` (production), an unsigned or unverifiable bundle is
-/// refused; dev mode (`false`) accepts unsigned bundles.
+/// Verifies a bundle without unpacking it. With `require_signature`
+/// (production), an unsigned or unverifiable bundle is refused; dev mode
+/// (`false`) accepts unsigned bundles. The answer carries the manifest and
+/// the publisher fingerprint the consent dialog shows; the entry set stays
+/// internal to the unpack that follows.
 ///
 /// # Errors
 ///
-/// Returns the [`BundleError`] naming the refusal: a hostile entry path
-/// ([`BundleError::Traversal`]), a missing or invalid manifest, an unsigned
-/// bundle in production, a signature that does not verify, a publisher key
-/// that is not the manifest's, an entrypoint the bundle does not carry, or a
-/// filesystem failure.
+/// Returns the [`BundleError`] naming the refusal: a hostile entry path, a
+/// missing or invalid manifest, an unsigned bundle in production, a signature
+/// that does not verify, a publisher key that is not the manifest's, or an
+/// entrypoint the bundle does not carry.
+pub fn verify(bundle: &Path, require_signature: bool) -> Result<VerifiedBundle, BundleError> {
+    let entries = read_tar(bundle)?;
+    verify_entries(&entries, require_signature)
+}
+
+/// Verifies and unpacks a bundle into `target/<manifest id>/`.
+///
+/// # Errors
+///
+/// As [`verify`], plus [`BundleError::Io`] when the extraction's writes fail.
 pub fn verify_and_unpack(
     bundle: &Path,
     target: &Path,
     require_signature: bool,
 ) -> Result<VerifiedBundle, BundleError> {
     let entries = read_tar(bundle)?;
+    let verified = verify_entries(&entries, require_signature)?;
+    unpack_entries(&entries, target, &verified.manifest)?;
+    Ok(verified)
+}
+
+/// The verification over an entry map: the manifest, the signature and the
+/// publisher key when signed, and the entrypoint's presence.
+fn verify_entries(
+    entries: &BTreeMap<String, Vec<u8>>,
+    require_signature: bool,
+) -> Result<VerifiedBundle, BundleError> {
     let manifest_bytes = entries
         .get("manifest.toml")
         .ok_or(BundleError::MissingManifest)?;
@@ -259,7 +281,7 @@ pub fn verify_and_unpack(
             return Err(BundleError::PublisherMismatch);
         }
         let signature = entries.get(SIGNATURE_ENTRY).expect("checked above");
-        let digest = canonical_digest(&entries);
+        let digest = canonical_digest(entries);
         UnparsedPublicKey::new(&ED25519, public.as_slice())
             .verify(&digest, signature)
             .map_err(|_| BundleError::BadSignature)?;
@@ -284,8 +306,21 @@ pub fn verify_and_unpack(
     if !entries.contains_key(&entrypoint) {
         return Err(BundleError::MissingEntrypoint(entrypoint));
     }
+    Ok(VerifiedBundle {
+        manifest,
+        publisher_fingerprint: fingerprint,
+    })
+}
+
+/// The extraction: the verified entries land under `target/<manifest id>/`,
+/// the signing pair excluded (it is metadata, not the plugin's files).
+fn unpack_entries(
+    entries: &BTreeMap<String, Vec<u8>>,
+    target: &Path,
+    manifest: &PluginManifest,
+) -> Result<(), BundleError> {
     let root = target.join(manifest.id.as_str());
-    for (path, content) in &entries {
+    for (path, content) in entries {
         if path == SIGNATURE_ENTRY || path == PUBLISHER_ENTRY {
             continue;
         }
@@ -295,10 +330,7 @@ pub fn verify_and_unpack(
         }
         std::fs::write(destination, content)?;
     }
-    Ok(VerifiedBundle {
-        manifest,
-        publisher_fingerprint: fingerprint,
-    })
+    Ok(())
 }
 
 #[cfg(test)]

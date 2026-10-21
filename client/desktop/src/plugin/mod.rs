@@ -66,6 +66,13 @@ pub(crate) enum RegistryError {
     /// A production build refuses to enable a plugin declaring proposed
     /// methods.
     ProposedPlugin(String),
+    /// The admin policy switch is off: plugins do not run.
+    Disabled,
+    /// An install or its offer failed: the bundle's refusal.
+    Install {
+        /// What the verification or the consent answered.
+        reason: String,
+    },
     /// A call into a plugin failed: the worker's refusal or error.
     Call {
         /// The plugin's id.
@@ -102,6 +109,8 @@ impl core::fmt::Display for RegistryError {
                     "plugin {id} declares proposed methods, which production never enables"
                 )
             }
+            RegistryError::Disabled => write!(f, "plugins are disabled by policy"),
+            RegistryError::Install { reason } => write!(f, "the install failed: {reason}"),
             RegistryError::Call { id, reason } => {
                 write!(f, "the call into plugin {id} failed: {reason}")
             }
@@ -147,6 +156,24 @@ pub(crate) struct PluginRow {
     pub(crate) ui: Option<astra_plugin::UiDescriptors>,
 }
 
+/// The install offer one bundle answers: everything the consent dialog shows.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct InstallOffer {
+    /// The plugin's id.
+    pub(crate) id: String,
+    /// Its display name.
+    pub(crate) name: String,
+    /// Its version.
+    pub(crate) version: String,
+    /// The publisher key's fingerprint (empty for an unsigned dev bundle).
+    pub(crate) publisher_fingerprint: String,
+    /// The permissions the manifest requests, as wire names.
+    pub(crate) permissions: Vec<String>,
+    /// The publisher's privacy policy, when the bundle names one.
+    pub(crate) privacy_policy_url: Option<String>,
+}
+
 /// One activated plugin serving a method, as the gate consumes it.
 pub(crate) struct ServingWorker {
     /// The plugin's id.
@@ -180,6 +207,10 @@ pub(crate) struct PluginRegistry {
     entries: Mutex<HashMap<String, PluginEntry>>,
     /// The persisted grant/enabled records, loaded at construction.
     persisted: std::collections::BTreeMap<String, persist::PluginRecord>,
+    /// The admin policy switch, mirrored from the settings snapshot: off
+    /// means enable refuses and the serving/call seams answer as if no
+    /// plugin were serving.
+    active: std::sync::atomic::AtomicBool,
 }
 
 impl PluginRegistry {
@@ -194,7 +225,20 @@ impl PluginRegistry {
             dev_dirs,
             dev_build,
             entries: Mutex::new(HashMap::new()),
+            active: std::sync::atomic::AtomicBool::new(true),
         }
+    }
+
+    /// Mirrors the admin policy switch (the settings snapshot's
+    /// plugins_enabled) into the registry.
+    pub(crate) fn set_active(&self, active: bool) {
+        self.active
+            .store(active, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Whether plugins run at all right now.
+    pub(crate) fn is_active(&self) -> bool {
+        self.active.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Writes the current grant/enabled table through to the grants file.

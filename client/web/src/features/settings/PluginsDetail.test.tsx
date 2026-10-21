@@ -13,6 +13,10 @@ const api = vi.hoisted(() => ({
   pluginEnable: vi.fn(),
   pluginDisable: vi.fn(),
   pluginList: vi.fn(),
+  pluginInstallOffer: vi.fn(),
+  pluginInstall: vi.fn(),
+  openFile: vi.fn(),
+  dispatch: vi.fn(),
 }));
 
 vi.mock('@/services/plugins', async (importOriginal) => ({
@@ -20,6 +24,17 @@ vi.mock('@/services/plugins', async (importOriginal) => ({
   pluginEnable: api.pluginEnable,
   pluginDisable: api.pluginDisable,
   pluginList: api.pluginList,
+  pluginInstallOffer: api.pluginInstallOffer,
+  pluginInstall: api.pluginInstall,
+}));
+
+vi.mock('@tauri-apps/plugin-dialog', () => ({
+  open: api.openFile,
+}));
+
+vi.mock('@/services/ipc', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  dispatch: api.dispatch,
 }));
 
 import { PluginsDetail } from './PluginsDetail';
@@ -39,6 +54,10 @@ beforeEach(() => {
   api.pluginEnable.mockReset().mockResolvedValue(undefined);
   api.pluginDisable.mockReset().mockResolvedValue(undefined);
   api.pluginList.mockReset().mockResolvedValue([]);
+  api.pluginInstallOffer.mockReset();
+  api.pluginInstall.mockReset().mockResolvedValue(undefined);
+  api.openFile.mockReset();
+  api.dispatch.mockReset().mockResolvedValue(undefined);
 });
 
 afterEach(cleanup);
@@ -105,5 +124,36 @@ describe('the plugin pages', () => {
     await waitFor(() => {
       expect(screen.queryByTitle('Key manager', { suggest: false })).toBeNull();
     });
+  });
+});
+
+describe('the policy switch and the install entry', () => {
+  it('dispatches the plugins_enabled intent from the toggle', () => {
+    render(<PluginsDetail />);
+    screen.getByRole('checkbox', { name: 'Run plugins' }).click();
+    expect(api.dispatch).toHaveBeenCalledWith({
+      settings: { set_plugins_enabled: { enabled: false } },
+    });
+  });
+
+  it('offers the consent dialog from a picked file and installs through it', async () => {
+    api.openFile.mockResolvedValue('/tmp/crypto.astra-plugin');
+    api.pluginInstallOffer.mockResolvedValue({
+      id: 'dev.astra.crypto',
+      name: 'Crypto',
+      version: '0.1.0',
+      publisher_fingerprint: 'abcdef0123456789',
+      permissions: ['send'],
+    });
+    render(<PluginsDetail />);
+    screen.getByRole('button', { name: 'Install from file…' }).click();
+    await screen.findByRole('dialog');
+    expect(screen.getByRole('dialog').textContent).toContain('Crypto');
+    // The consent dialog carries the install; cancelling it installs nothing.
+    screen.getByRole('button', { name: 'Cancel' }).click();
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+    expect(api.pluginInstall).not.toHaveBeenCalled();
   });
 });
