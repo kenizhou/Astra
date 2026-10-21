@@ -133,6 +133,30 @@ drops the hold. Transforms run in registry order, each seeing the previous
 one's output, and a failed or unavailable transform holds the send closed
 (the untransformed mail never goes).
 
+## The UI contribution model
+
+Descriptors first: the manifest's optional `[ui]` table declares static shapes
+and Astra's chrome renders them. `composer_actions` become buttons in the
+composer chrome, `settings_sections` become categories in the settings
+screen's Plugins detail (each field in its kind's control: toggle, text,
+select, password, action), and `pages` open inside the sandboxed frame. A
+click or a field change is a `plugin_call` into the worker's declared custom
+method (`plugin.<id>.<name>`), answered with the worker's own payload; an
+action's effect shows through the answer (for example a toggle's `pressed`),
+because a worker never touches the draft directly.
+
+The reading pane's banner slot (`PluginBanner`) renders the decode answer's
+`security_banner` leg: the plugin's level and words, mounted above the body.
+
+Rich pages run in the `PluginFrame`: an iframe over the `astra-plugin://`
+scheme, which resolves `astra-plugin://<plugin-id>/<path>` inside that
+plugin's own directory only (traversal and cross-plugin reads refused,
+missing files 404, HTML with a CSP of `default-src 'none'` plus the bundle's
+own scripts/styles/images/fonts). The page talks to its worker over a narrow
+postMessage bridge (`frame_call` / `frame_result` / `frame_error`), served
+only from the frame's own window and gated by the same declared-method rule
+as every call.
+
 ## Known gaps, recorded
 
 - Ops queued before a `before_send` handler activates are not retro-gated;
@@ -150,5 +174,9 @@ one's output, and a failed or unavailable transform holds the send closed
 - The blob cache's quota and eviction are named in the contract; the cache
   itself lands with the first payload that needs it.
 - Grants are not persisted across restarts yet.
-- The UI contribution model (descriptors, the sandboxed frame) is SP3c;
-  signed bundles and the install dialog are SP3d.
+- The decode seam is live in the reading pipeline (the `MessageDecoder` port,
+  the raw source handed to the serving plugin, decoded legs through the
+  identical sanitise pipeline, the banner in the reading snapshot); what is
+  not there yet is a shipped plugin that decodes anything (the crypto module
+  is built-in, Track B).
+- Signed bundles and the install dialog are SP3d.
