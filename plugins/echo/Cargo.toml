@@ -1,0 +1,23 @@
+[package]
+name = "astra-plugin-echo"
+description = "The echo stub plugin: the worker protocol's conformance fixture. Ships in the repo, never in a build."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# The shared contract: the echo plugin speaks the envelope family the crate
+# defines, which is what makes it a conformance fixture rather than a parrot.
+astra-plugin = { path = "../../crates/astra-plugin" }
+# The envelope family's open JSON payloads.
+serde_json.workspace = true
+# The line IO the protocol runs on.
+tokio = { workspace = true, features = ["io-util", "io-std", "macros", "rt"] }
+
+[dev-dependencies]
+# The smoke test frames its init as JSON.
+serde_json.workspace = true

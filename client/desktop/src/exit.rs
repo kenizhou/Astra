@@ -35,6 +35,9 @@ impl AppState {
     /// recovery; the process does not outlive the window closing.
     pub(crate) fn stop_sync(&self) {
         self.runtime.block_on(|| self.agent.shutdown());
+        // The plugin workers second: each is asked to exit and reaped
+        // regardless, while the runtime is still alive to run their pumps.
+        self.runtime.block_on(|| self.plugins.shutdown_all());
         self.runtime.shutdown_timeout(EXIT_SYNC_BOUND);
     }
 }

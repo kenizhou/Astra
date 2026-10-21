@@ -130,11 +130,12 @@
 
 | 功能 | 状态 | 备注 |
 |---|---|---|
-| 插件宿主：清单、生命周期、监督 | ⬜ | SP1 |
-| 版本化钩子 API v1（compose.transform、message.decode） | ⬜ | SP1 骨架 |
-| example-plugin 端到端 | ⬜ | SP1 |
-| SMIME 插件包 | ⬜ | SP-CRYPTO，对等之后 |
-| OpenPGP 插件包 | ⬜ | SP-CRYPTO，对等之后 |
+| 插件平台：版本化 AOM envelope、宿主签发句柄、三道闸路由器 | 🚧 | 契约 crate 只放行 manifest 已声明、权限已授予、句柄在作用域内的调用，含评审后的权限拆分（compose_edit 与 send 分离）与仅限开发版的 proposed 层；plugins.md |
+| 带 sidecar 监督的 worker 宿主 | 🚧 | 每个插件一个进程外 worker，经 JSONL stdio：版本钉死的握手、代际号、重启预算、未决调用与订阅的 fail-closed 排空均已测试，含 spawn 失败即致命的规则；plugins.md |
+| 桌面注册表：发现、启停、授权审批 | 🚧 | 受管理的插件目录加 ASTRA_PLUGIN_DEV 路径、生命周期机、四条精简命令；授权在分发切片的同意对话框落地前为会话状态；plugins.md |
+| echo 符合性插件 | 🚧 | 桩 worker 在进程内与真实 spawn 进程两种形态下完成 envelope 往返；随仓库提供，绝不进入构建 |
+| S/MIME 签名与加密 | ⬜ | 已定为内置（2026-10-20），不做插件：crates/astra-crypto，SP-CRYPTO |
+| OpenPGP 签名与加密 | ⬜ | 同上：与 S/MIME 一起内置，SP-CRYPTO |
 
 ## Astra：CLI
 

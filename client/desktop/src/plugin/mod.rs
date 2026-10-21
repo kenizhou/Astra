@@ -1,0 +1,387 @@
+// SPDX-License-Identifier: GPL-3.0-only
+//! The plugin registry: the desktop host's managed plugin state.
+//!
+//! Discovery scans the managed plugins directory (and any
+//! `ASTRA_PLUGIN_DEV` development directories the boot hands over) for
+//! `manifest.toml` files, parses them with the contract crate's fail-closed
+//! parse, and holds one entry per plugin: its manifest, its worker program,
+//! its lifecycle, its granted permissions, and its worker host once
+//! activated. Nothing here lets a plugin install or activate itself:
+//! discovery is host-side, activation is a human decision driven through the
+//! command surface, and the grant table starts empty for every plugin.
+//!
+//! The grant table is session state in this slice; persistence across
+//! restarts lands with the install/consent dialog of the distribution slice.
+
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::Mutex,
+    time::Duration,
+};
+
+use astra_plugin::{
+    IllegalTransition, Lifecycle, LifecycleEvent, Permission, PluginId, PluginManifest,
+    WorkerConfig, WorkerHost,
+};
+use serde::Serialize;
+
+/// Why a registry operation failed.
+#[derive(Debug)]
+pub(crate) enum RegistryError {
+    /// No discovered plugin carries this id.
+    UnknownPlugin(String),
+    /// The plugin is not activated, so there is nothing to disable.
+    NotActive(String),
+    /// The enable path failed: the worker never reached Activated.
+    Enable {
+        /// The plugin's id.
+        id: String,
+        /// What the spawn or the handshake answered.
+        reason: String,
+    },
+    /// The grant asked for a permission the manifest never declared.
+    UndeclaredPermission {
+        /// The plugin's id.
+        id: String,
+        /// The permission asked for.
+        permission: Permission,
+    },
+    /// The permission is already granted.
+    AlreadyGranted(Permission),
+    /// The lifecycle machine refused the transition.
+    Lifecycle(IllegalTransition),
+}
+
+impl core::fmt::Display for RegistryError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            RegistryError::UnknownPlugin(id) => write!(f, "no discovered plugin {id}"),
+            RegistryError::NotActive(id) => write!(f, "plugin {id} is not activated"),
+            RegistryError::Enable { id, reason } => {
+                write!(f, "plugin {id} failed to enable: {reason}")
+            }
+            RegistryError::UndeclaredPermission { id, permission } => write!(
+                f,
+                "plugin {id} never declared permission {}",
+                permission.wire_name()
+            ),
+            RegistryError::AlreadyGranted(permission) => {
+                write!(
+                    f,
+                    "permission {} is already granted",
+                    permission.wire_name()
+                )
+            }
+            RegistryError::Lifecycle(error) => write!(f, "{error}"),
+        }
+    }
+}
+
+impl std::error::Error for RegistryError {}
+
+/// The handshake deadline one worker's init gets (the plan's 5s).
+const INIT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// The restart budget one worker gets (the plan's 3).
+const RESTART_MAX: u32 = 3;
+
+/// The backoff base of the restart schedule (linear, capped at 4s by the
+/// supervision machine).
+const BACKOFF_BASE: Duration = Duration::from_secs(1);
+
+/// One registry row as the command surface reports it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct PluginRow {
+    /// The plugin's id.
+    pub(crate) id: String,
+    /// Its display name.
+    pub(crate) name: String,
+    /// Its version.
+    pub(crate) version: String,
+    /// Its lifecycle state, lowercased (`discovered`, `activated`, ...).
+    pub(crate) lifecycle: String,
+    /// The permissions the host has granted, as wire names.
+    pub(crate) grants: Vec<String>,
+    /// The worker program the entry resolves to.
+    pub(crate) program: String,
+}
+
+/// One discovered plugin.
+struct PluginEntry {
+    manifest: PluginManifest,
+    program: PathBuf,
+    lifecycle: Lifecycle,
+    grants: Vec<Permission>,
+    host: Option<WorkerHost>,
+}
+
+/// The registry. Cheap to construct; discovery runs on [`PluginRegistry::list`]
+/// so a plugin directory dropped in while the app runs appears on the next
+/// list without a restart.
+pub(crate) struct PluginRegistry {
+    root: PathBuf,
+    dev_dirs: Vec<PathBuf>,
+    dev_build: bool,
+    entries: Mutex<HashMap<String, PluginEntry>>,
+}
+
+impl PluginRegistry {
+    /// A registry over the managed plugins directory `root`, plus any
+    /// development plugin directories. `dev_build` gates proposed methods
+    /// (the plan's dev-only placeholder tier).
+    #[must_use]
+    pub(crate) fn new(root: PathBuf, dev_dirs: Vec<PathBuf>, dev_build: bool) -> Self {
+        Self {
+            root,
+            dev_dirs,
+            dev_build,
+            entries: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// The registry rows, after a fresh discovery pass.
+    pub(crate) fn list(&self) -> Vec<PluginRow> {
+        self.refresh();
+        let mut rows: Vec<PluginRow> = self
+            .entries
+            .lock()
+            .expect("entries")
+            .values()
+            .map(|entry| PluginRow {
+                id: entry.manifest.id.as_str().to_string(),
+                name: entry.manifest.name.clone(),
+                version: entry.manifest.version.clone(),
+                lifecycle: lifecycle_name(&entry.lifecycle).to_string(),
+                grants: entry
+                    .grants
+                    .iter()
+                    .map(|grant| grant.wire_name().to_string())
+                    .collect(),
+                program: entry.program.to_string_lossy().into_owned(),
+            })
+            .collect();
+        rows.sort_by(|a, b| a.id.cmp(&b.id));
+        rows
+    }
+
+    /// Enables one plugin: loads it, spawns its worker, and activates it. A
+    /// failure lands the entry in the terminal Failed state with the reason.
+    pub(crate) async fn enable(&self, id: &str) -> Result<(), RegistryError> {
+        self.refresh();
+        let (manifest, program, grants) = {
+            let mut entries = self.entries.lock().expect("entries");
+            let entry = entries
+                .get_mut(id)
+                .ok_or_else(|| RegistryError::UnknownPlugin(id.to_string()))?;
+            if let Lifecycle::Failed(reason) = &entry.lifecycle {
+                return Err(RegistryError::Enable {
+                    id: id.to_string(),
+                    reason: format!("the plugin failed earlier: {reason}"),
+                });
+            }
+            entry
+                .lifecycle
+                .clone()
+                .transition(LifecycleEvent::Load)
+                .map_err(RegistryError::Lifecycle)?;
+            entry.lifecycle = Lifecycle::Loaded;
+            (
+                entry.manifest.clone(),
+                entry.program.clone(),
+                entry.grants.clone(),
+            )
+        };
+        let data_dir = self.data_dir_of(&manifest.id);
+        if let Err(error) = std::fs::create_dir_all(&data_dir) {
+            let mut entries = self.entries.lock().expect("entries");
+            if let Some(entry) = entries.get_mut(id) {
+                entry.lifecycle =
+                    Lifecycle::Failed(format!("the data directory could not be created: {error}"));
+            }
+            return Err(RegistryError::Enable {
+                id: id.to_string(),
+                reason: format!("the data directory could not be created: {error}"),
+            });
+        }
+        let config = WorkerConfig {
+            program: program.clone(),
+            args: vec![],
+            data_dir,
+            init_timeout: INIT_TIMEOUT,
+            restart_max: RESTART_MAX,
+            backoff_base: BACKOFF_BASE,
+        };
+        let host = WorkerHost::spawn_process(config, manifest, &grants, self.dev_build);
+        let outcome = host.start().await;
+        let mut entries = self.entries.lock().expect("entries");
+        let entry = entries
+            .get_mut(id)
+            .ok_or_else(|| RegistryError::UnknownPlugin(id.to_string()))?;
+        match outcome {
+            Ok(()) => {
+                entry.lifecycle = Lifecycle::Activated;
+                entry.host = Some(host);
+                Ok(())
+            }
+            Err(error) => {
+                let reason = error.to_string();
+                entry.lifecycle = Lifecycle::Failed(reason.clone());
+                Err(RegistryError::Enable {
+                    id: id.to_string(),
+                    reason,
+                })
+            }
+        }
+    }
+
+    /// Disables one active plugin: the worker is asked to exit and killed
+    /// regardless, and the entry returns to Discovered (a fresh activation is
+    /// a fresh instance, per the lifecycle machine's terminal-Failed rule).
+    pub(crate) async fn disable(&self, id: &str) -> Result<(), RegistryError> {
+        self.refresh();
+        let host = {
+            let mut entries = self.entries.lock().expect("entries");
+            let entry = entries
+                .get_mut(id)
+                .ok_or_else(|| RegistryError::UnknownPlugin(id.to_string()))?;
+            if entry.lifecycle != Lifecycle::Activated {
+                return Err(RegistryError::NotActive(id.to_string()));
+            }
+            entry.lifecycle = Lifecycle::Discovered;
+            entry.host.take()
+        };
+        if let Some(host) = host {
+            host.shutdown().await;
+        }
+        Ok(())
+    }
+
+    /// Grants one manifest-declared permission. The grant applies at the
+    /// worker's next start; a running worker keeps its init-time grants until
+    /// then (the init envelope is the only grant carrier).
+    pub(crate) fn approve(&self, id: &str, permission: Permission) -> Result<(), RegistryError> {
+        self.refresh();
+        let mut entries = self.entries.lock().expect("entries");
+        let entry = entries
+            .get_mut(id)
+            .ok_or_else(|| RegistryError::UnknownPlugin(id.to_string()))?;
+        if !entry.manifest.permissions.contains(&permission) {
+            return Err(RegistryError::UndeclaredPermission {
+                id: id.to_string(),
+                permission,
+            });
+        }
+        if entry.grants.contains(&permission) {
+            return Err(RegistryError::AlreadyGranted(permission));
+        }
+        entry.grants.push(permission);
+        Ok(())
+    }
+
+    /// The worker host of one activated plugin, for the call sites later
+    /// slices add (the send gate first).
+    #[allow(dead_code)] // SP3b's send gate is the first caller.
+    pub(crate) fn worker_host(&self, id: &str) -> Option<WorkerHost> {
+        self.entries
+            .lock()
+            .expect("entries")
+            .get(id)
+            .and_then(|entry| entry.host.clone())
+    }
+
+    /// Shuts every running worker down. Called on the exit path, before the
+    /// runtime drops (the drop order in `AppState` is load bearing).
+    pub(crate) async fn shutdown_all(&self) {
+        let hosts: Vec<WorkerHost> = self
+            .entries
+            .lock()
+            .expect("entries")
+            .values_mut()
+            .filter_map(|entry| entry.host.take())
+            .collect();
+        for host in hosts {
+            host.shutdown().await;
+        }
+    }
+
+    /// The discovery pass: scan the roots, insert newly seen plugins as
+    /// Discovered, and never touch an entry that has moved past discovery.
+    fn refresh(&self) {
+        for dir in self.candidates() {
+            let manifest_path = dir.join("manifest.toml");
+            let Ok(text) = std::fs::read_to_string(&manifest_path) else {
+                continue;
+            };
+            let manifest = match PluginManifest::parse(&text) {
+                Ok(manifest) => manifest,
+                Err(error) => {
+                    log::warn!("plugins: skipping {}: {error}", manifest_path.display());
+                    continue;
+                }
+            };
+            let id = manifest.id.as_str().to_string();
+            let program = program_of(&dir, &manifest);
+            let mut entries = self.entries.lock().expect("entries");
+            entries.entry(id).or_insert(PluginEntry {
+                manifest,
+                program,
+                lifecycle: Lifecycle::Discovered,
+                grants: Vec::new(),
+                host: None,
+            });
+        }
+    }
+
+    /// Every directory that might hold a manifest: the managed root's
+    /// immediate children, plus each dev directory directly.
+    fn candidates(&self) -> Vec<PathBuf> {
+        let mut dirs = Vec::new();
+        if let Ok(children) = std::fs::read_dir(&self.root) {
+            dirs.extend(
+                children
+                    .filter_map(std::result::Result::ok)
+                    .map(|child| child.path())
+                    .filter(|path| path.is_dir()),
+            );
+        }
+        dirs.extend(self.dev_dirs.iter().filter(|dir| dir.is_dir()).cloned());
+        dirs
+    }
+
+    /// The worker's private data directory for one plugin.
+    fn data_dir_of(&self, id: &PluginId) -> PathBuf {
+        self.root.join("data").join(id.as_str())
+    }
+}
+
+/// The worker program a plugin directory resolves to: the manifest's
+/// entrypoint when it names one, else the last id segment with the OS
+/// executable suffix (`dev.astra.echo` -> `echo.exe` on Windows).
+fn program_of(dir: &Path, manifest: &PluginManifest) -> PathBuf {
+    if let Some(entrypoint) = &manifest.entrypoint {
+        return dir.join(entrypoint);
+    }
+    let tail = manifest
+        .id
+        .as_str()
+        .rsplit('.')
+        .next()
+        .expect("a parsed id is never empty");
+    dir.join(format!("{tail}{}", std::env::consts::EXE_SUFFIX))
+}
+
+/// The lifecycle's lowercase wire name for the row.
+fn lifecycle_name(lifecycle: &Lifecycle) -> &'static str {
+    match lifecycle {
+        Lifecycle::Discovered => "discovered",
+        Lifecycle::Loaded => "loaded",
+        Lifecycle::Activated => "activated",
+        Lifecycle::Failed(_) => "failed",
+    }
+}
+
+#[cfg(test)]
+#[path = "registry_tests.rs"]
+mod tests;

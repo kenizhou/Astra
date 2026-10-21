@@ -128,11 +128,12 @@ this row ports.
 
 | Feature | Status | Notes |
 |---|---|---|
-| Plugin host with manifest, lifecycle, supervision | ⬜ | SP1 |
-| Versioned hook API v1 (compose.transform, message.decode) | ⬜ | SP1 skeleton |
-| example-plugin e2e | ⬜ | SP1 |
-| SMIME plugin package | ⬜ | SP-CRYPTO, post parity |
-| OpenPGP plugin package | ⬜ | SP-CRYPTO, post parity |
+| Plugin platform: versioned AOM envelope, host-issued handles, three-gate router | 🚧 | the contract crate routes manifest-declared, permission-granted, in-scope calls only, with the reviewed permission split (compose_edit vs send) and the dev-gated proposed tier; plugins.md |
+| Worker host with sidecar supervision | 🚧 | one out-of-process worker per plugin over JSONL stdio: the pinned-version handshake, generations, the restart budget, and fail-closed draining of pending calls and subscriptions all tested, including a fatal-spawn rule; plugins.md |
+| Desktop registry: discovery, enable/disable, grant approvals | 🚧 | the managed plugins directory plus ASTRA_PLUGIN_DEV paths, the lifecycle machine, and the four thin commands; grants are session state until the distribution slice's consent dialog; plugins.md |
+| echo conformance plugin | 🚧 | the stub worker round-trips the envelope in-process and as a real spawned process; ships in the repo, never in a build |
+| S/MIME signing and encryption | ⬜ | decided built-in (2026-10-20), not a plugin: crates/astra-crypto, SP-CRYPTO |
+| OpenPGP signing and encryption | ⬜ | same: built-in with S/MIME, SP-CRYPTO |
 
 ## Astra: CLI
 

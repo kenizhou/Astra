@@ -270,6 +270,7 @@ dependencies = [
  "astra-composer",
  "astra-mcp",
  "astra-oauth",
+ "astra-plugin",
  "astra-viewmodel",
  "async-trait",
  "engine-api",
@@ -349,7 +350,17 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "tokio",
  "toml 1.1.8+spec-1.1.0",
+]
+
+[[package]]
+name = "astra-plugin-echo"
+version = "0.1.0"
+dependencies = [
+ "astra-plugin",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

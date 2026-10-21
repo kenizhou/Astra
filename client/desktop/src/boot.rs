@@ -141,10 +141,30 @@ pub(crate) fn assemble_state(
     );
     let mcp = Arc::new(crate::mcp::McpHost::new(Arc::new(mcp_server), data_dir));
 
+    // The plugin registry: the managed plugins directory beside the store,
+    // plus any development plugin directories `ASTRA_PLUGIN_DEV` names
+    // (semicolon-separated, each pointing directly at a plugin directory).
+    // Proposed methods route in debug builds only.
+    let dev_dirs = std::env::var("ASTRA_PLUGIN_DEV")
+        .map(|value| {
+            value
+                .split(';')
+                .filter(|entry| !entry.is_empty())
+                .map(std::path::PathBuf::from)
+                .collect()
+        })
+        .unwrap_or_default();
+    let plugins = Arc::new(crate::plugin::PluginRegistry::new(
+        data_dir.join("plugins"),
+        dev_dirs,
+        cfg!(debug_assertions),
+    ));
+
     Ok(AppState {
         app: core as Arc<dyn AppPort>,
         agent: agent_relay,
         mcp,
+        plugins,
         llm,
         connections,
         photo_root: engine_path

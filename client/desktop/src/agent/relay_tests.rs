@@ -307,9 +307,21 @@ fn a_death_mid_prompt_drains_the_turn() {
         ),
         "the drain says interrupted: {events:?}"
     );
-    assert_eq!(
-        relay.status().as_str(),
-        "restarting",
+    // The state read races the 20ms backoff: by the time the drain settles
+    // the restart may already show "starting" or "ready". The attempts
+    // counter is the race-free witness: the death path counts the attempt
+    // before the backoff is even armed.
+    assert!(
+        runtime
+            .block_on(|| async {
+                for _ in 0..1000 {
+                    if relay.attempts().await >= 1 {
+                        return true;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                }
+                false
+            }),
         "the budget has room, so a restart is scheduled"
     );
 }
