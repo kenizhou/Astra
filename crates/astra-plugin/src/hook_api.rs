@@ -1,66 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Hook API v1: the two out-of-process hooks and their typed request/response
-//! contracts.
+//! Hook API v1 payload types: the request/response schemas the
+//! `composer.transform` and `message.decode` object methods carry.
 //!
-//! These are versioned wire types, shaped exactly as they will cross the plugin
+//! The hook era's envelope (the interim `protocol.rs`) is gone; what survives
+//! are these payload schemas, reused by the object model's method registry.
+//! They are versioned wire types, shaped exactly as they cross the plugin
 //! boundary: snake_case field names, externally tagged enums, and absent
-//! `Option`s omitted rather than nulled. SP1 ships them as compiled, unit-tested
-//! contracts only; no hook is executed, because no composer or process host
-//! exists yet. Changing any wire shape under [`HOOK_API_V1`] is a breaking
-//! contract change; the versioned process such changes will follow lives in the
-//! plugin contract document once it is written.
+//! `Option`s omitted rather than nulled. Changing any shape here is a breaking
+//! contract change and bumps the payload's version.
 //!
-//! Hooks never touch the engine: a hook sees only the payload carried in its
+//! Hooks never touch the engine: a method sees only the payload carried in its
 //! request, and send discipline in the host cannot be bypassed by a response.
 
 use serde::{Deserialize, Serialize};
-
-use crate::permissions::Permission;
-
-/// The hook API level this crate speaks. A manifest must declare exactly this
-/// level; anything else is rejected at parse (see [`crate::PluginManifest`]).
-pub const HOOK_API_V1: u32 = 1;
-
-/// The hooks of API level 1. A manifest names the ones a plugin serves by their
-/// dotted wire names (for example `compose.transform`), and
-/// [`HookApiV1::required_permission`] is what each of them costs in declared
-/// permissions. The serde names are the same dotted strings, so a manifest, the
-/// wire, and error messages all cite one name.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum HookApiV1 {
-    /// Pre-send transform (encrypt, sign) at the composer's output seam.
-    #[serde(rename = "compose.transform")]
-    ComposeTransform,
-    /// Post-fetch decode (decrypt, verify) producing renderable parts and
-    /// security banner data.
-    #[serde(rename = "message.decode")]
-    MessageDecode,
-}
-
-impl HookApiV1 {
-    /// Every hook of API level 1.
-    pub const ALL: [HookApiV1; 2] = [HookApiV1::ComposeTransform, HookApiV1::MessageDecode];
-
-    /// The hook's dotted wire name: the string a manifest declares, the serde
-    /// envelope carries, and error messages cite.
-    #[must_use]
-    pub fn wire_name(self) -> &'static str {
-        match self {
-            HookApiV1::ComposeTransform => "compose.transform",
-            HookApiV1::MessageDecode => "message.decode",
-        }
-    }
-
-    /// The permission a plugin must declare to serve this hook. The manifest
-    /// parse enforces that every declared hook's permission is declared too.
-    #[must_use]
-    pub fn required_permission(self) -> Permission {
-        match self {
-            HookApiV1::ComposeTransform => Permission::TransformOutgoing,
-            HookApiV1::MessageDecode => Permission::DecodeIncoming,
-        }
-    }
-}
 
 /// The host's opaque reference to the account a hook invocation belongs to. A
 /// plain string on the wire; the host resolves it, the plugin never can.

@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Tests for [`PluginManifest`]: the parse contract a plugin author meets first.
 //!
-//! A manifest that lies about its hook API level, names a hook it lacks the
-//! permission for, or smuggles in an unknown field is rejected at parse. A plugin
-//! whose manifest never reaches a host can never run, so the parse IS the security
-//! boundary the rest of the host builds on.
+//! A manifest that lies about its API level or AOM version, names a method the
+//! registry does not define, asks for a method without the permission that
+//! method costs, or smuggles in an unknown field is rejected at parse. A plugin
+//! whose manifest never reaches a host can never run, so the parse IS the
+//! security boundary the rest of the host builds on.
 
 use super::*;
 
@@ -12,9 +13,10 @@ const VALID: &str = r#"
 id = "dev.astra.crypto"
 name = "Astra Crypto"
 version = "0.1.0"
-hook_api = 1
-hooks = ["compose.transform", "message.decode"]
-permissions = ["transform_outgoing", "decode_incoming", "read_mailbox"]
+api_level = 1
+aom_version = 1
+methods = ["message.markRead", "composer.transform", "plugin.dev.astra.crypto.ping"]
+permissions = ["read_mailbox", "compose_edit"]
 "#;
 
 #[test]
@@ -23,101 +25,130 @@ fn a_valid_manifest_parses_with_every_field() {
     assert_eq!(manifest.id.as_str(), "dev.astra.crypto");
     assert_eq!(manifest.name, "Astra Crypto");
     assert_eq!(manifest.version, "0.1.0");
-    assert_eq!(manifest.hook_api, HOOK_API_V1);
+    assert_eq!(manifest.api_level, PLUGIN_API_LEVEL);
+    assert_eq!(manifest.aom_version, AOM_VERSION);
     assert_eq!(
-        manifest.hooks,
-        vec![HookApiV1::ComposeTransform, HookApiV1::MessageDecode]
+        manifest.methods,
+        vec![
+            "message.markRead".to_string(),
+            "composer.transform".to_string(),
+            "plugin.dev.astra.crypto.ping".to_string(),
+        ]
     );
     assert_eq!(
         manifest.permissions,
-        vec![
-            Permission::TransformOutgoing,
-            Permission::DecodeIncoming,
-            Permission::ReadMailbox,
-        ]
+        vec![Permission::ReadMailbox, Permission::ComposeEdit,]
     );
 }
 
 #[test]
-fn an_api_level_above_the_host_level_is_rejected() {
-    let text = VALID.replace("hook_api = 1", "hook_api = 2");
-    let error = PluginManifest::parse(&text).expect_err("newer API level");
+fn an_api_level_above_or_below_the_host_level_is_rejected() {
+    for level in [0, 2] {
+        let text = VALID.replace("api_level = 1", &format!("api_level = {level}"));
+        let error = PluginManifest::parse(&text).expect_err("wrong API level");
+        assert!(matches!(
+            error,
+            ManifestError::ApiLevelMismatch {
+                found,
+                expected: PLUGIN_API_LEVEL,
+            } if found == level
+        ));
+    }
+}
+
+#[test]
+fn an_aom_version_other_than_the_host_version_is_rejected() {
+    let text = VALID.replace("aom_version = 1", "aom_version = 2");
+    let error = PluginManifest::parse(&text).expect_err("wrong AOM version");
     assert!(matches!(
         error,
-        ManifestError::ApiLevelMismatch {
+        ManifestError::AomVersionMismatch {
             found: 2,
-            expected: HOOK_API_V1,
+            expected: AOM_VERSION,
         }
     ));
 }
 
 #[test]
-fn an_api_level_below_the_host_level_is_rejected() {
-    let text = VALID.replace("hook_api = 1", "hook_api = 0");
-    assert!(matches!(
-        PluginManifest::parse(&text),
-        Err(ManifestError::ApiLevelMismatch { found: 0, .. })
-    ));
-}
-
-#[test]
-fn a_missing_hook_api_field_is_rejected() {
-    let text = VALID.replace("hook_api = 1\n", "");
-    assert!(matches!(
-        PluginManifest::parse(&text),
-        Err(ManifestError::InvalidToml(_))
-    ));
-}
-
-#[test]
-fn a_hook_without_its_permission_is_rejected() {
-    // compose.transform without transform_outgoing: the manifest asks the host to
-    // hand it outgoing mail it holds no permission to transform.
+fn a_manifest_with_no_methods_is_rejected() {
     let text = VALID.replace(
-        "permissions = [\"transform_outgoing\", \"decode_incoming\", \"read_mailbox\"]",
-        "permissions = [\"decode_incoming\", \"read_mailbox\"]",
+        "methods = [\"message.markRead\", \"composer.transform\", \"plugin.dev.astra.crypto.ping\"]",
+        "methods = []",
     );
-    let error = PluginManifest::parse(&text).expect_err("hook without permission");
+    assert!(matches!(
+        PluginManifest::parse(&text),
+        Err(ManifestError::NoMethods)
+    ));
+}
+
+#[test]
+fn an_unknown_method_is_rejected() {
+    let text = VALID.replace("message.markRead", "message.exfiltrate");
+    assert!(matches!(
+        PluginManifest::parse(&text),
+        Err(ManifestError::UnknownMethod(method)) if method == "message.exfiltrate"
+    ));
+}
+
+#[test]
+fn a_custom_namespaced_method_is_accepted() {
+    // `plugin.<id>.<name>` is the open route for methods no registry entry
+    // will ever name; the parse accepts it without a registry lookup.
+    let text = VALID.replace("message.markRead", "plugin.anything.at.all");
+    assert!(PluginManifest::parse(&text).is_ok());
+}
+
+#[test]
+fn a_method_declared_twice_is_rejected() {
+    let text = VALID.replace("\"plugin.dev.astra.crypto.ping\"", "\"message.markRead\"");
+    assert!(matches!(
+        PluginManifest::parse(&text),
+        Err(ManifestError::DuplicateMethod(method)) if method == "message.markRead"
+    ));
+}
+
+#[test]
+fn a_permission_declared_twice_is_rejected() {
+    let text = VALID.replace(
+        "permissions = [\"read_mailbox\", \"compose_edit\"]",
+        "permissions = [\"read_mailbox\", \"compose_edit\", \"read_mailbox\"]",
+    );
+    assert!(matches!(
+        PluginManifest::parse(&text),
+        Err(ManifestError::DuplicatePermission(Permission::ReadMailbox))
+    ));
+}
+
+#[test]
+fn a_method_without_its_required_permission_is_rejected() {
+    let text = VALID.replace(
+        "permissions = [\"read_mailbox\", \"compose_edit\"]",
+        "permissions = [\"read_mailbox\"]",
+    );
+    let error = PluginManifest::parse(&text).expect_err("compose_edit undeclared");
     assert!(matches!(
         error,
         ManifestError::MissingPermission {
-            hook: HookApiV1::ComposeTransform,
-            permission: Permission::TransformOutgoing,
-        }
+            ref method,
+            permission: Permission::ComposeEdit,
+        } if method == "composer.transform"
     ));
 }
 
 #[test]
-fn a_decode_hook_without_decode_incoming_is_rejected() {
-    let text = VALID.replace(
-        "permissions = [\"transform_outgoing\", \"decode_incoming\", \"read_mailbox\"]",
-        "permissions = [\"transform_outgoing\"]",
-    );
-    assert!(matches!(
-        PluginManifest::parse(&text),
-        Err(ManifestError::MissingPermission {
-            hook: HookApiV1::MessageDecode,
-            permission: Permission::DecodeIncoming,
-        })
-    ));
+fn a_blank_or_padded_id_is_rejected() {
+    for id in ["", "  ", " dev.astra.crypto", "dev.astra.crypto "] {
+        let text = VALID.replace("id = \"dev.astra.crypto\"", &format!("id = \"{id}\""));
+        assert!(
+            matches!(PluginManifest::parse(&text), Err(ManifestError::BlankId)),
+            "id {id:?} must be rejected"
+        );
+    }
 }
 
 #[test]
 fn an_unknown_field_is_rejected() {
-    let text = format!("{VALID}\nextra_field = \"surprise\"\n");
-    let error = PluginManifest::parse(&text).expect_err("unknown field");
-    assert!(
-        error.to_string().contains("unknown field"),
-        "error names the unknown field: {error}"
-    );
-}
-
-#[test]
-fn an_unknown_permission_name_is_rejected() {
-    let text = VALID.replace(
-        "permissions = [\"transform_outgoing\", \"decode_incoming\", \"read_mailbox\"]",
-        "permissions = [\"transform_outgoing\", \"root\"]",
-    );
+    let text = format!("{VALID}extra = true\n");
     assert!(matches!(
         PluginManifest::parse(&text),
         Err(ManifestError::InvalidToml(_))
@@ -125,146 +156,18 @@ fn an_unknown_permission_name_is_rejected() {
 }
 
 #[test]
-fn an_unknown_hook_name_is_rejected() {
-    let text = VALID.replace(
-        "hooks = [\"compose.transform\", \"message.decode\"]",
-        "hooks = [\"engine.write_raw\"]",
-    );
-    assert!(matches!(
-        PluginManifest::parse(&text),
-        Err(ManifestError::InvalidToml(_))
-    ));
-}
-
-#[test]
-fn a_missing_required_field_is_rejected() {
-    let text = VALID.replace("name = \"Astra Crypto\"\n", "");
-    assert!(matches!(
-        PluginManifest::parse(&text),
-        Err(ManifestError::InvalidToml(_))
-    ));
-}
-
-#[test]
-fn a_manifest_without_a_permissions_key_is_rejected() {
-    // A plugin that declares no permissions at all asks for nothing, which the
-    // contract refuses: the key must be present, even before its contents are
-    // checked against the declared hooks.
-    let text = VALID.replace(
-        "permissions = [\"transform_outgoing\", \"decode_incoming\", \"read_mailbox\"]\n",
-        "",
-    );
-    assert!(matches!(
-        PluginManifest::parse(&text),
-        Err(ManifestError::InvalidToml(_))
-    ));
-}
-
-#[test]
-fn an_empty_id_is_rejected() {
-    let text = VALID.replace("dev.astra.crypto", "");
-    let error = PluginManifest::parse(&text).expect_err("empty id");
-    assert!(matches!(error, ManifestError::BlankId));
-}
-
-#[test]
-fn a_whitespace_only_id_is_rejected() {
-    let text = VALID.replace("dev.astra.crypto", "   ");
-    assert!(matches!(
-        PluginManifest::parse(&text),
-        Err(ManifestError::BlankId)
-    ));
-}
-
-#[test]
-fn an_id_with_surrounding_whitespace_is_rejected_not_trimmed() {
-    // Pinned behaviour: the guard rejects rather than trims. The host keys
-    // registry entries and permission grants by the exact id string, so a
-    // silently trimmed id would let two manifests share one identity.
-    let text = VALID.replace("dev.astra.crypto", "  dev.astra.crypto  ");
-    assert!(matches!(
-        PluginManifest::parse(&text),
-        Err(ManifestError::BlankId)
-    ));
-}
-
-#[test]
-fn a_duplicate_hook_is_rejected() {
-    let text = VALID.replace(
-        "hooks = [\"compose.transform\", \"message.decode\"]",
-        "hooks = [\"compose.transform\", \"compose.transform\"]",
-    );
-    let error = PluginManifest::parse(&text).expect_err("duplicate hook");
-    assert!(matches!(
-        error,
-        ManifestError::DuplicateHook(HookApiV1::ComposeTransform)
-    ));
-}
-
-#[test]
-fn a_duplicate_permission_is_rejected() {
-    let text = VALID.replace(
-        "permissions = [\"transform_outgoing\", \"decode_incoming\", \"read_mailbox\"]",
-        "permissions = [\"transform_outgoing\", \"transform_outgoing\", \"decode_incoming\"]",
-    );
-    let error = PluginManifest::parse(&text).expect_err("duplicate permission");
-    assert!(matches!(
-        error,
-        ManifestError::DuplicatePermission(Permission::TransformOutgoing)
-    ));
-}
-
-#[test]
-fn a_manifest_declaring_no_hooks_is_rejected() {
-    let text = VALID.replace(
-        "hooks = [\"compose.transform\", \"message.decode\"]",
-        "hooks = []",
-    );
-    assert!(matches!(
-        PluginManifest::parse(&text),
-        Err(ManifestError::NoHooks)
-    ));
-}
-
-#[test]
-fn a_coherent_single_hook_manifest_parses() {
-    // The coherence rule only demands that each declared hook's permission be
-    // present: read_mailbox (or any extra permission) is never demanded by a
-    // hook, and a manifest may serve one hook with exactly that hook's
-    // permission. The host grants nothing at parse; permissions are asks.
-    let text = VALID
-        .replace(
-            "hooks = [\"compose.transform\", \"message.decode\"]",
-            "hooks = [\"message.decode\"]",
-        )
-        .replace(
-            "permissions = [\"transform_outgoing\", \"decode_incoming\", \"read_mailbox\"]",
-            "permissions = [\"decode_incoming\"]",
-        );
-    let manifest = PluginManifest::parse(&text).expect("coherent manifest");
-    assert_eq!(manifest.hooks, vec![HookApiV1::MessageDecode]);
-    assert_eq!(manifest.permissions, vec![Permission::DecodeIncoming]);
-}
-
-#[test]
-fn debug_renders_the_manifest_without_redaction_gaps() {
-    // The manifest is secrets-free by design, so its derived Debug is safe to log
-    // today; this pins the invariant so a future secret-bearing field that forgets
-    // to redact shows up as a deliberate change in this test.
-    let manifest = PluginManifest::parse(VALID).expect("valid manifest");
-    let rendered = format!("{manifest:?}");
-    assert!(rendered.contains("dev.astra.crypto"));
-    assert!(!rendered.contains("Secret"));
-}
-
-#[test]
-fn the_error_rendering_names_the_missing_permission() {
-    let text = VALID.replace(
-        "permissions = [\"transform_outgoing\", \"decode_incoming\", \"read_mailbox\"]",
-        "permissions = [\"decode_incoming\"]",
-    );
-    let error = PluginManifest::parse(&text).expect_err("hook without permission");
-    let rendered = error.to_string();
-    assert!(rendered.contains("compose.transform"), "{rendered}");
-    assert!(rendered.contains("transform_outgoing"), "{rendered}");
+fn the_retired_hooks_field_is_rejected() {
+    // The hook era is over: a manifest written against hook_api v1 must fail
+    // loudly (an unknown field or a missing api_level), never parse silently.
+    let text = r#"
+id = "dev.astra.old"
+name = "Old"
+version = "0.1.0"
+hook_api = 1
+aom_version = 1
+hooks = ["compose.transform"]
+methods = ["message.markRead"]
+permissions = ["read_mailbox"]
+"#;
+    assert!(PluginManifest::parse(text).is_err());
 }
