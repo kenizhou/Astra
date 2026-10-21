@@ -172,3 +172,46 @@ fn shutdown_all_with_nothing_running_is_quiet() {
         .expect("runtime")
         .block_on(|| registry.shutdown_all());
 }
+
+#[test]
+fn a_call_reaches_the_worker_and_undeclared_or_inactive_refuse() {
+    crate::runtime::build_runtime()
+        .expect("runtime")
+        .block_on(|| async {
+            let registry = crate::plugin::testkit::registry_with(
+                "call",
+                "dev.astra.echo",
+                &["plugin.dev.astra.echo.ping"],
+                None,
+                &[],
+                crate::plugin::testkit::spawn_echo(),
+            )
+            .await;
+            let answer = registry
+                .call(
+                    "dev.astra.echo",
+                    "plugin.dev.astra.echo.ping",
+                    serde_json::json!({"n": 1}),
+                )
+                .await
+                .expect("the echo answers");
+            assert_eq!(answer, serde_json::json!({"n": 1}), "the args echoed back");
+            let undeclared = registry
+                .call("dev.astra.echo", "message.markRead", serde_json::json!([]))
+                .await;
+            assert!(
+                matches!(undeclared, Err(RegistryError::Call { .. })),
+                "an undeclared method refuses before the pipe"
+            );
+            assert!(matches!(
+                registry
+                    .call(
+                        "dev.astra.ghost",
+                        "plugin.dev.astra.echo.ping",
+                        serde_json::json!([])
+                    )
+                    .await,
+                Err(RegistryError::UnknownPlugin(_))
+            ));
+        });
+}

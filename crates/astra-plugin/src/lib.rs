@@ -24,7 +24,10 @@ pub use hook_api::{
     MessageDecodeRequest, MessageDecodeResponse, SecurityBanner, SecurityLevel,
 };
 pub use lifecycle::{IllegalTransition, Lifecycle, LifecycleEvent};
-pub use manifest::{ManifestError, PluginId, PluginManifest, SendMode};
+pub use manifest::{
+    ComposerActionDescriptor, ManifestError, PageDescriptor, PluginId, PluginManifest, SendMode,
+    SettingsFieldDescriptor, SettingsFieldKind, SettingsSectionDescriptor, UiDescriptors,
+};
 pub use object_model::{
     is_custom_method, lookup, AccountSnapshot, BlobRef, FolderSnapshot, HandleEntry, HandleKind,
     HandleTable, HostMessage, MessageSnapshot, MethodDef, NodeKind, ObjectRef, RefError, Stability,
