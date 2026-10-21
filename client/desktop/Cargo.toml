@@ -99,6 +99,9 @@ time.workspace = true
 # The composer document the drafts intents carry; the command-surface fakes
 # render the saved document to the plain text a stored draft resumes as.
 astra-composer = { path = "../../crates/astra-composer" }
+# The echo plugin's loop, driven in-process over duplex streams by the gate
+# tests (the worker host's custom spawn path).
+astra-plugin-echo = { path = "../../plugins/echo" }
 # The provider-side plumbing the boot dial tests name: ConnectionInfo for
 # the stand-in providers' connection answers, which engine-api re-exports
 # the traits of but not the type itself.

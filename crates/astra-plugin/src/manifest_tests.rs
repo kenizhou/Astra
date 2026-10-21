@@ -185,3 +185,52 @@ permissions = ["read_mailbox"]
 "#;
     assert!(PluginManifest::parse(text).is_err());
 }
+
+#[test]
+fn before_send_requires_its_mode_and_the_mode_requires_the_method() {
+    let gated = VALID.replace(
+        "methods = [\"message.markRead\", \"composer.transform\", \"plugin.dev.astra.crypto.ping\"]",
+        "methods = [\"before_send\"]",
+    );
+    let gated = gated.replace(
+        "permissions = [\"read_mailbox\", \"compose_edit\"]",
+        "permissions = [\"send\", \"admin\"]",
+    );
+    // The handler with no mode declared is rejected.
+    assert!(matches!(
+        PluginManifest::parse(&gated),
+        Err(ManifestError::MissingSendMode)
+    ));
+    // The mode with no handler declared is rejected.
+    let stray = VALID.replace(
+        "permissions = [\"read_mailbox\", \"compose_edit\"]",
+        "permissions = [\"read_mailbox\", \"compose_edit\"]\nbefore_send_mode = \"block\"",
+    );
+    assert!(matches!(
+        PluginManifest::parse(&stray),
+        Err(ManifestError::UnexpectedSendMode)
+    ));
+}
+
+#[test]
+fn the_send_modes_parse_and_round_trip() {
+    for (name, mode) in [
+        ("block", SendMode::Block),
+        ("soft_block", SendMode::SoftBlock),
+        ("prompt_user", SendMode::PromptUser),
+    ] {
+        let text = VALID.replace(
+            "methods = [\"message.markRead\", \"composer.transform\", \"plugin.dev.astra.crypto.ping\"]",
+            "methods = [\"before_send\"]",
+        );
+        let text = text.replace(
+            "permissions = [\"read_mailbox\", \"compose_edit\"]",
+            "permissions = [\"send\", \"admin\"]",
+        );
+        let text = format!("{text}before_send_mode = \"{name}\"\n");
+        let manifest = PluginManifest::parse(&text).expect("mode parses");
+        assert_eq!(manifest.before_send_mode, Some(mode));
+        let value = serde_json::to_value(mode).expect("serialises");
+        assert_eq!(value, serde_json::json!(name));
+    }
+}

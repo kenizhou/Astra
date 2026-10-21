@@ -17,10 +17,30 @@
 
 use std::collections::HashMap;
 
-use astra_viewmodel::{queued_row, SendingSnapshot};
-use engine_api::{AccountId, Confirmation, OpRejection, PendingOpKind, Provider};
+use astra_viewmodel::{queued_row, HeldSend, HeldState, SendingSnapshot};
+use engine_api::{AccountId, Confirmation, Draft, OpRejection, PendingOpKind, Provider};
 
 use crate::{drafts::now_instant, reference::QueuedRef, App, OutboxIntent};
+
+/// One send the plugin gate is holding: the row the snapshot publishes plus
+/// the built draft a retry or a Send Anyway resumes. The draft, never a
+/// re-render: the composition the gate vetted is the composition that queues.
+pub(crate) struct HeldEntry {
+    /// The hold's id, minted when the gate took the composition.
+    pub(crate) hold: String,
+    /// The account the send leaves from.
+    pub(crate) from: AccountId,
+    /// The subject line.
+    pub(crate) subject: String,
+    /// The plugin whose verdict is awaited or whose refusal holds the send.
+    pub(crate) plugin: String,
+    /// The reason, in product words.
+    pub(crate) reason: String,
+    /// Where the hold stands.
+    pub(crate) state: HeldState,
+    /// The built draft, transformed if a transform ran.
+    pub(crate) draft: Draft,
+}
 
 /// The sending state beside the queue itself: what the app adds that the store
 /// does not hold.
@@ -31,6 +51,12 @@ pub(crate) struct Outbox {
     /// own, so the app notes the moment it first saw each op; a send already
     /// queued when the app started is unknown and reads as an empty stamp.
     arrived: HashMap<(AccountId, u64), String>,
+    /// The sends the plugin gate is holding back from the queue, in hold
+    /// order. Session state by design: the draft behind each is durable, and
+    /// the hold rebuilds from a resend.
+    held: Vec<HeldEntry>,
+    /// The hold id counter: session-scoped, which is all a row answer needs.
+    hold_serial: u64,
 }
 
 impl<P: Provider> App<P> {
@@ -56,6 +82,143 @@ impl<P: Provider> App<P> {
                 self.confirm_queued_send(&queued, Confirmation::NotDelivered)
                     .await;
             }
+            OutboxIntent::AnswerGate { hold, send_anyway } => {
+                self.answer_gate(&hold, send_anyway).await;
+            }
+            OutboxIntent::RetryHeld { hold } => self.retry_held(&hold).await,
+            OutboxIntent::WithdrawHeld { hold } => self.withdraw_held(&hold).await,
+        }
+    }
+
+    /// Takes one composition into the gate's hold and publishes the row,
+    /// answering the hold's id. The gate calls this with `Checking` the
+    /// moment it starts, so the awaited verdict is visible from the first
+    /// second.
+    pub(crate) async fn hold_send(
+        &self,
+        from: AccountId,
+        draft: Draft,
+        plugin: String,
+        reason: String,
+        state: HeldState,
+    ) -> String {
+        let hold = {
+            let mut outbox = self.outbox.lock().expect("outbox mutex poisoned");
+            outbox.hold_serial += 1;
+            let hold = format!("hold-{}", outbox.hold_serial);
+            outbox.held.push(HeldEntry {
+                hold: hold.clone(),
+                subject: draft.subject.clone(),
+                from,
+                draft,
+                plugin,
+                reason,
+                state,
+            });
+            hold
+        };
+        self.rebuild_sending().await;
+        hold
+    }
+
+    /// Moves a held send to a fresh state with the verdict's plugin and
+    /// reason, republishing.
+    pub(crate) async fn settle_hold(
+        &self,
+        hold: &str,
+        plugin: String,
+        reason: String,
+        state: HeldState,
+    ) {
+        {
+            let mut outbox = self.outbox.lock().expect("outbox mutex poisoned");
+            if let Some(entry) = outbox.held.iter_mut().find(|entry| entry.hold == hold) {
+                entry.plugin = plugin;
+                entry.reason = reason;
+                entry.state = state;
+            }
+        }
+        self.rebuild_sending().await;
+    }
+
+    /// Removes a hold and answers its entry, republishing. A hold that
+    /// already left (a double answer, a stale row click) answers nothing.
+    pub(crate) async fn take_hold(&self, hold: &str) -> Option<HeldEntry> {
+        let entry = {
+            let mut outbox = self.outbox.lock().expect("outbox mutex poisoned");
+            outbox
+                .held
+                .iter()
+                .position(|entry| entry.hold == hold)
+                .map(|position| outbox.held.remove(position))
+        };
+        if entry.is_some() {
+            self.rebuild_sending().await;
+        }
+        entry
+    }
+
+    /// The prompt-user answer: Send Anyway queues the held composition
+    /// without re-gating (the answer is never remembered); Deny drops the
+    /// hold and keeps the draft unsent. Only a `NeedsAnswer` hold accepts an
+    /// answer: a row that moved under the click cannot send by it.
+    async fn answer_gate(&self, hold: &str, send_anyway: bool) {
+        let needs_answer = self
+            .outbox
+            .lock()
+            .expect("outbox mutex poisoned")
+            .held
+            .iter()
+            .any(|entry| entry.hold == hold && entry.state == HeldState::NeedsAnswer);
+        if !needs_answer {
+            log::info!("outbox: a gate answer named a hold that is not asking");
+            return;
+        }
+        let Some(entry) = self.take_hold(hold).await else {
+            return;
+        };
+        if !send_anyway {
+            log::info!("outbox: the user denied a prompted send; it stays a draft");
+            return;
+        }
+        let Some(handle) = self.account_handle(&entry.from).await else {
+            log::warn!("outbox: the held send's account is no longer configured");
+            return;
+        };
+        let Some(provider) = handle.providers.first() else {
+            log::warn!("outbox: the held send's account has no provider to send through");
+            return;
+        };
+        log::info!("outbox: the user said Send Anyway; queueing without re-gating");
+        let from = entry.from.clone();
+        self.submit_and_drain(&from, provider, entry.draft).await;
+    }
+
+    /// Re-runs the gate over a held send: the hold drops and the submit seam
+    /// takes the draft again, fresh verdict and all.
+    async fn retry_held(&self, hold: &str) {
+        let Some(entry) = self.take_hold(hold).await else {
+            log::info!("outbox: a retry named a hold that is not held");
+            return;
+        };
+        let Some(handle) = self.account_handle(&entry.from).await else {
+            log::warn!("outbox: the held send's account is no longer configured");
+            return;
+        };
+        let Some(provider) = handle.providers.first() else {
+            log::warn!("outbox: the held send's account has no provider to send through");
+            return;
+        };
+        log::info!("outbox: re-gating a held send");
+        let from = entry.from.clone();
+        self.gate_and_submit(&from, provider, entry.draft).await;
+    }
+
+    /// Drops a held send. The draft behind it stays in Drafts; nothing is
+    /// ever queued by withdrawing.
+    async fn withdraw_held(&self, hold: &str) {
+        if self.take_hold(hold).await.is_some() {
+            log::info!("outbox: a held send was withdrawn; the draft stays");
         }
     }
 
@@ -171,7 +334,22 @@ impl<P: Provider> App<P> {
                 }
             }
         }
-        let snapshot = SendingSnapshot { rows };
+        let held = self
+            .outbox
+            .lock()
+            .expect("outbox mutex poisoned")
+            .held
+            .iter()
+            .map(|entry| HeldSend {
+                hold: entry.hold.clone(),
+                account: entry.from.clone(),
+                subject: entry.subject.clone(),
+                plugin: entry.plugin.clone(),
+                reason: entry.reason.clone(),
+                state: entry.state,
+            })
+            .collect();
+        let snapshot = SendingSnapshot { rows, held };
         if self.sending.get() != snapshot {
             self.sending.publish(snapshot);
         }

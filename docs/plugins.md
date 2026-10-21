@@ -103,10 +103,48 @@ registry: `plugin_list`, `plugin_enable`, `plugin_disable`,
 `plugin_approve`. The grant table is session state in this slice;
 persistence and the consent dialog land with the distribution slice.
 
+## The send gate
+
+Every send a submit starts passes the registered `before_send` handlers
+**before it reaches the engine's queue** (the engine owns the queue's
+scheduling, so a veto after queueing is no veto at all), and every
+composition's rendered bodies pass the registered `composer.transform`
+handlers before the gate. A send a handler blocks is never queued: it stands
+in the outbox surface as a held row (`SendingSnapshot.held`) naming the
+plugin and the reason, backed by the draft the autosave already persists.
+There is no plaintext fallback by construction.
+
+The manifest declares the mode (`before_send_mode`, required with the
+handler):
+
+| Mode | On a violation | On an unavailable or timed-out handler |
+|---|---|---|
+| `block` (default) | The send holds, blocked. | The send holds (fail closed). |
+| `soft_block` | The send holds, blocked. | The send proceeds (fail open). |
+| `prompt_user` | A Send Anyway / Deny question the person answers. | The send proceeds (no question was ever asked). |
+
+Timeouts follow Outlook's shape: the held row names the awaited plugin from
+the first second, and a 5-minute cap ends the wait, folded by the mode.
+One handler per plugin per composition; auto-activation costs the `admin`
+grant, so a send-granted but non-admin plugin is never called. Send Anyway
+queues without re-gating and is never remembered; Deny drops the hold and
+keeps the draft; retry re-runs the gate on the held composition; withdraw
+drops the hold. Transforms run in registry order, each seeing the previous
+one's output, and a failed or unavailable transform holds the send closed
+(the untransformed mail never goes).
+
 ## Known gaps, recorded
 
+- Ops queued before a `before_send` handler activates are not retro-gated;
+  per-op holds inside a drain need engine support the pinned revision does
+  not have.
+- Held rows are session state; the draft behind them is durable, and the
+  held entry itself rebuilds from a resend.
+- Plugin-initiated calls (a worker reading the AOM on its own) have no
+  envelope yet; every call the send path needs is host-initiated, so the gap
+  costs nothing today and lands when a consumer needs it.
 - Routed calls are forwarded to the worker but no host intent executes them
-  yet; the stable method wiring is SP3b's core work.
+  yet; the stable method wiring is a later slice's core work.
 - Event streams exist as envelope types and subscription bookkeeping only;
   no astra-app event feeds them yet.
 - The blob cache's quota and eviction are named in the contract; the cache

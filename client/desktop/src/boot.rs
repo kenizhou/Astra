@@ -89,6 +89,30 @@ pub(crate) fn assemble_state(
             spawner.spawn(task);
         }
     };
+    // The plugin registry before the core boots: the send gate it backs is
+    // installed into the app from the first submit, and the registry reads
+    // its own state at call time, so a plugin enabled later joins the fold
+    // without a reinstall.
+    let dev_dirs = std::env::var("ASTRA_PLUGIN_DEV")
+        .map(|value| {
+            value
+                .split(';')
+                .filter(|entry| !entry.is_empty())
+                .map(std::path::PathBuf::from)
+                .collect()
+        })
+        .unwrap_or_default();
+    let plugins = Arc::new(crate::plugin::PluginRegistry::new(
+        data_dir.join("plugins"),
+        dev_dirs,
+        cfg!(debug_assertions),
+    ));
+    let gate = Arc::new(crate::plugin::PluginGate::new(
+        Arc::clone(&plugins),
+        GATE_HANDLER_TIMEOUT,
+    ));
+    let gate_for_boot: Arc<dyn astra_app::BeforeSendGate> = gate.clone();
+    let transform_for_boot: Arc<dyn astra_app::ComposeTransform> = gate;
     let core = runtime.block_on(|| {
         astra_app::boot(
             &engine_path,
@@ -97,6 +121,8 @@ pub(crate) fn assemble_state(
             observer,
             spawn,
             ai_pass,
+            Some(gate_for_boot),
+            Some(transform_for_boot),
         )
     })?;
     // The settings seam: the account store the settings surface reads the
@@ -141,25 +167,6 @@ pub(crate) fn assemble_state(
     );
     let mcp = Arc::new(crate::mcp::McpHost::new(Arc::new(mcp_server), data_dir));
 
-    // The plugin registry: the managed plugins directory beside the store,
-    // plus any development plugin directories `ASTRA_PLUGIN_DEV` names
-    // (semicolon-separated, each pointing directly at a plugin directory).
-    // Proposed methods route in debug builds only.
-    let dev_dirs = std::env::var("ASTRA_PLUGIN_DEV")
-        .map(|value| {
-            value
-                .split(';')
-                .filter(|entry| !entry.is_empty())
-                .map(std::path::PathBuf::from)
-                .collect()
-        })
-        .unwrap_or_default();
-    let plugins = Arc::new(crate::plugin::PluginRegistry::new(
-        data_dir.join("plugins"),
-        dev_dirs,
-        cfg!(debug_assertions),
-    ));
-
     Ok(AppState {
         app: core as Arc<dyn AppPort>,
         agent: agent_relay,
@@ -181,6 +188,11 @@ pub(crate) fn assemble_state(
 /// The AI ledgers' file name, under the data directory: the same store the
 /// CLI opens, so both writers land in one ledger.
 const AI_STORE_FILE: &str = "ai.sqlite";
+
+/// The hard cap on one plugin's gate or transform call (the plan's ~5min):
+/// a handler that never answers inside it is unavailable for that call, and
+/// its mode decides what the send does about that.
+const GATE_HANDLER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
 /// Builds the background LLM client when the tier table and the TLS
 /// transport resolve: the registry from the `ASTRA_LLM_*` tier lists, the

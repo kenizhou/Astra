@@ -103,6 +103,7 @@ fn the_sending_pull_follows_the_queue_from_submit_to_withdrawal() {
             subject: "On its way".to_owned(),
             arrived_at: ARRIVED_AT.to_owned(),
         }],
+        held: vec![],
     };
     wait_for_sending(&state, &queued);
 
@@ -142,6 +143,7 @@ fn the_outbox_actions_mark_send_and_settle_or_requeue_the_row() {
                 subject: String::new(),
                 arrived_at: stamp.clone(),
             }],
+            held: vec![],
         },
     );
 
@@ -157,6 +159,7 @@ fn the_outbox_actions_mark_send_and_settle_or_requeue_the_row() {
                 subject: String::new(),
                 arrived_at: stamp.clone(),
             }],
+            held: vec![],
         },
     );
 
@@ -172,6 +175,7 @@ fn the_outbox_actions_mark_send_and_settle_or_requeue_the_row() {
                 subject: String::new(),
                 arrived_at: stamp,
             }],
+            held: vec![],
         },
     );
 

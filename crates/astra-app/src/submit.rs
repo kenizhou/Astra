@@ -31,10 +31,25 @@ use engine_api::{
 use crate::{
     compose_request::carry,
     drafts::{mint_message_id, parse_addresses},
+    gate::{GateComposition, GateVerdict},
     protocol::ComposerBlob,
     reading::resolve,
     App,
 };
+
+/// The gate's view of one built draft: the envelope and both rendered legs.
+fn gate_composition_of(from: &AccountId, draft: &Draft) -> GateComposition {
+    GateComposition {
+        account: from.clone(),
+        from: draft.from.clone(),
+        to: draft.to.clone(),
+        cc: draft.cc.clone(),
+        bcc: draft.bcc.clone(),
+        subject: draft.subject.clone(),
+        plain: draft.text_body.clone(),
+        html: draft.html_body.clone().unwrap_or_default(),
+    }
+}
 
 impl<P: Provider> App<P> {
     /// Renders the composer's document and submits it through the account's
@@ -76,7 +91,7 @@ impl<P: Provider> App<P> {
             log::warn!("send: the message could not be built for sending");
             return;
         };
-        self.submit_and_drain(&from, provider, draft).await;
+        self.gate_and_submit(&from, provider, draft).await;
     }
 
     /// Sends the composer's document as a reply: the same path as the plain
@@ -113,7 +128,7 @@ impl<P: Provider> App<P> {
             return;
         };
         let draft = draft.in_reply_to(in_reply_to, references);
-        self.submit_and_drain(&from, provider, draft).await;
+        self.gate_and_submit(&from, provider, draft).await;
     }
 
     /// Sends the composer's document as a forward: the same path as the plain
@@ -180,7 +195,7 @@ impl<P: Provider> App<P> {
             return;
         };
         let draft = draft.with_references(original_chain(&original));
-        self.submit_and_drain(&from, provider, draft).await;
+        self.gate_and_submit(&from, provider, draft).await;
     }
 
     /// Submits `draft` through the account's durable outbox and drains the
@@ -188,7 +203,7 @@ impl<P: Provider> App<P> {
     /// due happens in this gesture rather than at the next refresh, the
     /// queue holds whatever the attempt came to, and the sending snapshot
     /// the rebuild publishes is what tells the user.
-    async fn submit_and_drain(&self, from: &AccountId, provider: &P, draft: Draft) {
+    pub(crate) async fn submit_and_drain(&self, from: &AccountId, provider: &P, draft: Draft) {
         let at = self.account_ordinal(from).await;
         log::info!("send[a{at}]: submitting a message");
         match self.engine.submit_mail(provider, from, &draft).await {
@@ -203,6 +218,76 @@ impl<P: Provider> App<P> {
         // A delivered send's copy reaches the store at the next sync; the
         // cached lists must not outlive it.
         self.invalidate_list_cache();
+    }
+
+    /// The gate seam every submit arm runs instead of queueing directly: the
+    /// transform rewrites the rendered legs first (failing closed), then the
+    /// gate vets the composition (the held row stands `Checking` from the
+    /// first second), and only an allow queues. With neither port installed
+    /// this is exactly [`App::submit_and_drain`], which is the zero-cost
+    /// default.
+    pub(crate) async fn gate_and_submit(&self, from: &AccountId, provider: &P, mut draft: Draft) {
+        if self.send_gate.is_none() && self.compose_transform.is_none() {
+            self.submit_and_drain(from, provider, draft).await;
+            return;
+        }
+        let at = self.account_ordinal(from).await;
+        if let Some(transform) = self.compose_transform.clone() {
+            match transform.transform(gate_composition_of(from, &draft)).await {
+                Ok(rewritten) => {
+                    draft.text_body = rewritten.plain;
+                    draft.html_body = Some(rewritten.html);
+                }
+                Err(failure) => {
+                    log::info!("send[a{at}]: a transform held the send: {}", failure.reason);
+                    self.hold_send(
+                        from.clone(),
+                        draft,
+                        failure.plugin,
+                        failure.reason,
+                        astra_viewmodel::HeldState::Blocked,
+                    )
+                    .await;
+                    return;
+                }
+            }
+        }
+        let Some(gate) = self.send_gate.clone() else {
+            self.submit_and_drain(from, provider, draft).await;
+            return;
+        };
+        let composition = gate_composition_of(from, &draft);
+        let hold = self
+            .hold_send(
+                from.clone(),
+                draft,
+                String::new(),
+                String::new(),
+                astra_viewmodel::HeldState::Checking,
+            )
+            .await;
+        match gate.check(&composition).await {
+            GateVerdict::Allow => {
+                if let Some(entry) = self.take_hold(&hold).await {
+                    self.submit_and_drain(&entry.from.clone(), provider, entry.draft)
+                        .await;
+                }
+            }
+            GateVerdict::PromptUser { plugin, reason } => {
+                self.settle_hold(
+                    &hold,
+                    plugin,
+                    reason,
+                    astra_viewmodel::HeldState::NeedsAnswer,
+                )
+                .await;
+            }
+            GateVerdict::Block { plugin, reason } => {
+                log::info!("send[a{at}]: the gate held the send: {reason}");
+                self.settle_hold(&hold, plugin, reason, astra_viewmodel::HeldState::Blocked)
+                    .await;
+            }
+        }
     }
 
     /// The original the pending compose request was computed from,
@@ -327,3 +412,7 @@ fn submit_draft(
 #[cfg(test)]
 #[path = "submit_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "submit_gate_tests.rs"]
+mod gate_tests;

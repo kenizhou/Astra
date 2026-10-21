@@ -312,16 +312,15 @@ fn a_death_mid_prompt_drains_the_turn() {
     // counter is the race-free witness: the death path counts the attempt
     // before the backoff is even armed.
     assert!(
-        runtime
-            .block_on(|| async {
-                for _ in 0..1000 {
-                    if relay.attempts().await >= 1 {
-                        return true;
-                    }
-                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        runtime.block_on(|| async {
+            for _ in 0..1000 {
+                if relay.attempts().await >= 1 {
+                    return true;
                 }
-                false
-            }),
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+            false
+        }),
         "the budget has room, so a restart is scheduled"
     );
 }

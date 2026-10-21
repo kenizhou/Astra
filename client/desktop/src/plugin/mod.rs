@@ -13,6 +13,10 @@
 //! The grant table is session state in this slice; persistence across
 //! restarts lands with the install/consent dialog of the distribution slice.
 
+pub(crate) mod gate;
+
+pub(crate) use gate::PluginGate;
+
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -21,8 +25,8 @@ use std::{
 };
 
 use astra_plugin::{
-    IllegalTransition, Lifecycle, LifecycleEvent, Permission, PluginId, PluginManifest,
-    WorkerConfig, WorkerHost,
+    IllegalTransition, Lifecycle, LifecycleEvent, Permission, PluginId, PluginManifest, SendMode,
+    SpawnFn, WorkerConfig, WorkerHost,
 };
 use serde::Serialize;
 
@@ -108,6 +112,16 @@ pub(crate) struct PluginRow {
     pub(crate) program: String,
 }
 
+/// One activated plugin serving a method, as the gate consumes it.
+pub(crate) struct ServingWorker {
+    /// The plugin's id.
+    pub(crate) id: String,
+    /// Its declared send-gate mode (set for `before_send` servers).
+    pub(crate) mode: Option<SendMode>,
+    /// Its live worker host.
+    pub(crate) host: WorkerHost,
+}
+
 /// One discovered plugin.
 struct PluginEntry {
     manifest: PluginManifest,
@@ -169,6 +183,18 @@ impl PluginRegistry {
     /// Enables one plugin: loads it, spawns its worker, and activates it. A
     /// failure lands the entry in the terminal Failed state with the reason.
     pub(crate) async fn enable(&self, id: &str) -> Result<(), RegistryError> {
+        self.enable_inner(id, None).await
+    }
+
+    /// Enables one plugin over a custom spawn path: the tests' in-process
+    /// workers (the echo plugin over duplex) ride the same lifecycle.
+    #[cfg(test)]
+    pub(crate) async fn enable_with(&self, id: &str, spawn: SpawnFn) -> Result<(), RegistryError> {
+        self.enable_inner(id, Some(spawn)).await
+    }
+
+    /// The shared enable: `None` spawns the worker as a real process.
+    async fn enable_inner(&self, id: &str, spawn: Option<SpawnFn>) -> Result<(), RegistryError> {
         self.refresh();
         let (manifest, program, grants) = {
             let mut entries = self.entries.lock().expect("entries");
@@ -213,7 +239,10 @@ impl PluginRegistry {
             restart_max: RESTART_MAX,
             backoff_base: BACKOFF_BASE,
         };
-        let host = WorkerHost::spawn_process(config, manifest, &grants, self.dev_build);
+        let host = match spawn {
+            None => WorkerHost::spawn_process(config, manifest, &grants, self.dev_build),
+            Some(spawn) => WorkerHost::new(config, manifest, &grants, self.dev_build, spawn),
+        };
         let outcome = host.start().await;
         let mut entries = self.entries.lock().expect("entries");
         let entry = entries
@@ -289,6 +318,43 @@ impl PluginRegistry {
             .expect("entries")
             .get(id)
             .and_then(|entry| entry.host.clone())
+    }
+
+    /// Every activated plugin serving `method` with `grant` granted, ready to
+    /// be called. The gate and the transform fold over this set; an
+    /// unactivated or ungranted plugin is simply not in it.
+    pub(crate) fn serving(&self, method: &str, grant: Permission) -> Vec<ServingWorker> {
+        self.entries
+            .lock()
+            .expect("entries")
+            .values()
+            .filter(|entry| {
+                entry.lifecycle == Lifecycle::Activated
+                    && entry
+                        .manifest
+                        .methods
+                        .iter()
+                        .any(|declared| declared == method)
+                    && entry.grants.contains(&grant)
+            })
+            .filter_map(|entry| {
+                entry.host.clone().map(|host| ServingWorker {
+                    id: entry.manifest.id.as_str().to_string(),
+                    mode: entry.manifest.before_send_mode,
+                    host,
+                })
+            })
+            .collect()
+    }
+
+    /// Whether one plugin holds a grant (the gate's auto-activation check:
+    /// `before_send` fires only for admin-granted plugins).
+    pub(crate) fn has_grant(&self, id: &str, permission: Permission) -> bool {
+        self.entries
+            .lock()
+            .expect("entries")
+            .get(id)
+            .is_some_and(|entry| entry.grants.contains(&permission))
     }
 
     /// Shuts every running worker down. Called on the exit path, before the

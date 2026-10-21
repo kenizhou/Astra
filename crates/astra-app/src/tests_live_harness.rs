@@ -131,6 +131,8 @@ mod folder_proof;
 mod folders;
 #[path = "tests_live_harness/forward.rs"]
 mod forward;
+#[path = "tests_live_harness/gate.rs"]
+mod gate;
 #[path = "tests_live_harness/jmap.rs"]
 mod jmap;
 #[path = "tests_live_harness/list.rs"]

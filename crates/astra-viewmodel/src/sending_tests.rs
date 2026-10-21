@@ -4,7 +4,7 @@
 
 use engine_api::AccountId;
 
-use super::{QueuedKey, QueuedRow, QueuedState, SendingSnapshot};
+use super::{HeldSend, HeldState, QueuedKey, QueuedRow, QueuedState, SendingSnapshot};
 
 /// A well-formed account id, the way every sending test names one.
 fn account(value: &str) -> AccountId {
@@ -23,6 +23,7 @@ fn a_queued_send_crosses_with_its_key_state_subject_and_arrival() {
             subject: "Quarterly review".to_owned(),
             arrived_at: "2026-10-09T08:30:00Z".to_owned(),
         }],
+        held: vec![],
     };
     let json = serde_json::to_string(&snapshot).unwrap();
     assert_eq!(
@@ -88,4 +89,48 @@ fn a_row_round_trips_with_an_empty_subject_and_instant() {
         r#"{"queued":{"account":"home","op":1},"state":"failed","subject":"","arrived_at":""}"#
     );
     assert_eq!(serde_json::from_str::<QueuedRow>(&json).unwrap(), row);
+}
+
+#[test]
+fn a_held_send_crosses_with_plugin_reason_and_state() {
+    let snapshot = SendingSnapshot {
+        rows: vec![],
+        held: vec![HeldSend {
+            hold: "hold-7".to_owned(),
+            account: account("work"),
+            subject: "Quarterly review".to_owned(),
+            plugin: "dev.astra.crypto".to_owned(),
+            reason: "no ready key for tim@example.test".to_owned(),
+            state: HeldState::Blocked,
+        }],
+    };
+    let json = serde_json::to_string(&snapshot).unwrap();
+    assert_eq!(
+        json,
+        concat!(
+            r#"{"rows":[],"held":[{"hold":"hold-7","account":"work","#,
+            r#""subject":"Quarterly review","plugin":"dev.astra.crypto","#,
+            r#""reason":"no ready key for tim@example.test","state":"blocked"}]}"#
+        )
+    );
+    assert_eq!(
+        serde_json::from_str::<SendingSnapshot>(&json).unwrap(),
+        snapshot
+    );
+}
+
+#[test]
+fn the_held_states_cross_as_plain_words() {
+    assert_eq!(
+        serde_json::to_string(&HeldState::Checking).unwrap(),
+        r#""checking""#
+    );
+    assert_eq!(
+        serde_json::to_string(&HeldState::NeedsAnswer).unwrap(),
+        r#""needs_answer""#
+    );
+    assert_eq!(
+        serde_json::to_string(&HeldState::Blocked).unwrap(),
+        r#""blocked""#
+    );
 }

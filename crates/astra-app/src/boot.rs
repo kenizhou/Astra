@@ -40,7 +40,8 @@ pub enum BootError {
 /// first sync on the host's runtime: priming paints the cached list first, and the
 /// first sync is the longest wait the app asks for. `ai` is the AI bundle the incoming
 /// pass runs over, assembled host-side over its background client; `None` runs no
-/// pass.
+/// pass. `gate` and `transform` are the plugin send gate and compose transform every
+/// submit consults; `None` for both sends ungated.
 ///
 /// The preferences file sits beside the engine store, in the same directory.
 ///
@@ -48,6 +49,7 @@ pub enum BootError {
 ///
 /// Returns [`BootError`] when the engine cannot open its store or abandon the leases a
 /// previous run left; nothing else stops a boot.
+#[allow(clippy::too_many_arguments)]
 pub async fn boot<P, S>(
     engine_path: &Path,
     accounts: Vec<Account<P>>,
@@ -55,6 +57,8 @@ pub async fn boot<P, S>(
     observer: Arc<dyn AppObserver>,
     spawn: S,
     ai: Option<AiPass>,
+    gate: Option<Arc<dyn crate::gate::BeforeSendGate>>,
+    transform: Option<Arc<dyn crate::gate::ComposeTransform>>,
 ) -> Result<Arc<App<P>>, BootError>
 where
     P: Provider + 'static,
@@ -74,7 +78,8 @@ where
         .map_or_else(|| preferences_path(Path::new(".")), preferences_path);
     let app = App::new(engine, accounts, connector, observer)
         .with_prefs_path(Some(prefs_path))
-        .with_ai_pass(ai);
+        .with_ai_pass(ai)
+        .with_send_gate(gate, transform);
     let app = Arc::new(app);
     // Before anything can drain: a write the last run left mid-attempt is put back the
     // way the point it reached allows, so the first drain sends what never left and

@@ -395,6 +395,25 @@ fn the_outbox_family_crosses_with_the_queued_reference() {
         }),
         r#"{"outbox":{"confirm_not_sent":{"queued":{"account":"home","op":2}}}}"#,
     );
+    round_trips(
+        &Intent::Outbox(OutboxIntent::AnswerGate {
+            hold: "hold-7".to_owned(),
+            send_anyway: true,
+        }),
+        r#"{"outbox":{"answer_gate":{"hold":"hold-7","send_anyway":true}}}"#,
+    );
+    round_trips(
+        &Intent::Outbox(OutboxIntent::RetryHeld {
+            hold: "hold-2".to_owned(),
+        }),
+        r#"{"outbox":{"retry_held":{"hold":"hold-2"}}}"#,
+    );
+    round_trips(
+        &Intent::Outbox(OutboxIntent::WithdrawHeld {
+            hold: "hold-2".to_owned(),
+        }),
+        r#"{"outbox":{"withdraw_held":{"hold":"hold-2"}}}"#,
+    );
     // The CamelCase spelling is not the wire.
     assert!(serde_json::from_str::<Intent>(r#"{"outbox":"Show"}"#).is_err());
 }
