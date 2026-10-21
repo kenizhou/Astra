@@ -62,4 +62,25 @@ pub enum OutboxIntent {
         /// The queued send.
         queued: QueuedRef,
     },
+    /// The user's answer to a prompt-user gate: Send Anyway queues the held
+    /// composition without re-gating (the answer is never remembered), Deny
+    /// drops the hold and keeps the draft unsent.
+    AnswerGate {
+        /// The held send the prompt names.
+        hold: String,
+        /// True for Send Anyway, false for Deny.
+        send_anyway: bool,
+    },
+    /// Re-runs the gate over a held send: the retry for a handler that was
+    /// unavailable or a recipient that has since become trusted.
+    RetryHeld {
+        /// The held send.
+        hold: String,
+    },
+    /// Drops a held send. The draft behind it stays in Drafts; nothing is
+    /// ever queued by withdrawing.
+    WithdrawHeld {
+        /// The held send.
+        hold: String,
+    },
 }

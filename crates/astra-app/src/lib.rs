@@ -323,6 +323,13 @@ pub struct App<P> {
     /// Woken by each open that arms a reply draft, so the driver future
     /// the host runs picks the arming up off the open's own path.
     reply_armed: tokio::sync::Notify,
+    /// The plugin send gate: every submit checks with it before queueing.
+    /// `None` (the default) and a submit costs nothing.
+    send_gate: Option<Arc<dyn crate::gate::BeforeSendGate>>,
+    /// The plugin compose transform: every submit's rendered legs pass it
+    /// before the gate. `None` (the default) sends what the composer
+    /// rendered.
+    compose_transform: Option<Arc<dyn crate::gate::ComposeTransform>>,
 }
 
 impl<P> core::fmt::Debug for App<P> {
@@ -386,6 +393,8 @@ impl<P: Provider> App<P> {
             pass_armed: tokio::sync::Notify::new(),
             reply_arms: Mutex::new(Vec::new()),
             reply_armed: tokio::sync::Notify::new(),
+            send_gate: None,
+            compose_transform: None,
         }
     }
 
@@ -431,6 +440,21 @@ impl<P: Provider> App<P> {
     #[must_use]
     pub fn with_ai_pass(mut self, pass: Option<AiPass>) -> Self {
         self.ai = pass.map(Arc::new);
+        self
+    }
+
+    /// Names the plugin gate and transform every submit consults, or `None`
+    /// for both (the default) to send ungated and untransformed. Call it
+    /// before the first dispatch; the host's gate reads its plugin registry
+    /// at call time, so plugins enabled later join without a reinstall.
+    #[must_use]
+    pub fn with_send_gate(
+        mut self,
+        gate: Option<Arc<dyn crate::gate::BeforeSendGate>>,
+        transform: Option<Arc<dyn crate::gate::ComposeTransform>>,
+    ) -> Self {
+        self.send_gate = gate;
+        self.compose_transform = transform;
         self
     }
 }
