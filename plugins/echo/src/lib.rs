@@ -36,9 +36,12 @@ pub async fn run(
                 aom_version: AOM_VERSION,
                 methods: manifest.methods,
             },
-            HostMessage::ObjectCall { id, args, .. } => {
-                WorkerMessage::ObjectResult { id, value: args }
-            }
+            HostMessage::ObjectCall {
+                id, method, args, ..
+            } => WorkerMessage::ObjectResult {
+                id,
+                value: answer_for(&method, args),
+            },
             HostMessage::ObjectSubscribe { stream, .. } => WorkerMessage::ObjectEvent {
                 stream,
                 event: serde_json::json!({ "echo": "subscribed" }),
@@ -51,6 +54,20 @@ pub async fn run(
         writer.flush().await?;
     }
     Ok(())
+}
+
+/// The echo's answer for one call: the send gate gets its allow verdict, the
+/// compose transform gets its own bodies back in the response's shape, and
+/// every other method gets its args verbatim.
+fn answer_for(method: &str, args: serde_json::Value) -> serde_json::Value {
+    match method {
+        "before_send" => serde_json::json!({ "verdict": "allow" }),
+        "composer.transform" => serde_json::json!({
+            "html": args["composer_html"],
+            "plain": args["composer_plain"],
+        }),
+        _ => args,
+    }
 }
 
 #[cfg(test)]
@@ -143,6 +160,40 @@ mod tests {
         let event = hear(&mut host).await;
         assert_eq!(event["type"], "object_event");
         assert_eq!(event["stream"], "explorer.onSelectionChange");
+
+        say(
+            &mut host,
+            serde_json::json!({
+                "type": "object_call",
+                "id": "c2",
+                "method": "before_send",
+                "args": { "account": "work" },
+            }),
+        )
+        .await;
+        let verdict = hear(&mut host).await;
+        assert_eq!(
+            verdict["value"],
+            serde_json::json!({ "verdict": "allow" }),
+            "the gate gets its allow verdict"
+        );
+
+        say(
+            &mut host,
+            serde_json::json!({
+                "type": "object_call",
+                "id": "c3",
+                "method": "composer.transform",
+                "args": { "composer_html": "<p>hi</p>", "composer_plain": "hi" },
+            }),
+        )
+        .await;
+        let transformed = hear(&mut host).await;
+        assert_eq!(
+            transformed["value"],
+            serde_json::json!({ "html": "<p>hi</p>", "plain": "hi" }),
+            "the transform answers in the response's shape"
+        );
 
         say(&mut host, serde_json::json!({ "type": "plugin_shutdown" })).await;
         task.await.expect("no panic").expect("clean exit");

@@ -21,6 +21,11 @@ fn manifest(extra_methods: &[&str], permissions: &[&str]) -> PluginManifest {
         .map(|p| format!("\"{p}\""))
         .collect::<Vec<_>>()
         .join(", ");
+    let mode = if extra_methods.contains(&"before_send") {
+        "before_send_mode = \"block\"\n"
+    } else {
+        ""
+    };
     PluginManifest::parse(&format!(
         r#"
 id = "dev.astra.echo"
@@ -30,7 +35,7 @@ api_level = 1
 aom_version = 1
 methods = [{methods}]
 permissions = [{permissions}]
-"#
+{mode}"#
     ))
     .expect("test manifest parses")
 }

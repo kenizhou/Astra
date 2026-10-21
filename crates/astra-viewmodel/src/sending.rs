@@ -84,16 +84,56 @@ pub struct QueuedRow {
     pub arrived_at: String,
 }
 
+/// Where a held send stands: the gate states a surface renders differently.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HeldState {
+    /// The gate is running; the plugin named is being awaited.
+    Checking,
+    /// A prompt-user handler asked a question; the row waits on the person's
+    /// Send Anyway or Deny.
+    NeedsAnswer,
+    /// A block-mode handler refused, timed out, or was unavailable: the send
+    /// holds until the person retries or withdraws it.
+    Blocked,
+}
+
+/// One send the plugin gate is holding back from the queue.
+///
+/// A held send is not a queued send: the engine never saw it, which is what
+/// makes "no plaintext fallback" a construction fact rather than a
+/// convention. The composition behind it stays a saved draft; the row's id is
+/// what an answer (Send Anyway, Deny) or a retry names.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HeldSend {
+    /// The hold's id, minted when the gate took the composition.
+    pub hold: String,
+    /// The account the send would leave from.
+    pub account: AccountId,
+    /// The subject line, empty if the draft carried none.
+    pub subject: String,
+    /// The plugin whose verdict is awaited or whose refusal holds the send.
+    pub plugin: String,
+    /// The reason the handler gave (or the timeout's), in product words.
+    pub reason: String,
+    /// Where the hold stands.
+    pub state: HeldState,
+}
+
 /// An immutable snapshot of the sends that have not gone out, for a surface to
 /// render as the outbox panel.
 ///
 /// Every account's sends in one list, in account order then queue order: the
 /// queue is the one place a person looks for mail that has not gone, whichever
-/// account it was to leave from. Empty when every send has gone.
+/// account it was to leave from. Empty when every send has gone. The held leg
+/// carries the sends the plugin gate is holding back from the queue.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SendingSnapshot {
     /// The outstanding sends, oldest queue position first within each account.
     pub rows: Vec<QueuedRow>,
+    /// The sends the plugin gate is holding, in the order they were held.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub held: Vec<HeldSend>,
 }
 
 /// Projects one outbox row into the queue's row, or `None` for a row that is

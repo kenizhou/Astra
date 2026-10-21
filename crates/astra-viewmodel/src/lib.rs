@@ -37,7 +37,9 @@ pub use reading::{
 };
 pub use rows::{MessageRowView, RowKey, ViewMode};
 pub use search::{SearchScope, SearchState};
-pub use sending::{queued_row, QueuedKey, QueuedRow, QueuedState, SendingSnapshot};
+pub use sending::{
+    queued_row, HeldSend, HeldState, QueuedKey, QueuedRow, QueuedState, SendingSnapshot,
+};
 pub use settings::{
     AboutBlock, AccountKind, AccountLegs, AccountSettingsRow, AccountSignatures, DavSectionRow,
     DefaultCalendar, GrantState, SettingsBlock, SettingsError, SettingsSnapshot, ThemeMode,

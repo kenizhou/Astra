@@ -31,6 +31,10 @@ pub(crate) struct Outbox {
     /// own, so the app notes the moment it first saw each op; a send already
     /// queued when the app started is unknown and reads as an empty stamp.
     arrived: HashMap<(AccountId, u64), String>,
+    /// The sends the plugin gate is holding back from the queue, in hold
+    /// order. Session state by design: the draft behind each is durable, and
+    /// the hold rebuilds from a resend.
+    held: Vec<astra_viewmodel::HeldSend>,
 }
 
 impl<P: Provider> App<P> {
@@ -171,7 +175,13 @@ impl<P: Provider> App<P> {
                 }
             }
         }
-        let snapshot = SendingSnapshot { rows };
+        let held = self
+            .outbox
+            .lock()
+            .expect("outbox mutex poisoned")
+            .held
+            .clone();
+        let snapshot = SendingSnapshot { rows, held };
         if self.sending.get() != snapshot {
             self.sending.publish(snapshot);
         }

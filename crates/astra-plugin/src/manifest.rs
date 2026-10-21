@@ -21,6 +21,22 @@ use crate::{
     permissions::Permission,
 };
 
+/// How a `before_send` handler's verdict and its absence behave. Declared in
+/// the manifest as `before_send_mode`; required when the handler is declared,
+/// refused without it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SendMode {
+    /// Hard stop: cannot send until the handler approves, and an unavailable
+    /// handler blocks (the default for crypto; no plaintext fallback).
+    Block,
+    /// Block on a violation, but fail open when the worker is unavailable.
+    SoftBlock,
+    /// The handler's reason becomes a Send Anyway / Deny decision the user
+    /// answers; never remembered silently.
+    PromptUser,
+}
+
 /// A plugin's identity, stable across versions: the id the host keys registry
 /// entries and permission grants by. Declared once in the manifest and never
 /// derived from anything. Parsing rejects ids that are blank or carry
@@ -92,6 +108,11 @@ pub enum ManifestError {
         /// The permission the manifest failed to declare.
         permission: Permission,
     },
+    /// The manifest declares `before_send` but no `before_send_mode`.
+    MissingSendMode,
+    /// The manifest declares a `before_send_mode` without the `before_send`
+    /// method it belongs to.
+    UnexpectedSendMode,
 }
 
 impl fmt::Display for ManifestError {
@@ -126,6 +147,12 @@ impl fmt::Display for ManifestError {
                 "method {method} requires permission {}, which the manifest does not declare",
                 permission.wire_name()
             ),
+            ManifestError::MissingSendMode => {
+                write!(f, "before_send is declared but before_send_mode is not")
+            }
+            ManifestError::UnexpectedSendMode => {
+                write!(f, "before_send_mode is declared but before_send is not")
+            }
         }
     }
 }
@@ -167,6 +194,10 @@ pub struct PluginManifest {
     /// permissions are actually granted is the host's fail-closed decision,
     /// never the manifest's.
     pub permissions: Vec<Permission>,
+    /// The send-gate mode, required exactly when the manifest declares the
+    /// `before_send` method.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub before_send_mode: Option<SendMode>,
     /// The worker executable inside the plugin's directory, when the manifest
     /// sits beside its binary. Absent in tests and in manifests that name
     /// their binary by convention (the last id segment plus the OS suffix).
@@ -217,6 +248,12 @@ impl PluginManifest {
         }
         if let Some(permission) = first_duplicate(&manifest.permissions) {
             return Err(ManifestError::DuplicatePermission(*permission));
+        }
+        let serves_send_gate = manifest.methods.iter().any(|m| m == "before_send");
+        match (serves_send_gate, manifest.before_send_mode) {
+            (true, None) => return Err(ManifestError::MissingSendMode),
+            (false, Some(_)) => return Err(ManifestError::UnexpectedSendMode),
+            _ => {}
         }
         for method in &manifest.methods {
             if is_custom_method(method) {
