@@ -215,3 +215,90 @@ fn a_call_reaches_the_worker_and_undeclared_or_inactive_refuse() {
             ));
         });
 }
+
+#[test]
+fn grants_and_the_enabled_flag_persist_across_registry_instances() {
+    crate::runtime::build_runtime()
+        .expect("runtime")
+        .block_on(|| async {
+            let root = scratch("persist");
+            write_plugin(&root, "dev.astra.echo", None);
+            let registry = PluginRegistry::new(root.clone(), vec![], true);
+            registry.list();
+            registry
+                .approve("dev.astra.echo", Permission::ReadMailbox)
+                .expect("declared grant");
+            registry
+                .enable_with("dev.astra.echo", crate::plugin::testkit::spawn_echo())
+                .await
+                .expect("enabled");
+
+            // A fresh instance over the same root reads the file.
+            let reloaded = PluginRegistry::new(root, vec![], true);
+            let row = reloaded
+                .list()
+                .into_iter()
+                .find(|row| row.id == "dev.astra.echo")
+                .expect("row");
+            assert_eq!(row.grants, vec!["read_mailbox".to_string()]);
+            assert_eq!(
+                reloaded.restore_enabled(),
+                vec!["dev.astra.echo".to_string()],
+                "the enabled flag survives the restart"
+            );
+        });
+}
+
+#[test]
+fn production_refuses_a_plugin_declaring_proposed_methods() {
+    crate::runtime::build_runtime()
+        .expect("runtime")
+        .block_on(|| async {
+            let root = scratch("proposed");
+            // before_send is proposed this slice: a release build must not
+            // enable a plugin declaring it. The manifest names it properly.
+            let dir = root.join("dev.astra.echo");
+            std::fs::create_dir_all(&dir).expect("dir");
+            std::fs::write(
+                dir.join("manifest.toml"),
+                r#"
+id = "dev.astra.echo"
+name = "Echo"
+version = "0.1.0"
+api_level = 1
+aom_version = 1
+methods = ["before_send"]
+permissions = ["send", "admin"]
+before_send_mode = "block"
+"#,
+            )
+            .expect("manifest written");
+            let registry = PluginRegistry::new(root.clone(), vec![], false);
+            registry.list();
+            let error = registry
+                .enable("dev.astra.echo")
+                .await
+                .expect_err("proposed refused in production");
+            assert!(matches!(error, RegistryError::ProposedPlugin(_)));
+            // The dev build over the same directory enables it.
+            let dev = PluginRegistry::new(root, vec![], true);
+            assert!(dev
+                .enable_with("dev.astra.echo", crate::plugin::testkit::spawn_echo())
+                .await
+                .is_ok());
+        });
+}
+
+#[test]
+fn a_malformed_grants_file_reads_as_empty() {
+    let root = scratch("malformed-grants");
+    write_plugin(&root, "dev.astra.echo", None);
+    std::fs::write(root.join("grants.toml"), "not toml at all [").expect("written");
+    let registry = PluginRegistry::new(root, vec![], true);
+    let row = registry
+        .list()
+        .into_iter()
+        .find(|row| row.id == "dev.astra.echo")
+        .expect("row");
+    assert!(row.grants.is_empty(), "a malformed file is no grants");
+}

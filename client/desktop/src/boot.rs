@@ -171,6 +171,20 @@ pub(crate) fn assemble_state(
     );
     let mcp = Arc::new(crate::mcp::McpHost::new(Arc::new(mcp_server), data_dir));
 
+    // The plugins the grants file marks enabled start their workers off the
+    // boot path: each failure lands the entry Failed, never a failed boot.
+    let restoring = plugins.restore_enabled();
+    if !restoring.is_empty() {
+        let registry = Arc::clone(&plugins);
+        runtime.handle().spawn(async move {
+            for id in restoring {
+                if let Err(error) = registry.enable(&id).await {
+                    log::warn!("plugins: the boot enable of {id} failed: {error}");
+                }
+            }
+        });
+    }
+
     Ok(AppState {
         app: core as Arc<dyn AppPort>,
         agent: agent_relay,

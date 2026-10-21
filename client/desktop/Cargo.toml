@@ -46,6 +46,8 @@ astra-ai = { path = "../../crates/astra-ai" }
 # The plugin platform's contracts and worker host: the registry's manifests,
 # permission table, and out-of-process workers.
 astra-plugin = { path = "../../crates/astra-plugin" }
+# The registry's grants file.
+toml.workspace = true
 # The MCP server the advanced-settings listener hosts: the server with its
 # gate and tool-call ledger, and the endpoint and listener derived from
 # the app's data directory.

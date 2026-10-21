@@ -8,10 +8,10 @@
 //! its lifecycle, its granted permissions, and its worker host once
 //! activated. Nothing here lets a plugin install or activate itself:
 //! discovery is host-side, activation is a human decision driven through the
-//! command surface, and the grant table starts empty for every plugin.
-//!
-//! The grant table is session state in this slice; persistence across
-//! restarts lands with the install/consent dialog of the distribution slice.
+//! command surface, and the grant table starts empty for every plugin. Grants
+//! and the enabled flag write through to `grants.toml` beside the root, and
+//! the boot restores them; a production build refuses plugins declaring
+//! proposed methods.
 
 pub(crate) mod gate;
 pub(crate) mod scheme;
@@ -19,6 +19,7 @@ pub(crate) mod scheme;
 mod calls;
 
 mod decode;
+mod persist;
 pub(crate) use decode::PluginDecoder;
 pub(crate) use gate::PluginGate;
 
@@ -63,6 +64,9 @@ pub(crate) enum RegistryError {
     AlreadyGranted(Permission),
     /// The lifecycle machine refused the transition.
     Lifecycle(IllegalTransition),
+    /// A production build refuses to enable a plugin declaring proposed
+    /// methods.
+    ProposedPlugin(String),
     /// A call into a plugin failed: the worker's refusal or error.
     Call {
         /// The plugin's id.
@@ -93,6 +97,12 @@ impl core::fmt::Display for RegistryError {
                 )
             }
             RegistryError::Lifecycle(error) => write!(f, "{error}"),
+            RegistryError::ProposedPlugin(id) => {
+                write!(
+                    f,
+                    "plugin {id} declares proposed methods, which production never enables"
+                )
+            }
             RegistryError::Call { id, reason } => {
                 write!(f, "the call into plugin {id} failed: {reason}")
             }
@@ -157,6 +167,8 @@ struct PluginEntry {
     lifecycle: Lifecycle,
     grants: Vec<Permission>,
     host: Option<WorkerHost>,
+    /// Whether the plugin is enabled; persisted beside the registry root.
+    enabled: bool,
 }
 
 /// The registry. Cheap to construct; discovery runs on [`PluginRegistry::list`]
@@ -167,6 +179,8 @@ pub(crate) struct PluginRegistry {
     dev_dirs: Vec<PathBuf>,
     dev_build: bool,
     entries: Mutex<HashMap<String, PluginEntry>>,
+    /// The persisted grant/enabled records, loaded at construction.
+    persisted: std::collections::BTreeMap<String, persist::PluginRecord>,
 }
 
 impl PluginRegistry {
@@ -176,11 +190,42 @@ impl PluginRegistry {
     #[must_use]
     pub(crate) fn new(root: PathBuf, dev_dirs: Vec<PathBuf>, dev_build: bool) -> Self {
         Self {
+            persisted: persist::load(&root),
             root,
             dev_dirs,
             dev_build,
             entries: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Writes the current grant/enabled table through to the grants file.
+    fn persist(&self) {
+        let records = self
+            .entries
+            .lock()
+            .expect("entries")
+            .iter()
+            .map(|(id, entry)| {
+                (
+                    id.clone(),
+                    persist::PluginRecord {
+                        grants: entry.grants.clone(),
+                        enabled: entry.enabled,
+                    },
+                )
+            })
+            .collect();
+        persist::store(&self.root, &records);
+    }
+
+    /// The ids the grants file marks enabled; the boot enables each, and a
+    /// worker that now fails lands Failed without ever failing the boot.
+    pub(crate) fn restore_enabled(&self) -> Vec<String> {
+        self.persisted
+            .iter()
+            .filter(|(_, record)| record.enabled)
+            .map(|(id, _)| id.clone())
+            .collect()
     }
 
     /// The registry rows, after a fresh discovery pass.
@@ -225,6 +270,23 @@ impl PluginRegistry {
     /// The shared enable: `None` spawns the worker as a real process.
     async fn enable_inner(&self, id: &str, spawn: Option<SpawnFn>) -> Result<(), RegistryError> {
         self.refresh();
+        // The production gate: a release build never enables a plugin that
+        // declares a proposed method (the dev-only placeholder tier).
+        if !self.dev_build {
+            let entries = self.entries.lock().expect("entries");
+            let entry = entries
+                .get(id)
+                .ok_or_else(|| RegistryError::UnknownPlugin(id.to_string()))?;
+            let proposed = entry
+                .manifest
+                .methods
+                .iter()
+                .filter_map(|method| astra_plugin::lookup(method))
+                .any(|def| def.stability == astra_plugin::Stability::Proposed);
+            if proposed {
+                return Err(RegistryError::ProposedPlugin(id.to_string()));
+            }
+        }
         let (manifest, program, grants) = {
             let mut entries = self.entries.lock().expect("entries");
             let entry = entries
@@ -277,10 +339,11 @@ impl PluginRegistry {
         let entry = entries
             .get_mut(id)
             .ok_or_else(|| RegistryError::UnknownPlugin(id.to_string()))?;
-        match outcome {
+        let answer = match outcome {
             Ok(()) => {
                 entry.lifecycle = Lifecycle::Activated;
                 entry.host = Some(host);
+                entry.enabled = true;
                 Ok(())
             }
             Err(error) => {
@@ -291,7 +354,10 @@ impl PluginRegistry {
                     reason,
                 })
             }
-        }
+        };
+        drop(entries);
+        self.persist();
+        answer
     }
 
     /// Disables one active plugin: the worker is asked to exit and killed
@@ -308,11 +374,13 @@ impl PluginRegistry {
                 return Err(RegistryError::NotActive(id.to_string()));
             }
             entry.lifecycle = Lifecycle::Discovered;
+            entry.enabled = false;
             entry.host.take()
         };
         if let Some(host) = host {
             host.shutdown().await;
         }
+        self.persist();
         Ok(())
     }
 
@@ -335,6 +403,8 @@ impl PluginRegistry {
             return Err(RegistryError::AlreadyGranted(permission));
         }
         entry.grants.push(permission);
+        drop(entries);
+        self.persist();
         Ok(())
     }
 
@@ -371,13 +441,15 @@ impl PluginRegistry {
             let id = manifest.id.as_str().to_string();
             let program = program_of(&dir, &manifest);
             let mut entries = self.entries.lock().expect("entries");
+            let record = self.persisted.get(&id);
             entries.entry(id).or_insert(PluginEntry {
                 manifest,
                 program,
                 dir: dir.clone(),
                 lifecycle: Lifecycle::Discovered,
-                grants: Vec::new(),
+                grants: record.map_or_else(Vec::new, |record| record.grants.clone()),
                 host: None,
+                enabled: record.is_some_and(|record| record.enabled),
             });
         }
     }
