@@ -111,6 +111,7 @@ fn the_snapshot_crosses_its_full_shape_and_reads_back() {
                     },
                     "dav_error": "the re-dial could not reach the origin",
                     "refresh_error": "the diary could not be re-expanded under the new zone; set the zone again to retry",
+                    "crypto_method": "none",
                     "signatures": { "new_mail": { "body_html": "<p>Ada</p>", "body_plain": "Ada" } }
                 }
             ],

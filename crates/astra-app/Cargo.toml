@@ -76,6 +76,8 @@ provider-caldav.workspace = true
 engine-tls.workspace = true
 # The crypto tests hex-encode fixture key material.
 hex = "0.4"
+# The harness crypto proof decodes the wire's base64 transports.
+base64 = "0.23"
 reqwest.workspace = true
 serde_json.workspace = true
 # The test executor (`#[tokio::test]`); tests may build a runtime, the library may not.

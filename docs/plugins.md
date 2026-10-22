@@ -190,6 +190,60 @@ preference (the settings snapshot's block, default on) is the admin policy
 switch: off means the boot enables nothing, `enable` refuses, and the gate,
 decoder, and call surfaces answer as if no plugin were serving.
 
+## Track B: the built-in crypto
+
+Message encryption is a product feature, not a plugin: S/MIME and OpenPGP
+ship inside the app core (the 2026-10-20 decision), so no plugin ever sees
+plaintext it does not need and the trust model of the send gate is the
+app's own. What stands after SP4b:
+
+- **The store** (`crates/astra-crypto-store`): one `crypto.sqlite` beside
+  the AI store, kylins' schema in its final form (`crypto_keys` incl.
+  harvested/intermediate, append-only `trust_decisions`, `collected_keys`,
+  `contact_pinned_keys`, `crl_cache`, `message_crypto_results`,
+  `send_as_aliases`). Soft private blobs wrap at rest under an AAD-bound
+  AES-256-GCM master key in the OS keyring. The `SqliteKeyStore` bridge
+  implements the core `KeyStore` (account-bound, the `standard|fingerprint`
+  KeyId, the OpenPGP subkey fallback, token handles, the fetchability
+  filter); the trust decisions and the recipient resolution ladder (NoKey
+  with the collected hint, expiry first, own key Ready, the
+  verified/personal/unverified Ready model, Rejected, Undecided,
+  AcceptedOtherEmail, pin-preferred) mirror kylins' `resolve_recipient_status_at`.
+- **The send gate** (`crates/astra-crypto-core::apply`): kylins'
+  `apply_crypto` semantics, verbatim. Passthrough, `NoSigningKey`, the
+  fail-closed trust gate (every recipient must resolve Ready; no plaintext
+  fallback, no ciphertext on refusal), pin-aware selection so gate and
+  encrypt use the same key, the S/MIME-only chain gate against the stored
+  anchors, protected-headers subject hiding (default on, fail-safe to on),
+  OpenPGP Autocrypt-Gossip inside the encrypted part, `EncryptOp.sign_with`
+  composition (never clear-sign-then-encrypt), and the W9 password arm
+  (SKESK symmetric, `PasswordConflict`/`PasswordRequired`).
+- **The Astra-side outbox** (spec D3): the pinned engine's submit takes
+  only `Draft`, so a crypto send assembles with the engine's own
+  `engine_rfc5322` (byte-identical output), wraps once (the filed variant,
+  with `Bcc`), and queues in `crypto_outbox`. The wire variant is the same
+  ciphertext minus the `Bcc` header. The bypass transport is small and
+  explicit: EHLO, `AUTH PLAIN`, `MAIL FROM`, `RCPT TO`, dot-stuffed `DATA`,
+  `RSET` on error, over the account's dialled settings and the host-built
+  TLS connector; the Sent copy files by IMAP `APPEND` (special-use `\Sent`
+  discovery). A mid-DATA loss lands `unconfirmed`; only the user's answer
+  re-sends. Crypto rows ride the existing sending snapshot under a high-bit
+  op namespace with the same verbs routed.
+- **The switch**: each account's `[crypto] method` in its stored config
+  (`none | openpgp | smime`), echoed on the settings row and editable from
+  the Accounts page. `none` is the zero-cost default: the engine's queue
+  keeps every send. The composer's sign/encrypt flags ride the submit
+  intents, defaulting to both on under a method. A method without IMAP/SMTP
+  submission settings holds with the typed unavailable answer, never a
+  silent drop.
+
+Later slices: SP4c is the receive half (decrypt/verify through the reading
+pipeline, encrypted drafts at rest, the result rows and the security
+banner, CRL fetching, the Autocrypt consume half); SP4d is the token
+registry (cryptoki, openpgp-card) and the native security UI. A token key
+with no registered provider already fails typed (`TokenNotPresent`), never
+falls back to software.
+
 ## Known gaps, recorded
 
 - Ops queued before a `before_send` handler activates are not retro-gated;

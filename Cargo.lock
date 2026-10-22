@@ -315,6 +315,7 @@ dependencies = [
  "astra-crypto-store",
  "astra-viewmodel",
  "async-trait",
+ "base64 0.23.1",
  "engine-api",
  "engine-core",
  "engine-provider",

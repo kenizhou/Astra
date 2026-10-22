@@ -137,8 +137,8 @@ this row ports.
 | Signed bundles, install consent, persisted grants, and the policy switch | 🚧 | the ed25519-signed tar verifies publisher identity and integrity (tamper, wrong key, and unsigned-in-production each refused), the offer/consent flow installs exactly the checked grants, grants and the enabled flag persist across restarts (boot re-enables), production builds never enable proposed-method plugins, and the plugins_enabled switch silences every surface; plugins.md |
 | Desktop registry: discovery, enable/disable, grant approvals | 🚧 | the managed plugins directory plus ASTRA_PLUGIN_DEV paths, the lifecycle machine, and the four thin commands; grants are session state until the distribution slice's consent dialog; plugins.md |
 | echo conformance plugin | 🚧 | the stub worker round-trips the envelope in-process and as a real spawned process; ships in the repo, never in a build |
-| S/MIME signing and encryption | 🚧 | built-in (2026-10-20 decision): astra-crypto-smime vendored with its full battery green (chain validation, CMS build/parse, pkcs12 import, token routing, openssl interop); the send gate and UI land in SP4b/SP4c |
-| OpenPGP signing and encryption | 🚧 | same: astra-crypto-openpgp vendored green (engine round-trips, card routing, gpg/sq interop); send gate and UI in SP4b/SP4c |
+| S/MIME signing and encryption | 🚧 | built-in (2026-10-20 decision): astra-crypto-smime vendored with its full battery green (chain validation, CMS build/parse, pkcs12 import, token routing, openssl interop); SP4b landed the store, the send gate, and the Astra-side crypto outbox (protected subjects, trust-gated recipients, the per-account method switch) proven live against the harness; the receive half and the security UI land in SP4c/SP4d |
+| OpenPGP signing and encryption | 🚧 | same: astra-crypto-openpgp vendored green (engine round-trips, card routing, gpg/sq interop); SP4b landed the send half incl. Autocrypt-Gossip and the W9 password arm, proven live against the harness (delivered sealed, recipient decrypts); receive and the UI in SP4c/SP4d |
 
 ## Astra: CLI
 

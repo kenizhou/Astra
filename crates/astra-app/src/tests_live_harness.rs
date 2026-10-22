@@ -123,6 +123,8 @@ mod calendar_invite;
 mod calendar_proof;
 #[path = "tests_live_harness/composer_proof.rs"]
 mod composer_proof;
+#[path = "tests_live_harness/crypto_send.rs"]
+mod crypto_send;
 #[path = "tests_live_harness/drafts.rs"]
 mod drafts;
 #[path = "tests_live_harness/folder_proof.rs"]

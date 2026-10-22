@@ -139,8 +139,8 @@
 | 签名包、安装同意、持久授权与策略开关 | 🚧 | ed25519 签名 tar 验证发布者身份与完整性（篡改、错误密钥、生产版未签名各自被拒），报价/同意流程恰好安装所勾授权，授权与启用标记跨重启持久（启动时重新启用），生产构建绝不启用 proposed 方法插件，plugins_enabled 开关令所有端面静默；plugins.md |
 | 桌面注册表：发现、启停、授权审批 | 🚧 | 受管理的插件目录加 ASTRA_PLUGIN_DEV 路径、生命周期机、四条精简命令；授权在分发切片的同意对话框落地前为会话状态；plugins.md |
 | echo 符合性插件 | 🚧 | 桩 worker 在进程内与真实 spawn 进程两种形态下完成 envelope 往返；随仓库提供，绝不进入构建 |
-| S/MIME 签名与加密 | 🚧 | 内置（2026-10-20 决定）：astra-crypto-smime 已迁入且全量电池绿（链验证、CMS 构建/解析、pkcs12 导入、令牌路由、openssl 互操作）；发送闸门与 UI 在 SP4b/SP4c 落地 |
-| OpenPGP 签名与加密 | 🚧 | 同上：astra-crypto-openpgp 已迁入全绿（引擎往返、卡片路由、gpg/sq 互操作）；发送闸门与 UI 在 SP4b/SP4c 落地 |
+| S/MIME 签名与加密 | 🚧 | 内置（2026-10-20 决定）：astra-crypto-smime 已迁入且全量电池绿（链验证、CMS 构建/解析、pkcs12 导入、令牌路由、openssl 互操作）；SP4b 落地了存储、发送闸门与 Astra 侧加密发件箱（受保护主题、信任门控收件人、按账户的方法开关），已经过 harness 实证；接收半与安全 UI 在 SP4c/SP4d 落地 |
+| OpenPGP 签名与加密 | 🚧 | 同上：astra-crypto-openpgp 已迁入全绿（引擎往返、卡片路由、gpg/sq 互操作）；SP4b 落地了发送半（含 Autocrypt-Gossip 与 W9 密码臂），已经过 harness 实证（密封送达、收件人解密回读）；接收半与 UI 在 SP4c/SP4d 落地 |
 
 ## Astra：CLI
 
