@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 //! Secret-material wrappers.
 //!
 //! `SecretBox<T>` is a heap-allocated, zeroizing secret. Use it for raw key

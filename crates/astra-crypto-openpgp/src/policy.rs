@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 //! Bridge between `astra_crypto_core::CryptoPolicy` and Sequoia's `StandardPolicy`.
 //!
 //! Translates the framework-wide algorithm allow-set into Sequoia's policy
@@ -5,7 +6,7 @@
 //! **read** path (admits legacy algorithms so old mail still decrypts and
 //! verifies). A weak-algorithm detector inspects the algorithms actually used
 //! by a verified Signature and returns a human-readable warning string when a
-//! legacy/weak algo is observed — without failing the read operation itself.
+//! legacy/weak algo is observed - without failing the read operation itself.
 //!
 //! ## Design choices (Task 4 controller decisions)
 //!
@@ -15,7 +16,7 @@
 //!   / [`StandardPolicy::accept_asymmetric_algo`] are sufficient to admit the
 //!   legacy read-path set. This keeps both policies as concrete `StandardPolicy`
 //!   instances so tests can query `hash_cutoff` and the trait methods directly,
-//!   and Tasks 5–7 can pass `&dyn Policy` to Sequoia's encrypt/sign/decrypt/
+//!   and Tasks 5-7 can pass `&dyn Policy` to Sequoia's encrypt/sign/decrypt/
 //!   verify builders.
 //! - **`PgpPolicy` retains the framework `CryptoPolicy`** so Task 8's
 //!   `OpenpgpBackend::policy()` can return it by reference (the engine does
@@ -35,8 +36,8 @@ use sequoia_openpgp::types::{
 /// OpenPGP-engine policy bundle.
 ///
 /// Holds the framework [`CryptoPolicy`] (so `OpenpgpBackend::policy()` can
-/// return it directly, Task 8) alongside two Sequoia policies — a modern
-/// `write` policy and a relaxed `read` policy — plus a weak-algorithm detector
+/// return it directly, Task 8) alongside two Sequoia policies - a modern
+/// `write` policy and a relaxed `read` policy - plus a weak-algorithm detector
 /// configured from the same framework policy.
 pub struct PgpPolicy {
     /// Framework-wide algorithm policy. Task 8's backend.policy() returns
@@ -71,7 +72,7 @@ impl PgpPolicy {
     /// Produces two `StandardPolicy` instances:
     /// - **write**: modern defaults, tightened to `p.min_rsa_bits` if it exceeds
     ///   Sequoia's default 2048-bit floor.
-    /// - **read**: permissive — admits SHA-1, MD5, 3DES, and RSA of any size so
+    /// - **read**: permissive - admits SHA-1, MD5, 3DES, and RSA of any size so
     ///   decrypt/verify of legacy mail succeeds. Detection of these weak algos
     ///   is delegated to [`PgpPolicy::note_weak`] so the engine can still
     ///   surface a UI warning without failing the operation.
@@ -81,7 +82,7 @@ impl PgpPolicy {
         // RSA3072 / RSA4096 and reject RSA1024 (cutoff Feb 2014, see
         // `policy.rs:719`). The framework baseline is `min_rsa_bits = 3072`,
         // so we tighten by rejecting RSA2048 explicitly. (RSA1024 is already
-        // rejected by the default cutoff — no action needed for it.)
+        // rejected by the default cutoff - no action needed for it.)
         let mut write = StandardPolicy::new();
         if p.min_rsa_bits >= 3072 {
             write.reject_asymmetric_algo(AsymmetricAlgorithm::RSA2048);
@@ -97,7 +98,7 @@ impl PgpPolicy {
         // Hashes: SHA-1 (common in old mail) + MD5 (rare but seen).
         read.accept_hash(SqHash::SHA1);
         read.accept_hash(SqHash::MD5);
-        // Symmetric: 3DES — very common in pre-AEAD OpenPGP messages.
+        // Symmetric: 3DES - very common in pre-AEAD OpenPGP messages.
         // TripleDes is marked deprecated by Sequoia (use newer algos for new
         // output); here we *accept* it for reading legacy mail only.
         #[allow(deprecated)]
@@ -153,7 +154,7 @@ impl PgpPolicy {
     /// - **Hash**: SHA-1, MD5 (both collision-broken).
     /// - **Public-key family**: DSA (removed from OpenPGP in RFC 9580).
     ///
-    /// Does NOT detect RSA<small — `Signature::pk_algo()` reports the family
+    /// Does NOT detect RSA<small - `Signature::pk_algo()` reports the family
     /// (RSA) but not the bit length. The engine should resolve the signing
     /// Cert and call [`WeakAlgoDetector::is_rsa_too_small`] separately.
     pub fn note_weak(&self, sig: &openpgp::packet::Signature) -> Option<String> {
@@ -377,7 +378,7 @@ mod tests {
         // The write policy's `StandardPolicy` must have a SHA-1 cutoff for
         // CollisionResistance (i.e. SHA-1 is rejected for data signatures).
         // `hash_cutoff` is a `StandardPolicy`-specific method (NOT on the
-        // `Policy` trait — verified at `policy.rs:1116`), so we use the
+        // `Policy` trait - verified at `policy.rs:1116`), so we use the
         // `pub(crate)` field access rather than the `&dyn Policy` accessor.
         let core = CryptoPolicy::default_baseline();
         let pgp = PgpPolicy::from_core(&core);

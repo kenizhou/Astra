@@ -1,7 +1,8 @@
+// SPDX-License-Identifier: GPL-3.0-only
 //! W6: Sequoia [`crypto::Signer`] / [`crypto::Decryptor`] shims over the
 //! astra-crypto-core [`TokenProvider`] trait (OpenPGP hardware tokens / cards).
 //!
-//! The shims are **generic over the provider trait** — they know nothing
+//! The shims are **generic over the provider trait** - they know nothing
 //! about PC/SC or OpenPGP-card APDUs. The backend's `OpenPgpCardProvider`
 //! (pcsc + openpgp-card) and the test-suite `MockTokenProvider` both plug in
 //! behind the same trait, so the full sign/decrypt path is exercised in CI
@@ -32,7 +33,7 @@
 //! ## Typed-error channel
 //!
 //! Sequoia collapses shim errors into its own `Error` type, which the
-//! engine then wraps as `CryptoError::backend` — erasing the typed token
+//! engine then wraps as `CryptoError::backend` - erasing the typed token
 //! errors (`TokenPinRequired` / `TokenNotPresent` / `TokenPinIncorrect`)
 //! the UI depends on. Both shims therefore capture the real error into a
 //! [`CardErrorSlot`] before returning a placeholder Sequoia error; the
@@ -77,7 +78,7 @@ fn seq_err(e: CryptoError, slot: &CardErrorSlot) -> openpgp::anyhow::Error {
     openpgp::Error::InvalidOperation(msg).into()
 }
 
-/// A plain (non-slot) Sequoia error for slot-miss conditions — see the ECDH
+/// A plain (non-slot) Sequoia error for slot-miss conditions - see the ECDH
 /// arm's NOTE. Extracted to keep the anyhow type annotation in one place.
 fn plain_seq_err(msg: String) -> openpgp::anyhow::Error {
     openpgp::Error::InvalidOperation(msg).into()
@@ -85,7 +86,7 @@ fn plain_seq_err(msg: String) -> openpgp::anyhow::Error {
 
 /// Provider-error mapping for the DECRYPT paths. PKESK::decrypt folds every
 /// error into `None` ("try the next slot"), so device errors would vanish
-/// unless captured — but a generic crypto failure (e.g. an RSA padding
+/// unless captured - but a generic crypto failure (e.g. an RSA padding
 /// reject on a slot addressed to a DIFFERENT key) is a normal slot-miss,
 /// not a device error. Only the actionable device-state errors
 /// (`TokenPinRequired` / `TokenNotPresent` / `TokenPinIncorrect`) go into
@@ -126,7 +127,7 @@ fn mechanism_for_signing_key(
         mpi::PublicKey::EdDSA { .. } => Ok((
             TokenSignMechanism::Ed25519,
             // Hash-agnostic (the card signs whatever digest OpenPGP hands
-            // it) — accept the modern default set.
+            // it) - accept the modern default set.
             vec![
                 HashAlgorithm::SHA256,
                 HashAlgorithm::SHA384,
@@ -153,7 +154,7 @@ pub struct CardSigner {
 impl CardSigner {
     /// Build a signer for `public` (the token key's public half, selected
     /// from the stored cert by the caller). `err` is the typed-error
-    /// channel — clone it BEFORE moving the signer into the engine.
+    /// channel - clone it BEFORE moving the signer into the engine.
     pub fn new(
         public: Key<PublicParts, UnspecifiedRole>,
         provider: Arc<dyn TokenProvider>,
@@ -196,7 +197,7 @@ impl Signer for CardSigner {
 
 /// Reassemble a token's raw signature bytes into Sequoia's `mpi::Signature`,
 /// dispatched on the public key algorithm (the wire form is fixed by the
-/// mechanism contract — see module docs).
+/// mechanism contract - see module docs).
 fn signature_from_raw(public: &mpi::PublicKey, raw: &[u8]) -> CryptoResult<mpi::Signature> {
     match public {
         mpi::PublicKey::RSA { .. } => Ok(mpi::Signature::RSA {
@@ -247,7 +248,7 @@ pub struct CardDecryptor {
 
 impl CardDecryptor {
     /// Build a decryptor for `public` (the token key's public half). `err` is
-    /// the typed-error channel — clone it BEFORE moving the decryptor into
+    /// the typed-error channel - clone it BEFORE moving the decryptor into
     /// the engine.
     pub fn new(
         public: Key<PublicParts, UnspecifiedRole>,
@@ -301,7 +302,7 @@ impl Decryptor for CardDecryptor {
                 // input contract: SEC1 uncompressed (0x04 || x || y) for
                 // NIST curves, raw 32 bytes for Cv25519. Note sequoia's
                 // `decode_point` returns (x, y) SPLIT for NIST curves and
-                // (raw32, empty) for 25519 — reassemble the wire form here.
+                // (raw32, empty) for 25519 - reassemble the wire form here.
                 let (x, y) = e.decode_point(&curve).map_err(|e| {
                     seq_err(
                         CryptoError::Malformed(format!("decode ECDH ephemeral point: {e}")),
@@ -323,7 +324,7 @@ impl Decryptor for CardDecryptor {
                     .map_err(|e| decrypt_op_err(e, &self.err))?;
                 // NOTE: an unwrap failure means "this PKESK slot was not
                 // addressed to this key" (PKESK::decrypt folds errors into
-                // `None` so the next slot is tried) — NOT a device error.
+                // `None` so the next slot is tried) - NOT a device error.
                 // It must NOT populate the typed-error slot, or a wrong-key
                 // iteration would surface as a spurious token failure
                 // instead of `NoMatchingKey`.
@@ -355,7 +356,7 @@ impl Decryptor for CardDecryptor {
                 // RFC 9580 §3.2.2: KEK = HKDF-SHA256(E || U || S,
                 // info="OpenPGP X25519"), then AES-128-KW unwrap. Unwrap
                 // failures are slot-misses, not device errors (see the ECDH
-                // arm's NOTE) — no typed-error slot.
+                // arm's NOTE) - no typed-error slot.
                 let kek = hkdf_sha256_openpgp_x25519(e.as_slice(), u, &s)
                     .map_err(|e| plain_seq_err(format!("X25519 KDF failed: {e}")))?;
                 let sk = crypto::ecdh::aes_key_unwrap(
@@ -458,7 +459,7 @@ fn hkdf_sha256(
 
 /// RFC 9580 §3.2.2 KEK derivation for X25519 PKESKs:
 /// `KEK = HKDF-SHA256(IKM = E || U || S, salt = none, info = "OpenPGP
-/// X25519", L = 16)` — matches Sequoia's own software path
+/// X25519", L = 16)` - matches Sequoia's own software path
 /// (`Backend::hkdf_sha256(&ikm, None, b"OpenPGP X25519", kek)`).
 fn hkdf_sha256_openpgp_x25519(e: &[u8], u: &[u8; 32], s: &[u8]) -> CryptoResult<Vec<u8>> {
     let mut ikm = Vec::with_capacity(96);
@@ -486,7 +487,7 @@ mod tests {
     }
 
     /// Cross-check `hkdf_sha256` against RFC 5869 Test Case 1 (SHA-256,
-    /// multi-block expand, L=42) — proves the extract+expand construction
+    /// multi-block expand, L=42) - proves the extract+expand construction
     /// the X25519 KEK derivation is built on.
     #[test]
     fn hkdf_sha256_matches_rfc5869_case1() {

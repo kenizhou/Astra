@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 //! OpenPGP engine: generate / import / export (non-streaming key ops).
 //!
 //! This is the ONLY module in the crate that imports `sequoia_openpgp` for
@@ -12,7 +13,7 @@
 //!   yields `(Cert, revocation)`. `CertBuilder::new()` defaults the primary
 //!   to certify-only; `add_signing_subkey` + `add_transport_encryption_subkey`
 //!   add dedicated subkeys. The default ciphersuite selects Ed25519 for
-//!   primary/signing and X25519 for encryption — matches the engine contract.
+//!   primary/signing and X25519 for encryption - matches the engine contract.
 //! - **import**: `parse_certs` (keymap) wraps `CertParser::from_bytes` which
 //!   auto-detects armor vs binary. For encrypted-secret certs, the verified
 //!   decryption pattern is at `sequoia_openpgp-2.4.1/src/cert.rs:6289` (test
@@ -22,7 +23,7 @@
 //!   preserving each key's role via `KeyAmalgamation::primary()`.
 //! - **export**: `cert.armored().serialize(...)` emits an ASCII-armored
 //!   `PUBLIC KEY BLOCK` frame (delegates to `cert.serialize`, public-only by
-//!   construction — see `keymap.rs` API notes).
+//!   construction - see `keymap.rs` API notes).
 //!
 //! ## Passphrase handling
 //!
@@ -30,7 +31,7 @@
 //! zeroized on drop). To pass them to Sequoia's `decrypt_secret`, we expose them
 //! via [`secrecy::ExposeSecret`], clone into a `String`, and immediately convert
 //! to [`sequoia_openpgp::crypto::Password`] (which uses `mem::Encrypted`
-//! internally — also zeroized on drop). The intermediate `String` is short-lived
+//! internally - also zeroized on drop). The intermediate `String` is short-lived
 //! (a single statement); the bytes never leave crypto-aware containers.
 
 use astra_crypto_core::{
@@ -66,7 +67,7 @@ use crate::keymap;
 /// No OpenPGP S2K passphrase is applied; at-rest protection is the framework's
 /// master-key layer (OS keyring + AES-256-GCM in `kylins.client.backend::crypto`),
 /// not Sequoia's. Generated secret material is therefore UNENCRYPTED within the
-/// OpenPGP packet wiring — the engine contract is that the surrounding storage
+/// OpenPGP packet wiring - the engine contract is that the surrounding storage
 /// layer applies at-rest protection.
 ///
 /// **Revocation cert**: the second tuple element from `CertBuilder::generate()`
@@ -81,14 +82,14 @@ use crate::keymap;
 /// later encrypts to such a recipient, Sequoia's `Encryptor::build` sees
 /// `supports_seipdv2() == true` on every recipient and auto-upgrades the
 /// ciphertext to **PKESK v6 + SEIPDv2** (`sequoia-openpgp-2.4.1/src/serialize/
-/// stream.rs:3057-3067`). That is the cryptographically modern path — but
+/// stream.rs:3057-3067`). That is the cryptographically modern path - but
 /// **GnuPG 2.4.x** (the current stable as of July 2026) **does NOT support
 /// PKESK v6 / SEIPDv2** (added in GnuPG 2.5), so any ciphertext our engine
 /// produces for a default-features recipient fails to decrypt in GnuPG with
 /// `packet(1) with unknown version 6`. This is the asymmetric-interop gap
 /// Task 9's interop tests caught.
 ///
-/// The fix is to advertise SEIPDv1 only — Sequoia's `Encryptor` then falls
+/// The fix is to advertise SEIPDv1 only - Sequoia's `Encryptor` then falls
 /// back to **PKESK v3 + SEIPDv1** (RFC 4880 / 4880bis), which GnuPG 2.4.x
 /// (and every other OpenPGP implementation going back to GnuPG 1.x) can
 /// decrypt. Trade-off: we lose AEAD's better integrity and nonces for our
@@ -154,7 +155,7 @@ pub fn import(data: &[u8], passphrase: Option<SecretBox<String>>) -> CryptoResul
         .ok_or_else(|| policy("import: no OpenPGP certs found in input"))?;
 
     // Only encrypted secrets require a passphrase. If none are encrypted, the
-    // cert is either public-only or an unencrypted TSK — return early. A
+    // cert is either public-only or an unencrypted TSK - return early. A
     // supplied passphrase is intentionally ignored (matches the brief's
     // "ignore a supplied passphrase" semantics for unencrypted certs).
     let has_encrypted = cert.keys().encrypted_secret().next().is_some();
@@ -217,7 +218,7 @@ pub fn import(data: &[u8], passphrase: Option<SecretBox<String>>) -> CryptoResul
 /// ASCII-armored public-key serialization of a Cert.
 ///
 /// Delegates to [`keymap::cert_to_armored_public`]. Emits a
-/// `BEGIN PGP PUBLIC KEY BLOCK` frame (public-only — no secret material
+/// `BEGIN PGP PUBLIC KEY BLOCK` frame (public-only - no secret material
 /// crosses this boundary).
 pub fn export_armored_public(cert: &openpgp::Cert) -> CryptoResult<Vec<u8>> {
     keymap::cert_to_armored_public(cert)
@@ -237,12 +238,12 @@ pub fn export_armored_public(cert: &openpgp::Cert) -> CryptoResult<Vec<u8>> {
 //
 // - **`SingleMimeBlob` only, exactly one Body part.** The single Body part's
 //   `data` (a complete MIME entity) is written RAW into the OpenPGP
-//   literal-data packet — no engine-internal framing appears on the wire.
+//   literal-data packet - no engine-internal framing appears on the wire.
 //   This is the genuine third-party shape: a GnuPG/Thunderbird client
 //   encrypting a mail payload produces exactly this. `SplitPerPart` returns
 //   [`CryptoError::Policy`]`("SplitPerPart not supported in engine-core")`;
 //   wiring for it lands in a later slice. Multi-part input under
-//   `SingleMimeBlob` is likewise rejected with `Policy` — it cannot be
+//   `SingleMimeBlob` is likewise rejected with `Policy` - it cannot be
 //   represented on the raw wire (MIME already multiplexes body+attachments
 //   inside the single entity).
 // - **No MIME framing.** PGP/MIME multipart framing is the send slice's job;
@@ -256,10 +257,10 @@ pub fn export_armored_public(cert: &openpgp::Cert) -> CryptoResult<Vec<u8>> {
 //
 // `decrypt` first attempts `unframe_parts` on the recovered literal data.
 // `Ok` means the ciphertext was produced by the pre-raw-format send slice
-// (dev-build Sent-folder copies — the only framed ciphertext in existence;
+// (dev-build Sent-folder copies - the only framed ciphertext in existence;
 // the send slice was never released), and the framed inner parts are
-// returned. `Err(Malformed)` — the overwhelmingly common case, including
-// every genuine third-party message — means the literal data is a raw MIME
+// returned. `Err(Malformed)` - the overwhelmingly common case, including
+// every genuine third-party message - means the literal data is a raw MIME
 // entity, returned as a single `Body` part verbatim. The discrimination
 // cannot false-positive: `unframe_parts` requires a u32-LE part count ≤ 1024
 // followed by length-prefixed fields that exactly tile the input, while a
@@ -276,7 +277,7 @@ pub fn export_armored_public(cert: &openpgp::Cert) -> CryptoResult<Vec<u8>> {
 //   mirror the FIRST input `Part` (a label; the SEIP body is that part's
 //   raw data bytes).
 // - **`recipients`**: populated INFORMATIVELY from the input `recipient_certs`
-//   via [`keymap::cert_to_handle`]. The `packet` field is EMPTY — the actual
+//   via [`keymap::cert_to_handle`]. The `packet` field is EMPTY - the actual
 //   PKESK key-wrap bytes are embedded in `parts[0].ciphertext` and are not
 //   extracted out in this slice. Documented mapping; a cleaner
 //   per-recipient-packet separation is out of scope.
@@ -294,7 +295,7 @@ pub fn export_armored_public(cert: &openpgp::Cert) -> CryptoResult<Vec<u8>> {
 /// Kept ONLY for [`decrypt`]'s lenient legacy fallback: ciphertexts produced
 /// by the pre-raw-format send slice (dev-build Sent copies) decrypt to a
 /// framed blob. New ciphertexts carry the MIME entity raw, so `unframe_parts`
-/// failing with `Malformed` is the normal third-party path — see the
+/// failing with `Malformed` is the normal third-party path - see the
 /// module-level "Decrypt: lenient legacy-framing fallback" note.
 ///
 /// Legacy framing (little-endian, self-describing):
@@ -440,7 +441,7 @@ fn resolve_signing_keypair(
 /// See the module-level docs above for the [`EncryptedEnvelope`] shape
 /// mapping (single ciphertext blob + informative `recipients` list).
 ///
-/// **Spawn-blocking is Task 8's concern** — this function is synchronous.
+/// **Spawn-blocking is Task 8's concern** - this function is synchronous.
 ///
 /// # Errors
 ///
@@ -481,7 +482,7 @@ pub fn encrypt(
 
 /// W6 token variant of [`encrypt`]: inline-sign with a card-backed signer
 /// (e.g. [`crate::card::CardSigner`]) instead of a cert-resolved keypair.
-/// Everything else — recipient handling, message stack, envelope shape — is
+/// Everything else - recipient handling, message stack, envelope shape - is
 /// identical to the software path.
 pub fn encrypt_with_signer(
     parts: &[Part],
@@ -516,7 +517,7 @@ fn encrypt_impl(
     }
     // Raw wire format: SingleMimeBlob carries exactly one Body part whose
     // `data` (a complete MIME entity) is written verbatim into the
-    // literal-data packet — no internal framing. Covers the empty-parts
+    // literal-data packet - no internal framing. Covers the empty-parts
     // case too (`0 != 1`).
     if parts.len() != 1 {
         return Err(policy(format!(
@@ -612,14 +613,14 @@ fn encrypt_impl(
 /// Outcome of a streaming decrypt ([`decrypt`] / [`decrypt_with_token`] /
 /// [`decrypt_symmetric`]).
 ///
-/// - `payload` — the recovered plaintext parts.
-/// - `weak_warning` — the first legacy/weak signature algorithm noticed by
+/// - `payload` - the recovered plaintext parts.
+/// - `weak_warning` - the first legacy/weak signature algorithm noticed by
 ///   the read path's `VerificationHelper::check` (see
 ///   [`crate::policy::PgpPolicy::note_weak`]).
-/// - `unverifiable_signature` — an embedded signature was present but could
+/// - `unverifiable_signature` - an embedded signature was present but could
 ///   NOT be verified because the signer's cert was not among the offered
 ///   verification certs (Sequoia records this as
-///   [`VerificationError::MissingKey`]). The decrypt itself SUCCEEDS —
+///   [`VerificationError::MissingKey`]). The decrypt itself SUCCEEDS -
 ///   fail-closed applies to BAD signatures (tampering), never to a missing
 ///   signer key. The caller maps this to the framework's
 ///   `SignatureState::UnknownKey` ("unknown-key" persisted state) instead of
@@ -635,7 +636,7 @@ pub struct DecryptOutcome {
 /// (see [`DecryptOutcome`] for the full outcome).
 ///
 /// **Unknown-signer tolerance:** an embedded signature whose signer cert is
-/// NOT among the offered verification certs no longer aborts the decrypt —
+/// NOT among the offered verification certs no longer aborts the decrypt -
 /// Sequoia records it as [`VerificationError::MissingKey`] inside the
 /// signature group, the helper tolerates that variant per group, and the
 /// outcome's `unverifiable_signature` flag is set. A genuinely BAD embedded
@@ -651,13 +652,13 @@ pub struct DecryptOutcome {
 /// run through [`unframe_parts`]. `Ok(parts)` means the ciphertext came from
 /// the pre-raw-format send slice (dev-build Sent copies) and the framed
 /// parts are returned. `Err(Malformed)` means the literal data is a raw MIME
-/// entity — the normal case for every genuine third-party message — and it
+/// entity - the normal case for every genuine third-party message - and it
 /// is returned verbatim as a single `Body` part (`id: "body"`). Fail-closed
 /// is unchanged: genuine decrypt/packet failures error out BEFORE this
 /// point; the fallback only decides how to INTERPRET successfully-decrypted
 /// plaintext, never whether to accept it.
 ///
-/// **Spawn-blocking is Task 8's concern** — this function is synchronous.
+/// **Spawn-blocking is Task 8's concern** - this function is synchronous.
 pub fn decrypt(
     envelope: &EncryptedEnvelope,
     decryption_cert: &openpgp::Cert,
@@ -670,7 +671,7 @@ pub fn decrypt(
 /// W6 token variant of [`decrypt`]: the PKESK private op is delegated to a
 /// card-backed decryptor (e.g. [`crate::card::CardDecryptor`]). The cert is
 /// still used for embedded-signature verification candidates (public half
-/// only — token certs carry no secret material).
+/// only - token certs carry no secret material).
 pub fn decrypt_with_token(
     envelope: &EncryptedEnvelope,
     decryption_cert: &openpgp::Cert,
@@ -766,7 +767,7 @@ fn decrypt_impl(
 }
 
 // =========================================================================
-// symmetric (SKESK) encrypt / decrypt — W9 password-protected mail
+// symmetric (SKESK) encrypt / decrypt - W9 password-protected mail
 // =========================================================================
 //
 // OpenPGP symmetric encryption (RFC 4880 SKESK + SEIPD): the message is
@@ -780,7 +781,7 @@ fn decrypt_impl(
 // `aead_algo` was explicitly set OR every RECIPIENT cert advertises SEIPDv2
 // (`sequoia-openpgp-2.4.1/src/serialize/stream.rs:3057-3067`). A passwords-only
 // `Encryptor::with_passwords` has NO recipients, so the upgrade condition is
-// never met and the output is **SKESK v4 + SEIPDv1** (RFC 4880) — exactly what
+// never met and the output is **SKESK v4 + SEIPDv1** (RFC 4880) - exactly what
 // `gpg --symmetric` (GnuPG 2.4.x) produces and consumes. This mirrors the
 // PKESK path's SEIPDv1-only decision (see `generate`'s doc comment): the
 // load-bearing interop target is Thunderbird/GnuPG 2.4.x, which cannot parse
@@ -791,7 +792,7 @@ fn decrypt_impl(
 // The passphrase enters as `astra_crypto_core::SecretBox<String>` (heap-allocated,
 // zeroized on drop) and is converted to Sequoia's `crypto::Password`
 // (`mem::Encrypted`, zeroized on drop) via a transient
-// `zeroize::Zeroizing<String>` — the same pattern [`import`] uses. The bytes
+// `zeroize::Zeroizing<String>` - the same pattern [`import`] uses. The bytes
 // never leave crypto-aware containers, are never logged, and are never
 // persisted.
 
@@ -800,23 +801,23 @@ fn decrypt_impl(
 /// constraint and passphrase handling.
 ///
 /// The [`EncryptedEnvelope`] shape mirrors [`encrypt`]'s SingleMimeBlob
-/// mapping (single ciphertext blob carrying the full OpenPGP message —
+/// mapping (single ciphertext blob carrying the full OpenPGP message -
 //  SKESK + SEIP data), with an EMPTY `recipients` list: there are no PKESK
 /// key-wrap packets in a symmetric message.
 ///
 /// `sign_with` composes an inline signature inside the ciphertext exactly as
-/// [`encrypt`] does (verification on decrypt needs the signer's public cert —
+/// [`encrypt`] does (verification on decrypt needs the signer's public cert -
 /// passed to [`decrypt_symmetric`] as a known signer).
 ///
-/// **Spawn-blocking is the caller's concern** — this function is synchronous.
+/// **Spawn-blocking is the caller's concern** - this function is synchronous.
 ///
 /// # Errors
 ///
 /// - [`CryptoError::Policy`]`("SplitPerPart not supported in engine-core")`,
 ///   `("encrypt: SingleMimeBlob requires exactly one part …")`,
-///   `("… PartKind::Body")` — same shape validation as [`encrypt`].
+///   `("… PartKind::Body")` - same shape validation as [`encrypt`].
 /// - [`CryptoError::Policy`]`("encrypt_symmetric: passphrase must not be
-///   empty")` — fail-closed: no ciphertext is produced for an empty
+///   empty")` - fail-closed: no ciphertext is produced for an empty
 ///   passphrase.
 /// - [`CryptoError::Policy`]`("encrypt: sign_with cert has no usable signing
 ///   subkey")` (shared with [`encrypt`]'s inline-sign path).
@@ -876,7 +877,7 @@ fn encrypt_symmetric_impl(
             "encrypt: SingleMimeBlob requires the single part to be PartKind::Body",
         ));
     }
-    // Fail-closed: an empty passphrase must produce NO ciphertext — the send
+    // Fail-closed: an empty passphrase must produce NO ciphertext - the send
     // slice surfaces this as a typed error before any bytes are emitted.
     if passphrase.expose_secret().is_empty() {
         return Err(policy("encrypt_symmetric: passphrase must not be empty"));
@@ -893,13 +894,13 @@ fn encrypt_symmetric_impl(
     //
     // `Encryptor::with_passwords` with no recipients never triggers Sequoia's
     // SEIPDv2 auto-upgrade (see the section docs), so the output is SKESK v4 +
-    // SEIPDv1 — the `gpg --symmetric`-compatible shape.
+    // SEIPDv1 - the `gpg --symmetric`-compatible shape.
     let mut sink: Vec<u8> = Vec::new();
     let encryptor = Encryptor::with_passwords(Message::new(&mut sink), std::iter::once(password));
     let encryptor_msg = map_sequoia(encryptor.build())?;
 
     // Optional inline-sign: identical to `encrypt`'s signer arm (resolved
-    // box — software keypair or W6 card shim).
+    // box - software keypair or W6 card shim).
     let signing_target: Message = if let Some(signer) = signer {
         let signer = map_sequoia(Signer::new(encryptor_msg, signer))?;
         map_sequoia(signer.build())?
@@ -934,32 +935,32 @@ fn encrypt_symmetric_impl(
 /// (see [`DecryptOutcome`] for the full outcome).
 ///
 /// `known_signers` are the certs offered to Sequoia for verifying an embedded
-/// (inline) signature — a symmetric message has no decryption cert, so signer
+/// (inline) signature - a symmetric message has no decryption cert, so signer
 /// resolution is entirely caller-driven (the framework passes the account's
 /// imported OpenPGP certs; verification works when the signer's public key is
 /// among them). The embedded-signature policy matches [`decrypt`]: an
-/// unknown signer ([`VerificationError::MissingKey`]) DEGRADES — the decrypt
+/// unknown signer ([`VerificationError::MissingKey`]) DEGRADES - the decrypt
 /// succeeds with `unverifiable_signature` set; a genuinely bad signature
 /// (no `GoodChecksum` from an offered cert) FAILS the decrypt.
 ///
-/// **Lenient legacy-framing fallback:** identical to [`decrypt`] — the
+/// **Lenient legacy-framing fallback:** identical to [`decrypt`] - the
 /// recovered literal data is first run through [`unframe_parts`]; a raw MIME
 /// entity (the normal third-party case) is returned verbatim as a single
 /// `Body` part.
 ///
-/// **Spawn-blocking is the caller's concern** — this function is synchronous.
+/// **Spawn-blocking is the caller's concern** - this function is synchronous.
 ///
 /// # Errors
 ///
 /// - [`CryptoError::WrongPassphrase`] (typed) when the passphrase fits no
-///   SKESK slot in the message — wrong passphrase OR the message is not
+///   SKESK slot in the message - wrong passphrase OR the message is not
 ///   passphrase-encrypted at all. The caller surfaces this as a re-prompt,
 ///   never as a structural failure. (Tampered-ciphertext MDC failures also
 ///   collapse into this variant for small messages, mirroring the PKESK
-///   path's tampered → `NoMatchingKey` collapse — see [`decrypt`]'s tests.)
+///   path's tampered → `NoMatchingKey` collapse - see [`decrypt`]'s tests.)
 /// - [`CryptoError::Policy`] for SplitPerPart / empty-envelope shape errors.
 /// - [`CryptoError::Backend`] for structural failures (unparseable packet
-///   stream, etc.) — NEVER reclassified as WrongPassphrase.
+///   stream, etc.) - NEVER reclassified as WrongPassphrase.
 pub fn decrypt_symmetric(
     envelope: &EncryptedEnvelope,
     passphrase: SecretBox<String>,
@@ -1002,7 +1003,7 @@ pub fn decrypt_symmetric(
 
     let helper = decryptor.into_helper();
 
-    // Lenient legacy-framing fallback — identical discrimination to
+    // Lenient legacy-framing fallback - identical discrimination to
     // `decrypt` (see its doc comment).
     let parts = match unframe_parts(&plaintext) {
         Ok(framed) => framed,
@@ -1034,7 +1035,7 @@ pub fn decrypt_symmetric(
 /// suffices.
 ///
 /// Lenient: a parse failure mid-stream returns what was found up to that
-/// point (an unparseable stream with no preceding SKESK yields `false` — the
+/// point (an unparseable stream with no preceding SKESK yields `false` - the
 /// receive path then reports the structural failure, not a passphrase
 /// prompt).
 pub fn has_skesk(ciphertext: &[u8]) -> bool {
@@ -1076,7 +1077,7 @@ struct PasswordHelper<'a> {
     weak_warning: Option<String>,
     /// An embedded signature could not be verified because its signer's cert
     /// was not among `known_signers` (`VerificationError::MissingKey`).
-    /// Surfaced on [`DecryptOutcome::unverifiable_signature`] — the caller
+    /// Surfaced on [`DecryptOutcome::unverifiable_signature`] - the caller
     /// maps it to the framework's `SignatureState::UnknownKey`.
     unverifiable_signature: bool,
 }
@@ -1095,7 +1096,7 @@ impl<'a> VerificationHelper for PasswordHelper<'a> {
     fn check(&mut self, structure: MessageStructure) -> sequoia_openpgp::Result<()> {
         // Identical policy to `Helper::check` (see there for the full
         // rationale): `VerificationError::MissingKey` (unknown signer)
-        // DEGRADES — flagged on the outcome, decrypt proceeds; every other
+        // DEGRADES - flagged on the outcome, decrypt proceeds; every other
         // signature-group error (bad signature, unbound key, malformed)
         // fails the decrypt closed. The first weak-algo warning is captured.
         for layer in structure.into_iter() {
@@ -1147,7 +1148,7 @@ impl<'a> DecryptionHelper for PasswordHelper<'a> {
         ) -> bool,
     ) -> sequoia_openpgp::Result<Option<openpgp::Cert>> {
         // Try every SKESK with the passphrase: the first one whose derived
-        // session key `decrypt_fn` accepts wins. PKESKs are ignored — this is
+        // session key `decrypt_fn` accepts wins. PKESKs are ignored - this is
         // the dedicated passphrase path (the PKESK key loop runs separately,
         // first).
         let _ = sym_algo; // the SKESK carries its own sym-algo
@@ -1163,7 +1164,7 @@ impl<'a> DecryptionHelper for PasswordHelper<'a> {
             }
         }
         // No SKESK fit the passphrase: wrong passphrase (or the message is
-        // not passphrase-encrypted at all — zero SKESKs). Signal via the
+        // not passphrase-encrypted at all - zero SKESKs). Signal via the
         // typed `WrongPassphrase` marker so the framework can re-prompt
         // without parsing Display strings.
         Err(crate::error::WrongPassphrase("no SKESK matched the supplied passphrase".into()).into())
@@ -1192,14 +1193,14 @@ impl<'a> DecryptionHelper for PasswordHelper<'a> {
 // The split between `UnknownKey` and `Invalid` is decided BEFORE invoking
 // `DetachedVerifier`: we pre-filter `known_signers` by the sig packet's
 // issuer fingerprint(s). If no signer matches, we skip verification entirely
-// and return `UnknownKey` — this avoids relying on Sequoia's "No Key" error
+// and return `UnknownKey` - this avoids relying on Sequoia's "No Key" error
 // shape and gives a clean, engine-level state distinction.
 
 /// Detached-sign `payload` with `signer_cert`'s dedicated signing subkey.
 ///
 /// Verified Task-1 spike `## detached-sign` shape:
 /// `Signer::new(Message::new(sink), keypair)?.detached().build()?`, then
-/// `write_all(payload)` + `finalize()`. The data is HASHED, not emitted —
+/// `write_all(payload)` + `finalize()`. The data is HASHED, not emitted -
 /// `signature` holds ONLY the detached signature packet.
 ///
 /// The signing subkey is resolved via [`resolve_signing_keypair`] (same path
@@ -1207,7 +1208,7 @@ impl<'a> DecryptionHelper for PasswordHelper<'a> {
 /// rules apply: an alive, unrevoked, policy-accepted signing subkey with
 /// unencrypted secret material is required.
 ///
-/// **Spawn-blocking is Task 8's concern** — this function is synchronous.
+/// **Spawn-blocking is Task 8's concern** - this function is synchronous.
 ///
 /// # Errors
 ///
@@ -1249,10 +1250,10 @@ pub fn sign_detached(
 /// W6 token variant of [`sign_detached`]: detached-sign with a card-backed
 /// signer (e.g. [`crate::card::CardSigner`]) instead of a cert-resolved
 /// keypair. `signer_cert` supplies ONLY the metadata for the returned
-/// [`astra_crypto_core::DetachedSignature`]'s `signer` handle — the signature
+/// [`astra_crypto_core::DetachedSignature`]'s `signer` handle - the signature
 /// itself comes from the token.
 ///
-/// **Spawn-blocking is the caller's concern** — this function is synchronous.
+/// **Spawn-blocking is the caller's concern** - this function is synchronous.
 pub fn sign_detached_with_signer(
     payload: &[u8],
     signer_cert: &openpgp::Cert,
@@ -1283,7 +1284,7 @@ pub fn sign_detached_with_signer(
 /// See the module-level docs above for the full state-mapping table. The
 /// load-bearing decision is `UnknownKey` vs `Invalid`: it is made by
 /// pre-filtering `known_signers` against the signature packet's issuer
-/// fingerprint(s) — if no known signer matches, `UnknownKey` is returned
+/// fingerprint(s) - if no known signer matches, `UnknownKey` is returned
 /// WITHOUT invoking the verifier. Only when a matching key is available do
 /// we run `DetachedVerifierBuilder::from_bytes(...)?.with_policy(read_policy,
 /// None, helper)?.verify_bytes(payload)?` (the verified `## detached-verify`
@@ -1306,7 +1307,7 @@ pub fn sign_detached_with_signer(
 /// `revocation_reason` is always `None` (PGP key revocation handling arrives
 /// with Web-of-Trust in the receive slice).
 ///
-/// **Spawn-blocking is Task 8's concern** — this function is synchronous.
+/// **Spawn-blocking is Task 8's concern** - this function is synchronous.
 pub fn verify_detached(
     payload: &[u8],
     sig: &astra_crypto_core::DetachedSignature,
@@ -1332,13 +1333,13 @@ pub fn verify_detached(
 
     // Pre-filter: do any known_signers match the sig's issuer fingerprint(s)?
     // We compare against EVERY key in the cert (primary + subkeys) because the
-    // signature is typically made by a dedicated SIGNING SUBKEY — the sig
+    // signature is typically made by a dedicated SIGNING SUBKEY - the sig
     // packet's IssuerFingerprint subpacket then carries the subkey's fp, not
     // the cert primary's fp (which is what `cert.fingerprint()` returns and
     // what `keymap::cert_to_handle` surfaces). Matching on the primary fp
     // alone would falsely classify a known signer as UnknownKey.
     //
-    // Comparison is on `Fingerprint` (not `KeyHandle`) — the sig packet's
+    // Comparison is on `Fingerprint` (not `KeyHandle`) - the sig packet's
     // IssuerFingerprint subpacket is the strong form (RFC 9580 §5.2.3.28);
     // matching on it avoids false positives from short-KeyID collisions.
     let matching: Vec<&openpgp::Cert> = known_signers
@@ -1403,7 +1404,7 @@ pub fn verify_detached(
     // it carries only the verify-FAILURE reason. The detector itself is
     // unit-tested in `policy::tests::note_weak_*`; surfacing the warning in
     // `VerificationResult` is deferred to the receive slice (spec §7) which
-    // will add a dedicated channel — `failure_reason` must stay `None` on
+    // will add a dedicated channel - `failure_reason` must stay `None` on
     // success states per the framework contract.
 
     match verify_outcome {
@@ -1417,7 +1418,7 @@ pub fn verify_detached(
         Err(e) => Ok(astra_crypto_core::VerificationResult {
             state: astra_crypto_core::SignatureState::Invalid,
             signer: Some(signer_handle),
-            // Just the verify-FAILURE reason — NOT a weak-algo advisory.
+            // Just the verify-FAILURE reason - NOT a weak-algo advisory.
             failure_reason: Some(format!("{}", e)),
             revocation_reason: None,
         }),
@@ -1430,7 +1431,7 @@ pub fn verify_detached(
 /// `PacketParserBuilder::from_bytes(...)?.build()?` returns a
 /// `PacketParserResult`; we match out the `Some(parser)` arm and call
 /// `recurse()` to materialize the `Packet`. The packet MUST be a
-/// `Packet::Signature` — anything else is a [`CryptoError::Malformed`].
+/// `Packet::Signature` - anything else is a [`CryptoError::Malformed`].
 ///
 /// We use this instead of [`openpgp::packet::Signature::from_bytes`] because
 /// the latter's `Parse` impl dispatches through a `Self::parse` method that
@@ -1486,7 +1487,7 @@ fn extract_issuer_fingerprints(sig: &openpgp::packet::Signature) -> Vec<openpgp:
 }
 
 /// Extract the distinct issuer fingerprint(s) from a detached signature's
-/// packet bytes — the same parse [`verify_detached`] performs internally.
+/// packet bytes - the same parse [`verify_detached`] performs internally.
 ///
 /// The OpenPGP backend's signer resolution (F2) uses this to search the
 /// keystore by the sig's `IssuerFingerprint` BEFORE verification: detached
@@ -1506,7 +1507,7 @@ pub fn issuer_fingerprints_of(sig_bytes: &[u8]) -> CryptoResult<Vec<openpgp::Fin
 /// already established that at least one matches the sig's issuer
 /// fingerprint). `get_certs` hands them all back so Sequoia can resolve the
 /// exact signing subkey by `KeyHandle`. `check` enforces "at least one
-/// `GoodChecksum`" — a tampered payload yields no `GoodChecksum`, so `check`
+/// `GoodChecksum`" - a tampered payload yields no `GoodChecksum`, so `check`
 /// returns `Err` and `verify_bytes` propagates it as `Err`.
 struct VerifyHelper {
     known_signers: Vec<openpgp::Cert>,
@@ -1576,7 +1577,7 @@ struct Helper<'a> {
     weak_warning: Option<String>,
     /// An embedded signature could not be verified because its signer's cert
     /// was not offered (`VerificationError::MissingKey`). Surfaced on
-    /// [`DecryptOutcome::unverifiable_signature`] — the caller maps it to the
+    /// [`DecryptOutcome::unverifiable_signature`] - the caller maps it to the
     /// framework's `SignatureState::UnknownKey`.
     unverifiable_signature: bool,
 }
@@ -1592,7 +1593,7 @@ impl<'a> VerificationHelper for Helper<'a> {
         // signer's public cert is among `known_signers`; when it is NOT,
         // Sequoia records `VerificationError::MissingKey`, which `check`
         // tolerates (degraded to the outcome's `unverifiable_signature`
-        // flag — never a decrypt abort).
+        // flag - never a decrypt abort).
         let mut certs = Vec::with_capacity(self.known_signers.len() + 1);
         certs.push(self.cert.clone());
         certs.extend(self.known_signers.iter().cloned());
@@ -1602,8 +1603,8 @@ impl<'a> VerificationHelper for Helper<'a> {
     fn check(&mut self, structure: MessageStructure) -> sequoia_openpgp::Result<()> {
         // Unknown-signer tolerance (per signature group): Sequoia records a
         // signature it cannot verify for lack of the signer's cert as
-        // `VerificationError::MissingKey`. That is NOT evidence of tampering —
-        // the message simply came from someone whose key we don't hold — so
+        // `VerificationError::MissingKey`. That is NOT evidence of tampering -
+        // the message simply came from someone whose key we don't hold - so
         // it DEGRADES: the decrypt succeeds and the outcome carries
         // `unverifiable_signature` (the framework persists `unknown-key`).
         // Every other error (`BadSignature`, `UnboundKey`, `BadKey`,
@@ -1738,7 +1739,7 @@ mod tests {
     /// Task-1 spike `gen()` pattern, duplicated per the no-cross-task-assumption
     /// rule (this crate's lib-tests must not depend on `tests/spike.rs`).
     /// Yields a Cert with primary (certify) + transport-encryption subkey +
-    /// signing subkey — all with UNENCRYPTED secret material (no S2K).
+    /// signing subkey - all with UNENCRYPTED secret material (no S2K).
     fn gen() -> openpgp::Cert {
         let (cert, _rev) = CertBuilder::new()
             .add_userid("engine-test@example.org")
@@ -1751,7 +1752,7 @@ mod tests {
 
     /// Build a TSK with ALL secret material encrypted under `password`.
     /// `CertBuilder::set_password` applies S2K encryption to every key the
-    /// builder produces (primary + subkeys) — verified at
+    /// builder produces (primary + subkeys) - verified at
     /// `sequoia_openpgp-2.4.1/src/cert.rs:6289` test `decrypt_encrypt_secrets`.
     fn gen_encrypted(password: &str) -> openpgp::Cert {
         let (cert, _rev) = CertBuilder::new()
@@ -1959,7 +1960,7 @@ mod tests {
         let wrong_pw: SecretBox<String> = SecretBox::new(Box::new("wrong password".to_string()));
         let err = import(&blob, Some(wrong_pw)).unwrap_err();
         // A wrong passphrase surfaces as a Sequoia error → CryptoError::Backend
-        // (NOT Policy — the user supplied a passphrase; it just didn't match).
+        // (NOT Policy - the user supplied a passphrase; it just didn't match).
         assert!(
             matches!(err, astra_crypto_core::CryptoError::Backend(_)),
             "wrong passphrase must surface as CryptoError::Backend; got: {err}"
@@ -2035,7 +2036,7 @@ mod tests {
         let DecryptOutcome { payload, .. } = decrypt(&env, &cert, &[], &pol).expect("decrypt");
         assert_eq!(payload.standard, astra_crypto_core::Standard::OpenPgp);
         assert_eq!(payload.parts.len(), 1, "one part in, one part out");
-        // Raw wire format: the input part id is a label only — it is NOT on
+        // Raw wire format: the input part id is a label only - it is NOT on
         // the wire. Decrypt's raw path synthesizes the canonical "body" id.
         assert_eq!(
             payload.parts[0].id,
@@ -2107,7 +2108,7 @@ mod tests {
     }
 
     /// Construct a legacy framed blob (the pre-raw-wire-format plaintext
-    /// shape) by hand — `frame_parts` was deleted with the raw-wire-format
+    /// shape) by hand - `frame_parts` was deleted with the raw-wire-format
     /// change, so tests that exercise the legacy fallback build the single-
     /// Body-part frame inline. Format (all u32 LE):
     ///   part_count=1 | id_len | id | kind_tag=0 (Body) | data_len | data
@@ -2127,11 +2128,11 @@ mod tests {
         // Backward-compat: ciphertexts produced by the pre-raw-format send
         // slice (dev-build Sent-folder copies) decrypt to a FRAMED blob.
         // decrypt must recognize it via unframe_parts and return the framed
-        // inner part — NOT the framed blob as raw bytes.
+        // inner part - NOT the framed blob as raw bytes.
         //
         // We simulate a legacy ciphertext by encrypting the framed blob AS
         // the part data: encrypt now writes raw, so the ciphertext's literal
-        // data IS the framed blob — byte-identical to what a pre-raw-format
+        // data IS the framed blob - byte-identical to what a pre-raw-format
         // encrypt produced.
         let pol = pgp_policy();
         let cert = gen();
@@ -2153,7 +2154,10 @@ mod tests {
             1,
             "legacy framed payload must unframe to its inner part"
         );
-        assert_eq!(payload.parts[0].id, astra_crypto_core::PartId("body".into()));
+        assert_eq!(
+            payload.parts[0].id,
+            astra_crypto_core::PartId("body".into())
+        );
         assert!(
             matches!(payload.parts[0].kind, astra_crypto_core::PartKind::Body),
             "legacy framed inner part kind must be Body"
@@ -2188,8 +2192,14 @@ mod tests {
 
         let DecryptOutcome { payload, .. } = decrypt(&env, &cert, &[], &pol).expect("decrypt");
         assert_eq!(payload.parts.len(), 1);
-        assert_eq!(payload.parts[0].id, astra_crypto_core::PartId("body".into()));
-        assert!(matches!(payload.parts[0].kind, astra_crypto_core::PartKind::Body));
+        assert_eq!(
+            payload.parts[0].id,
+            astra_crypto_core::PartId("body".into())
+        );
+        assert!(matches!(
+            payload.parts[0].kind,
+            astra_crypto_core::PartKind::Body
+        ));
         assert_eq!(
             payload.parts[0].data, mime,
             "raw MIME entity must round-trip verbatim"
@@ -2215,7 +2225,7 @@ mod tests {
         // Even a payload whose first u32 LE parses as a PLAUSIBLE part count
         // (≤ cap) must fail on structure: a valid frame needs id/kind/data
         // length fields that exactly tile the input with zero trailing bytes.
-        // Here count=1, then id_len reads as 0x44434241 ("ABCD" LE) — far
+        // Here count=1, then id_len reads as 0x44434241 ("ABCD" LE) - far
         // beyond the buffer → truncated → Malformed.
         let near_miss: &[u8] = b"\x01\x00\x00\x00ABCDE";
         let err = unframe_parts(near_miss).unwrap_err();
@@ -2270,7 +2280,7 @@ mod tests {
         // PoC (interaction F2): cert A signs, cert B decrypts, and A's cert is
         // NOT offered for verification. Sequoia records the embedded signature
         // as `VerificationError::MissingKey`. PRE-FIX this aborted the whole
-        // decrypt (the helper returned Err on any signature-group error) —
+        // decrypt (the helper returned Err on any signature-group error) -
         // the message was unreadable even though the ciphertext was fine.
         // POST-FIX the decrypt succeeds with `unverifiable_signature` set; the
         // framework maps that to the `unknown-key` signature state.
@@ -2302,7 +2312,7 @@ mod tests {
             .expect("offered signer must verify");
         assert!(
             !outcome.unverifiable_signature,
-            "offered signer must verify — no unverifiable_signature flag"
+            "offered signer must verify - no unverifiable_signature flag"
         );
         assert_eq!(outcome.payload.parts[0].data, part.data);
     }
@@ -2339,7 +2349,7 @@ mod tests {
             .expect("offered signer must verify");
         assert!(
             !outcome.unverifiable_signature,
-            "offered signer must verify — no unverifiable_signature flag"
+            "offered signer must verify - no unverifiable_signature flag"
         );
         assert_eq!(outcome.payload.parts[0].data, part.data);
     }
@@ -2347,7 +2357,7 @@ mod tests {
     #[test]
     fn decrypt_symmetric_unknown_signer_wrong_passphrase_still_typed() {
         // Interaction guard: the unknown-signer tolerance must NOT mask the
-        // wrong-passphrase classification — a wrong passphrase on a signed
+        // wrong-passphrase classification - a wrong passphrase on a signed
         // symmetric message still surfaces the typed WrongPassphrase (the
         // SKESK loop fails before any signature check runs).
         let pol = pgp_policy();
@@ -2380,7 +2390,7 @@ mod tests {
         // Sequoia's DEFAULT_BUFFER_SIZE (25 MiB), so the MDC check runs
         // INSIDE `decrypt_fn`, which rejects the session key exactly the way
         // a non-matching PKESK does. The helper therefore reports this
-        // through the wrong-key channel — typed `NoMatchingKey` since F1
+        // through the wrong-key channel - typed `NoMatchingKey` since F1
         // (before F1 it was `Backend` carrying the same "no PKESK matched"
         // wording; the backend's string-match already folded this case into
         // `no-key`, so behavior is unchanged). A genuine parse-level
@@ -2417,7 +2427,7 @@ mod tests {
     fn decrypt_garbage_ciphertext_is_structural_not_no_matching_key() {
         // Fail-closed guard for the typed classification: input that is not a
         // parseable OpenPGP message at all must fail at packet-parse time and
-        // stay `Backend` — it must NEVER be reclassified as NoMatchingKey, or
+        // stay `Backend` - it must NEVER be reclassified as NoMatchingKey, or
         // the framework would silently fold corrupt messages into `no-key`
         // instead of `failed`.
         let pol = pgp_policy();
@@ -2449,7 +2459,7 @@ mod tests {
     fn decrypt_with_wrong_cert_returns_typed_no_matching_key() {
         // Wrong-key site #1: the message was encrypted to cert A only; cert B
         // (a different, fully-valid TSK) fits NO PKESK. The engine must report
-        // this via the TYPED `CryptoError::NoMatchingKey` variant — the
+        // this via the TYPED `CryptoError::NoMatchingKey` variant - the
         // framework's "try the next key" classification MUST NOT depend on
         // matching human-readable Display strings.
         let pol = pgp_policy();
@@ -2506,7 +2516,7 @@ mod tests {
     #[test]
     fn encrypt_multiple_recipients_decrypts_with_either() {
         // Each recipient cert must be able to decrypt a message encrypted to
-        // both — Sequoia emits one PKESK per recipient inside the single
+        // both - Sequoia emits one PKESK per recipient inside the single
         // ciphertext blob.
         let pol = pgp_policy();
         let cert_a = gen();
@@ -2638,7 +2648,10 @@ mod tests {
             decrypt_symmetric(&env, secret("hunter2"), &[], &pol).expect("decrypt_symmetric");
         assert_eq!(payload.standard, astra_crypto_core::Standard::OpenPgp);
         assert_eq!(payload.parts.len(), 1);
-        assert_eq!(payload.parts[0].id, astra_crypto_core::PartId("body".into()));
+        assert_eq!(
+            payload.parts[0].id,
+            astra_crypto_core::PartId("body".into())
+        );
         assert_eq!(payload.parts[0].data, part.data);
     }
 
@@ -2646,7 +2659,7 @@ mod tests {
     fn symmetric_encrypt_emits_skesk_v4_and_seipdv1() {
         // GnuPG-interop wire-format pin (mirrors the PKESK path's
         // SEIPDv1-only constraint): a passwords-only Encryptor must emit
-        // SKESK v4 (RFC 4880) + SEIPDv1 — NOT SKESK6/SEIPDv2 (RFC 9580),
+        // SKESK v4 (RFC 4880) + SEIPDv1 - NOT SKESK6/SEIPDv2 (RFC 9580),
         // which GnuPG 2.4.x cannot parse.
         let pol = pgp_policy();
         let part = body_part("body", b"wire format check");
@@ -2738,7 +2751,7 @@ mod tests {
     fn symmetric_decrypt_pkesk_only_message_is_typed_wrong_passphrase() {
         // A pure-PKESK message has no SKESK slots: the passphrase path must
         // surface the typed WrongPassphrase (zero SKESKs tried), NOT a
-        // structural error — the receive UI maps this to "not a
+        // structural error - the receive UI maps this to "not a
         // password-protected message" handling.
         let pol = pgp_policy();
         let cert = gen();
@@ -2832,7 +2845,10 @@ mod tests {
         let DecryptOutcome { payload, .. } =
             decrypt_symmetric(&env, secret("pw"), &[], &pol).expect("decrypt_symmetric");
         assert_eq!(payload.parts.len(), 1);
-        assert_eq!(payload.parts[0].id, astra_crypto_core::PartId("body".into()));
+        assert_eq!(
+            payload.parts[0].id,
+            astra_crypto_core::PartId("body".into())
+        );
         assert_eq!(payload.parts[0].data, mime);
     }
 
@@ -2963,7 +2979,7 @@ mod tests {
             "Invalid must surface a failure_reason"
         );
         // Signer is still the matching known-signer (we identified the right
-        // key — the signature itself just doesn't verify).
+        // key - the signature itself just doesn't verify).
         let signer = result
             .signer
             .as_ref()
@@ -2990,7 +3006,7 @@ mod tests {
         );
         // Issuer fingerprint is still derivable from the sig packet → surfaced.
         // The sig's IssuerFingerprint subpacket carries the SIGNING SUBKEY's
-        // fp (not the cert's primary) — extract it via the same path the
+        // fp (not the cert's primary) - extract it via the same path the
         // production code uses for cross-checking.
         let signer = result
             .signer
@@ -3068,7 +3084,7 @@ mod tests {
     #[test]
     fn verify_detached_valid_verified_silences_failure_reason_on_modern_algos() {
         // Contract check: `failure_reason` must be `None` on `ValidVerified`
-        // (modern algo OR weak algo — the contract is unconditional; the
+        // (modern algo OR weak algo - the contract is unconditional; the
         // framework docstring at `envelope.rs:153-157` says `None` on all
         // success states). This test uses a modern-algo fixture; weak-algo
         // surfacing is deferred to the receive slice per the engine-core
@@ -3078,7 +3094,10 @@ mod tests {
         let sig = sign_detached(b"clean payload", &cert, &pol).expect("sign");
         let result = verify_detached(b"clean payload", &sig, std::slice::from_ref(&cert), &pol)
             .expect("verify");
-        assert_eq!(result.state, astra_crypto_core::SignatureState::ValidVerified);
+        assert_eq!(
+            result.state,
+            astra_crypto_core::SignatureState::ValidVerified
+        );
         assert!(
             result.failure_reason.is_none(),
             "ValidVerified must have None failure_reason (contract is unconditional); got {:?}",

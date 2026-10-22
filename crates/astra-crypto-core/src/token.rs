@@ -1,12 +1,13 @@
+// SPDX-License-Identifier: GPL-3.0-only
 //! Hardware-token abstraction (W6): PKCS#11 tokens (S/MIME) and OpenPGP cards.
 //!
-//! Private key material NEVER leaves the token — sign/decrypt operations are
+//! Private key material NEVER leaves the token - sign/decrypt operations are
 //! delegated to the device through the [`TokenProvider`] trait. Two provider
 //! families implement it in the backend crate (`src/mail/token/`):
 //!
-//! - **PKCS#11** via the `cryptoki` crate (dynamic-loaded vendor module —
+//! - **PKCS#11** via the `cryptoki` crate (dynamic-loaded vendor module -
 //!   OpenSC, Yubico PIV, SoftHSM, ...).
-//! - **OpenPGP card** via `openpgp-card` + `card-backend-pcsc` (PC/SC —
+//! - **OpenPGP card** via `openpgp-card` + `card-backend-pcsc` (PC/SC -
 //!   YubiKey, Nitrokey, Gnuk, ...).
 //!
 //! The trait is **synchronous** because both underlying stacks are blocking
@@ -70,7 +71,7 @@ pub struct TokenInfo {
 }
 
 /// A key object living on a token, as enumerated by
-/// [`TokenProvider::list_keys`]. Carries PUBLIC material only — private
+/// [`TokenProvider::list_keys`]. Carries PUBLIC material only - private
 /// material is never read off the device.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -89,7 +90,7 @@ pub struct TokenKeyInfo {
     pub public_data: Option<Vec<u8>>,
 }
 
-/// A reference to one key on one token — the address every private op takes.
+/// A reference to one key on one token - the address every private op takes.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TokenKeyRef {
@@ -107,7 +108,7 @@ impl TokenKeyRef {
 }
 
 /// The signature operation a token must perform. All mechanisms hand the
-/// token a PRE-COMPUTED digest (or, for EdDSA, the bytes Ed25519 signs — the
+/// token a PRE-COMPUTED digest (or, for EdDSA, the bytes Ed25519 signs - the
 /// OpenPGP hash output, which cards treat as the Ed25519 "message"); the
 /// token never sees the full message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -134,8 +135,8 @@ pub enum TokenSignMechanism {
 /// - PINs are held in zeroizing containers and dropped on removal/lock.
 /// - Device-absence and PIN failures surface as the typed
 ///   [`CryptoError::TokenNotPresent`] / [`CryptoError::TokenPinRequired`] /
-///   [`CryptoError::TokenPinIncorrect`] variants — never as generic
-///   `Backend`/`Malformed` errors — so the UI can prompt appropriately.
+///   [`CryptoError::TokenPinIncorrect`] variants - never as generic
+///   `Backend`/`Malformed` errors - so the UI can prompt appropriately.
 pub trait TokenProvider: Send + Sync {
     /// Which token family this provider talks to.
     fn kind(&self) -> TokenKind;
@@ -179,7 +180,7 @@ pub trait TokenProvider: Send + Sync {
     fn decrypt(&self, key: &TokenKeyRef, ciphertext: &[u8]) -> Result<Vec<u8>>;
 
     /// X.509 cert chain stored on the token for `key` (leaf first), for
-    /// S/MIME chain assembly. Default: not supported — callers fall back to
+    /// S/MIME chain assembly. Default: not supported - callers fall back to
     /// the keystore-stored cert captured at registration time.
     fn x509_chain(&self, _key: &TokenKeyRef) -> Result<Vec<Vec<u8>>> {
         Err(CryptoError::NotImplemented(

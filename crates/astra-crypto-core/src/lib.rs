@@ -1,9 +1,10 @@
+// SPDX-License-Identifier: GPL-3.0-only
 //! Neutral, engine-free crypto abstractions for the Astra crypto framework.
 //!
 //! This crate defines the shared contract that every standard backend
 //! (OpenPGP, S/MIME, 国密) and every key source (software, PKCS#11 token)
-//! implements. It depends on NO cryptographic engine — only serde,
-//! async-trait, thiserror, secrecy, zeroize, and subtle — so it compiles
+//! implements. It depends on NO cryptographic engine - only serde,
+//! async-trait, thiserror, secrecy, zeroize, and subtle - so it compiles
 //! standalone and lets the application hold one message type regardless of
 //! backend.
 

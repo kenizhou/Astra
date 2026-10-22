@@ -1,8 +1,9 @@
+// SPDX-License-Identifier: GPL-3.0-only
 use serde::{Deserialize, Serialize};
 
 /// Five-value acceptance ladder (Thunderbird model). `Verified`, `Personal`,
 /// and `Unverified` (accepted WITHOUT fingerprint verification) qualify a
-/// recipient key for encryption — Thunderbird's `unverified` means
+/// recipient key for encryption - Thunderbird's `unverified` means
 /// "accepted-without-verification" and is encryption-usable; only the display
 /// differs from `Verified`. `Undecided` routes the recipient to the Key
 /// Assistant; `Rejected` hard-blocks.
@@ -24,7 +25,7 @@ impl TrustState {
     ///
     /// NOTE: this is the ENCRYPTION-gate predicate only. Signature DISPLAY
     /// (`valid-verified` vs `valid-unverified`) deliberately uses the stricter
-    /// `Verified | Personal` check at the display-mapping sites — an
+    /// `Verified | Personal` check at the display-mapping sites - an
     /// unverified-accepted signer must never render as fully verified.
     pub fn may_encrypt_to(self) -> bool {
         matches!(

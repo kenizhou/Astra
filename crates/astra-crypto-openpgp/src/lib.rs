@@ -1,6 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-only
 //! OpenPGP crypto backend (Sequoia engine). Implements `astra_crypto_core::CryptoBackend`.
 //!
-//! Task 8 wiring: [`OpenpgpBackend`] adapts the Sequoia engine (Tasks 5–7) to
+//! Task 8 wiring: [`OpenpgpBackend`] adapts the Sequoia engine (Tasks 5-7) to
 //! the framework's [`astra_crypto_core::CryptoBackend`] trait via the [`KeyStore`]
 //! abstraction. Heavy Sequoia ops run inside [`tokio::task::spawn_blocking`] so
 //! the async runtime's worker threads are not blocked by CPU-bound crypto.
@@ -34,16 +35,16 @@ pub mod policy;
 // (hardware-token / OpenPGP-card keys).
 pub mod card;
 
-// W6: card-routing E2E tests (MockTokenProvider — no hardware).
+// W6: card-routing E2E tests (MockTokenProvider - no hardware).
 #[cfg(test)]
 mod card_tests;
 
-use async_trait::async_trait;
 use astra_crypto_core::{
     CryptoBackend, CryptoError, CryptoPolicy, DecryptOp, DecryptedPayload, EncryptOp,
     EncryptedEnvelope, KeyGenParams, KeyHandle, KeyHandleRef, KeyId, KeyStore, Result, SecretBox,
     SignOp, SignedEnvelope, Standard, StoredKey, VerificationResult, VerifyOp,
 };
+use async_trait::async_trait;
 use secrecy::ExposeSecret;
 use sequoia_openpgp as openpgp;
 use std::sync::Arc;
@@ -87,13 +88,16 @@ impl OpenpgpBackend {
 
     /// Attach a hardware-token provider (W6). Builder-style, mirroring
     /// `SmimeBackend::with_token_provider`.
-    pub fn with_token_provider(mut self, provider: Arc<dyn astra_crypto_core::TokenProvider>) -> Self {
+    pub fn with_token_provider(
+        mut self,
+        provider: Arc<dyn astra_crypto_core::TokenProvider>,
+    ) -> Self {
         self.token_provider = Some(provider);
         self
     }
 
     /// Resolve the token provider or fail typed (see `SmimeBackend`'s
-    /// equivalent — a token handle without a provider is an actionable
+    /// equivalent - a token handle without a provider is an actionable
     /// `TokenNotPresent`, not a generic backend error).
     fn require_token_provider(&self) -> Result<&Arc<dyn astra_crypto_core::TokenProvider>> {
         self.token_provider.as_ref().ok_or_else(|| {
@@ -137,7 +141,7 @@ impl OpenpgpBackend {
     }
 
     /// Build a card-backed decryptor for a `KeyHandle::Token` decryption key
-    /// (transport-encryption subkey, no secret filter — see
+    /// (transport-encryption subkey, no secret filter - see
     /// [`Self::card_signer_for`]).
     fn card_decryptor_for(
         &self,
@@ -173,14 +177,14 @@ impl OpenpgpBackend {
     /// Resolve a [`KeyHandleRef`] to an [`openpgp::Cert`] via the keystore.
     ///
     /// When `prefer_private` is true, the private blob is preferred (ops that
-    /// need secret material — decrypt, sign). When false, the public blob is
+    /// need secret material - decrypt, sign). When false, the public blob is
     /// used (encrypt recipients, verify signers). If the keystore has no entry
     /// for `handle.handle`, returns [`CryptoError::KeyNotFound`].
     ///
     /// When `prefer_private=true` but the `StoredKey` is public-only
     /// (`private_data == None`), this falls back to the public blob; the engine
     /// call then fails with a clear "no usable signing/encryption subkey"
-    /// error — surfaced as [`CryptoError::NoMatchingKey`] for the decrypt path
+    /// error - surfaced as [`CryptoError::NoMatchingKey`] for the decrypt path
     /// (wrong-key condition) and as [`CryptoError::Backend`] elsewhere.
     ///
     /// [`CryptoError::Backend`]: astra_crypto_core::CryptoError::Backend
@@ -235,7 +239,7 @@ impl OpenpgpBackend {
 }
 
 // =========================================================================
-// W9 — symmetric (SKESK) ops, OpenpgpBackend-concrete
+// W9 - symmetric (SKESK) ops, OpenpgpBackend-concrete
 // =========================================================================
 //
 // Password-protected mail is OpenPGP-only: S/MIME has no symmetric mode, so
@@ -247,7 +251,7 @@ impl OpenpgpBackend {
 // use with `SmimeBackend::import_key_with_chain`).
 impl OpenpgpBackend {
     /// Symmetrically encrypt `parts` with `passphrase` (OpenPGP SKESK +
-    /// SEIPDv1 — see [`engine::encrypt_symmetric`]'s interop docs).
+    /// SEIPDv1 - see [`engine::encrypt_symmetric`]'s interop docs).
     ///
     /// `sign_with` (optional) resolves to the signer cert's PRIVATE blob via
     /// the keystore, exactly like the PKESK `encrypt` op's signer resolution.
@@ -263,7 +267,7 @@ impl OpenpgpBackend {
         sign_with: Option<&KeyHandleRef>,
     ) -> Result<EncryptedEnvelope> {
         // Resolve the optional signer cert (private blob needed for the
-        // signing keypair) — same as `CryptoBackend::encrypt`. W6: a token
+        // signing keypair) - same as `CryptoBackend::encrypt`. W6: a token
         // signer is built as a card shim instead (public blob only).
         let mut token_signer: Option<(
             Box<dyn openpgp::crypto::Signer + Send + Sync>,
@@ -328,7 +332,7 @@ impl OpenpgpBackend {
     /// Resolve candidate signer certs for embedded-signature verification:
     /// every `known_signers` handle resolvable via the keystore PLUS every
     /// parseable blob in `extra_signer_blobs` (material that lives OUTSIDE
-    /// the keystore — e.g. the backend's `collected_keys` staging area).
+    /// the keystore - e.g. the backend's `collected_keys` staging area).
     /// Best-effort, warn-and-skip per candidate (mirrors `verify`'s F2
     /// resolution): a keystore error or unparseable blob on one candidate
     /// must not mask another. De-duped by cert fingerprint.
@@ -385,7 +389,7 @@ impl OpenpgpBackend {
     /// embedded-signature verification (see [`Self::resolve_signer_certs`]).
     /// A wrong passphrase surfaces as the typed
     /// [`astra_crypto_core::CryptoError::WrongPassphrase`]; an unverifiable
-    /// embedded signature (unknown signer) DEGRADES — the returned
+    /// embedded signature (unknown signer) DEGRADES - the returned
     /// [`engine::DecryptOutcome`] carries `unverifiable_signature: true`.
     pub async fn decrypt_symmetric(
         &self,
@@ -409,7 +413,7 @@ impl OpenpgpBackend {
     }
 
     /// PKESK decrypt with embedded-signature verification candidates
-    /// (`known_signers` + `extra_signer_blobs` — see
+    /// (`known_signers` + `extra_signer_blobs` - see
     /// [`Self::resolve_signer_certs`]). This is the receive path's entry
     /// point: the framework offers the account's keystore + collected-keys
     /// certs so a cross-cert sign-then-encrypt message verifies its embedded
@@ -429,7 +433,7 @@ impl OpenpgpBackend {
             .resolve_signer_certs(known_signers, extra_signer_blobs)
             .await;
 
-        // W6: token-held decryption key — route through the card decryptor
+        // W6: token-held decryption key - route through the card decryptor
         // shim. The cert is public-only; the PKESK private op runs on-card.
         if let KeyHandle::Token {
             token_serial,
@@ -480,7 +484,7 @@ impl OpenpgpBackend {
 
 /// Wrapper to give `tokio::task::JoinError` a `Display + std::error::Error`
 /// impl that incorporates the panic payload's message. (JoinError implements
-/// `Error` directly, but its `Display` is terse — wrapping here lets us add
+/// `Error` directly, but its `Display` is terse - wrapping here lets us add
 /// the "spawn_blocking task" context the framework logs benefit from.)
 #[derive(Debug)]
 struct JoinErrorWrapper(tokio::task::JoinError);
@@ -518,7 +522,7 @@ impl CryptoBackend for OpenpgpBackend {
             recipient_certs.push(self.resolve_cert(r, /* prefer_private */ false).await?);
         }
 
-        // W6: token-held inline signer — build the card shim up-front; the
+        // W6: token-held inline signer - build the card shim up-front; the
         // engine's token signer entry point consumes it. Software signers
         // keep the cert-resolution path.
         let mut token_signer: Option<(
@@ -586,7 +590,7 @@ impl CryptoBackend for OpenpgpBackend {
         // only (the historical trait behavior). The receive path calls
         // [`OpenpgpBackend::decrypt_with_signers`] directly so keystore +
         // collected-keys certs are offered. An embedded signature that still
-        // cannot be verified (unknown signer) DEGRADES — decrypt succeeds;
+        // cannot be verified (unknown signer) DEGRADES - decrypt succeeds;
         // the trait's `DecryptedPayload` has no channel for the flag, so it
         // is dropped here exactly like the weak-algo warning below.
         let outcome = self
@@ -610,7 +614,7 @@ impl CryptoBackend for OpenpgpBackend {
             return Err(error::policy("inline sign not supported in engine-core"));
         }
 
-        // W6: token-held signing key — route through the card signer shim.
+        // W6: token-held signing key - route through the card signer shim.
         if let KeyHandle::Token {
             token_serial,
             key_id,
@@ -681,7 +685,7 @@ impl CryptoBackend for OpenpgpBackend {
         // subkey-fp handle to the cert that owns it (the subkey-aware `get`
         // contract). Every resolved cert is handed to the engine, which
         // pre-filters by issuer fingerprint (primary OR subkey match) and
-        // returns `UnknownKey` — fail-closed — when none match.
+        // returns `UnknownKey` - fail-closed - when none match.
         //
         // A malformed signature errors here exactly as it would inside the
         // engine (`CryptoError::Malformed` from the packet parse).
@@ -698,7 +702,7 @@ impl CryptoBackend for OpenpgpBackend {
 
         // Best-effort per candidate (mirrors the receive path's per-key
         // warn-and-skip): a keystore error or unparseable blob on one
-        // candidate must not mask another candidate that does resolve — the
+        // candidate must not mask another candidate that does resolve - the
         // engine's `UnknownKey` remains the fail-closed floor.
         let mut known_signers: Vec<openpgp::Cert> = Vec::new();
         let mut seen_fps: std::collections::HashSet<String> = std::collections::HashSet::new();

@@ -1,8 +1,9 @@
+// SPDX-License-Identifier: GPL-3.0-only
 //! Closure-driven [`TokenProvider`] mock for hardware-free testing (W6).
 //!
 //! Compiled only under `cfg(test)` or the `testing` Cargo feature (sibling
 //! crates enable it via dev-dependencies). The mock emulates the device-side
-//! contract — presence gating, PIN session state, typed errors — while the
+//! contract - presence gating, PIN session state, typed errors - while the
 //! actual cryptography is injected per test as closures, so each consumer
 //! crate signs/decrypts with its own stack (`p256`/`rsa` in crypto-smime,
 //! Sequoia in crypto-openpgp) and exercises the REAL token-routed code paths

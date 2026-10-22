@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 use async_trait::async_trait;
 
 use crate::envelope::{
@@ -51,7 +52,7 @@ pub struct KeyGenParams {
 }
 
 /// The contract every standard backend implements. Verification is decoupled
-/// from decryption — a message can be "decrypted OK, signature unverified".
+/// from decryption - a message can be "decrypted OK, signature unverified".
 ///
 /// Concrete backends (crypto-openpgp, crypto-smime, crypto-sm) are added in
 /// later phases; this phase only proves the trait is usable and object-safe.

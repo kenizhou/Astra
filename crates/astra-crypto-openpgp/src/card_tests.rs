@@ -1,15 +1,16 @@
+// SPDX-License-Identifier: GPL-3.0-only
 //! W6 OpenPGP-card routing tests (no hardware): the astra-crypto-core
 //! `MockTokenProvider` emulates the card (presence gating, PIN sessions,
 //! typed errors) while the actual "on-card" crypto is injected as closures
-//! over the SAME keys Sequoia generated — so the real card-routed paths
+//! over the SAME keys Sequoia generated - so the real card-routed paths
 //! (`CardSigner` / `CardDecryptor` shims, `OpenpgpBackend` token dispatch,
 //! `engine::sign_detached_with_signer` / `decrypt_with_token` /
 //! `encrypt_with_signer`) run end to end.
 //!
 //! Covered algorithms:
-//! - **RSA 3k** card keys (sign + verify, encrypt + decrypt) — the classic
+//! - **RSA 3k** card keys (sign + verify, encrypt + decrypt) - the classic
 //!   smartcard shape.
-//! - **Ed25519 / Cv25519 (ECDH)** card keys — GnuPG's modern default card
+//! - **Ed25519 / Cv25519 (ECDH)** card keys - GnuPG's modern default card
 //!   shape and this engine's generated-key shape.
 
 #[cfg(test)]
@@ -17,7 +18,6 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
 
-    use async_trait::async_trait;
     use astra_crypto_core::mock_token::MockTokenProvider;
     use astra_crypto_core::{
         CryptoBackend, CryptoError, CryptoPolicy, DecryptOp, EncryptOp, Fingerprint, KeyHandle,
@@ -25,6 +25,7 @@ mod tests {
         SerializationStrategy, SignOp, SignatureState, Standard, StoredKey, TokenKeyId,
         TokenProvider, TokenSignMechanism, VerifyOp,
     };
+    use async_trait::async_trait;
     use openpgp::cert::prelude::*;
     use openpgp::cert::CipherSuite;
     use openpgp::crypto::mpi;
@@ -66,7 +67,9 @@ mod tests {
                 handle: k.handle.clone(),
                 public_data: k.public_data.clone(),
                 private_data: k.private_data.as_ref().map(|p| {
-                    SecretBox::new(Box::new(astra_crypto_core::secret::expose_bytes(p).to_vec()))
+                    SecretBox::new(Box::new(
+                        astra_crypto_core::secret::expose_bytes(p).to_vec(),
+                    ))
                 }),
             });
             Ok(found)
@@ -199,7 +202,7 @@ mod tests {
             (mpi::PublicKey::RSA { .. }, mpi::Signature::RSA { s }) => s.value().to_vec(),
             (mpi::PublicKey::EdDSA { .. }, mpi::Signature::EdDSA { r, s }) => {
                 let mut raw = Vec::with_capacity(64);
-                // R may carry the 0x40 point prefix (33 bytes) — strip to the
+                // R may carry the 0x40 point prefix (33 bytes) - strip to the
                 // raw 32-byte form the card returns.
                 let r_bytes = r.value();
                 let r32 = if r_bytes.len() == 33 && r_bytes[0] == 0x40 {
@@ -275,7 +278,7 @@ mod tests {
 
         let mock = MockTokenProvider::openpgp_card(CARD_SERIAL, CARD_PIN);
         mock.add_key_id(CARD_KEY_ID, "RSA-3072", KeyUsage::Encrypt);
-        // Emulated on-card op: PSO:DECIPHER — RSA PKCS#1 unwrap. The closure
+        // Emulated on-card op: PSO:DECIPHER - RSA PKCS#1 unwrap. The closure
         // receives the raw RSA ciphertext MPI; emulate via the software
         // decryptor and return the unpadded block (algo || sk || checksum).
         mock.on_decrypt(move |_key, ciphertext| {
@@ -283,7 +286,7 @@ mod tests {
                 c: mpi::MPI::new(ciphertext),
             };
             // The software decryptor returns the FULL unpadded block as the
-            // "session key" — the same shape the card returns (Sequoia's
+            // "session key" - the same shape the card returns (Sequoia's
             // PKESK layer parses algo||key||checksum out of it).
             let block = openpgp::crypto::Decryptor::decrypt(&mut *pair.lock().unwrap(), &esk, None)
                 .map_err(|e| CryptoError::Token(format!("on-card RSA decrypt: {e}")))?;
@@ -406,7 +409,7 @@ mod tests {
 
         let mock = MockTokenProvider::openpgp_card(CARD_SERIAL, CARD_PIN);
         mock.add_key_id(CARD_KEY_ID, "Cv25519", KeyUsage::Encrypt);
-        // Emulated on-card op: PSO:DECIPHER (ECDH) — X25519 scalar multiply
+        // Emulated on-card op: PSO:DECIPHER (ECDH) - X25519 scalar multiply
         // against the ephemeral public point, return the shared point S.
         mock.on_decrypt(move |_key, ephemeral_point| {
             let e: [u8; 32] = ephemeral_point.try_into().map_err(|_| {
@@ -511,7 +514,7 @@ mod tests {
 
         let mock = MockTokenProvider::openpgp_card(CARD_SERIAL, CARD_PIN);
         mock.on_sign(|_k, _m, _d| Ok(vec![0u8; 64]));
-        // NOTE: no unlock — the private op must demand the PIN, and the
+        // NOTE: no unlock - the private op must demand the PIN, and the
         // typed error must survive the sequoia/engine boundary.
         let backend = OpenpgpBackend::new(store, CryptoPolicy::default_baseline())
             .with_token_provider(Arc::new(mock));

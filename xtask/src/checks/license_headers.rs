@@ -1,12 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Gate check: Rust and TypeScript sources carry the SPDX header.
+//! Gate check: Rust and TypeScript sources carry the SPDX header. Vendored
+//! third-party trees are exempt: they carry their own licence (the
+//! RustCrypto formats MIT/Apache headers in the vendored cms snapshot), and
+//! stamping ours over it would be wrong.
 
 pub(crate) const HEADER: &str = "// SPDX-License-Identifier: GPL-3.0-only";
+
+/// The vendored third-party trees whose own licences apply instead.
+const VENDORED_PREFIXES: &[&str] = &["crates/astra-crypto-smime/vendor/"];
 
 pub(crate) fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
     let mut bad = Vec::new();
     for f in super::walk_files(root, &["rs", "ts", "tsx"]) {
         let r = super::rel(root, &f);
+        if VENDORED_PREFIXES.iter().any(|prefix| r.starts_with(prefix)) {
+            continue;
+        }
         let contents = super::read_lossy(&f);
         let first = contents.lines().next().unwrap_or_default();
         if !first.contains(HEADER) {

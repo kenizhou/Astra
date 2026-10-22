@@ -1,15 +1,16 @@
+// SPDX-License-Identifier: GPL-3.0-only
 //! In-memory `KeyStore` for OpenPGP backend integration tests.
 //!
 //! Backed by a `Mutex<HashMap<KeyHandle, StoredKey>>`. Sufficient for the
 //! engine-core round-trip tests in `tests/round_trip.rs` (single-threaded
 //! `#[tokio::test]` drivers, no persistence required).
 //!
-//! `find_by_email` returns `Ok(vec![])` — it is not exercised by the engine-core
+//! `find_by_email` returns `Ok(vec![])` - it is not exercised by the engine-core
 //! round-trips (the backend resolves keys by `KeyHandle` only). A persistence
 //! backend with email lookup lands in the receive/sync slice.
 
-use async_trait::async_trait;
 use astra_crypto_core::{KeyHandle, KeyHandleRef, KeyStore, Result, Standard, StoredKey};
+use async_trait::async_trait;
 use secrecy::{ExposeSecret, SecretBox};
 use sequoia_openpgp as openpgp;
 use std::collections::HashMap;

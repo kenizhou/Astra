@@ -1,12 +1,13 @@
+// SPDX-License-Identifier: GPL-3.0-only
 //! `sequoia_openpgp` errors -> `astra_crypto_core::CryptoError`.
 //!
 //! Single translation seam every other module in this crate routes Sequoia
 //! results through.
 //!
-//! - [`map_err`] — wraps any `Result<T, E>` whose error type implements
+//! - [`map_err`] - wraps any `Result<T, E>` whose error type implements
 //!   `std::error::Error + Send + Sync + 'static` (e.g. `sequoia_openpgp::Error`,
 //!   `std::io::Error`, hand-rolled backend errors).
-//! - [`map_sequoia`] — wraps a Sequoia `openpgp::Result<T>`
+//! - [`map_sequoia`] - wraps a Sequoia `openpgp::Result<T>`
 //!   (= `Result<T, anyhow::Error>`). **Required** for all Sequoia call sites:
 //!   `anyhow::Error` deliberately does not implement `std::error::Error`
 //!   (its inner `Box<dyn Error + Send + Sync>` already does), so it cannot
@@ -20,7 +21,7 @@
 //! framework's `Backend(Arc<dyn Error>)` variant is declared
 //! `#[error("crypto backend error: {0}")]` *without* a `#[source]` attribute
 //! (see `kylins.client.crypto/core/src/error.rs`), so `Error::source()` returns
-//! `None` for it. The **typed source chain is NOT walkable** — code like
+//! `None` for it. The **typed source chain is NOT walkable** - code like
 //! `e.source().downcast_ref::<sequoia_openpgp::Error>()` will silently get
 //! `None`. The original error's **Display and Debug are both preserved**
 //! (reachable via `to_string()` / `format!("{e:?}")`); for anyhow-wrapped
@@ -60,7 +61,7 @@ impl std::fmt::Display for AnyhowBackend {
 }
 
 impl std::error::Error for AnyhowBackend {
-    // No `source()` override — see the type-level doc.
+    // No `source()` override - see the type-level doc.
 }
 
 /// Wrap a backend-native result whose error type implements
@@ -69,7 +70,7 @@ impl std::error::Error for AnyhowBackend {
 ///
 /// Use this for `Result<T, sequoia_openpgp::Error>`, `Result<T, std::io::Error>`,
 /// and any other std-`Error` error types. **Do not** use this for Sequoia's
-/// `openpgp::Result<T>` (= `Result<T, anyhow::Error>`) — `anyhow::Error`
+/// `openpgp::Result<T>` (= `Result<T, anyhow::Error>`) - `anyhow::Error`
 /// deliberately does not implement `std::error::Error`; route those through
 /// [`map_sequoia`] instead.
 pub fn map_err<T, E>(r: std::result::Result<T, E>) -> CryptoResult<T>
@@ -93,7 +94,7 @@ pub fn map_sequoia<T>(r: sequoia_openpgp::Result<T>) -> CryptoResult<T> {
 /// does not fit the message ("wrong key": no PKESK slot matched, or the cert
 /// has no usable transport-encryption subkey at all). It travels through
 /// Sequoia's anyhow channel and is recovered by [`map_sequoia_decrypt`] into
-/// the TYPED [`CryptoError::NoMatchingKey`] variant — the framework's
+/// the TYPED [`CryptoError::NoMatchingKey`] variant - the framework's
 /// "try the next key" classification must never depend on matching
 /// human-readable Display strings.
 #[derive(Debug)]
@@ -111,7 +112,7 @@ impl std::error::Error for NoMatchingKey {}
 /// passphrase does not fit any SKESK slot in the message ("wrong passphrase").
 /// Travels through Sequoia's anyhow channel and is recovered by
 /// [`map_sequoia_decrypt`] into the TYPED [`CryptoError::WrongPassphrase`]
-/// variant — the passphrase-prompt UI's "re-prompt" classification must never
+/// variant - the passphrase-prompt UI's "re-prompt" classification must never
 /// depend on matching human-readable Display strings. (W9 password mail.)
 #[derive(Debug)]
 pub(crate) struct WrongPassphrase(pub String);
@@ -158,7 +159,7 @@ mod tests {
     use super::*;
     use sequoia_openpgp::parse::Parse;
 
-    /// Stand-in for a non-anyhow backend error — same `Error + Send + Sync + 'static` bound.
+    /// Stand-in for a non-anyhow backend error - same `Error + Send + Sync + 'static` bound.
     #[derive(Debug)]
     struct TestErr(&'static str);
     impl std::fmt::Display for TestErr {
@@ -187,7 +188,7 @@ mod tests {
             "display should contain original message, got: {e}"
         );
         // NOTE: `CryptoError::Backend` is declared `#[error("... {0}")]` without
-        // `#[source]`, so `Error::source()` returns `None` for it — Display is
+        // `#[source]`, so `Error::source()` returns `None` for it - Display is
         // preserved, but the formal source chain is not exposed by the framework.
         // Tracked as a concern in the Task 2 report; out of scope to fix here
         // (would require touching `kylins.client.crypto/core/src/error.rs`).
@@ -209,7 +210,7 @@ mod tests {
     /// what every Sequoia API actually returns (`openpgp::Result<T>` =
     /// `Result<T, anyhow::Error>`). `map_sequoia` is the canonical mapper.
     /// This test uses a REAL Sequoia error (the gap that let the Task 2 defect
-    /// slip through originally — Task 2's test used a stand-in `TestErr`).
+    /// slip through originally - Task 2's test used a stand-in `TestErr`).
     #[test]
     fn map_sequoia_wraps_real_anyhow_error() {
         // A genuinely malformed Cert parse returns openpgp::Result::Err (anyhow).
@@ -261,7 +262,7 @@ mod tests {
     #[test]
     fn map_sequoia_decrypt_recovers_no_matching_key_marker() {
         // The DecryptionHelper's wrong-key marker must surface as the TYPED
-        // variant, with its message preserved — never as Backend.
+        // variant, with its message preserved - never as Backend.
         let r: sequoia_openpgp::Result<u8> = Err(NoMatchingKey("no PKESK matched".into()).into());
         let e = map_sequoia_decrypt(r).unwrap_err();
         assert!(
@@ -286,7 +287,7 @@ mod tests {
     #[test]
     fn map_sequoia_decrypt_leaves_other_errors_as_backend() {
         // Fail-closed: a genuine Sequoia error WITHOUT the marker stays
-        // Backend — it must never be reclassified as NoMatchingKey.
+        // Backend - it must never be reclassified as NoMatchingKey.
         let bad: sequoia_openpgp::Result<sequoia_openpgp::Cert> =
             sequoia_openpgp::Cert::from_bytes(b"not a valid openpgp cert");
         let e = map_sequoia_decrypt(bad).unwrap_err();
@@ -303,7 +304,7 @@ mod tests {
     #[test]
     fn map_sequoia_decrypt_recovers_wrong_passphrase_marker() {
         // The SKESK DecryptionHelper's wrong-passphrase marker must surface as
-        // the TYPED variant, with its message preserved — never as Backend or
+        // the TYPED variant, with its message preserved - never as Backend or
         // NoMatchingKey.
         let r: sequoia_openpgp::Result<u8> =
             Err(WrongPassphrase("no SKESK matched the passphrase".into()).into());

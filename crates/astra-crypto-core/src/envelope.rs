@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 use serde::{Deserialize, Serialize};
 
 use crate::handle::KeyHandleRef;
@@ -56,7 +57,7 @@ pub enum SerializationStrategy {
     SingleMimeBlob,
 }
 
-/// Encryption granularity — how parts are grouped into encryption units
+/// Encryption granularity - how parts are grouped into encryption units
 /// (session-key granularity). Orthogonal to `SerializationStrategy` (wire
 /// layout). See docs/security/crypto-architecture-design.md §11.4.1.
 ///
@@ -154,14 +155,14 @@ pub struct VerificationResult {
     /// by the smime backend's `verify_with_context`. `None` on success states
     /// (`ValidVerified` / `ValidUnverified`), on the `UnknownKey` + sig-fail
     /// `Invalid` early-return arms (where chain validation never runs), and on
-    /// the trait `verify` impl (pre-chain — no chain outcome yet).
+    /// the trait `verify` impl (pre-chain - no chain outcome yet).
     ///
     /// Surfaced end-to-end (2026-07-18 granular-chain-outcome spec): populated
     /// by `SmimeBackend::verify_with_context` from `ChainOutcome.failure_reason`
     /// → persisted in `message_crypto_results.failure_reason` → returned by
     /// `get_signer_details` → rendered by the `SignatureDetailsDialog`.
     /// Diagnostic text from the crypto layer (pkix path errors, CRL reason
-    /// names, identity-mismatch format) — NOT attacker-controlled, rendered as
+    /// names, identity-mismatch format) - NOT attacker-controlled, rendered as
     /// plain text by the dialog (no HTML).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure_reason: Option<String>,

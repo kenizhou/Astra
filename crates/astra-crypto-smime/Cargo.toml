@@ -1,0 +1,167 @@
+[package]
+name = "astra-crypto-smime"
+version = "0.1.0"
+edition = "2021"
+# Raised from 1.77.2 because the `cms` crate (Task 1) is edition 2024 / MSRV 1.85.
+# crypto-core stays at 1.77.2 (it does not depend on cms).
+rust-version = "1.85"
+
+[features]
+default = []
+# Cross-crate test helpers (cert + SignedData builders) used by the backend's
+# `mail/crypto.rs::tests` + `tests/crypto_smime_lifecycle.rs`. NOT part of the
+# public API; backend enables via `[dev-dependencies] crypto-smime = { path =
+# "...", features = ["testing"] }`.
+testing = []
+
+[dependencies]
+astra-crypto-core = { path = "../astra-crypto-core" }
+# RustCrypto formats stack. NOTE: x509-cert 0.3 requires the signature v3 /
+# p256 0.14 / ecdsa 0.17 stack (its `builder` feature pulls signature v3, and
+# p256 0.13's SigningKey only impls signature v2 traits). Task 4 therefore
+# aligns smime to the v3 stack; this is scoped to this crate only.
+x509-cert = { version = "0.3", features = ["builder", "pem"] }
+der = "0.8"
+spki = "0.8"
+# `pem` + `alloc` are explicitly enabled so `DecodePrivateKey::from_pkcs8_pem`
+# (Task 5 `import_key`) and `PrivateKeyInfoOwned`/`EncodePrivateKey::to_pkcs8_der`
+# resolve directly from this crate (they're transitively on via p256, but relying
+# on that is fragile). `encryption` + `pkcs5` enable
+# `EncryptedPrivateKeyInfo::decrypt` (Plan 3 encrypted-PKCS#8 PEM import) and
+# `PrivateKeyInfo::encrypt` (test-fixture builder). `getrandom` lets the test
+# fixture call `PrivateKeyInfo::encrypt(password)` without threading an RNG
+# through pkcs8's `TryCryptoRng` trait bound (which pins rand_core 0.6 and would
+# not interop with our rand 0.10 / rand_core 0.10 stack).
+pkcs8 = { version = "0.11", features = ["pem", "alloc", "encryption", "pkcs5", "getrandom"] }
+p256 = { version = "0.14", features = ["pkcs8", "pem", "ecdh"] }
+ecdsa = { version = "0.17", features = ["digest", "pem"] }
+signature = "3"
+# CMS builder, vendored from the kylins snapshot (a post-pre.2 RustCrypto/formats
+# checkout carrying the KEK-copy fix in builder/kari.rs). Checked against the
+# published 0.3.0-rc.0 (SP4a spec D2, user ask): it compiles, but its kari/ECC
+# recipient path is broken (the ANSI X9.63 KDF output never lands in the KEK
+# buffer it wraps with; formats master carries the same miss), so the vendored
+# snapshot stays. The pkcs12 0.2.0-pre.0 pin (=0.3.0-pre.1) rules the registry
+# route out regardless: Cargo unifies prerelease tags of one version line.
+cms = { path = "vendor/cms", features = ["builder"] }
+# Generic-instantiated cipher / key-wrap types we pass to the cms builders
+# (Aes128 content cipher, AesKw<Aes192> key wrap). Must be direct deps because
+# we name the types, not just rely on cms's transitive use.
+aes = "0.9"
+aes-kw = "0.3"
+cbc = "0.2"
+# RSA recipients use PKCS#1v1.5 key transport (ktri). RC line pinned by cms 0.3.
+rsa = { version = "=0.10.0-rc.18", features = ["sha2"] }
+# RSA-PSS CMS signature verify (G4-extend): parse the hashAlgorithm from a
+# `id-RSASSA-PSS` AlgorithmIdentifier.parameters (RSASSA-PSS-params SEQUENCE,
+# RFC 8017 §8.1). Same 0.8 line as our build stack (rsa 0.10 → pkcs1 0.8-rc),
+# so the types line up with `AlgorithmIdentifierOwned.parameters` without a
+# 0.7 bridge (unlike chain.rs's cert-chain `pkcs1-07`). `alloc` for the parser.
+pkcs1 = { version = "=0.8.0-rc.4", default-features = false, features = ["alloc"] }
+const-oid = { version = "0.10", features = ["db"] }
+# sha2 must be 0.11 (ecdsa 0.17 / elliptic-curve 0.14 line) with the `oid`
+# feature, which provides `AssociatedOid for Sha256` - required by the
+# CertificateBuilder signing path for ECDSA P-256.
+sha2 = { version = "0.11", features = ["oid"] }
+# SHA-1 for the kari KDF dispatch (G7 T5). openssl/Thunderbird/NSS historically
+# default to `dhSinglePass-stdDH-sha1kdf-scheme` (1.3.133.16.840.63.0.2) for the
+# ANSI X9.63 KDF; our build side uses SHA-256. The receive path dispatches on
+# `kari.key_enc_alg.oid` → `ansi_x963_kdf::<Sha1|Sha256>`. Same 0.11 line as
+# sha2 (shared `digest 0.11` Digest trait), so `sha2::Digest` covers both.
+sha1 = "0.11"
+# rand 0.10 provides rand_core 0.10, which is what elliptic-curve 0.14's
+# `Generate::generate_from_rng` expects (`CryptoRngCore` bound).
+rand = "0.10"
+x509-parser = "0.18"
+# PEM block parsing for import_key (Task 5) + PEM construction in tests.
+base64 = "0.22"
+uuid = { version = "1", features = ["v4"] }
+async-trait = "0.1"
+thiserror = "1"
+zeroize = "1"
+# Used by `import_p12_with_chain` to soft-skip a single intermediate cert that
+# fails to parse (one bad cert must not block the leaf import). Mirrors the
+# backend's `log::warn!`-on-decode-failure pattern in `list_trust_anchor_certs`.
+log = "0.4"
+# Plan 3 (PKCS#12 import): `p12-keystore` parses .p12/.pfx DER, decrypts the bag
+# PBE with the user's passphrase, and exposes the leaf cert + private key as
+# raw DER bytes (`Certificate::as_der`, `PrivateKey::as_der`). We use ONLY the
+# `&[u8]`-returning surface (`KeyStore::from_pkcs12`, `private_key_chain`,
+# `as_der`), so the crate's internal `der`/`spki`/`x509-cert` line is irrelevant
+# to our 0.8 build stack - no bridging needed (unlike `chain.rs`'s pkix-* path,
+# which must name the 0.2 types). The `Error` enum variants are matched by name
+# with wildcard inner payloads, so the transitive `der::Error`/`MacError` types
+# never need to be named from this crate. `secrecy = "0.10"` matches
+# crypto-core's version (Cargo unifies) so `ExposeSecret` resolves against the
+# SAME `SecretBox<String>` type crypto-core re-exports - used to read the import
+# passphrase within `import_key`'s scope (zeroized on drop).
+p12-keystore = "0.3.1"
+secrecy = "0.10"
+
+# ─── Phase 1b Plan 2 (G4): cert-chain validation engine ───
+# The `pkix-*` family (MarkAtwood/crate-pkix workspace). `pkix-chain` is the
+# ergonomic wrapper combining `pkix-path` (RFC 5280 §6.1 path validation) with
+# `pkix-revocation` (CRL/OCSP). The use-case wrapper `verify_smime_signer`
+# composes chain validation with `pkix-identity` From↔SAN binding and
+# `pkix-profiles` EKU rules. `pkix-profiles-cabf` adds the CA/B Forum S/MIME BR
+# reference policy (separate crate from `pkix-profiles`, which is RFC-baseline
+# only). Direct deps below let us name the types explicitly in `chain.rs`.
+#
+# **DE-RISKING NOTE (Task 1 spike):** the pkix-* ecosystem currently pins the
+# `x509-cert 0.2` / `der 0.7` / `spki 0.7` line, whereas this crate is on the
+# `x509-cert 0.3` / `der 0.8` / `spki 0.8` line (required by the vendored cms
+# builder). Cargo resolves both majors side-by-side in the dep graph; the types
+# are NOT shared, so `chain.rs` bridges via raw DER bytes (build with our 0.3
+# stack → `to_der()` → re-parse via the aliased `x509-cert-v02` 0.2 dep → pass
+# to pkix-chain). This is acceptable because `validate_signer_chain`'s seam is
+# already `&[u8]` DER, and is the documented carry-forward if/when RustCrypto
+# formats cuts the 0.3 line. Tracked in the Task 1 report's "API pin" +
+# "Concerns" sections.
+# `rustcrypto` transitively enables `pkix-path/p384` (pkix-path's `rustcrypto`
+# feature = `["rsa", "p256", "p384"]`). With it, `DefaultVerifier` handles
+# ECDSA-P384 natively (Task 2 spike-simplification - no custom P-384 code). RSA-PSS
+# is still a `DefaultVerifier` gap and is closed by the `SmimeVerifier` wrapper.
+pkix-chain = { version = "0.4", features = ["crl", "rustcrypto"] }
+pkix-profiles-cabf = "0.2"
+pkix-identity = "0.1"
+pkix-revocation = { version = "0.3", features = ["crl"] }
+# ECDSA P-384 cert generation in tests. pkix-path pulls in `p384 0.13` for its
+# own verify path; we keep p384 0.14 (same line as p256 0.14) for cert building.
+p384 = { version = "0.14", features = ["pem", "pkcs8"] }
+# pkix-chain's `verify_chain`/`verify_smime_signer` take `&[x509_cert::Certificate]`
+# where `x509_cert` is the **0.2** line (pkix-path 0.3.2 → x509-cert 0.2). Our
+# build-time stack is `x509-cert 0.3` (required by the vendored cms builder).
+# Cargo cannot have two same-named deps, so we alias the 0.2 line under
+# `x509-cert-v02` via the `package = ` rename. chain.rs re-parses our 0.3-built
+# cert DER into `x509_cert_v02::Certificate` for handing to pkix-chain.
+x509-cert-v02 = { package = "x509-cert", version = "0.2", default-features = false }
+# `der 0.7` is the line `x509-cert 0.2` / `pkix-path 0.3.2` are built against.
+# Our build stack is `der 0.8`. Aliased as `der-07` so `chain.rs` can call
+# `<CertificateV02 as der_07::Decode>::from_der(...)` for the 0.2 cert type.
+der-07 = { package = "der", version = "0.7" }
+# Task 2: `SmimeVerifier` (custom `SignatureVerifier`) needs to name the spki
+# 0.7 types (`AlgorithmIdentifierRef` / `SubjectPublicKeyInfoRef`) used by the
+# `pkix_path::SignatureVerifier` trait signature. Our build stack's `spki` is
+# 0.8, so we alias the 0.7 line. Same rationale as `der-07`.
+spki-07 = { package = "spki", version = "0.7" }
+# Task 2: the `SignatureVerifier` trait's return type is `signature::Error`
+# from `signature 2.x` (pkix-path's dep line). Our build stack uses
+# `signature 3.x`. Aliased so `SmimeVerifier::verify_signature` can name the
+# exact Error type the trait expects.
+signature-2 = { package = "signature", version = "2" }
+# Task 2: `pkcs1 0.7` exposes `RsaPssParams` for parsing the RSA-PSS
+# `AlgorithmIdentifier.parameters` (extracts the hashAlgorithm OID so we can
+# dispatch to `rsa::pss::VerifyingKey::<Sha256|Sha384|Sha512>`). Aliased
+# because pkcs1 0.8 (which our `rsa 0.10` dep uses) is on the spki 0.8 line,
+# incompatible with pkix-path's 0.7-encoded params. pkcs1 0.7.5 uses spki 0.7.
+pkcs1-07 = { package = "pkcs1", version = "0.7", default-features = false }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }
+# W6: MockTokenProvider for the hardware-free token-routing E2E tests.
+astra-crypto-core = { path = "../astra-crypto-core", features = ["testing"] }
+# Task 2 round-trip test does `use cipher::{BlockModeDecrypt, KeyIvInit};` and
+# `use cipher::block_padding::Pkcs7;` for the AES-128-CBC decrypt verification.
+# cipher is only transitive (via cms/cbc/aes) otherwise, so `use cipher::...`
+# would not resolve. Same 0.5.x line the vendored cms builder + cbc 0.2/aes 0.9 use.
+cipher = "0.5"

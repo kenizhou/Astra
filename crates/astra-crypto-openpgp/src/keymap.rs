@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 //! Sequoia `Cert` <-> framework `KeyHandleRef` / blob translations.
 //!
 //! Pure (de)serialization + handle-construction layer. No `KeyStore` trait
@@ -15,11 +16,11 @@
 //!   `SecretKey`/`SecretSubkey` when `key.has_secret()`).
 //! - [`Cert::armored`] returns `impl Serialize + SerializeInto` backed by an
 //!   `Encoder::Cert` variant (`serialize/cert_armored.rs:84-88, 124-127`)
-//!   that calls `cert.serialize(...)` under the hood — i.e. the armored form
+//!   that calls `cert.serialize(...)` under the hood - i.e. the armored form
 //!   is also public-only. The armor `Kind` is `PublicKey`
 //!   (`serialize/cert_armored.rs:161-162`).
 //! - [`Cert::strip_secret_key_material`] (`cert.rs:3202`) is the verified
-//!   equivalent of the brief's notional `strip_secret()` — no method named
+//!   equivalent of the brief's notional `strip_secret()` - no method named
 //!   `strip_secret` exists on `Cert` in 2.4.1. Consumes `self`, returns a
 //!   new `Cert` with secret material removed from the primary + every subkey.
 //! - [`CertParser::from_bytes`] (via the `Parse` trait) auto-detects armor
@@ -36,7 +37,7 @@ use crate::error::CryptoResult;
 // All Sequoia results in this module route through `crate::error::map_sequoia`
 // (the canonical mapper for `openpgp::Result<T>` = `Result<T, anyhow::Error>`).
 // `anyhow::Error` does not implement `std::error::Error`, so the generic
-// `crate::error::map_err` cannot accept it — see `error.rs` for details.
+// `crate::error::map_err` cannot accept it - see `error.rs` for details.
 
 /// Framework fingerprint of a Cert's primary key (lowercase hex).
 ///
@@ -67,7 +68,7 @@ pub fn cert_to_handle(cert: &openpgp::Cert) -> KeyHandleRef {
 
 /// Binary TPK serialization of a Cert **with** secret key material.
 ///
-/// For at-rest storage only — never crosses the IPC boundary in plaintext.
+/// For at-rest storage only - never crosses the IPC boundary in plaintext.
 /// Round-trips via [`parse_certs`].
 ///
 /// **Note:** this MUST go through `cert.as_tsk().serialize(...)`. `Cert`'s
@@ -126,7 +127,7 @@ mod tests {
     /// Task-1 spike `gen()` pattern, duplicated per the no-cross-task-assumption
     /// rule (this crate's lib-tests must not depend on `tests/spike.rs`).
     /// Yields a Cert with a primary (certify+sign) key + transport-encryption
-    /// subkey + signing subkey — `CertBuilder::generate()` always produces a
+    /// subkey + signing subkey - `CertBuilder::generate()` always produces a
     /// TSK (secret material present on every key).
     fn gen() -> openpgp::Cert {
         let (cert, _rev) = CertBuilder::new()

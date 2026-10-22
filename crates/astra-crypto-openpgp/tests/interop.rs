@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 //! Cross-implementation interop tests for OpenPGP (Task 9).
 //!
 //! Mirrors `crypto-smime/src/interop_tests.rs`: prove our output is consumed
@@ -25,7 +26,7 @@
 //! # Wire-format note
 //!
 //! The engine writes the single Body part's bytes RAW into the OpenPGP
-//! literal-data packet — for a mail payload that is a complete RFC 5322/2045
+//! literal-data packet - for a mail payload that is a complete RFC 5322/2045
 //! MIME entity, exactly what a third-party OpenPGP client (GnuPG,
 //! Thunderbird) produces. These tests therefore feed the CLI a raw MIME
 //! entity and compare raw bytes: no engine-internal framing appears anywhere
@@ -42,13 +43,13 @@
 
 mod common;
 
-use common::MemoryKeyStore;
 use astra_crypto_core::{
     CryptoBackend, EncryptedEnvelope, EncryptedPart, Part, PartId, PartKind, SerializationStrategy,
     Standard,
 };
 use astra_crypto_openpgp::engine;
 use astra_crypto_openpgp::policy::PgpPolicy;
+use common::MemoryKeyStore;
 use sequoia_openpgp as openpgp;
 use sequoia_openpgp::serialize::Marshal;
 use std::process::{Command, Stdio};
@@ -147,7 +148,7 @@ impl TempHome {
 /// On Windows we MAY be running against the Git-for-Windows build of `gpg`
 /// (an MSYS2/cygwin binary at `C:\Program Files\Git\usr\bin\gpg.exe`). That
 /// build's runtime does NOT recognize `C:\...` or `C:/...` as absolute paths
-/// in command-line arguments — it treats them as relative and joins with the
+/// in command-line arguments - it treats them as relative and joins with the
 /// cwd, producing a mangled path like `/d/.../C:/Users/...`. The fix is to
 /// convert to MSYS2 form (`/c/Users/...`) which the runtime does accept.
 ///
@@ -247,7 +248,7 @@ fn cli_import(cli: &Cli, td: &TempHome, cert_bytes: &[u8]) {
             pipe_in(&mut cmd, cert_bytes, "gpg --import");
         }
         Cli::Sq => {
-            // `sq` has no single "import to keystore" subcommand in 0.x/1.x —
+            // `sq` has no single "import to keystore" subcommand in 0.x/1.x -
             // `sq cert import` reads from file or stdin. We pipe via stdin.
             let mut cmd = cli_base(cli, td);
             cmd.args(["cert", "import"]);
@@ -371,7 +372,7 @@ fn cli_decrypt(cli: &Cli, td: &TempHome, ciphertext: &[u8]) -> Vec<u8> {
 
 /// Symmetrically encrypt `plaintext` with `passphrase` via `gpg --symmetric`;
 /// return the OpenPGP message bytes (binary). gpg emits SKESK v4 + SEIPDv1
-/// (RFC 4880) — the wire shape `engine::decrypt_symmetric` must consume.
+/// (RFC 4880) - the wire shape `engine::decrypt_symmetric` must consume.
 /// Uses AES256 + no compression to match `cli_encrypt`.
 ///
 /// gpg-only: `sq encrypt --symmetric` prompts for the password on the tty
@@ -496,7 +497,7 @@ fn cli_detach_verify(cli: &Cli, td: &TempHome, payload: &[u8], sig: &[u8]) {
 
 /// Generate a fresh Cert (Ed25519 primary + X25519 enc subkey + Ed25519 sign
 /// subkey) via the SAME engine API the backend uses. The Cert is a TSK with
-/// unencrypted secret material (no S2K) — directly usable for sign/decrypt.
+/// unencrypted secret material (no S2K) - directly usable for sign/decrypt.
 fn gen_cert(user_id: &str) -> openpgp::Cert {
     engine::generate(user_id).expect("engine::generate")
 }
@@ -509,7 +510,7 @@ fn armored_public(cert: &openpgp::Cert) -> Vec<u8> {
 /// Armored PRIVATE KEY BLOCK for `cert` (TSK form; carries secret material).
 /// Used to seed the CLI's keyring with a decryption-capable copy of OUR cert
 /// for the "we encrypt → CLI decrypts" direction. Built directly via Sequoia's
-/// `cert.as_tsk().armored()` — the engine does not expose a secret-armored
+/// `cert.as_tsk().armored()` - the engine does not expose a secret-armored
 /// export (at-rest secret blobs are binary; armored export is a test fixture
 /// concern, not a production path).
 fn armored_secret(cert: &openpgp::Cert) -> Vec<u8> {
@@ -526,7 +527,7 @@ fn pgp_policy() -> PgpPolicy {
     PgpPolicy::default()
 }
 
-/// A raw RFC 5322/2045 MIME entity — the genuine third-party payload shape.
+/// A raw RFC 5322/2045 MIME entity - the genuine third-party payload shape.
 /// The engine's raw wire format carries these bytes verbatim in the
 /// literal-data packet; no engine-internal framing is applied.
 fn raw_mime_entity(body_text: &str) -> Vec<u8> {
@@ -540,14 +541,14 @@ fn raw_mime_entity(body_text: &str) -> Vec<u8> {
 }
 
 // =========================================================================
-// Tests — encrypt/decrypt cross-impl
+// Tests - encrypt/decrypt cross-impl
 // =========================================================================
 
 /// Direction 1: CLI encrypts to our cert → engine::decrypt recovers plaintext.
 ///
 /// Generate a Cert HERE, export its armored public key, import into the CLI's
 /// temp keyring, encrypt THERE, then `engine::decrypt` HERE. The plaintext is
-/// a RAW MIME entity — the genuine third-party shape a GnuPG/Thunderbird
+/// a RAW MIME entity - the genuine third-party shape a GnuPG/Thunderbird
 /// client produces. `engine::decrypt` must return it verbatim via its raw
 /// path (the lenient legacy-framing fallback must NOT misfire on it). The
 /// WIRE FORMAT under test is the OpenPGP message itself (PKESK + SEIP +
@@ -573,7 +574,7 @@ fn cross_impl_cli_encrypts_engine_decrypts() {
     // 2. Import into the CLI's temp keyring.
     cli_import(&cli, &td, &pub_armored);
 
-    // 3. CLI encrypts a RAW MIME entity to our cert (no pre-framing — this is
+    // 3. CLI encrypts a RAW MIME entity to our cert (no pre-framing - this is
     // the genuine third-party payload shape).
     let mime_entity = raw_mime_entity("cross-impl: CLI encrypts, engine decrypts");
     let message = cli_encrypt(&cli, &td, &cert_fp, &mime_entity);
@@ -617,7 +618,7 @@ fn cross_impl_cli_encrypts_engine_decrypts() {
 /// temp keyring so the CLI has a decryption-capable copy. We encrypt here
 /// via `engine::encrypt`; the CLI decrypts and writes the literal-data body
 /// to a file. With the raw wire format that body IS the original MIME
-/// entity — we compare bytes directly, no unframing.
+/// entity - we compare bytes directly, no unframing.
 ///
 /// **History:** until the `engine::generate` SEIPDv1-only fix landed, this
 /// test was `#[ignore]`'d because Sequoia's default `Features::seipdv2`
@@ -644,7 +645,7 @@ fn cross_impl_engine_encrypts_cli_decrypts() {
         .contains("BEGIN PGP PRIVATE KEY BLOCK"),);
     cli_import(&cli, &td, &sec_armored);
 
-    // engine::encrypt — writes the Body part's bytes RAW into the
+    // engine::encrypt - writes the Body part's bytes RAW into the
     // literal-data packet (no internal framing).
     let mime_entity = raw_mime_entity("cross-impl: engine encrypts, CLI decrypts");
     let part = Part {
@@ -674,7 +675,7 @@ fn cross_impl_engine_encrypts_cli_decrypts() {
 }
 
 // =========================================================================
-// Tests — detached sign/verify cross-impl
+// Tests - detached sign/verify cross-impl
 // =========================================================================
 
 /// Direction 3: CLI detach-signs → engine::verify_detached returns ValidVerified.
@@ -741,7 +742,7 @@ fn cross_impl_engine_signs_cli_verifies() {
 
     // CLI verifies. cli_detach_verify panics if the CLI rejects the signature,
     // which is the load-bearing assertion (a CLI-rejected signature is a
-    // wire-format mismatch — exactly what interop tests exist to catch).
+    // wire-format mismatch - exactly what interop tests exist to catch).
     cli_detach_verify(&cli, &td, payload, &sig.signature);
 }
 
@@ -759,7 +760,7 @@ fn cross_impl_engine_signs_cli_verifies() {
 /// (CLI decrypts our output).
 ///
 /// **History:** same SEIPDv2/v4 gap as `cross_impl_engine_encrypts_cli_decrypts`
-/// — was `#[ignore]`'d until the `engine::generate` SEIPDv1-only fix landed.
+/// - was `#[ignore]`'d until the `engine::generate` SEIPDv1-only fix landed.
 /// Now passes against GnuPG 2.4.9.
 #[tokio::test]
 async fn cross_impl_backend_encrypt_then_cli_decrypts() {
@@ -817,16 +818,16 @@ async fn cross_impl_backend_encrypt_then_cli_decrypts() {
 }
 
 // =========================================================================
-// Tests — symmetric (SKESK) cross-impl (W9 password mail)
+// Tests - symmetric (SKESK) cross-impl (W9 password mail)
 // =========================================================================
 
 /// Direction 5: `gpg --symmetric` encrypts → engine::decrypt_symmetric
 /// recovers the plaintext.
 ///
-/// The passphrase never touches a keyring — `gpg --symmetric` derives the
+/// The passphrase never touches a keyring - `gpg --symmetric` derives the
 /// session key from the passphrase alone (SKESK v4 + SEIPDv1, RFC 4880).
 /// `engine::decrypt_symmetric` must consume exactly that shape; the plaintext
-/// is a raw MIME entity (genuine third-party shape — no engine framing).
+/// is a raw MIME entity (genuine third-party shape - no engine framing).
 #[test]
 fn cross_impl_gpg_symmetric_engine_decrypts() {
     if skip_no_gpg() {

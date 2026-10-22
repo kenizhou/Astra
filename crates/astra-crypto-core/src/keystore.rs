@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
@@ -12,14 +13,14 @@ use crate::standard::Standard;
 ///
 /// # Serde
 /// `private_data` is `#[serde(skip)]` because [`SecretBox`] is not `Serialize`
-/// in secrecy 0.10 — and more importantly, private key material must never be
+/// in secrecy 0.10 - and more importantly, private key material must never be
 /// serialized into a serde stream (IPC, JSON logs, etc.). A round-tripped
 /// `StoredKey` always has `private_data == None`; the bytes survive only
 /// in-Rust through the `KeyStore` put/get path.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StoredKey {
     pub handle: KeyHandleRef,
-    /// DER cert / armored PGP public / SM2 public — raw bytes.
+    /// DER cert / armored PGP public / SM2 public - raw bytes.
     pub public_data: Vec<u8>,
     /// PKCS#8 DER (soft) private material; `None` for public-only/token keys.
     /// Skipped during serde so private bytes never serialize.

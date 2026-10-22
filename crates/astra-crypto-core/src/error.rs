@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 use std::sync::Arc;
 
 /// Type-erased crypto error. Backend-native errors are wrapped here so the

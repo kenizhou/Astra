@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 //! End-to-end integration tests for `OpenpgpBackend` against the in-memory
 //! `MemoryKeyStore`. Drives the framework's `CryptoBackend` trait through the
 //! Sequoia engine: generate → export → import, encrypt → decrypt (with and
@@ -11,12 +12,12 @@
 
 mod common;
 
-use common::MemoryKeyStore;
 use astra_crypto_core::{
     CryptoBackend, CryptoPolicy, KeyGenParams, KeyStore, Part, PartId, PartKind,
     SerializationStrategy, SignatureState, Standard,
 };
 use astra_crypto_openpgp::OpenpgpBackend;
+use common::MemoryKeyStore;
 use std::sync::Arc;
 
 // ---------- fixtures ----------
@@ -359,7 +360,7 @@ fn placeholder_signer() -> astra_crypto_core::KeyHandleRef {
 /// F2: a detached signature made by a signing SUBKEY must verify through the
 /// trait even when the caller passes a placeholder signer handle. The sig
 /// packet's `IssuerFingerprint` subpacket carries the subkey's fingerprint
-/// while the keystore is keyed by the cert's PRIMARY fingerprint — the
+/// while the keystore is keyed by the cert's PRIMARY fingerprint - the
 /// backend's signer resolution must search the keystore by the sig's issuer
 /// fingerprint with subkey awareness.
 #[tokio::test]
@@ -384,7 +385,7 @@ async fn verify_with_placeholder_signer_resolves_subkey_signer_via_issuer_finger
     let mut signed = b.sign(sign_op).await.expect("sign");
 
     // Sanity: the sig's issuer IS a subkey fingerprint (not the cert primary
-    // the keystore is keyed by) — the exact case primary-fp resolution fails.
+    // the keystore is keyed by) - the exact case primary-fp resolution fails.
     let issuer_fp =
         sig_issuer_fingerprint(&signed.signature.signature).expect("sig carries an issuer fp");
     assert_ne!(
@@ -577,8 +578,8 @@ async fn memory_keystore_put_cert_then_backend_export_round_trips() {
     // Generate a cert via the engine DIRECTLY (not via backend.generate_key),
     // then store it via the MemoryKeyStore helper. This proves the helper's
     // StoredKey construction is compatible with the backend's resolution path.
-    let cert =
-        astra_crypto_openpgp::engine::generate("helper-interop@example.org").expect("engine::generate");
+    let cert = astra_crypto_openpgp::engine::generate("helper-interop@example.org")
+        .expect("engine::generate");
     let handle = ks
         .put_cert(&cert)
         .expect("MemoryKeyStore::put_cert stores the cert");

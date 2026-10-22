@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{Fingerprint, KeyId, TokenKeyId};
@@ -14,7 +15,7 @@ pub enum KeyUsage {
 }
 
 /// Where a key's private half lives. Software keys expose encrypted bytes at
-/// rest through a `KeyStore`; token keys never leave the device — operations
+/// rest through a `KeyStore`; token keys never leave the device - operations
 /// are delegated to the token by the backend.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 // NOTE: Adjacently-tagged (`tag` + `content`) rather than internally-tagged
@@ -32,7 +33,7 @@ pub enum KeyHandle {
     },
 }
 
-/// A *reference* to a key — everything the application layer and the IPC
+/// A *reference* to a key - everything the application layer and the IPC
 /// boundary ever see. Raw key bytes never appear here by construction.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KeyHandleRef {
