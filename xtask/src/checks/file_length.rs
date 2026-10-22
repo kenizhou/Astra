@@ -5,6 +5,16 @@
 
 pub(crate) const MAX_LINES: usize = 500;
 
+/// The upstream-ported trees the cap deliberately does not measure: code kept
+/// byte-diffable with its source so port diffs stay reviewable (the crypto
+/// workspace vendored from kylins, spec D3). Exempt only while unrewritten;
+/// a slice that rewrites these files natively must shrink the list to match.
+const UPSTREAM_EXEMPT_PREFIXES: &[&str] = &[
+    "crates/astra-crypto-core/",
+    "crates/astra-crypto-openpgp/",
+    "crates/astra-crypto-smime/",
+];
+
 /// True for package manager lockfiles, which are generated output.
 fn is_lockfile(p: &std::path::Path) -> bool {
     matches!(
@@ -26,6 +36,12 @@ pub(crate) fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
             continue;
         }
         if is_lockfile(&f) {
+            continue;
+        }
+        if UPSTREAM_EXEMPT_PREFIXES
+            .iter()
+            .any(|prefix| r.starts_with(prefix))
+        {
             continue;
         }
         let lines = super::read_lossy(&f).lines().count();
@@ -68,6 +84,16 @@ mod tests {
     fn lockfiles_are_generated_output() {
         let long = "line\n".repeat(super::MAX_LINES + 1);
         let root = fixture(&[("client/web/package-lock.json", &long)]);
+        assert!(super::check(&root).is_ok());
+    }
+
+    #[test]
+    fn upstream_ported_trees_are_exempt() {
+        let long = "line\n".repeat(super::MAX_LINES + 1);
+        let root = fixture(&[
+            ("crates/astra-crypto-core/src/lib.rs", &long),
+            ("crates/astra-crypto-smime/src/lib.rs", &long),
+        ]);
         assert!(super::check(&root).is_ok());
     }
 }
