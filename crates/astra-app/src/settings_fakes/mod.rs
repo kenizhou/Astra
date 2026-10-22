@@ -143,6 +143,7 @@ impl FakeAccountOps {
                 address: self.address.clone(),
                 grant: None,
                 dav: None,
+                crypto_method: "none".to_owned(),
             },
         );
         self
@@ -317,6 +318,16 @@ impl HostAccountOps<CalendarFake> for FakeAccountOps {
         let id = account.as_str();
         self.stored.lock().unwrap().remove(id);
         self.infos.lock().unwrap().remove(id);
+        Ok(())
+    }
+
+    async fn store_crypto_method(&self, account: &AccountId, method: &str) -> Result<(), String> {
+        let id = account.as_str();
+        let mut infos = self.infos.lock().unwrap();
+        let Some(info) = infos.get_mut(id) else {
+            return Err("the account has no stored config on this host".to_owned());
+        };
+        info.crypto_method = method.to_owned();
         Ok(())
     }
 }

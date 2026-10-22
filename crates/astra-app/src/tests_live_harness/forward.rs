@@ -69,6 +69,7 @@ async fn the_forward_carries_the_chain_without_answering_and_cleans_up_after_its
         subject: SUBJECT.to_owned(),
         document: document(WORDS),
         blobs: Vec::new(),
+        crypto: crate::crypto::CryptoFlags::default(),
     })
     .await
     .unwrap();
@@ -158,6 +159,7 @@ async fn the_forward_carries_the_chain_without_answering_and_cleans_up_after_its
             attachments: Vec::new(),
         },
         blobs: Vec::new(),
+        crypto: crate::crypto::CryptoFlags::default(),
     })
     .await
     .unwrap();

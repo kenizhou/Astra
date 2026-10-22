@@ -61,6 +61,8 @@ fn the_snapshot_crosses_its_full_shape_and_reads_back() {
                     .to_owned(),
             ),
             grant: None,
+            crypto_method: "none".to_owned(),
+            crypto_error: None,
             signatures: Some(AccountSignatures {
                 new_mail: Some(Signature {
                     body_html: "<p>Ada</p>".to_owned(),
@@ -224,6 +226,8 @@ fn the_grant_states_cross_both_ways_and_absent_means_healthy() {
         refresh_error: None,
         grant: None,
         signatures: None,
+        crypto_method: "none".to_owned(),
+        crypto_error: None,
     };
     let wire = serde_json::to_value(&healthy).expect("the healthy row serialises");
     assert!(
@@ -271,6 +275,8 @@ fn a_row_s_dav_echo_never_carries_the_password_back() {
         refresh_error: None,
         grant: None,
         signatures: None,
+        crypto_method: "none".to_owned(),
+        crypto_error: None,
     };
     let wire = serde_json::to_value(&row).expect("the row serialises");
     assert!(

@@ -113,6 +113,15 @@ pub enum SettingsIntent {
         /// The editor's section, or `None` to clear the account's legs.
         section: Option<DavSectionInput>,
     },
+    /// Write one account's crypto method (`none` / `openpgp` / `smime`):
+    /// the built-in send gate's per-account switch. `none` is the zero-cost
+    /// default (the engine's queue keeps every send).
+    SetCryptoMethod {
+        /// The account whose method to write.
+        account: AccountId,
+        /// The method word; the core refuses one it does not know.
+        method: String,
+    },
     /// Remove an account: its stored config, its rows, and its legs go
     /// together.
     RemoveAccount {

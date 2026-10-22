@@ -232,6 +232,11 @@ pub enum Intent {
         /// handle with no bytes fails the send rather than sending a message
         /// silently missing its files.
         blobs: Vec<ComposerBlob>,
+        /// The composer's crypto toggles (sign/encrypt); consulted only when
+        /// the account has a crypto method configured, where they default to
+        /// both on.
+        #[serde(default)]
+        crypto: crate::crypto::CryptoFlags,
     },
     /// Send the composer's rich document as a reply: the same durable-outbox
     /// discipline as [`Intent::SubmitRichMail`], with the threading the reply
@@ -264,6 +269,10 @@ pub enum Intent {
         /// Host-resolved bytes for every attachment handle the document
         /// references; empty while the editor produces no attachments.
         blobs: Vec<ComposerBlob>,
+        /// The composer's crypto toggles, as on
+        /// [`Intent::SubmitRichMail`].
+        #[serde(default)]
+        crypto: crate::crypto::CryptoFlags,
     },
     /// Send the composer's rich document as a forward: the same
     /// durable-outbox discipline, carrying the original's `References` chain
@@ -287,6 +296,10 @@ pub enum Intent {
         /// Host-resolved bytes for every attachment handle the document
         /// references; empty while the editor produces no attachments.
         blobs: Vec<ComposerBlob>,
+        /// The composer's crypto toggles, as on
+        /// [`Intent::SubmitRichMail`].
+        #[serde(default)]
+        crypto: crate::crypto::CryptoFlags,
     },
     /// What the outbox panel asks the runtime to do with a queued send
     /// ([`OutboxIntent`]): show the queue, or act on one send in it.

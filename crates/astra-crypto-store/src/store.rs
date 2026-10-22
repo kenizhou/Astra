@@ -16,11 +16,18 @@ struct Migration {
 }
 
 /// The embedded migrations, in order.
-const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    name: "init",
-    sql: include_str!("migrations/0001_init.sql"),
-}];
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "init",
+        sql: include_str!("migrations/0001_init.sql"),
+    },
+    Migration {
+        version: 2,
+        name: "crypto_outbox",
+        sql: include_str!("migrations/0002_crypto_outbox.sql"),
+    },
+];
 
 /// The sqlite-backed crypto store. All query layers in this crate take a
 /// `&CryptoStore` and lock the connection per statement, matching

@@ -49,6 +49,7 @@ fn submit(subject: &str) -> Intent {
         subject: subject.to_owned(),
         document: document("On its way"),
         blobs: Vec::new(),
+        crypto: crate::crypto::CryptoFlags::default(),
     }
 }
 

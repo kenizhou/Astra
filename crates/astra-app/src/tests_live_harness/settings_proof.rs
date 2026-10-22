@@ -170,6 +170,10 @@ impl HostAccountOps<Box<dyn Provider>> for DocumentAccountStore {
                     .unwrap_or_default(),
                 grant: None,
                 dav: config.dav.as_ref().map(dav_echo),
+                crypto_method: config
+                    .crypto
+                    .as_ref()
+                    .map_or_else(|| "none".to_owned(), |crypto| crypto.method.clone()),
             });
         }
         infos
@@ -209,6 +213,20 @@ impl HostAccountOps<Box<dyn Provider>> for DocumentAccountStore {
 
     async fn remove_account(&self, account: &AccountId) -> Result<(), String> {
         std::fs::remove_file(self.of(account.as_str())).map_err(|err| err.to_string())
+    }
+
+    async fn store_crypto_method(&self, account: &AccountId, method: &str) -> Result<(), String> {
+        let id = account.as_str().to_owned();
+        let mut config =
+            astra_account::load(self.of(&id)).map_err(|_| NOT_REGISTERED.to_owned())?;
+        config.crypto = match method {
+            "none" => None,
+            other => Some(astra_account::CryptoAccount {
+                method: other.to_owned(),
+            }),
+        };
+        let document = config.to_toml().map_err(|err| err.to_string())?;
+        std::fs::write(self.of(&id), document).map_err(|err| err.to_string())
     }
 }
 

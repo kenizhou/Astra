@@ -419,6 +419,7 @@ fn the_style_profile_is_inferred_live_from_sent_mail() {
             subject: STYLE_SUBJECT.to_owned(),
             document: document(STYLE_WORDS),
             blobs: Vec::new(),
+            crypto: astra_app::CryptoFlags::default(),
         })
         .await
         .expect("the proof send");

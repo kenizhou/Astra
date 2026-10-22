@@ -46,6 +46,10 @@ astra-ai = { path = "../../crates/astra-ai" }
 # The plugin platform's contracts and worker host: the registry's manifests,
 # permission table, and out-of-process workers.
 astra-plugin = { path = "../../crates/astra-plugin" }
+# The built-in crypto: the send gate's method words, and the store the host
+# opens beside the AI store for the crypto send path.
+astra-crypto-core = { path = "../../crates/astra-crypto-core" }
+astra-crypto-store = { path = "../../crates/astra-crypto-store" }
 # The registry's grants file.
 toml.workspace = true
 # The MCP server the advanced-settings listener hosts: the server with its

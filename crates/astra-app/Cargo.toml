@@ -21,9 +21,20 @@ astra-ai = { path = "../astra-ai" }
 astra-composer = { path = "../astra-composer" }
 # The immutable snapshots the surfaces render, and the folder-row projection.
 astra-viewmodel = { path = "../astra-viewmodel" }
+# The built-in crypto: the send gate, the store and its outbox/transport, and
+# the two standard backends the gate dispatches.
+astra-crypto-core = { path = "../astra-crypto-core" }
+astra-crypto-store = { path = "../astra-crypto-store" }
+astra-crypto-openpgp = { path = "../astra-crypto-openpgp" }
+astra-crypto-smime = { path = "../astra-crypto-smime" }
 # The engine facade: every mail read and sync goes through it (engine types via
 # re-exports; no other engine crate).
 engine-api.workspace = true
+# The crypto bypass assembles with the engine's own assembler, so a wrapped
+# message is byte-identical to a non-crypto send before the gate runs.
+engine-rfc5322.workspace = true
+# The crypto transport's connector type crosses the host's resolver port.
+tokio-rustls.workspace = true
 # Every protocol and preferences type crosses the IPC or the preferences file as data.
 serde.workspace = true
 # The async `MailboxConnector` seam the host implements.
@@ -63,6 +74,8 @@ provider-caldav.workspace = true
 # The relayed meeting-brief proof's transport, built over the engine's TLS
 # policy the same way the desktop host builds the background client.
 engine-tls.workspace = true
+# The crypto tests hex-encode fixture key material.
+hex = "0.4"
 reqwest.workspace = true
 serde_json.workspace = true
 # The test executor (`#[tokio::test]`); tests may build a runtime, the library may not.

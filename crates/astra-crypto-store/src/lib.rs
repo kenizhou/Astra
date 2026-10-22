@@ -29,11 +29,13 @@ pub mod crypto_policy;
 mod default;
 mod keys;
 mod keystore;
+mod outbox;
 mod password;
 mod pinned;
 mod policy;
 mod resolve;
 mod store;
+pub mod transport;
 mod trust;
 pub mod vault;
 
@@ -57,6 +59,11 @@ pub use keys::{
     CryptoKeyRow,
 };
 pub use keystore::SqliteKeyStore;
+pub use outbox::{
+    enqueue_crypto_send, get_crypto_outbox_row, list_crypto_outbox, list_due_crypto_sends,
+    mark_crypto_failed, mark_crypto_sending, mark_crypto_unconfirmed, requeue_crypto_send,
+    settle_crypto_send, CryptoOutboxRow,
+};
 pub use password::apply_password_crypto;
 pub use pinned::{list_pinned_keys, remove_pinned_key, set_pinned_key, PinnedKey};
 pub use policy::StoreCryptoPolicy;
@@ -65,6 +72,10 @@ pub use resolve::{
     resolve_recipient_status_at, RecipientTrustFailure, RecipientTrustState, RecipientTrustStatus,
 };
 pub use store::CryptoStore;
+pub use transport::{
+    file_sent_copy, submit_smtp, ImapDial, SmtpDial, SubmitFailure, SubmitFailureKind,
+    TransportSecurity,
+};
 pub use trust::{
     get_latest_trust_decision, list_decisions_for_email, list_latest_decisions_for_key,
     put_trust_decision, TrustDecisionRow,

@@ -92,6 +92,7 @@ fn reply(subject: &str) -> Intent {
         subject: subject.to_owned(),
         document: document("Agreed"),
         blobs: Vec::new(),
+        crypto: crate::crypto::CryptoFlags::default(),
     }
 }
 
@@ -104,6 +105,7 @@ fn forward(subject: &str) -> Intent {
         subject: subject.to_owned(),
         document: document("Look at this"),
         blobs: Vec::new(),
+        crypto: crate::crypto::CryptoFlags::default(),
     }
 }
 
@@ -359,6 +361,7 @@ fn forward_over(subject: &str, document: ComposerDocument) -> Intent {
         subject: subject.to_owned(),
         document,
         blobs: Vec::new(),
+        crypto: crate::crypto::CryptoFlags::default(),
     }
 }
 

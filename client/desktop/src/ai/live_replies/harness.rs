@@ -95,6 +95,7 @@ fn harness_account(
         graph: None,
         google: None,
         jmap: None,
+        crypto: None,
         dav: None,
         shape: astra_account::AccountShape::default(),
     }

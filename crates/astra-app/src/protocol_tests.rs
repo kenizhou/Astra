@@ -333,6 +333,7 @@ fn submit_rich_mail_carries_the_recipients_the_document_and_the_blobs() {
             subject: "On its way".to_owned(),
             document: document("Sent words"),
             blobs: Vec::new(),
+            crypto: crate::crypto::CryptoFlags::default(),
         },
         concat!(
             r#"{"submit_rich_mail":{"from":"work","to":"you@test.local","#,
@@ -340,7 +341,7 @@ fn submit_rich_mail_carries_the_recipients_the_document_and_the_blobs() {
             r#""document":{"blocks":[{"Paragraph":{"content":"#,
             r#"[{"Text":{"text":"Sent words","bold":false,"italic":false,"underline":false,"#,
             r#""font_size":null,"color":null,"highlight":null,"link":null}}]}}],"#,
-            r#""attachments":[]},"blobs":[]}}"#
+            r#""attachments":[]},"blobs":[],"crypto":{}}}"#
         ),
     );
     // A submit with host-resolved attachment bytes carries them beside the document.
@@ -356,6 +357,7 @@ fn submit_rich_mail_carries_the_recipients_the_document_and_the_blobs() {
                 DraftBlobHandle::new("blob-1").unwrap(),
                 vec![1, 2, 3],
             )],
+            crypto: crate::crypto::CryptoFlags::default(),
         },
         concat!(
             r#"{"submit_rich_mail":{"from":"work","to":"you@test.local","#,
@@ -363,7 +365,7 @@ fn submit_rich_mail_carries_the_recipients_the_document_and_the_blobs() {
             r#""document":{"blocks":[{"Paragraph":{"content":"#,
             r#"[{"Text":{"text":"With a file","bold":false,"italic":false,"underline":false,"#,
             r#""font_size":null,"color":null,"highlight":null,"link":null}}]}}],"#,
-            r#""attachments":[]},"blobs":[{"handle":"blob-1","bytes":[1,2,3]}]}}"#
+            r#""attachments":[]},"blobs":[{"handle":"blob-1","bytes":[1,2,3]}],"crypto":{}}}"#
         ),
     );
 }

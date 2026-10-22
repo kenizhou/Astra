@@ -49,6 +49,7 @@ async fn the_unified_list_holds_both_accounts_inbox_rows_newest_first() {
         subject: SUBJECT.to_owned(),
         document: proof::document(WORDS),
         blobs: Vec::new(),
+        crypto: crate::crypto::CryptoFlags::default(),
     })
     .await
     .unwrap();

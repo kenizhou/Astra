@@ -13,6 +13,7 @@
 mod autodetect;
 mod config;
 mod credentials;
+mod crypto;
 mod dav;
 mod google;
 mod graph;
@@ -33,6 +34,7 @@ pub use config::{
     Secret, SmtpAccount,
 };
 pub use credentials::imap_credential_source;
+pub use crypto::CryptoAccount;
 pub use dav::{connect_dav_providers, DavAccount, DavProviders};
 pub use google::{
     connect_google_calendar_providers, connect_google_folder, connect_google_mail_providers,

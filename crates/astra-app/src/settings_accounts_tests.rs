@@ -247,3 +247,57 @@ async fn an_added_account_s_row_publishes_without_a_settings_dispatch() {
         "the new account's row stands without a settings dispatch"
     );
 }
+
+#[tokio::test]
+async fn the_crypto_method_write_lands_on_the_row_and_an_unknown_word_is_refused() {
+    let ops = FakeAccountOps::new().describing("work");
+    let (app, _surfaces) = over(vec![("work", vec![mail_half()])], ops);
+
+    app.dispatch(Intent::Settings(SettingsIntent::Refresh))
+        .await
+        .unwrap();
+    assert_eq!(
+        app.settings().accounts[0].crypto_method,
+        "none",
+        "the default echo"
+    );
+
+    app.dispatch(Intent::Settings(SettingsIntent::SetCryptoMethod {
+        account: engine_api::AccountId::try_from("work").unwrap(),
+        method: "openpgp".to_owned(),
+    }))
+    .await
+    .unwrap();
+    let row = &app.settings().accounts[0];
+    assert_eq!(row.crypto_method, "openpgp", "the write lands on the row");
+    assert!(row.crypto_error.is_none());
+
+    // An unknown method word is refused with the row error, and the standing
+    // method does not move.
+    app.dispatch(Intent::Settings(SettingsIntent::SetCryptoMethod {
+        account: engine_api::AccountId::try_from("work").unwrap(),
+        method: "carrier-pigeon".to_owned(),
+    }))
+    .await
+    .unwrap();
+    let row = &app.settings().accounts[0];
+    assert_eq!(row.crypto_method, "openpgp", "the refusal changes nothing");
+    assert!(
+        row.crypto_error
+            .as_deref()
+            .is_some_and(|e| e.contains("none, openpgp, or smime")),
+        "the refusal reads on the row: {:?}",
+        row.crypto_error
+    );
+
+    // A good write after clears the error.
+    app.dispatch(Intent::Settings(SettingsIntent::SetCryptoMethod {
+        account: engine_api::AccountId::try_from("work").unwrap(),
+        method: "none".to_owned(),
+    }))
+    .await
+    .unwrap();
+    let row = &app.settings().accounts[0];
+    assert_eq!(row.crypto_method, "none");
+    assert!(row.crypto_error.is_none());
+}

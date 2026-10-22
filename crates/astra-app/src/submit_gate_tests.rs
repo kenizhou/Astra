@@ -49,6 +49,7 @@ fn send(text: &str) -> Intent {
         subject: "Quarterly report".to_owned(),
         document: document(text),
         blobs: Vec::new(),
+        crypto: crate::crypto::CryptoFlags::default(),
     }
 }
 

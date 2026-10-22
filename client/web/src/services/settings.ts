@@ -91,6 +91,10 @@ export interface AccountSettingsRow {
    * grant needs the person to act. Absent is the healthy state.
    */
   grant?: GrantStateWord;
+  /** The account's crypto method (none / openpgp / smime); the built-in send gate's switch. */
+  crypto_method?: string;
+  /** Why the account's crypto-method write last refused or failed, when it did. */
+  crypto_error?: string;
   /** The account's signature assignment, when it holds one. */
   signatures?: AccountSignatures;
 }
@@ -150,7 +154,8 @@ export type SettingsIntentBody =
   | { set_dav: { account: string; section: DavSectionInput | null } }
   | { remove_account: { account: string } }
   | { set_send_account: { account: string | null } }
-  | { set_signature: { account: string; reply: boolean; signature: Signature | null } };
+  | { set_signature: { account: string; reply: boolean; signature: Signature | null } }
+  | { set_crypto_method: { account: string; method: string } };
 
 /**
  * The section constructor's omission discipline: a field the editor did
@@ -218,6 +223,11 @@ export const settingsIntents = {
    *  null; the last empty slot takes the account's row with it. */
   setSignature: (account: string, reply: boolean, signature: Signature | null) => ({
     settings: { set_signature: { account, reply, signature } },
+  }),
+  /** Write one account's crypto method (none / openpgp / smime): the
+   *  built-in send gate's per-account switch. */
+  setCryptoMethod: (account: string, method: string) => ({
+    settings: { set_crypto_method: { account, method } },
   }),
 };
 

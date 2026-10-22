@@ -181,6 +181,15 @@ pub struct AccountSettingsRow {
     /// one is stored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dav: Option<DavSectionRow>,
+    /// The account's crypto method (`none` / `openpgp` / `smime`): the
+    /// built-in send gate's per-account switch, echoed from the stored
+    /// config. `none` is the zero-cost default.
+    #[serde(default)]
+    pub crypto_method: String,
+    /// Why the account's crypto-method write last refused or failed, when
+    /// it did. Absent crosses no key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crypto_error: Option<String>,
     /// Why the account's dav editor last refused or failed, when it did: the
     /// section the editor shows is the one that stands, and this names why
     /// the save did not change it. Absent crosses no key.

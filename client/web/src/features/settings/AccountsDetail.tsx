@@ -132,6 +132,32 @@ export function AccountsDetail() {
           setSelected(null);
         }}
       />
+      {/* The built-in crypto: the send gate's per-account method. With one
+          set, sends assemble, gate, and travel the Astra-side crypto
+          outbox; none is the zero-cost default. */}
+      <div className="flex max-w-[280px] flex-col gap-1.5">
+        <label htmlFor="crypto-method" className="text-xs font-medium text-foreground">
+          Encryption (built-in)
+        </label>
+        <select
+          id="crypto-method"
+          aria-label={`Encryption method for ${row.address}`}
+          value={row.crypto_method ?? 'none'}
+          onChange={(event) => {
+            void dispatch(intents.setCryptoMethod(row.account, event.target.value));
+          }}
+          className="rounded-[var(--radius-xs)] border border-border bg-background px-2 py-1 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <option value="none">None</option>
+          <option value="openpgp">OpenPGP</option>
+          <option value="smime">S/MIME</option>
+        </select>
+        {row.crypto_error !== undefined && (
+          <p role="alert" className="text-xs text-[var(--warning)]">
+            {row.crypto_error}
+          </p>
+        )}
+      </div>
       <div className="mt-2 flex flex-col gap-2 border-t border-border pt-3">
         {removing ? (
           <div

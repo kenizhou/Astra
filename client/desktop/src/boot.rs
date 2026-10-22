@@ -140,6 +140,19 @@ pub(crate) fn assemble_state(
         Arc::clone(&credentials),
         Arc::clone(&refusals),
     )));
+    // The built-in crypto send path: the crypto store beside the AI store,
+    // and the dial table's resolver for each account's method and endpoints.
+    // Installed before the first dispatch, so every crypto send from the
+    // first finds it standing.
+    let crypto_store = Arc::new(astra_crypto_store::CryptoStore::open(
+        &data_dir.join(CRYPTO_STORE_FILE),
+    )?);
+    core.install_crypto_send(
+        crypto_store,
+        Arc::new(crate::crypto_send::HostCryptoResolver::new(Arc::clone(
+            &connections,
+        ))),
+    );
     // Prime the settings snapshot: nothing republishes it until a settings
     // intent lands, so without this the first pull after a launch answers
     // the empty default, grant states and account rows included.
@@ -208,6 +221,10 @@ pub(crate) fn assemble_state(
 /// The AI ledgers' file name, under the data directory: the same store the
 /// CLI opens, so both writers land in one ledger.
 const AI_STORE_FILE: &str = "ai.sqlite";
+
+/// The crypto store's file name, under the data directory: key material,
+/// trust decisions, and the crypto outbox.
+const CRYPTO_STORE_FILE: &str = "crypto.sqlite";
 
 /// The hard cap on one plugin's gate or transform call (the plan's ~5min):
 /// a handler that never answers inside it is unavailable for that call, and
