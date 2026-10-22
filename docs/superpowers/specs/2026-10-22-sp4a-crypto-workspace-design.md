@@ -36,7 +36,7 @@ compiles against the current cipher 0.5 / elliptic-curve 0.14 line and its
 builder API matches, but its `builder/kari.rs` never lands the ANSI X9.63 KDF
 output in the KEK buffer it wraps with, so every ECC recipient round trip
 fails AES-KW integrity (`decrypt_round_trips_ecc_recipient`,
-`token_decrypt_ecc_kari_round_trips`, the openssl kari interop) — and formats
+`token_decrypt_ecc_kari_round_trips`, the openssl kari interop), and formats
 master carries the same miss, so no published or bleeding-edge build has the
 fix the snapshot carries. Independent of that, `pkcs12 0.2.0-pre.0` (the only
 modern release, pulled by `p12-keystore`) pins `cms =0.3.0-pre.1` exactly,
