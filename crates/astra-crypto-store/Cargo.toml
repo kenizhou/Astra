@@ -1,0 +1,43 @@
+[package]
+name = "astra-crypto-store"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77.2"
+
+[features]
+default = []
+# Exposes `vault::set_test_master_key` to sibling crates' tests (the store's
+# own tests build with cfg(test) and need no feature).
+testing = []
+
+[dependencies]
+astra-crypto-core = { path = "../astra-crypto-core" }
+astra-crypto-openpgp = { path = "../astra-crypto-openpgp" }
+astra-crypto-smime = { path = "../astra-crypto-smime" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+async-trait = "0.1"
+# kylins used thiserror 1 (as does astra-crypto-core); the workspace pins 2
+# for its own crates. The store's error type is internal, so either works.
+thiserror = "2"
+secrecy = "0.10"
+rusqlite = { workspace = true }
+uuid = { workspace = true }
+keyring = { workspace = true }
+base64 = { workspace = true }
+log = { workspace = true }
+aes-gcm = "0.10"
+rand = "0.10"
+hex = "0.4"
+x509-parser = "0.18"
+
+[dev-dependencies]
+astra-crypto-smime = { path = "../astra-crypto-smime", features = ["testing"] }
+# Named directly (matching the openpgp crate's pins) so tests can import the
+# PrimaryKey trait for subkey selection.
+sequoia-openpgp = { version = "2", default-features = false, features = ["crypto-rust", "allow-experimental-crypto", "allow-variable-time-crypto"] }
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt"] }
+
+[lints]
+workspace = true
