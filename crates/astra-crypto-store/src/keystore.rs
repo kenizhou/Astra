@@ -65,16 +65,21 @@ struct KeyMetadata {
 /// encrypts private material at rest; this bridge hex-encodes binary
 /// material so DER survives the String-based `CryptoKeyRecord` fields
 /// losslessly.
+///
+/// The bridge OWNS an `Arc<CryptoStore>` (not a borrow) so it can be
+/// shared with the crypto backends, which take `Arc<dyn KeyStore>` (a
+/// `'static` owner). Callers holding only a `&CryptoStore` (the recipient
+/// resolver) use the free [`find_by_email_fetchable`] helper directly.
 #[derive(Debug)]
-pub struct SqliteKeyStore<'a> {
-    store: &'a CryptoStore,
+pub struct SqliteKeyStore {
+    store: std::sync::Arc<CryptoStore>,
     account_id: String,
 }
 
-impl<'a> SqliteKeyStore<'a> {
+impl SqliteKeyStore {
     /// Construct a keystore bound to `account_id`. The account must be
     /// registered with the store (`CryptoStore::register_account`).
-    pub fn from_store(store: &'a CryptoStore, account_id: impl Into<String>) -> Self {
+    pub fn new(store: std::sync::Arc<CryptoStore>, account_id: impl Into<String>) -> Self {
         Self {
             store,
             account_id: account_id.into(),
@@ -114,11 +119,11 @@ impl<'a> SqliteKeyStore<'a> {
         &self,
         requested: &Fingerprint,
     ) -> CryptoResult<Option<String>> {
-        let rows = crate::list_crypto_keys_for_account(self.store, &self.account_id, "openpgp")
+        let rows = crate::list_crypto_keys_for_account(&self.store, &self.account_id, "openpgp")
             .map_err(|e| CryptoError::backend(DbError(e)))?;
         for row in rows {
             let Some(record) = crate::get_crypto_key_full(
-                self.store,
+                &self.store,
                 &self.account_id,
                 "openpgp",
                 &row.fingerprint,
@@ -210,7 +215,7 @@ impl<'a> SqliteKeyStore<'a> {
             policy_json,
         };
 
-        crate::upsert_crypto_key(self.store, &record)
+        crate::upsert_crypto_key(&self.store, &record)
             .map_err(|e| CryptoError::backend(DbError(e)))?;
 
         // Return a canonical KeyHandleRef whose KeyId embeds standard|fingerprint.
@@ -234,7 +239,7 @@ impl<'a> SqliteKeyStore<'a> {
                 key_id,
             } => {
                 let record = crate::get_crypto_key_by_token(
-                    self.store,
+                    &self.store,
                     &self.account_id,
                     token_serial,
                     &key_id.0,
@@ -280,7 +285,7 @@ impl<'a> SqliteKeyStore<'a> {
         let (standard, fingerprint) = Self::decode_key_id(key_id)?;
 
         let mut record = crate::get_crypto_key_full(
-            self.store,
+            &self.store,
             &self.account_id,
             standard.as_str(),
             fingerprint.as_str(),
@@ -297,7 +302,7 @@ impl<'a> SqliteKeyStore<'a> {
         if record.is_none() && standard == Standard::OpenPgp {
             if let Some(primary_fp) = self.find_openpgp_primary_for_key_fingerprint(&fingerprint)? {
                 record = crate::get_crypto_key_full(
-                    self.store,
+                    &self.store,
                     &self.account_id,
                     standard.as_str(),
                     &primary_fp,
@@ -363,56 +368,7 @@ impl<'a> SqliteKeyStore<'a> {
         standard: Standard,
         email: &str,
     ) -> CryptoResult<Vec<KeyHandleRef>> {
-        let rows = crate::list_crypto_keys_for_email(self.store, standard.as_str(), email)
-            .map_err(|e| CryptoError::backend(DbError(e)))?;
-
-        let mut out = Vec::with_capacity(rows.len());
-        for row in rows {
-            // Fetchability filter: the email->fingerprint discovery is
-            // GLOBAL (the row carrying the recipient's email may live under
-            // the recipient's own account), but `get` is account-scoped: a
-            // handle this account's keystore cannot fetch would die
-            // downstream with a raw backend error instead of the precise
-            // fail-closed missing-cert signal. Surface only handles a
-            // same-fingerprint row under THIS account can serve (e.g. a
-            // contact cert imported into the sending account, the legitimate
-            // multi-account send path); drop the rest so callers see a clean
-            // miss.
-            let fetchable = crate::get_crypto_key_public(
-                self.store,
-                &self.account_id,
-                &row.standard,
-                &row.fingerprint,
-            )
-            .map_err(|e| CryptoError::backend(DbError(e)))?
-            .is_some();
-            if !fetchable {
-                continue;
-            }
-            let fp = Fingerprint::new(&row.fingerprint);
-            let Some(std) = Standard::from_str(&row.standard).ok() else {
-                continue;
-            };
-            // Token rows surface Token handles (the recipient path only
-            // reads public material, which the token get above serves).
-            let handle = match (&row.token_serial, &row.token_key_id) {
-                (Some(serial), Some(key_id)) => KeyHandle::Token {
-                    token_serial: serial.clone(),
-                    key_id: astra_crypto_core::TokenKeyId(key_id.clone()),
-                },
-                _ => KeyHandle::Software(Self::encode_key_id(std, &fp)),
-            };
-            out.push(KeyHandleRef {
-                handle,
-                standard: std,
-                fingerprint: fp,
-                // find_by_email returns metadata-only refs; defaults are
-                // fine: callers call get() for full material + algorithm.
-                usage: KeyUsage::SignAndEncrypt,
-                algorithm: "unknown".to_string(),
-            });
-        }
-        Ok(out)
+        find_by_email_fetchable(&self.store, &self.account_id, standard, email)
     }
 
     /// Sync body of [`KeyStore::remove`].
@@ -430,7 +386,7 @@ impl<'a> SqliteKeyStore<'a> {
         // this keystore's bound account, a cross-account remove deletes 0
         // rows.
         crate::delete_crypto_key(
-            self.store,
+            &self.store,
             &self.account_id,
             standard.as_str(),
             fingerprint.as_str(),
@@ -441,7 +397,7 @@ impl<'a> SqliteKeyStore<'a> {
 }
 
 #[async_trait::async_trait]
-impl KeyStore for SqliteKeyStore<'_> {
+impl KeyStore for SqliteKeyStore {
     async fn put(&self, key: StoredKey) -> CryptoResult<KeyHandleRef> {
         self.put_sync(key)
     }
@@ -461,6 +417,64 @@ impl KeyStore for SqliteKeyStore<'_> {
     async fn remove(&self, handle: &KeyHandle) -> CryptoResult<()> {
         self.remove_sync(handle)
     }
+}
+
+/// The bridge's `find_by_email` logic over a bare `&CryptoStore`, for
+/// callers (the recipient resolver) that hold no `Arc<CryptoStore>`.
+///
+/// Fetchability filter: the email->fingerprint discovery is GLOBAL (the row
+/// carrying the recipient's email may live under the recipient's own
+/// account), but `get` is account-scoped: a handle this account's keystore
+/// cannot fetch would die downstream with a raw backend error instead of
+/// the precise fail-closed missing-cert signal. Surface only handles a
+/// same-fingerprint row under THIS account can serve (e.g. a contact cert
+/// imported into the sending account, the legitimate multi-account send
+/// path); drop the rest so callers see a clean miss.
+///
+/// # Errors
+/// Fails when the store read cannot run.
+pub(crate) fn find_by_email_fetchable(
+    store: &CryptoStore,
+    account_id: &str,
+    standard: Standard,
+    email: &str,
+) -> CryptoResult<Vec<KeyHandleRef>> {
+    let rows = crate::list_crypto_keys_for_email(store, standard.as_str(), email)
+        .map_err(|e| CryptoError::backend(DbError(e)))?;
+
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        let fetchable =
+            crate::get_crypto_key_public(store, account_id, &row.standard, &row.fingerprint)
+                .map_err(|e| CryptoError::backend(DbError(e)))?
+                .is_some();
+        if !fetchable {
+            continue;
+        }
+        let fp = Fingerprint::new(&row.fingerprint);
+        let Some(std) = Standard::from_str(&row.standard).ok() else {
+            continue;
+        };
+        // Token rows surface Token handles (the recipient path only reads
+        // public material, which the token get serves).
+        let handle = match (&row.token_serial, &row.token_key_id) {
+            (Some(serial), Some(key_id)) => KeyHandle::Token {
+                token_serial: serial.clone(),
+                key_id: astra_crypto_core::TokenKeyId(key_id.clone()),
+            },
+            _ => KeyHandle::Software(SqliteKeyStore::encode_key_id(std, &fp)),
+        };
+        out.push(KeyHandleRef {
+            handle,
+            standard: std,
+            fingerprint: fp,
+            // find_by_email returns metadata-only refs; defaults are fine:
+            // callers call get() for full material + algorithm.
+            usage: KeyUsage::SignAndEncrypt,
+            algorithm: "unknown".to_string(),
+        });
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

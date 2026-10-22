@@ -7,13 +7,14 @@ use super::*;
 use crate::store::CryptoStore;
 use astra_crypto_core::{KeyHandle, KeyId};
 use sequoia_openpgp::cert::amalgamation::key::PrimaryKey;
+use std::sync::Arc;
 
-fn test_store() -> CryptoStore {
+fn test_store() -> Arc<CryptoStore> {
     crate::vault::set_test_master_key([0x42u8; 32]);
     let store = CryptoStore::open_in_memory().expect("open in-memory store");
     store.register_account("a1", "a1@x.com").unwrap();
     store.register_account("a2", "a2@x.com").unwrap();
-    store
+    Arc::new(store)
 }
 
 struct PgpFixture {
@@ -61,7 +62,7 @@ fn stored_key(fixture: &PgpFixture) -> StoredKey {
 #[tokio::test]
 async fn put_then_get_round_trips_material_and_metadata() {
     let store = test_store();
-    let ks = SqliteKeyStore::from_store(&store, "a1");
+    let ks = SqliteKeyStore::new(store.clone(), "a1");
     let fixture = pgp_fixture("A One <a1@x.com>");
 
     let canonical = ks.put(stored_key(&fixture)).await.expect("put");
@@ -107,7 +108,7 @@ async fn put_then_get_round_trips_material_and_metadata() {
 #[tokio::test]
 async fn get_resolves_a_subkey_fingerprint_to_the_owning_cert() {
     let store = test_store();
-    let ks = SqliteKeyStore::from_store(&store, "a1");
+    let ks = SqliteKeyStore::new(store.clone(), "a1");
     let fixture = pgp_fixture("A One <a1@x.com>");
     ks.put(stored_key(&fixture)).await.unwrap();
 
@@ -141,7 +142,7 @@ async fn get_resolves_a_subkey_fingerprint_to_the_owning_cert() {
 #[tokio::test]
 async fn find_by_email_binds_the_account_email_and_filters_unfetchable() {
     let store = test_store();
-    let ks = SqliteKeyStore::from_store(&store, "a1");
+    let ks = SqliteKeyStore::new(store.clone(), "a1");
     let fixture = pgp_fixture("A One <a1@x.com>");
     ks.put(stored_key(&fixture)).await.unwrap();
 
@@ -156,7 +157,7 @@ async fn find_by_email_binds_the_account_email_and_filters_unfetchable() {
     // The email->fingerprint discovery is global, but a row this account
     // cannot serve must be filtered out: account a2 sees a clean miss, not a
     // handle that would die downstream.
-    let other = SqliteKeyStore::from_store(&store, "a2");
+    let other = SqliteKeyStore::new(store.clone(), "a2");
     assert!(
         other
             .find_by_email(Standard::OpenPgp, "a1@x.com")
@@ -170,12 +171,12 @@ async fn find_by_email_binds_the_account_email_and_filters_unfetchable() {
 #[tokio::test]
 async fn remove_is_account_scoped() {
     let store = test_store();
-    let ks = SqliteKeyStore::from_store(&store, "a1");
+    let ks = SqliteKeyStore::new(store.clone(), "a1");
     let fixture = pgp_fixture("A One <a1@x.com>");
     let canonical = ks.put(stored_key(&fixture)).await.unwrap();
 
     // Account a2 presenting a1's handle deletes 0 rows.
-    let other = SqliteKeyStore::from_store(&store, "a2");
+    let other = SqliteKeyStore::new(store.clone(), "a2");
     other.remove(&canonical.handle).await.unwrap();
     assert!(ks.get(&canonical.handle).await.unwrap().is_some());
 
@@ -210,7 +211,7 @@ async fn token_handles_resolve_public_material_only() {
     )
     .unwrap();
 
-    let ks = SqliteKeyStore::from_store(&store, "a1");
+    let ks = SqliteKeyStore::new(store.clone(), "a1");
     let handle = KeyHandle::Token {
         token_serial: "SER123".to_string(),
         key_id: astra_crypto_core::TokenKeyId("key-1".to_string()),

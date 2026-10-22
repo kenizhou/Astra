@@ -21,12 +21,20 @@ pub mod token;
 pub mod trust;
 pub mod util;
 
+pub mod apply;
+pub mod mime;
+pub mod pgp_mime;
+
 // W6: closure-driven TokenProvider mock for hardware-free tests. Compiled for
 // this crate's own tests and for sibling crates that enable the `testing`
 // feature via dev-dependencies (crypto-smime, crypto-openpgp, backend).
 #[cfg(any(test, feature = "testing"))]
 pub mod mock_token;
 
+pub use apply::{
+    apply_crypto, key_handle_ref, AddressSpec, CryptoMethod, CryptoSendError, DefaultSigningKey,
+    SendCryptoPolicy, SendDraft,
+};
 pub use backend::{CryptoBackend, DecryptOp, EncryptOp, KeyGenParams, SignOp, VerifyOp};
 pub use envelope::{
     DecryptedPayload, DetachedSignature, EncryptedEnvelope, EncryptedPart, EncryptionGranularity,
@@ -45,5 +53,5 @@ pub use standard::Standard;
 pub use token::{
     TokenInfo, TokenKeyInfo, TokenKeyRef, TokenKind, TokenProvider, TokenSignMechanism,
 };
-pub use trust::TrustState;
+pub use trust::{RecipientTrustFailure, RecipientTrustState, RecipientTrustStatus, TrustState};
 pub use util::constant_time_eq;

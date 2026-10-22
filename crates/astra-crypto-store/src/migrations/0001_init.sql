@@ -23,10 +23,13 @@
 PRAGMA foreign_keys = ON;
 
 -- Minimal account registry (see the header note). `email` feeds the
--- keystore bridge's find_by_email binding.
+-- keystore bridge's find_by_email binding; `crypto_policy_json` carries the
+-- per-account crypto settings (`send_autocrypt_headers`, `protect_subject`,
+-- ...) the send gate reads, mirroring kylins' accounts.crypto_policy_json.
 CREATE TABLE IF NOT EXISTS accounts (
     id    TEXT PRIMARY KEY,
-    email TEXT NOT NULL
+    email TEXT NOT NULL,
+    crypto_policy_json TEXT
 );
 
 -- Crypto identity keys/certs. Soft private-key blobs are stored as the hex

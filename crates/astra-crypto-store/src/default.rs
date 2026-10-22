@@ -22,6 +22,19 @@ pub struct DefaultKeyRow {
     pub token_key_id: Option<String>,
 }
 
+impl DefaultKeyRow {
+    /// The core gate's view of this row (core must not name store types).
+    pub fn as_core(&self) -> astra_crypto_core::DefaultSigningKey {
+        astra_crypto_core::DefaultSigningKey {
+            standard: self.standard.clone(),
+            fingerprint: self.fingerprint.clone(),
+            email: self.email.clone(),
+            token_serial: self.token_serial.clone(),
+            token_key_id: self.token_key_id.clone(),
+        }
+    }
+}
+
 /// The account's default signing key for `standard`, if one is flagged.
 /// Returns just enough to build a `KeyHandleRef`; callers needing the
 /// cert/private blob follow up with [`crate::get_crypto_key_full`] using the
