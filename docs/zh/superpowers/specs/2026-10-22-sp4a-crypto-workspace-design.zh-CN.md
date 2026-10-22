@@ -23,18 +23,23 @@ kylins 原文件逐字节一致，除：包名与工作区内的路径依赖
 性）。不改任何逻辑：从相同源码编译通过的移植本身即证明保真，232 个上
 游测试即回归电池。
 
-## D2：使用已发布的 cms 0.3.0-rc.0，不复制源码
+## D2：保留 vendored cms 快照，已发布的 rc.0 经评估并具名否决
 
-用户问是否有更新的已发布 `cms` 可替代 vendored 快照。已验证：
-`cms 0.3.0-rc.0`（比当时无法编译的 pre.2 更新）能对照当前
-cipher 0.5 / elliptic-curve 0.14 线编译，且其 builder API
-（`SignedDataBuilder`、`SignerInfoBuilder`、
-`KeyAgreeRecipientInfoBuilder`、`ContentEncryptionAlgorithm`）与
-`smime/src/cms_build.rs` 所用的形态一致（已按 kylins manifest 自带的换回
-清单做编译探针证明）。不复制 `vendor/cms`；smime 的 manifest 采用
-`cms = { version = "0.3.0-rc.0", features = ["builder"] }`。`rsa` 放宽到该
-发布版需要的 rc.19 线（kylins 钉的是 rc.18）。若 kylins 测试暴露 API 漂
-移，则带回 vendored 副本，并把失败调用点记入本决策为失败。
+用户问是否有更新的已发布 `cms` 可替代 vendored 快照。已评估并否决，原
+因具名：`cms 0.3.0-rc.0` 能对照当前 cipher 0.5 / elliptic-curve 0.14 线
+编译且 builder API 相符，但其 `builder/kari.rs` 从不把 ANSI X9.63 KDF 的
+输出落到实际用于包裹的 KEK 缓冲区，所有 ECC 收件人往返都过不了 AES-KW
+完整性校验（`decrypt_round_trips_ecc_recipient`、
+`token_decrypt_ecc_kari_round_trips`、openssl kari 互操作）；formats 主
+分支同样缺失该修复，任何已发布或前沿构建都没有快照所携带的修复。与此
+无关的另一约束：`pkcs12 0.2.0-pre.0`（唯一现代发布版，由
+`p12-keystore` 引入）精确钉定 `cms =0.3.0-pre.1`，而 Cargo 会统一同一
+版本线的预发布标签，任何注册表版本都不可能共存；只有路径包才能分叉。
+因此保留 vendored 快照（带 KEK 修复的 post-pre.2 formats 快照）于
+`crates/astra-crypto-smime/vendor/cms`，照用 kylins 的绕行方式。
+`pkcs1`/`rsa` 精确钉定（`=0.8.0-rc.4`、`=0.10.0-rc.18`）：预发布 caret
+范围今天会解析到更新的版本并打破快照的调用点（`RsaPssParams` 在 pkcs1
+rc.5 改为泛型）。
 
 ## D3：500 行上限对上游迁入 crate 豁免
 

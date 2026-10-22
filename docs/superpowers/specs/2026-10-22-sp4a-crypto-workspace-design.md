@@ -28,19 +28,25 @@ them, so the diff stays mechanical). No logic edits: a port that compiles
 from identical sources proves its own fidelity, and the 232 upstream tests
 are the regression battery.
 
-## D2: published cms 0.3.0-rc.0, no vendored source
+## D2: the vendored cms snapshot stays, with the published rc.0 evaluated and named
 
 The user asked whether a newer published `cms` can replace the vendored
-snapshot. Verified: `cms 0.3.0-rc.0` (newer than the pre.2 that failed to
-compile) builds against the current cipher 0.5 / elliptic-curve 0.14 line,
-and its builder API (`SignedDataBuilder`, `SignerInfoBuilder`,
-`KeyAgreeRecipientInfoBuilder`, `ContentEncryptionAlgorithm`) matches the
-shape `smime/src/cms_build.rs` uses, proven by a compile probe against the
-kylins manifest's own swap-back checklist. `vendor/cms` is not copied; the
-smime manifest takes `cms = { version = "0.3.0-rc.0", features = ["builder"] }`.
-`rsa` relaxes to the rc.19 line the release wants (kylins pinned rc.18).
-If the kylins tests expose an API drift, the vendored copy comes back and
-this decision is recorded as failed, with the failing call site named.
+snapshot. Evaluated and rejected, with the cause named: `cms 0.3.0-rc.0`
+compiles against the current cipher 0.5 / elliptic-curve 0.14 line and its
+builder API matches, but its `builder/kari.rs` never lands the ANSI X9.63 KDF
+output in the KEK buffer it wraps with, so every ECC recipient round trip
+fails AES-KW integrity (`decrypt_round_trips_ecc_recipient`,
+`token_decrypt_ecc_kari_round_trips`, the openssl kari interop) — and formats
+master carries the same miss, so no published or bleeding-edge build has the
+fix the snapshot carries. Independent of that, `pkcs12 0.2.0-pre.0` (the only
+modern release, pulled by `p12-keystore`) pins `cms =0.3.0-pre.1` exactly,
+and Cargo unifies prerelease tags of one version line, so no registry version
+could coexist anyway; only a path package forks. The vendored snapshot
+(post-pre.2 formats checkout with the KEK fix) is therefore kept at
+`crates/astra-crypto-smime/vendor/cms`, the kylins workaround as-is. The
+`pkcs1`/`rsa` pins are exact (`=0.8.0-rc.4`, `=0.10.0-rc.18`): prerelease
+caret ranges resolve newer today and break the snapshot's call sites
+(`RsaPssParams` went generic in pkcs1 rc.5).
 
 ## D3: the 500-line cap exempts vendored-upstream crates
 
