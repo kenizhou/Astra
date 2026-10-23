@@ -77,3 +77,18 @@ Astra 如何跟踪其四个参考项目。规则手册（AGENTS.md）链接到�
   录，否则构建可能吃到陈旧引擎产物。
 - security 分类的同步一律扣留审阅，绝不自动合并，与 22:00 契约对每个
   参考项目的规则一致。
+
+### 22:00 接线
+
+一个 Windows Task Scheduler 任务每晚运行该驱动，日志写在仓库**之外**
+（`D:/Projects/mailclient/logs/vendor-sync.log`）：
+
+```bash
+schtasks /Create /F /TN "Astra\vendor-upstream-sync" /SC DAILY /ST 22:00 \
+  /TR "\"C:\Program Files\Git\bin\bash.exe\" -lc 'D:/Projects/mailclient/Astra/scripts/dev/upstream-sync.sh >> D:/Projects/mailclient/logs/vendor-sync.log 2>&1'"
+```
+
+`upstream-sync.sh --dry-run` 打印当前与新版本及分类 digest 而不改动任
+何状态，是在放行同步前观察它的方式。任何失败（文件锁、网络、`gh`
+auth、原样性证明失败）以非零退出进日志，成为晨审事项，绝不静默跳
+过。
