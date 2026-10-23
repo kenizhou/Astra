@@ -72,9 +72,9 @@ struct Armed {
     /// key is not in this set.
     known: BTreeSet<ProviderKey>,
     /// Whether this pass is the account's first import of a cold store,
-    /// decided at arming: history arriving for the first time is not new
-    /// mail. Recomputed at every arming, so the pass that follows an import
-    /// classifies normally.
+    /// decided at the first arming and cleared by the first pass that
+    /// reaches the server: history arriving for the first time is not new
+    /// mail, but a delivery to an account that simply started empty is.
     importing: bool,
 }
 
@@ -113,6 +113,10 @@ impl NewMailQueue {
     /// store the first time it is armed in this process. The seed is the
     /// honest "prior key" test the engine's post-commit observer cannot run
     /// for itself; from here on the queue maintains the set as commits land.
+    /// The import suppression is decided at that first arming and cleared by
+    /// [`NewMailQueue::import_done`] once a pass reaches the server, so a
+    /// pass that failed offline keeps it and an account that starts empty
+    /// does not swallow its first delivery.
     pub(crate) async fn arm(&self, engine: &Engine, account: &AccountId, identity: &EmailAddress) {
         let seeded = {
             let state = self.state.lock().expect("new-mail mutex poisoned");
@@ -147,9 +151,6 @@ impl NewMailQueue {
             Some(armed) => {
                 armed.identity = identity.clone();
                 armed.inbox = inbox;
-                // The known set the last pass maintained answers whether
-                // this pass imports (still nothing held) or classifies.
-                armed.importing = armed.known.is_empty();
             }
             None => {
                 state.armed.insert(
@@ -162,6 +163,16 @@ impl NewMailQueue {
                     },
                 );
             }
+        }
+    }
+
+    /// Clears the account's import suppression: the call the pass makes when
+    /// it reached the server, so the import has had its chance and every
+    /// later delivery is new mail.
+    pub(crate) fn import_done(&self, account: &AccountId) {
+        let mut state = self.state.lock().expect("new-mail mutex poisoned");
+        if let Some(armed) = state.armed.get_mut(account) {
+            armed.importing = false;
         }
     }
 

@@ -90,7 +90,11 @@ impl<P: Provider> App<P> {
             at,
         )
         .await;
-        self.outages.record(&account.id, PassOutcome::of(&report));
+        let outcome = PassOutcome::of(&report);
+        self.outages.record(&account.id, outcome);
+        if outcome == PassOutcome::Success {
+            self.new_mail.import_done(&account.id);
+        }
         let cap = self
             .pane
             .lock()

@@ -180,3 +180,22 @@ async fn the_first_import_is_not_new_mail() {
     );
     assert_eq!(batch.overflow, 0);
 }
+
+#[tokio::test]
+async fn a_first_delivery_to_an_empty_account_qualifies() {
+    // The account starts empty: the first pass reaches the server and finds
+    // nothing, so the import suppression has had its chance and the first
+    // real delivery is new mail, not history.
+    let (app, _surfaces) = app(vec![]);
+    app.dispatch(Intent::RefreshMail).await.unwrap();
+    deliver(&app, fakes::mail("m1", "inbox", "the first ever mail")).await;
+    app.dispatch(Intent::RefreshMail).await.unwrap();
+
+    let batch = app.drain_new_mail();
+    assert_eq!(
+        batch.messages.len(),
+        1,
+        "an empty account's first delivery is new mail"
+    );
+    assert_eq!(batch.messages[0].key.as_str(), "m1");
+}
