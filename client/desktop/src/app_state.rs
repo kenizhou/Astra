@@ -461,6 +461,9 @@ pub(crate) struct AppState {
     /// Every registered account's config and connection pool: what a re-dial, a
     /// folder bind, and the boot's restore read.
     pub(crate) connections: Arc<AccountDials>,
+    /// The crypto store (key material and trust decisions): opened before the
+    /// boot dial, read by every wrapper an IMAP dial installs.
+    pub(crate) crypto_store: Arc<astra_crypto_store::CryptoStore>,
     /// The engine's contact-photo area, beside the store database: the one
     /// directory the photo command serves, so the webview never gains a
     /// protocol wide enough to read host files itself.

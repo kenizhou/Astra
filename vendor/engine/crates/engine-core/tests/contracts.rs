@@ -153,6 +153,7 @@ fn pending_ops_and_outcomes() {
     let failed = PendingOutcome::Failed {
         class: FailureClass::Conflict,
         retry_after: None,
+        detail: String::new(),
     };
     let needs = PendingOutcome::NeedsConfirmation {
         detail: "ambiguous send".into(),

@@ -86,6 +86,7 @@ pub(in crate::contract) async fn the_hand_over_is_recorded_under_the_current_lea
             PendingOutcome::Failed {
                 class: FailureClass::Retryable,
                 retry_after: Some(engine_core::time::Duration::ZERO),
+                detail: String::new(),
             },
         )
         .await

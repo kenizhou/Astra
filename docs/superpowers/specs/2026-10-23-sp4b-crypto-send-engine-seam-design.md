@@ -4,7 +4,7 @@
 spec **supersedes the bypass half of
 `2026-10-22-sp4b-crypto-send-design.md`'s D3** (left standing with a banner;
 history is not rewritten). User decisions 2026-10-23: keep the architecture
-simple — modify the ENGINE, not Astra (their note: "现在的方向已经确定了，我
+simple: modify the ENGINE, not Astra (their note: "现在的方向已经确定了，我
 们应该保持架构的简洁性，应该重新修改engine 而不是 Astra"), and of the
 three shapes put to them they picked: engine failed row + Send Now for
 trust-gate refusals; wrap the filed variant once and strip Bcc for the wire;
@@ -13,7 +13,7 @@ IMAP first with a provider-neutral trait.
 **Why the reversal.** SP4b's D3 shipped a second, much smaller send engine:
 the Astra-side `crypto_outbox` and its own SMTP submitter + IMAP Sent
 filing, because the then-pinned engine accepted only `Draft` payloads and
-could not be touched. The vendoring slice removed exactly that constraint —
+could not be touched. The vendoring slice removed exactly that constraint : 
 the engine now lives in-tree at `vendor/engine/` and in-tree edits are the
 supported flow. The bypass's own known gap (a second send engine that must
 re-earn retry/backoff, unconfirmed semantics, partial-DATA handling, and
@@ -74,7 +74,7 @@ refusal is pre-dial on implicit TLS, STARTTLS, and plaintext alike. The
 filed-copy selection prefers the wrapped output; today's no-Bcc fast path
 and filed re-assembly survive only for unwrapped sends. `refile()` (the
 `file_sent_copy` repair) runs the same helper, so an `Unfiled` crypto send
-can never re-file a plaintext Sent copy — the single worst leak this change
+can never re-file a plaintext Sent copy: the single worst leak this change
 must not ship.
 
 ## D3: the Astra wrapper in astra-crypto-store
@@ -101,7 +101,7 @@ deleted with their tests.
 gain an optional wrapper argument; the desktop host builds the wrapper per
 account whose `[crypto]` section names a method and passes it in, with the
 crypto store opened BEFORE `dial_stored` at boot. `store_crypto_method`
-re-dials before persisting and re-installs the providers in place — the
+re-dials before persisting and re-installs the providers in place: the
 previous "no re-dial" contract inverts, because the wrapper is bound at
 dial. A method written for an account without `[imap]` + `[smtp]` is
 refused host-side (`encryption needs an IMAP/SMTP account`): a method with
@@ -112,7 +112,7 @@ fail-closed regression this slice refuses to ship. The settings row's
 ## D5: the Astra tail shrinks to a flag stamp
 
 `submit_and_drain` stamps `draft.with_crypto(sign, encrypt)` (resolved from
-the composer's `CryptoFlags`, default both on under a method — inert when
+the composer's `CryptoFlags`, default both on under a method: inert when
 no wrapper is installed, never defaulting to false on a crypto account) and
 takes the engine tail unchanged. `crypto_submit_maybe`, the
 `CryptoSendSupport` port, the crypto outbox rows and verbs, and the
@@ -128,7 +128,7 @@ reason (the queued row derives subject from the draft payload for free),
 and Send Now retries after the user accepts the key. Nothing else changes:
 transient failures retry with backoff, mid-DATA loss stays `unconfirmed`
 with the confirmation pair, and the Sent copy is filed by the engine's own
-APPEND path — every semantic the bypass re-implemented at half size.
+APPEND path: every semantic the bypass re-implemented at half size.
 
 ## Known traps recorded, not hidden
 

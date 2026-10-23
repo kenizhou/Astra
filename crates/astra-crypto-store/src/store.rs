@@ -27,6 +27,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "crypto_outbox",
         sql: include_str!("migrations/0002_crypto_outbox.sql"),
     },
+    Migration {
+        version: 3,
+        name: "drop_crypto_outbox",
+        sql: include_str!("migrations/0003_drop_crypto_outbox.sql"),
+    },
 ];
 
 /// The sqlite-backed crypto store. All query layers in this crate take a

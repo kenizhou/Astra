@@ -464,7 +464,8 @@ dependencies = [
  "astra-crypto-smime",
  "async-trait",
  "base64 0.23.1",
- "engine-tls",
+ "engine-core",
+ "engine-provider",
  "hex",
  "keyring",
  "log",
@@ -477,7 +478,6 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
- "tokio-rustls",
  "uuid",
  "x509-parser",
 ]

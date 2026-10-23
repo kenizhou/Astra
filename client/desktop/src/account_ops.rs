@@ -79,21 +79,90 @@ pub(crate) struct HostAccountStore {
     /// The standing grant refusals the read half answers beside each
     /// config, and the removal clears an account's entry from.
     refusals: Arc<crate::oauth::grant_refusals::GrantRefusals>,
+    /// The crypto store the crypto-method write's re-dial builds the new
+    /// method's MIME wrapper from.
+    crypto_store: Arc<astra_crypto_store::CryptoStore>,
 }
 
 impl HostAccountStore {
-    /// A store over the boot's dial table, credential store, and refusal
-    /// map.
+    /// A store over the boot's dial table, credential store, refusal map,
+    /// and crypto store.
     pub(crate) fn new(
         dials: Arc<AccountDials>,
         credentials: Arc<dyn AccountCredentialStore>,
         refusals: Arc<crate::oauth::grant_refusals::GrantRefusals>,
+        crypto_store: Arc<astra_crypto_store::CryptoStore>,
     ) -> Self {
         Self {
             dials,
             credentials,
             refusals,
+            crypto_store,
         }
+    }
+
+    /// The crypto-method write's own half under an injected `dial`, which
+    /// receives the merged config, the account's connections, and the wrapper
+    /// the new method builds (or `None` once cleared) and answers the
+    /// re-dialled mail providers; the real verb passes the boot's own
+    /// connect, the tests pass stands-ins so no test touches a network. The
+    /// order the contract rests on: merge, refuse, RE-DIAL, persist, swap in
+    ///: the write takes effect with the next send because the account's
+    /// connections were rebuilt against it, and a dial that fails leaves the
+    /// old document stored. Fail-closed at the boundary the engine's wrap
+    /// seam cannot carry: a method on an account without both dial halves (a
+    /// Graph/Google/JMAP account, or IMAP without SMTP) is refused outright,
+    /// because the write would otherwise stand while sends went out plainly.
+    pub(crate) async fn store_crypto_method_with<D, Fut>(
+        &self,
+        account: &AccountId,
+        method: &str,
+        dial: D,
+    ) -> Result<Option<Vec<HostProvider>>, String>
+    where
+        D: FnOnce(
+            astra_account::AccountConfig,
+            Arc<astra_account::ImapConnections>,
+            Option<Arc<dyn engine_api::MimeWrapper>>,
+        ) -> Fut,
+        Fut: Future<Output = Result<Vec<HostProvider>, astra_account::AccountError>>,
+    {
+        let id = account.as_str().to_owned();
+        let (mut config, connections) = self
+            .dials
+            .of(&id)
+            .ok_or_else(|| NOT_REGISTERED.to_owned())?;
+        config.crypto = match method {
+            "none" => None,
+            other => Some(astra_account::CryptoAccount {
+                method: other.to_owned(),
+            }),
+        };
+        // The fail-closed guard: no seam, no write.
+        if config.crypto.is_some() && (config.imap.is_none() || config.smtp.is_none()) {
+            return Err("encryption needs an IMAP/SMTP account".to_owned());
+        }
+        // An account with no IMAP dial (a grant account clearing a legacy
+        // method) persists and answers no re-dial.
+        if config.imap.is_none() {
+            let document = config.to_toml().map_err(|err| err.to_string())?;
+            self.credentials
+                .persist(&id, &document)
+                .map_err(|err| err.to_string())?;
+            self.dials.replace_config(&id, config);
+            return Ok(None);
+        }
+        let wrapper =
+            crate::crypto_wrapper::mime_wrapper_for_config(&self.crypto_store, &config, account);
+        let providers = dial(config.clone(), connections, wrapper)
+            .await
+            .map_err(|err| err.to_string())?;
+        let document = config.to_toml().map_err(|err| err.to_string())?;
+        self.credentials
+            .persist(&id, &document)
+            .map_err(|err| err.to_string())?;
+        self.dials.replace_config(&id, config);
+        Ok(Some(providers))
     }
 
     /// The save's own half under an injected `dial`, which receives the
@@ -265,24 +334,15 @@ impl HostAccountOps<HostProvider> for HostAccountStore {
         Ok(())
     }
 
-    async fn store_crypto_method(&self, account: &AccountId, method: &str) -> Result<(), String> {
-        let id = account.as_str().to_owned();
-        let (mut config, _connections) = self
-            .dials
-            .of(&id)
-            .ok_or_else(|| NOT_REGISTERED.to_owned())?;
-        config.crypto = match method {
-            "none" => None,
-            other => Some(astra_account::CryptoAccount {
-                method: other.to_owned(),
-            }),
-        };
-        let document = config.to_toml().map_err(|err| err.to_string())?;
-        self.credentials
-            .persist(&id, &document)
-            .map_err(|err| err.to_string())?;
-        self.dials.replace_config(&id, config);
-        Ok(())
+    async fn store_crypto_method(
+        &self,
+        account: &AccountId,
+        method: &str,
+    ) -> Result<Option<Vec<HostProvider>>, String> {
+        self.store_crypto_method_with(account, method, |config, connections, wrapper| async move {
+            astra_account::connect_mail_providers(&connections, &config, account, wrapper).await
+        })
+        .await
     }
 }
 

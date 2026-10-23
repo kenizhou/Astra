@@ -30,6 +30,7 @@ fn stub_state(name: &str, mode: &str) -> (crate::AppState, Arc<CollectingSink>) 
         )),
         llm: None,
         connections: Arc::new(crate::AccountDials::empty(&scratch(name))),
+        crypto_store: crate::commands_fakes::crypto_store(),
         photo_root: scratch(name).join("photos"),
         credential_store: FakeStore::accepting(),
         oauth: crate::oauth::wiring::offline_surface(),

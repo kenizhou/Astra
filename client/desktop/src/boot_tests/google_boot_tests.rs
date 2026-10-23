@@ -94,8 +94,15 @@ fn boot_dials_google(
     let dials = Arc::clone(dials);
     let refusals = Arc::clone(refusals);
     runtime.block_on(move || async move {
-        super::super::stored::dial_stored(&dials, &store, unused_graph_dial(), dial, &refusals)
-            .await
+        super::super::stored::dial_stored(
+            &dials,
+            &store,
+            &crate::commands_fakes::crypto_store(),
+            unused_graph_dial(),
+            dial,
+            &refusals,
+        )
+        .await
     })
 }
 
@@ -188,7 +195,10 @@ fn a_dead_google_grant_at_boot_records_the_expired_sign_in_and_skips() {
 #[test]
 fn the_folder_binder_binds_a_google_account_s_account_global_provider() {
     let dials = registered_google_account("boot-google-folder");
-    let connector = super::super::stored::DialConnector::new(Arc::clone(&dials));
+    let connector = super::super::stored::DialConnector::new(
+        Arc::clone(&dials),
+        crate::commands_fakes::crypto_store(),
+    );
     let account = engine_api::AccountId::try_from("alice@gmail.example@google").unwrap();
 
     let bound = crate::runtime::build_runtime()

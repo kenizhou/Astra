@@ -89,7 +89,7 @@ pub(super) async fn dial(
     let config = harness_account(host, port, user, password, Vec::new());
     let account_id = config.account_id().expect("the account id");
     let connections = ImapConnections::new();
-    let Err(error) = connect_mail_providers(&connections, &config, &account_id).await else {
+    let Err(error) = connect_mail_providers(&connections, &config, &account_id, None).await else {
         panic!("the harness certificate was trusted without an accepted exception");
     };
     let AccountError::CertificateRejected { rejected, .. } = error else {
@@ -97,7 +97,7 @@ pub(super) async fn dial(
     };
     let accepted = CertificateException::new(rejected.server_name(), rejected.certificate());
     let config = harness_account(host, port, user, password, vec![accepted]);
-    let providers = connect_mail_providers(&connections, &config, &account_id)
+    let providers = connect_mail_providers(&connections, &config, &account_id, None)
         .await
         .expect("the dial with the accepted certificate");
     (account_id, providers)

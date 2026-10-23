@@ -47,6 +47,7 @@ pub(in crate::contract) async fn a_retryable_failure_comes_back_when_its_backoff
                 // No provider hint, so the store derives the delay: 30s for a first
                 // failure (`retry_delay`).
                 retry_after: None,
+                detail: String::new(),
             },
         )
         .await
@@ -121,6 +122,7 @@ pub(in crate::contract) async fn a_retryable_failure_settles_once_its_attempts_r
                 PendingOutcome::Failed {
                     class: FailureClass::Retryable,
                     retry_after: None,
+                    detail: String::new(),
                 },
             )
             .await
@@ -259,6 +261,7 @@ pub(in crate::contract) async fn a_parked_retry_can_be_hurried<S: Store + StoreR
                 // Far longer than any test would sit through, which is the point: a user
                 // watching an unsent message will not wait out a delay the engine chose.
                 retry_after: Some("PT1H".parse().unwrap()),
+                detail: String::new(),
             },
         )
         .await

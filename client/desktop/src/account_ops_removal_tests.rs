@@ -57,6 +57,7 @@ fn a_refused_removal_keeps_the_table_entry() {
         Arc::clone(&dials),
         FakeStore::refusing(),
         Arc::new(crate::oauth::grant_refusals::GrantRefusals::new()),
+        crate::commands_fakes::crypto_store(),
     );
     let account = work();
 

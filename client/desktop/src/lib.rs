@@ -18,7 +18,7 @@ mod app_state;
 mod boot;
 mod commands;
 mod credential_store;
-mod crypto_send;
+mod crypto_wrapper;
 mod detection;
 mod dial_table;
 mod exit;

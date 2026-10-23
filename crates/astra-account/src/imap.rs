@@ -8,7 +8,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use engine_api::{AccountId, MailboxId, MailboxRole, Provider};
+use engine_api::{AccountId, MailboxId, MailboxRole, MimeWrapper, Provider};
 use engine_core::sync::SyncUpdate;
 use tokio::net::TcpStream;
 use tokio_rustls::client::TlsStream;
@@ -73,9 +73,13 @@ impl ImapConnections {
     /// This login is the account's **first** in the dial, so a refusal here is the one that can
     /// mean the password is wrong ([`AccountError::SigninRejected`]). The account it
     /// replaces keeps serving whatever is still bound to it, minus its resting connections.
-    async fn connect(&self, config: &AccountConfig) -> Result<Arc<LiveImapAccount>, AccountError> {
+    async fn connect(
+        &self,
+        config: &AccountConfig,
+        mime_wrapper: Option<Arc<dyn MimeWrapper>>,
+    ) -> Result<Arc<LiveImapAccount>, AccountError> {
         let _connecting = self.connecting.lock().await;
-        let account = Arc::new(connect_account(config).await?);
+        let account = Arc::new(connect_account(config, mime_wrapper).await?);
         let replaced = self
             .account
             .lock()
@@ -91,6 +95,7 @@ impl ImapConnections {
     async fn current_or_connect(
         &self,
         config: &AccountConfig,
+        mime_wrapper: Option<Arc<dyn MimeWrapper>>,
     ) -> Result<Arc<LiveImapAccount>, AccountError> {
         if let Some(account) = self.current() {
             return Ok(account);
@@ -100,7 +105,7 @@ impl ImapConnections {
         if let Some(account) = self.current() {
             return Ok(account);
         }
-        let account = Arc::new(connect_account(config).await?);
+        let account = Arc::new(connect_account(config, mime_wrapper).await?);
         *self.account.lock().expect("imap account mutex poisoned") = Some(Arc::clone(&account));
         Ok(account)
     }
@@ -110,10 +115,16 @@ impl ImapConnections {
 ///
 /// Every connection the account dials later asks the same credential source, so the account's
 /// hundredth connection presents the credential that is valid when it is dialled.
-async fn connect_account(config: &AccountConfig) -> Result<LiveImapAccount, AccountError> {
+async fn connect_account(
+    config: &AccountConfig,
+    mime_wrapper: Option<Arc<dyn MimeWrapper>>,
+) -> Result<LiveImapAccount, AccountError> {
     let tls = account_tls(config)?;
     let credentials = imap_credential_source(config)?;
-    let imap = config.imap_config(credentials)?;
+    let mut imap = config.imap_config(credentials)?;
+    if let Some(wrapper) = mime_wrapper {
+        imap = imap.with_mime_wrapper(wrapper);
+    }
     LiveImapAccount::connect(&imap, tls.connector())
         .await
         .map_err(|err| AccountError::from_first_imap_login(err).over_tls(&tls))
@@ -158,9 +169,12 @@ pub async fn connect_imap_mailbox(
     connections: &ImapConnections,
     account: &AccountConfig,
     mailbox: &str,
+    mime_wrapper: Option<Arc<dyn MimeWrapper>>,
 ) -> Result<Box<dyn Provider>, AccountError> {
     let mailbox = mailbox_id(mailbox)?;
-    let imap = connections.current_or_connect(account).await?;
+    let imap = connections
+        .current_or_connect(account, mime_wrapper)
+        .await?;
     Ok(bind(&imap, mailbox))
 }
 
@@ -181,8 +195,9 @@ pub async fn connect_mail_providers(
     connections: &ImapConnections,
     account: &AccountConfig,
     account_id: &AccountId,
+    mime_wrapper: Option<Arc<dyn MimeWrapper>>,
 ) -> Result<Vec<Box<dyn Provider>>, AccountError> {
-    let imap = connections.connect(account).await?;
+    let imap = connections.connect(account, mime_wrapper).await?;
     let inbox_id = mailbox_id("INBOX")?;
     let inbox = imap.provider(inbox_id.clone());
 

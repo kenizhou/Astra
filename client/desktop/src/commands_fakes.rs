@@ -405,6 +405,12 @@ impl AccountCredentialStore for FakeStore {
 /// The agent relay runs the stub sidecar in echo mode (no process starts
 /// until an agent command asks for one), and the background client stays
 /// off: no tier list or provider key is read out of the test environment.
+/// An in-memory crypto store for the host's tests: the wrapper factory and
+/// the crypto-method write read one, and no test here dials a real key.
+pub(crate) fn crypto_store() -> Arc<astra_crypto_store::CryptoStore> {
+    Arc::new(astra_crypto_store::CryptoStore::open_in_memory().expect("the in-memory crypto store"))
+}
+
 pub(crate) fn state(name: &str, app: Arc<FakeApp>, store: Arc<FakeStore>) -> AppState {
     let (relay, _sink, _data) = crate::agent::testkit::stub_relay(name, "echo", 3, 50);
     AppState {
@@ -418,6 +424,7 @@ pub(crate) fn state(name: &str, app: Arc<FakeApp>, store: Arc<FakeStore>) -> App
         )),
         llm: None,
         connections: Arc::new(AccountDials::empty(&scratch(name))),
+        crypto_store: crypto_store(),
         photo_root: scratch(name).join("photos"),
         credential_store: store,
         oauth: crate::oauth::wiring::offline_surface(),

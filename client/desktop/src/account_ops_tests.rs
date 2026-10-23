@@ -107,16 +107,29 @@ fn store(dials: &Arc<AccountDials>) -> (HostAccountStore, Arc<FakeStore>) {
     (ops_over(dials, &credentials), credentials)
 }
 
-/// The store under test over `dials` and `credentials`: the explicit
-/// cast, because a nested `Arc::clone` argument does not unsize on its
-/// own.
+/// The store under test over `dials` and `credentials`: the explicit cast,
+/// because a nested `Arc::clone` argument does not unsize on its own.
 fn ops_over(dials: &Arc<AccountDials>, credentials: &Arc<FakeStore>) -> HostAccountStore {
     let credentials = Arc::clone(credentials) as Arc<dyn AccountCredentialStore>;
     HostAccountStore::new(
         Arc::clone(dials),
         credentials,
         Arc::new(crate::oauth::grant_refusals::GrantRefusals::new()),
+        crate::commands_fakes::crypto_store(),
     )
+}
+
+/// The desktop test idiom: poll async halves on the host's own runtime
+/// (tokio's block_on is disallowed in this crate).
+fn drive<M, F>(make: M) -> F::Output
+where
+    M: FnOnce() -> F + Send,
+    F: std::future::Future,
+    F::Output: Send,
+{
+    crate::runtime::build_runtime()
+        .expect("the test runtime builds")
+        .block_on(make)
 }
 
 /// The newest document the credential store holds for `id`.
@@ -140,9 +153,7 @@ fn standing_dav(dials: &AccountDials, id: &str) -> astra_account::DavAccount {
 fn account_infos_answers_one_masked_row_per_registered_config() {
     let dials = table("infos");
     let (ops, _credentials) = store(&dials);
-    let infos = crate::runtime::build_runtime()
-        .expect("the test runtime builds")
-        .block_on(|| ops.account_infos());
+    let infos = drive(|| ops.account_infos());
 
     assert_eq!(infos.len(), 2, "one row per registered config");
     let home = infos
@@ -184,33 +195,31 @@ fn a_stated_field_replaces_and_an_absent_one_keeps() {
     let dials = table("merge");
     let (ops, credentials) = store(&dials);
     let account = work();
-    let legs = crate::runtime::build_runtime()
-        .expect("the test runtime builds")
-        .block_on(|| {
-            ops.store_dav_with(
-                &account,
-                Some(DavSectionInput {
-                    caldav_url: None,
-                    carddav_url: Some("   ".to_owned()),
-                    username: Some("ada@elsewhere.test".to_owned()),
-                    password: None,
-                }),
-                |config| async move {
-                    assert!(
-                        config
-                            .dav
-                            .as_ref()
-                            .is_some_and(|dav| dav.carddav_url.is_none()),
-                        "the dial sees the merged config, its CardDAV origin cleared"
-                    );
-                    Ok::<_, astra_account::AccountError>(astra_account::DavProviders {
-                        caldav: Some(Box::new(FakeDav { calendars: true })),
-                        carddav: None,
-                    })
-                },
-            )
-        })
-        .expect("the save dials and stores");
+    let legs = drive(|| {
+        ops.store_dav_with(
+            &account,
+            Some(DavSectionInput {
+                caldav_url: None,
+                carddav_url: Some("   ".to_owned()),
+                username: Some("ada@elsewhere.test".to_owned()),
+                password: None,
+            }),
+            |config| async move {
+                assert!(
+                    config
+                        .dav
+                        .as_ref()
+                        .is_some_and(|dav| dav.carddav_url.is_none()),
+                    "the dial sees the merged config, its CardDAV origin cleared"
+                );
+                Ok::<_, astra_account::AccountError>(astra_account::DavProviders {
+                    caldav: Some(Box::new(FakeDav { calendars: true })),
+                    carddav: None,
+                })
+            },
+        )
+    })
+    .expect("the save dials and stores");
 
     assert!(
         legs.caldav
@@ -251,24 +260,22 @@ fn a_stated_password_replaces_the_stored_one() {
     let dials = table("password");
     let (ops, credentials) = store(&dials);
     let account = work();
-    crate::runtime::build_runtime()
-        .expect("the test runtime builds")
-        .block_on(|| {
-            ops.store_dav_with(
-                &account,
-                Some(DavSectionInput {
-                    password: Some("app-password-2".to_owned()),
-                    ..DavSectionInput::default()
-                }),
-                |_config| async {
-                    Ok::<_, astra_account::AccountError>(astra_account::DavProviders {
-                        caldav: None,
-                        carddav: None,
-                    })
-                },
-            )
-        })
-        .expect("the save dials and stores");
+    drive(|| {
+        ops.store_dav_with(
+            &account,
+            Some(DavSectionInput {
+                password: Some("app-password-2".to_owned()),
+                ..DavSectionInput::default()
+            }),
+            |_config| async {
+                Ok::<_, astra_account::AccountError>(astra_account::DavProviders {
+                    caldav: None,
+                    carddav: None,
+                })
+            },
+        )
+    })
+    .expect("the save dials and stores");
 
     let stored =
         astra_account::load_str(&newest(&credentials, "work")).expect("the merged document loads");
@@ -291,23 +298,21 @@ fn a_failed_re_dial_answers_err_and_the_stored_config_still_stands() {
     let ops = ops_over(&dials, &credentials);
     let account = work();
 
-    let sentence = crate::runtime::build_runtime()
-        .expect("the test runtime builds")
-        .block_on(|| {
-            ops.store_dav_with(
-                &account,
-                Some(DavSectionInput {
-                    username: Some("ada@elsewhere.test".to_owned()),
-                    ..DavSectionInput::default()
-                }),
-                |_config| async {
-                    Err::<astra_account::DavProviders, _>(astra_account::AccountError::Dav(
-                        "the origin is unreachable".to_owned(),
-                    ))
-                },
-            )
-        })
-        .expect_err("the failed dial refuses the save");
+    let sentence = drive(|| {
+        ops.store_dav_with(
+            &account,
+            Some(DavSectionInput {
+                username: Some("ada@elsewhere.test".to_owned()),
+                ..DavSectionInput::default()
+            }),
+            |_config| async {
+                Err::<astra_account::DavProviders, _>(astra_account::AccountError::Dav(
+                    "the origin is unreachable".to_owned(),
+                ))
+            },
+        )
+    })
+    .expect_err("the failed dial refuses the save");
 
     assert!(
         sentence.contains("unreachable"),
@@ -339,27 +344,26 @@ fn a_persist_refusal_answers_err_and_nothing_stored_moves() {
         Arc::clone(&dials),
         FakeStore::refusing(),
         Arc::new(crate::oauth::grant_refusals::GrantRefusals::new()),
+        crate::commands_fakes::crypto_store(),
     );
     let account = work();
 
-    let sentence = crate::runtime::build_runtime()
-        .expect("the test runtime builds")
-        .block_on(|| {
-            ops.store_dav_with(
-                &account,
-                Some(DavSectionInput {
-                    username: Some("ada@elsewhere.test".to_owned()),
-                    ..DavSectionInput::default()
-                }),
-                |_config| async {
-                    Ok::<_, astra_account::AccountError>(astra_account::DavProviders {
-                        caldav: None,
-                        carddav: None,
-                    })
-                },
-            )
-        })
-        .expect_err("the refused persist refuses the save");
+    let sentence = drive(|| {
+        ops.store_dav_with(
+            &account,
+            Some(DavSectionInput {
+                username: Some("ada@elsewhere.test".to_owned()),
+                ..DavSectionInput::default()
+            }),
+            |_config| async {
+                Ok::<_, astra_account::AccountError>(astra_account::DavProviders {
+                    caldav: None,
+                    carddav: None,
+                })
+            },
+        )
+    })
+    .expect_err("the refused persist refuses the save");
 
     assert!(
         sentence.contains("refused the write"),
@@ -435,21 +439,19 @@ fn a_none_section_clears_the_legs_and_the_stored_section() {
     let dials = table("clear");
     let (ops, credentials) = store(&dials);
     let account = work();
-    let legs = crate::runtime::build_runtime()
-        .expect("the test runtime builds")
-        .block_on(|| {
-            ops.store_dav_with(&account, None, |config| async move {
-                assert!(
-                    config.dav.is_none(),
-                    "the dial sees the config with its section dropped"
-                );
-                Ok::<_, astra_account::AccountError>(astra_account::DavProviders {
-                    caldav: None,
-                    carddav: None,
-                })
+    let legs = drive(|| {
+        ops.store_dav_with(&account, None, |config| async move {
+            assert!(
+                config.dav.is_none(),
+                "the dial sees the config with its section dropped"
+            );
+            Ok::<_, astra_account::AccountError>(astra_account::DavProviders {
+                caldav: None,
+                carddav: None,
             })
         })
-        .expect("the clear dials and stores");
+    })
+    .expect("the clear dials and stores");
 
     assert!(
         legs.caldav.is_none() && legs.carddav.is_none(),
@@ -471,14 +473,12 @@ fn an_account_the_table_does_not_hold_is_refused() {
     let (ops, _credentials) = store(&dials);
     let ghost = AccountId::try_from("ghost").expect("an account id");
 
-    let sentence = crate::runtime::build_runtime()
-        .expect("the test runtime builds")
-        .block_on(|| {
-            ops.store_dav_with(&ghost, Some(DavSectionInput::default()), |_config| async {
-                panic!("an unregistered account never reaches a dial");
-            })
+    let sentence = drive(|| {
+        ops.store_dav_with(&ghost, Some(DavSectionInput::default()), |_config| async {
+            panic!("an unregistered account never reaches a dial");
         })
-        .expect_err("the unknown account is refused");
+    })
+    .expect_err("the unknown account is refused");
     assert_eq!(
         sentence, "the account has no stored config on this host",
         "the refusal names what is missing"
