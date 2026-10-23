@@ -141,11 +141,11 @@ pub use engine_provider::{
     DraftAttachmentDisposition, DraftCalendar, DraftRecurrence, EventDeletion, EventDraft,
     EventEdit, EventPatch, EventRsvp, EventWrite, EventWriteReceipt, IdentityControls,
     InvitationError, Invitee, InviteePatch, InviteeRole, KeywordName, MailEdit, MailEditReceipt,
-    MailboxEdit, MailboxEditReceipt, MailboxWrites, MeetingDraft, MessageReport, Occurrence,
-    OverrideSurvival, PatchTarget, Provider, RecurrenceEdit, ReplyDelivery, ReportControls,
-    ReportEvidence, ReportReceipt, ReportVerdict, ReportVerdicts, RsvpControls, RsvpResponse,
-    SchedulingIdentity, SenderIdentity, SenderIdentityId, SentCopy, SourceStream,
-    SubmissionReceipt, TextEdit, WriteGuard, WritePrecondition,
+    MailboxEdit, MailboxEditReceipt, MailboxWrites, MeetingDraft, MessageReport, MimeWrapOutcome,
+    MimeWrapper, Occurrence, OverrideSurvival, PatchTarget, Provider, RecurrenceEdit,
+    ReplyDelivery, ReportControls, ReportEvidence, ReportReceipt, ReportVerdict, ReportVerdicts,
+    RsvpControls, RsvpResponse, SchedulingIdentity, SenderIdentity, SenderIdentityId, SentCopy,
+    SourceStream, SubmissionReceipt, TextEdit, WriteGuard, WritePrecondition,
 };
 pub use engine_recurrence::{
     ExpandError, Horizon, available_zones, day_bounds_utc, is_supported_zone, resolve_instant,

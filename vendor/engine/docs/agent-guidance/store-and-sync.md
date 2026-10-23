@@ -773,6 +773,10 @@ one event never race on either provider.
   base. Re-sending bytes built from the copy the server has moved past would silently revert
   somebody else's edit with a write the server happily accepts. (The drainer that will do
   that recovery is issue #60; today a `Conflict` is recorded and surfaced to the caller.)
+  A submission's payload is the `Draft` the same way: it carries the serde-defaulted
+  `sign`/`encrypt` flags rather than wrapped bytes, so a retry re-assembles and re-wraps
+  against the account's **current** MIME wrapper (`providers.md`), and a payload serialized
+  before the flags existed decodes as a plain send.
 
 - **A write does not update the store; a *reconcile* does** (issue #65). The drivers are
   deliberately pure: they record the op, call the provider, record the outcome. They never

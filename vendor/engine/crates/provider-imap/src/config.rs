@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use engine_provider::ConnectObserver;
+use engine_provider::{ConnectObserver, MimeWrapper};
 
 use crate::credentials::{CredentialSource, Credentials};
 
@@ -72,6 +72,7 @@ pub struct ImapConfig {
     pub(crate) smtp: Option<SmtpSettings>,
     pub(crate) since: Option<time::Date>,
     pub(crate) connect_observer: Option<Arc<dyn ConnectObserver>>,
+    pub(crate) mime_wrapper: Option<Arc<dyn MimeWrapper>>,
 }
 
 impl ImapConfig {
@@ -107,6 +108,7 @@ impl ImapConfig {
             smtp: None,
             since: None,
             connect_observer: None,
+            mime_wrapper: None,
         }
     }
 
@@ -206,6 +208,21 @@ impl ImapConfig {
     #[must_use]
     pub fn with_connect_observer(mut self, observer: Arc<dyn ConnectObserver>) -> Self {
         self.connect_observer = Some(observer);
+        self
+    }
+
+    /// Installs the MIME wrapper every submission consults when its draft asks
+    /// for crypto ([`engine_provider::Draft::sign`],
+    /// [`engine_provider::Draft::encrypt`]): the assembled filed message is
+    /// wrapped once, the wire variant is the same ciphertext minus the `Bcc`
+    /// header, and a refusal fails the op pre-dial with
+    /// [`engine_provider::ProviderError::permanent`]. Unset (the default),
+    /// every send goes out plainly, flags ignored.
+    ///
+    /// `Arc` so one host wrapper can be shared across the account's providers.
+    #[must_use]
+    pub fn with_mime_wrapper(mut self, wrapper: Arc<dyn MimeWrapper>) -> Self {
+        self.mime_wrapper = Some(wrapper);
         self
     }
 
