@@ -71,6 +71,7 @@ struct FakeHost {
     watch_steps: Mutex<VecDeque<ProviderResult<WatchEvent>>>,
     batches: Mutex<VecDeque<NewMailBatch>>,
     cadence: Duration,
+    present: Mutex<bool>,
 }
 
 impl FakeHost {
@@ -82,6 +83,7 @@ impl FakeHost {
             watch_steps: Mutex::new(VecDeque::new()),
             batches: Mutex::new(VecDeque::new()),
             cadence,
+            present: Mutex::new(true),
         })
     }
 
@@ -95,6 +97,12 @@ impl FakeHost {
     /// stands.
     fn watch_yields(self: &Arc<Self>, step: ProviderResult<WatchEvent>) -> &Arc<Self> {
         self.watch_steps.lock().unwrap().push_back(step);
+        self
+    }
+
+    /// Answers `present` as `standing` from now on.
+    fn presence(self: &Arc<Self>, standing: bool) -> &Arc<Self> {
+        *self.present.lock().unwrap() = standing;
         self
     }
 
@@ -147,6 +155,10 @@ impl DeliveryHost for Arc<FakeHost> {
 
     fn cadence(&self) -> Duration {
         self.cadence
+    }
+
+    fn present(&self) -> bool {
+        *self.present.lock().unwrap()
     }
 
     fn notify(&self, batch: &NewMailBatch) {
@@ -412,6 +424,63 @@ fn an_account_that_left_the_dial_table_stops_the_loop() {
                 host.actions(),
                 vec![Action::Open],
                 "a gone account runs no pass and waits no delay"
+            );
+        });
+}
+
+#[test]
+fn a_standing_watch_stops_when_its_account_leaves_the_table() {
+    crate::build_runtime()
+        .expect("the test runtime builds")
+        .block_on(|| async {
+            // The watch's own events are the only wake a parked watch gets,
+            // so the liveness check rides them: an account removed
+            // mid-watch drops its connection within one event, not never.
+            let host = FakeHost::polling(CADENCE)
+                .opens_with(OpenScript::Watch)
+                .watch_yields(Ok(WatchEvent::KeepAlive))
+                .clone();
+
+            let mut driver = Driver::new(Arc::clone(&host));
+            driver.step().await; // stand the watch
+            host.presence(false);
+            assert!(
+                !driver.step().await,
+                "the loop stops when the account left the dial table"
+            );
+            let actions = host.actions();
+            assert!(
+                !actions.contains(&Action::Pass(0)),
+                "no pass runs for an account that left: {actions:?}"
+            );
+        });
+}
+
+#[test]
+fn a_rate_limited_watch_drops_its_session_without_counting_an_outage() {
+    crate::build_runtime()
+        .expect("the test runtime builds")
+        .block_on(|| async {
+            // A rate-limited server is reachable: the session drops and the
+            // backoff runs, but the outage streak hears nothing.
+            let host = FakeHost::polling(CADENCE)
+                .opens_with(OpenScript::Watch)
+                .watch_yields(Err(ProviderError::rate_limited("too many watches", None)))
+                .passing(landed(0))
+                .clone();
+
+            let mut driver = Driver::new(Arc::clone(&host));
+            driver.step().await; // stand the watch
+            driver.step().await; // the rate limit: drop, back off, sync
+            let actions = host.actions();
+            assert!(
+                !actions.contains(&Action::Record(PassOutcome::NetworkFailure)),
+                "a rate limit is not an outage: {actions:?}"
+            );
+            assert_eq!(
+                actions[1],
+                Action::Wait(Duration::from_secs(1)),
+                "it still backs off and syncs"
             );
         });
 }

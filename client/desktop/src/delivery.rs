@@ -60,6 +60,11 @@ pub(crate) trait DeliveryHost: Send + Sync {
     /// The account's poll cadence, read fresh each cycle.
     fn cadence(&self) -> Duration;
 
+    /// Whether the account still stands in the dial table: the liveness a
+    /// standing watch checks between its events, so an account removed
+    /// mid-watch releases its connection rather than holding one forever.
+    fn present(&self) -> bool;
+
     /// Delivers a landed batch under the notification rules.
     fn notify(&self, batch: &NewMailBatch);
 }
@@ -120,12 +125,23 @@ impl<H: DeliveryHost> Driver<H> {
         if let Some(watch) = self.watching.as_mut() {
             match watch.next().await {
                 Ok(WatchEvent::Changed) => {
+                    if !self.host.present() {
+                        self.watching = None;
+                        return false;
+                    }
                     let batch = self.host.pass().await;
                     self.host.notify(&batch);
                 }
                 // A heartbeat, and any quieter word a later engine adds:
-                // nothing to run, nothing to wait.
-                Ok(_) => {}
+                // nothing to run, nothing to wait. The liveness check rides
+                // the wake, so a removed account drops its watch within one
+                // keepalive rather than holding the connection forever.
+                Ok(_) => {
+                    if !self.host.present() {
+                        self.watching = None;
+                        return false;
+                    }
+                }
                 Err(err) => {
                     if let Some(outcome) = watch_failure(&err) {
                         self.host.record(outcome);
@@ -167,13 +183,12 @@ impl<H: DeliveryHost> Driver<H> {
 
 /// The outcome a lost watch records, or `None` when it records nothing:
 /// the engine classifies a transport drop retryable, and those are the
-/// outage streak's own failures; a permanent watch error is never an
-/// outage (D5), so it only drops the session.
+/// outage streak's own failures. A rate-limited server is reachable, so a
+/// rate-limited watch drops its session and backs off without counting,
+/// and a permanent watch error is never an outage (D5) either.
 fn watch_failure(err: &engine_provider::ProviderError) -> Option<PassOutcome> {
     match err.class() {
-        engine_api::FailureClass::Retryable | engine_api::FailureClass::RateLimited => {
-            Some(PassOutcome::NetworkFailure)
-        }
+        engine_api::FailureClass::Retryable => Some(PassOutcome::NetworkFailure),
         _ => None,
     }
 }
@@ -279,6 +294,10 @@ impl DeliveryHost for Arc<HostDelivery> {
             .and_then(|row| row.sync)
             .map_or(DEFAULT_POLL_MINUTES, |sync| sync.poll_minutes);
         Duration::from_secs(u64::from(minutes) * 60)
+    }
+
+    fn present(&self) -> bool {
+        self.dials.of(self.account.as_str()).is_some()
     }
 
     fn notify(&self, batch: &NewMailBatch) {
