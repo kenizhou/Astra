@@ -58,6 +58,12 @@ pub(crate) fn all() -> Vec<Check> {
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// The vendored upstream tree (the sync engine, `vendor/engine/`): third-party
+/// content the gate's prose, header, and length rules must not measure. Nothing
+/// Astra-specific ever lives under it, so one prefix exempts every check that
+/// walks the tree. `paths_ascii` deliberately still scans it.
+pub(crate) const VENDORED_ROOT: &str = "vendor/";
+
 const SKIP_DIRS: &[&str] = &[
     ".git",
     "target",

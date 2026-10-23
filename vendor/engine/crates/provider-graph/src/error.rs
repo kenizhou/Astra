@@ -1,0 +1,311 @@
+//! Microsoft Graph protocol errors and their classification into the engine
+//! taxonomy.
+//!
+//! [`GraphError`] is the rich protocol-level error. At the provider-trait boundary
+//! it converts into an [`engine_provider::ProviderError`] carrying an
+//! engine-neutral [`FailureClass`], so callers branch on the class and never on
+//! Graph specifics (`providers.md`). Graph error bodies are a documented
+//! `{ "error": { "code", "message" } }` envelope; the `code` is captured for
+//! diagnostics, and the HTTP status drives classification — including `410 Gone`
+//! for an expired/invalid delta token, the analogue of JMAP
+//! `cannotCalculateChanges`, which forces a full resync.
+//!
+//! The HTTP transport and its `reqwest`-error classification land with the
+//! transport layer; this module covers the protocol/status surface that the pure
+//! normalizers and (next) the fetch layer produce.
+
+use engine_core::error::FailureClass;
+use engine_provider::ProviderError;
+use serde_json::Value;
+
+/// A Microsoft Graph protocol failure.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum GraphError {
+    /// The HTTP exchange itself failed (connect, TLS, a body, or a server that went quiet
+    /// for longer than the shared deadlines allow).
+    #[error("Graph transport error: {0}")]
+    Transport(#[from] engine_http::SendError),
+
+    /// The server returned a non-success HTTP status. The Graph error `code` is
+    /// captured when the body carried the standard envelope, and the raw body is
+    /// kept for diagnostics.
+    #[error("Graph HTTP {status} (code {code:?}): {body}")]
+    Status {
+        /// The HTTP status code.
+        status: u16,
+        /// The Graph error `code`, when the body carried the standard envelope.
+        code: Option<String>,
+        /// The raw response body.
+        body: String,
+        /// When the server said to come back — Graph's `Retry-After`, read off the reply
+        /// by [`engine_http::Sent::stated_wait`]. Graph is the one adapter here whose server
+        /// reliably names an instant, and until now the funnel read it for its own backoff
+        /// and nothing above the transport ever saw it.
+        retry_after: Option<core::time::Duration>,
+    },
+
+    /// A response was not the JSON the protocol requires.
+    #[error("malformed Graph JSON: {0}")]
+    Json(#[from] serde_json::Error),
+
+    /// A response was structurally not what the protocol requires (a missing `id`,
+    /// an absent `value` array or `@odata.deltaLink`, …).
+    #[error("malformed Graph response: {0}")]
+    Protocol(String),
+}
+
+impl GraphError {
+    /// Builds a [`GraphError::Status`], extracting the Graph error `code` from the
+    /// standard `{ "error": { "code", "message" } }` body when present.
+    #[must_use]
+    pub fn status(status: u16, body: impl Into<String>) -> Self {
+        let body = body.into();
+        let code = error_code(&body);
+        Self::Status {
+            status,
+            code,
+            body,
+            retry_after: None,
+        }
+    }
+
+    /// Records when the server said this would clear, from [`engine_http::Sent::stated_wait`].
+    #[must_use]
+    pub fn with_retry_after(mut self, wait: Option<core::time::Duration>) -> Self {
+        if let Self::Status { retry_after, .. } = &mut self {
+            *retry_after = wait;
+        }
+        self
+    }
+
+    /// When the server said to come back, if it said.
+    #[must_use]
+    pub fn retry_after(&self) -> Option<core::time::Duration> {
+        match self {
+            Self::Status { retry_after, .. } => *retry_after,
+            _ => None,
+        }
+    }
+
+    /// Builds a [`GraphError::Protocol`].
+    #[must_use]
+    pub fn protocol(detail: impl Into<String>) -> Self {
+        Self::Protocol(detail.into())
+    }
+
+    /// What this error is as the failure of a submission: the class it always has, except
+    /// for an exchange that failed after the request may have reached the server. That one
+    /// may have sent the message, so it needs confirming and is never retried
+    /// (`ProviderError::needs_confirmation`).
+    ///
+    /// Two more are the same case. A gateway's `502` or `504` says the server behind it gave
+    /// no answer, not that it refused; every other status is the server's own answer. And a
+    /// success whose body cannot be read is an answer nobody can read.
+    pub(crate) fn into_submission_error(self) -> ProviderError {
+        match &self {
+            Self::Transport(err) if err.may_have_been_received() => {
+                let detail = format!("{self}; the message may have been sent");
+                ProviderError::needs_confirmation(detail).with_source(self)
+            }
+            Self::Status {
+                status: 502 | 504, ..
+            }
+            | Self::Json(_) => {
+                let detail = format!("{self}; the message may have been sent");
+                ProviderError::needs_confirmation(detail).with_source(self)
+            }
+            _ => self.into(),
+        }
+    }
+
+    /// The engine-neutral class this protocol error maps to.
+    #[must_use]
+    pub fn failure_class(&self) -> FailureClass {
+        match self {
+            Self::Transport(e) => transport_class(e),
+            Self::Status { status, .. } => status_class(*status),
+            // Malformed JSON or a structurally invalid response is a protocol-level
+            // incompatibility: retrying the same request will not fix it.
+            Self::Json(_) | Self::Protocol(_) => FailureClass::Permanent,
+        }
+    }
+}
+
+/// Maps a failed exchange to a [`FailureClass`]: a body that did not decode is a permanent
+/// protocol mismatch; every other failure, a server gone quiet included, is transient.
+fn transport_class(err: &engine_http::SendError) -> FailureClass {
+    if err.is_decode() {
+        FailureClass::Permanent
+    } else {
+        FailureClass::Retryable
+    }
+}
+
+/// A client error outside any exchange, such as a client that could not be built.
+impl From<reqwest::Error> for GraphError {
+    fn from(err: reqwest::Error) -> Self {
+        Self::Transport(err.into())
+    }
+}
+
+/// Extracts the Graph error `code` from a `{ "error": { "code": .. } }` body, or
+/// `None` when the body is not the standard envelope.
+fn error_code(body: &str) -> Option<String> {
+    let value: Value = serde_json::from_str(body).ok()?;
+    value.get("error")?.get("code")?.as_str().map(str::to_owned)
+}
+
+/// Maps an HTTP status to a [`FailureClass`]. Graph throttles with `429`
+/// (+ `Retry-After`); an expired/invalid delta token is `410 Gone`, which forces a
+/// full resync (the analogue of JMAP `cannotCalculateChanges`); a failed write
+/// precondition — a stale `If-Match` ETag on a calendar write — is `409`/`412`, a
+/// [`Conflict`](FailureClass::Conflict) the caller resolves by refetch-and-retry.
+fn status_class(status: u16) -> FailureClass {
+    match status {
+        401 => FailureClass::Authentication,
+        409 | 412 => FailureClass::Conflict,
+        410 => FailureClass::NeedsResync,
+        429 => FailureClass::RateLimited,
+        500..=599 => FailureClass::Retryable,
+        _ => FailureClass::Permanent,
+    }
+}
+
+impl From<GraphError> for ProviderError {
+    fn from(err: GraphError) -> Self {
+        let class = err.failure_class();
+        let detail = err.to_string();
+        // A rate limit is the one class that carries *when*: the outbox obeys a provider's
+        // instant outright, past its own derived cap, and a host schedules from it.
+        let error = if class == FailureClass::RateLimited {
+            ProviderError::rate_limited(detail, err.retry_after().map(Into::into))
+        } else {
+            ProviderError::new(class, detail)
+        };
+        error.with_source(err)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Graph is the one server here that reliably names an instant, in a `Retry-After`
+    /// header on its `429` — and until #218's follow-up the send funnel read that header
+    /// for its own backoff and then discarded it, so nothing above the transport ever
+    /// learned it. A window-scale wait is exactly the case: the funnel declines to sleep
+    /// on it, and the number is the only thing that makes the refusal actionable.
+    #[test]
+    fn a_retry_after_graph_sent_reaches_the_neutral_error() {
+        use engine_provider::ProviderError;
+
+        let throttled = GraphError::status(429, r#"{"error":{"code":"ApplicationThrottled"}}"#)
+            .with_retry_after(Some(core::time::Duration::from_mins(5)));
+        let neutral: ProviderError = throttled.into();
+        assert_eq!(neutral.class(), FailureClass::RateLimited);
+        assert_eq!(
+            neutral
+                .retry_after()
+                .map(engine_core::time::Duration::seconds),
+            Some(300),
+        );
+    }
+
+    #[test]
+    fn a_status_that_is_not_a_throttle_carries_no_instant() {
+        use engine_provider::ProviderError;
+
+        // The guard that keeps the number meaningful: it is only ever read beside
+        // `RateLimited`, so it must not ride out on any other class.
+        let gone = GraphError::status(404, r#"{"error":{"code":"ErrorItemNotFound"}}"#)
+            .with_retry_after(Some(core::time::Duration::from_mins(5)));
+        let neutral: ProviderError = gone.into();
+        assert_ne!(neutral.class(), FailureClass::RateLimited);
+        assert_eq!(neutral.retry_after(), None);
+    }
+
+    const BAD_REQUEST: &str = include_str!("../tests/fixtures/error/bad_request.json");
+    const UNAUTHORIZED: &str = include_str!("../tests/fixtures/error/unauthorized.json");
+
+    #[test]
+    fn real_error_bodies_yield_their_code_and_class() {
+        // The captured 400 and 401 envelopes carry their documented codes.
+        let bad = GraphError::status(400, BAD_REQUEST);
+        assert!(matches!(&bad, GraphError::Status { code: Some(c), .. } if c == "BadRequest"));
+        assert_eq!(bad.failure_class(), FailureClass::Permanent);
+
+        let unauth = GraphError::status(401, UNAUTHORIZED);
+        assert!(
+            matches!(&unauth, GraphError::Status { code: Some(c), .. } if c == "InvalidAuthenticationToken")
+        );
+        assert_eq!(unauth.failure_class(), FailureClass::Authentication);
+        // Display carries the status, code, and body.
+        assert!(unauth.to_string().contains("401"));
+        assert!(unauth.to_string().contains("InvalidAuthenticationToken"));
+    }
+
+    #[test]
+    fn status_codes_map_to_engine_classes() {
+        // 410 Gone (expired delta token) forces a resync; 429 throttles; 5xx retries.
+        assert_eq!(
+            GraphError::status(410, "{}").failure_class(),
+            FailureClass::NeedsResync
+        );
+        assert_eq!(
+            GraphError::status(429, "{}").failure_class(),
+            FailureClass::RateLimited
+        );
+        assert_eq!(
+            GraphError::status(503, "{}").failure_class(),
+            FailureClass::Retryable
+        );
+        assert_eq!(
+            GraphError::status(404, "{}").failure_class(),
+            FailureClass::Permanent
+        );
+        // A stale If-Match on a calendar write is a conflict (refetch, then retry).
+        assert_eq!(
+            GraphError::status(412, "{}").failure_class(),
+            FailureClass::Conflict
+        );
+        assert_eq!(
+            GraphError::status(409, "{}").failure_class(),
+            FailureClass::Conflict
+        );
+    }
+
+    #[test]
+    fn a_body_without_the_envelope_has_no_code() {
+        // A non-JSON body and a JSON body without an `error.code` both yield None.
+        assert!(matches!(
+            GraphError::status(400, "not json at all"),
+            GraphError::Status { code: None, .. }
+        ));
+        assert!(matches!(
+            GraphError::status(500, r#"{"unexpected":true}"#),
+            GraphError::Status { code: None, .. }
+        ));
+    }
+
+    #[test]
+    fn protocol_and_json_errors_are_permanent() {
+        let protocol = GraphError::protocol("response had no value array");
+        assert_eq!(protocol.failure_class(), FailureClass::Permanent);
+        assert!(protocol.to_string().contains("no value array"));
+
+        let json: GraphError = serde_json::from_str::<Value>("{ not json")
+            .unwrap_err()
+            .into();
+        assert_eq!(json.failure_class(), FailureClass::Permanent);
+        assert!(json.to_string().contains("malformed Graph JSON"));
+    }
+
+    #[test]
+    fn converts_into_classified_provider_error_with_source() {
+        let provider: ProviderError = GraphError::status(401, UNAUTHORIZED).into();
+        assert_eq!(provider.class(), FailureClass::Authentication);
+        // The original Graph error stays reachable through the source chain.
+        assert!(std::error::Error::source(&provider).is_some());
+    }
+}

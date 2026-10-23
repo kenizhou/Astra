@@ -1,0 +1,75 @@
+# google-oauth
+
+A tiny standalone dev tool to obtain Google OAuth tokens for a **throwaway test
+account** and to capture real Gmail, Google Calendar, and People JSON responses as offline
+test fixtures for the `provider-google` adapter. It mirrors `tools/graph-oauth`.
+
+It is **not** part of the engine workspace (its own `[workspace]` table detaches
+it), so it never affects the engine's fmt/clippy/coverage gates. The engine stays
+OAuth-agnostic — hosts own account onboarding (`north-star.md`); this only exists to
+drive the interactive flow locally.
+
+## One-time setup: a Google OAuth client
+
+1. In the [Google Cloud Console](https://console.cloud.google.com/), create (or
+   reuse) a project and enable the **Gmail API**, **Google Calendar API**, and
+   **People API**.
+2. Configure the OAuth consent screen (External, Testing mode is fine) and add the
+   test account as a **Test user**. Add the scopes `https://mail.google.com/` and
+   `https://www.googleapis.com/auth/calendar`,
+   `https://www.googleapis.com/auth/contacts`,
+   `https://www.googleapis.com/auth/contacts.other.readonly`, (for Workspace
+   directory fixtures) `https://www.googleapis.com/auth/directory.readonly`, and (for the
+   send-as **write** in `live_identity`) `https://www.googleapis.com/auth/gmail.settings.basic`.
+   Reading the send-as list needs none of these; `https://mail.google.com/` covers it
+   (measured, see `docs/agent-guidance/google.md`).
+3. Create an **OAuth client ID** of type **Desktop app**. Note the **client ID**
+   and **client secret** (for a Desktop app the secret is embedded in the app, not
+   confidential).
+
+## Flow
+
+Authorization Code + PKCE (S256) with an `http://127.0.0.1` loopback redirect (RFC
+8252). `access_type=offline` + `prompt=consent` mint a refresh token.
+
+## Commands
+
+```sh
+# 1. Sign in (opens the browser; catches the loopback redirect).
+cargo run --manifest-path tools/google-oauth/Cargo.toml -- \
+  login --client-id <CLIENT_ID> --client-secret <CLIENT_SECRET>
+
+# 2. Refresh the access token any time.
+cargo run --manifest-path tools/google-oauth/Cargo.toml -- refresh
+
+# 3. Print a fresh access token (for the gated live tests).
+GOOGLE_ACCESS_TOKEN="$(cargo run -q --manifest-path tools/google-oauth/Cargo.toml -- token)" \
+  cargo test -p provider-google --test live_provider -- --nocapture
+
+# 4. Capture a real response as a fixture.
+cargo run --manifest-path tools/google-oauth/Cargo.toml -- \
+  get "/gmail/v1/users/me/labels" crates/provider-google/tests/fixtures/mail/labels.json
+cargo run --manifest-path tools/google-oauth/Cargo.toml -- \
+  get "/v1/people/me/connections?personFields=names,emailAddresses" connections.json
+```
+
+`--client-id`/`--client-secret` also read from `GOOGLE_CLIENT_ID` /
+`GOOGLE_CLIENT_SECRET`. Tokens are stored owner-only under `.local/tokens.json`
+(gitignored).
+
+## Measuring the API
+
+`api-bench.sh` probes Gmail directly with the signed-in account, to answer the questions
+that decide the adapter's fetch shape and that no fixture can: what one `messages.get`
+really costs and whether that cost is the link or the service, how far concurrency scales
+before `429`, what the batch endpoint buys, and what each `format` weighs with and without
+gzip. It is read-only — it lists ids and fetches them.
+
+```sh
+tools/google-oauth/api-bench.sh
+```
+
+That probes the **API**. For the same question asked of the **adapter**, through the real
+code path, use the gated live tests in `crates/provider-google/tests/`:
+`live_throughput` (how fast a real snapshot drains) and `live_batch_vs_concurrent` (the
+head-to-head, with `GOOGLE_BENCH_WINDOW` and `GOOGLE_BENCH_ROUNDS` to sweep).

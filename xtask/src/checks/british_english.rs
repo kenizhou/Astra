@@ -29,7 +29,9 @@ pub(crate) fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
     let mut bad = Vec::new();
     for f in super::walk_files(root, &["md"]) {
         let r = super::rel(root, &f);
-        if r.starts_with("docs/zh/") || super::is_zh_mirror(&f) {
+        // The vendored engine's own docs spell their own way.
+        if r.starts_with("docs/zh/") || r.starts_with(super::VENDORED_ROOT) || super::is_zh_mirror(&f)
+        {
             continue;
         }
         let mut in_fence = false;
@@ -76,6 +78,13 @@ mod tests {
     #[test]
     fn passes_on_british_prose() {
         let root = fixture(&[("a.md", "The colour of the licence.\n")]);
+        assert!(super::check(&root).is_ok());
+    }
+
+    #[test]
+    fn the_vendored_engine_tree_is_exempt() {
+        let root = fixture(&[("vendor/engine/docs/guide.md", "the color of the behavior
+")]);
         assert!(super::check(&root).is_ok());
     }
 

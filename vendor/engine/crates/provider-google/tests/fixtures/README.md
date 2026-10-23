@@ -1,0 +1,249 @@
+# provider-google test fixtures
+
+Real Google (Gmail **v1** + Calendar **v3**) JSON responses captured from a throwaway
+account via `tools/google-oauth`, then **scrubbed** of PII. The object *shapes* are
+verbatim from the live API; only account-identifying values were mapped to deterministic
+fakes, consistently, so cross-references (thread ids, label ids, Message-IDs, sync
+tokens) survive:
+
+- emails → `testuser@example.test`, display name → `Test User`
+- Gmail message ids → `message-N`; thread ids follow (a thread's root shares the root
+  message's id, exactly as Gmail returns it)
+- Gmail-assigned `Message-Id` headers → `message-N@mail.gmail.test`
+- opaque sync/page tokens → `…-sync-token-N` (they base64-encode account state incl. the
+  email); a calendar `htmlLink`'s `eid` (which base64-encodes the email) → a placeholder
+- the Meet `hangoutLink`/`conferenceData` join credential → a placeholder (`aaa-bbbb-ccc`);
+  a public repo must not ship a working join link
+
+The scrub is reproducible: `scratchpad/scrub.py` + `scrub_cal.py` (kept out of the repo)
+map the gitignored raw captures to these files. The Gmail message fixtures are
+deterministic self-sent messages ("Fixture: …"); the calendar fixtures are events created
+on the account.
+
+## Gmail files (`mail/`)
+
+| Fixture | Real call | Protects |
+| --- | --- | --- |
+| `mail/settings_send_as.json` | `users.settings.sendAs.list` | The shape a real account's send-as list has: `displayName` is present and **empty** on a mailbox nobody has named, which is what the adapter reads as "no name" rather than as a blank one. |
+| `mail/label_created_hidden.json` | `POST /gmail/v1/users/me/labels` with `labelListVisibility: labelHide`, `messageListVisibility: show` | the create a label standing for a keyword answers with: the new id, and both visibilities echoed as sent |
+| `error/label_name_conflict.json` | the same create again, for a name the account already has | the `409` another device's create leaves behind, on which the adapter reads the list again rather than creating a second label |
+| `mail/draft_created.json` | `POST /gmail/v1/users/me/drafts` | the draft object a create returns: a `drafts` id plus the message it wraps, already labelled `DRAFT` |
+| `mail/draft_updated.json` | `PUT /gmail/v1/users/me/drafts/{id}` on that draft | the same **draft** id with a **new** message id under it: what makes Gmail the one adapter whose draft key survives a re-save |
+| `error/draft_not_found.json` | `DELETE …/drafts/{id}` on a draft already deleted | the `404` a retried draft delete meets, so a retryable op settles rather than parking |
+| `mail/profile.json` | `GET /gmail/v1/users/me/profile` | the account cursor (`historyId`) a snapshot persists |
+| `mail/labels.json` | `GET /users/me/labels` | label → `Mailbox` role/keyword/membership mapping (system + a custom label), and the **nesting**: a two-level chain under `Fixture Label`, plus a `Fixture Orphan/Child` whose parent the account really does not have |
+| `mail/messages_list.json` | `GET /users/me/messages` | the `{id, threadId}` enumeration a snapshot pages |
+| `mail/message_metadata.json` | `GET /users/me/messages/{id}?format=metadata&metadataHeaders=…` | envelope/labels/thread normalization (unread, single-membership) |
+| `mail/message_metadata_labeled.json` | same, the labeled reply | **multi-membership** (INBOX+SENT+custom) + `STARRED`/`IMPORTANT` keywords, read, threaded to the first |
+| `mail/messages_list_junk.json` | `GET /users/me/messages?includeSpamTrash=true` | that the flag is what puts a Junk message in the enumeration at all — without it the list is empty |
+| `mail/message_metadata_junk.json` | same, the junk message | a `SPAM` label set, so the snapshot's `present` set and the SPAM membership are pinned against real bytes |
+| `mail/message_full.json` | `GET …/messages/{id}?format=full` | the `payload` tree (`body.data`, parts) + attachment detection |
+| `mail/message_raw.json` | `GET …/messages/{id}?format=raw` | base64url `raw` → `RawMime` decode |
+| `mail/history_delta.json` | `GET /users/me/history?startHistoryId=…` | delta shape: `messagesAdded`/`labelsAdded`/`labelsRemoved` (partials → re-fetch) |
+| `mail/history_deleted.json` | same, after a permanent delete | `messagesDeleted` tombstone shape |
+| `mail/modify_archived.json` | `POST …/messages/{id}/modify` with `removeLabelIds:["INBOX"]`, adding nothing | the **archive**: `INBOX` gone, `UNREAD`/`SENT` preserved |
+| `mail/trash.json` | `POST …/messages/{id}/trash` | the trash response: `TRASH` added, state preserved |
+| `mail/modify_spam.json` | `POST …/messages/{id}/modify` with `addLabelIds:["SPAM"]` | the junk report — and that the server clears `INBOX` **without being asked** (Finding: the label files the message itself) |
+| `mail/modify_not_spam.json` | the same with `removeLabelIds:["SPAM"], addLabelIds:["INBOX"]` | the not-junk report; removing `SPAM` *alone* leaves the message in no place label at all |
+| `error/invalid_label_phishing.json` | the same with `addLabelIds:["PHISHING"]` | Gmail has no phishing label — `400 Invalid label`, so the verdict is refused rather than filed as junk |
+| `error/*.json` | a 400(label)/401/403(rate)/403(perm)/404/410 | `error` envelope → `FailureClass` mapping |
+| `error/quota_exceeded.json` | the `403` a sustained width-8 drain draws | Gmail's **per-minute quota** refusal, verbatim: `PERMISSION_DENIED` with `errors[0].reason: rateLimitExceeded`, and a `google.rpc.ErrorInfo` naming `totalQueryCostPerMinutePerUser`, `6000`, `1/min/{project}/{user}` and `window_start_time`. The window figure is what `src/throttle.rs` turns into a wait, so this file is where "the server named an instant" is pinned — but see the next row, because this is the **minority** shape. |
+| `error/quota_exceeded_untimed.json` | the same call, a different refusal minutes later | The same `403` with the **same** `ErrorInfo` and **no** `window_start_time`. Two refusals in three look like this (14,710 measured; 32% carry the field), so the instant is a bonus and never a guarantee. Kept beside its twin so nobody reads one fixture as a contract. |
+| `error/concurrency_exceeded.json` | the `429` a salvo of 200 draws | Gmail's **other** limit: `RESOURCE_EXHAUSTED`, "Too many concurrent requests for user." Captured to keep the two apart — a count of refusals cannot say which one it counted. |
+| `identity/userinfo_workspace.json` | `GET /oauth2/v3/userinfo` with a token holding `userinfo.email` alone, on a Workspace account | the `hd` field that makes the account an organization's (`affiliation`); the domain, address, `sub` and picture are fakes |
+| `identity/userinfo_personal.json` | the same call on a personal account | the same reply without `hd`: the answer "personal" |
+| `error/userinfo_without_scope.json` | the same call with a token holding only `calendar` | the `401` a grant without `userinfo.email` gets, which says nothing about the account |
+
+## Real-behavior findings (captured, not assumed)
+
+1. **Gmail's message scope is account-global.** `historyId` is one account-wide cursor
+   (JMAP-like), not per-folder (Graph) or per-mailbox (IMAP). A snapshot enumerates
+   `messages.list` and persists the *profile's* `historyId`; the delta is `history.list`.
+2. **Labels are multi-membership + keyword state.** A message's `labelIds` is its
+   membership across labels at once. `UNREAD`/`STARRED` are keyword *state* (`$seen` is
+   the **absence** of `UNREAD`; `STARRED` → `$flagged`), so they are excluded from
+   membership and never emitted as mailboxes. `DRAFT` is both the Drafts place and the
+   `$draft` state.
+3. **Header names come back mixed-case** (`Message-Id`, not `Message-ID`), so header
+   lookup is case-insensitive. `internalDate` is epoch-millis (→ `received_at`); the
+   `Date` header is RFC 2822 (→ `sent_at`).
+4. **History changes are partials.** `messagesAdded`/`labelsAdded`/`labelsRemoved` carry
+   only `{id, threadId, labelIds}`, so each touched-but-present id is **re-fetched** full
+   (the engine applies whole objects); `messagesDeleted` tombstones.
+5. **`messages.send` rewrites the caller's `Message-ID`** (a captured
+   `<…@example.test>` came back as `<…@mail.gmail.com>`), so reconcile-by-`Message-ID`
+   would not match — but `send` **returns the sent message's id** in its response, so the
+   receipt uses that directly (no reconcile needed, unlike SMTP/Graph `sendMail`).
+6. **`messages.insert`/`import` require the `/upload/` endpoint** (the normal path 404s
+   with HTML on both `www.googleapis.com` and `gmail.googleapis.com`). The provider never
+   inserts (it uses `send`/`modify`/`trash`/`delete`, all normal-path methods), so the
+   single `https://www.googleapis.com` base serves every method the adapter calls. The
+   fixtures' self-sent messages therefore use `messages.send`, not `insert`.
+7. **A `404` from `history.list`** (an aged-out `startHistoryId`) is Gmail's resync
+   signal → `GoogleError::HistoryExpired` → snapshot restart. It has **no live test**: a
+   fresh account's history window still contains an id of `1`, returning a valid (large)
+   delta rather than a `404`, so the recovery is proven offline with a fake.
+8. **There is no Archive label, and the synthetic `ALL_MAIL` id is rejected as one.**
+   Archiving in Gmail is the *absence* of `INBOX` — the label list has `INBOX`, `SENT`,
+   `DRAFT`, `TRASH`, `SPAM`, `IMPORTANT`, `CATEGORY_*` and custom labels, and **nothing
+   archive-shaped**. The adapter therefore synthesizes an All-Mail mailbox under a reserved
+   `ALL_MAIL` id (finding 2's companion) — and that id must never travel back to Gmail:
+   `POST …/modify` with `addLabelIds:["ALL_MAIL"]` answers
+   **`400 invalidArgument: "Invalid label: ALL_MAIL"`** (captured as
+   `error/invalid_label.json`), which classifies `Permanent` — no retry can fix a label
+   that does not exist. So a `MoveTo` there sends the removals **alone**
+   (`mail/modify_archived.json` is the real response: `INBOX` gone, `UNREAD`/`SENT` kept).
+   This was a live bug: the adapter sent the synthetic id, every archive 400'd, and the
+   product surfaced it as a message that left the list and came straight back. Nothing
+   offline could catch it — the fakes answer canned bytes whatever they are sent — which is
+   why it is pinned by a request-body assertion *and* a live round-trip.
+9. **A self-addressed send lands in `INBOX` as well as `SENT`** (`labelIds:
+   ["UNREAD","SENT","INBOX"]` straight from `messages.send`). That is what makes the live
+   archive test meaningful: there is a real inbox membership to leave, so "it left the
+   inbox" is a check that can actually fail.
+
+21. **Gmail refuses in two shapes, and which one you meet depends on how you ask.** Both
+    captured on 2026-09-20 from this account, minutes apart:
+
+    | Probe | Refusal | Says |
+    | --- | --- | --- |
+    | 200 simultaneous `messages.get` | `429 RESOURCE_EXHAUSTED` | "Too many concurrent requests for user." |
+    | 8 in flight, sustained | `403 PERMISSION_DENIED` | "Quota exceeded … 'Units per minute per user'" |
+
+    Swept properly — salvos of W, a full quota window's rest between widths, widths in
+    randomised order — the concurrency ceiling is clean through 48 and refuses from 64 up
+    (1.6%, then 2.5% at 96, 8.4% at 128, 10.4% at 200). The adapter fans out 20 wide, so it
+    meets the quota and never the ceiling, which is exactly why the repo recorded for months
+    that Gmail "never sends a `429`": nothing here had ever asked wide enough. **Neither
+    refusal carries a `Retry-After`** — every header of both captures was checked — but the
+    `403` names `window_start_time` **about a third of the time** — 4,648 of 14,710 refusals
+    across three rested bursts, 42%/23%/29% by burst, with every other metadata key identical
+    — and where it does, the wait to the window's end is the server's own number. Where it
+    does not, there is nothing to schedule from and a caller backs off on its own.
+
+## Calendar files (`calendar/`)
+
+| Fixture | Real call | Protects |
+| --- | --- | --- |
+| `calendar/calendars.json` | `GET /calendar/v3/users/me/calendarList` | calendar-list → `Calendar` (primary + a reader-role holiday calendar; access role, colour) |
+| `calendar/events_list.json` | `GET /calendar/v3/calendars/primary/events?singleEvents=false` | the event page (masters kept with `RRULE`) + `nextSyncToken` |
+| `calendar/events_delta.json` | same, replaying the `syncToken` | delta shape: an updated event + a `status:"cancelled"` tombstone + a new `nextSyncToken` |
+| `calendar/event_single.json` | one timed event | single event + attendees/location/organizer |
+| `calendar/event_recurring_master.json` | a `GET …/events/{id}` series master | `recurrence` `RRULE` + zoned start/end |
+| `calendar/event_allday.json` | an all-day event | `start.date`/`end.date` (zoneless) |
+| `calendar/event_meet.json` | a Google Meet event | `conferenceData`/`hangoutLink` (join credential scrubbed) |
+| `calendar/event_invitation_answered.json` | an `events.import`ed invitation, answered `tentative` with a note | an event the account did **not** organize, read back after an RSVP: my status, and the organizer merged with their own `attendees[]` entry (Finding 16) |
+| `calendar/event_organizer_declined.json` | a self-organized event answered `declined` | the same address as `organizer` *and* attendee → **one** participant, roles `{owner, attendee}`, carrying the answer — not the organizer's implied `accepted` (Finding 16) |
+
+8. **Google Calendar is IANA-native.** Event times are `dateTime` (RFC 3339 with offset)
+   plus an IANA `timeZone` (e.g. `Europe/Amsterdam`) — no Windows-zone table (contrast
+   Graph). Recurring events return as **masters with an RFC 5545 `RRULE`**
+   (`singleEvents=false`), the master+rule+local-expansion model the engine wants.
+9. **`events.list` returns a `nextSyncToken` on the final page**; a `410` on replay means
+   the token expired (→ full resync). A deleted event appears in the delta as `{id, etag,
+   kind, status:"cancelled"}` (a minimal tombstone).
+10. **Calendar writes are `If-Match`-guarded** (`events.insert`/`patch`/`delete`); a stale
+    ETag is a `412 conditionNotMet`. `events.patch` merges a partial event and echoes the
+    updated one with a new `etag` (the ETag advances on every write).
+11. **Delete idempotency differs from Graph.** Google signals *already-gone* as `404` **or
+    `410 Gone`** (both are treated as idempotent success). A `delete` leaves the event
+    **cancelled with a new ETag**, so a *guarded* re-delete (the stale `If-Match`) returns
+    `412`, not `404`/`410` — a real conflict, surfaced for the caller to refetch. The live
+    test therefore does not re-delete with the old guard; the `404`/`410`-gone idempotency
+    is covered offline.
+16. **Google names the organizer twice, and an RSVP only writes one of them.** An event
+    carries an `organizer` object *and*, whenever that person is also invited, an
+    `attendees[]` entry marked `"organizer": true` — the ordinary self-organized meeting,
+    and the organizer of an invitation the account received. `events.patch` moves the
+    **attendee entry**; the `organizer` object never carries a status at all. A projection
+    that emitted both (as this adapter did) reported one address twice with contradictory
+    statuses, so reading one's own participation back returned a synthesized `accepted`
+    however it had been answered — which looks exactly like a *write* that does not work.
+    Both fixtures above pin the merge. Google also starts even the organizer's own entry at
+    `needsAction`, which is why the attendee entry's status is the authoritative one.
+17. **RSVP truncation depends on who is asking, not on the array.** A one-element
+    `attendees` patch *as an attendee* changes only that attendee — the other guests
+    survive. The **same request as the organizer replaces the whole array** and drops them.
+    Both directions are asserted live (`tests/live_calendar_rsvp.rs`).
+18. **`events.import` is how a live test gets a real invitation.** It places an event whose
+    `organizer` is a third party with the account as a `needsAction` attendee, mails nobody,
+    and **preserves the caller's `iCalUID`** — the one endpoint that does (`events.insert`
+    mints its own, which is why the receipt's id, never the uid, is the reconciliation key).
+    An imported event also carries `"privateCopy": true`, and its opaque `id` encodes the
+    calendar's address, so the fixture replaces it.
+19. **`events.list` is read-your-writes for an answered `responseStatus`.** Re-listing
+    immediately after an acknowledged `events.patch` returns the new status (5/5 rounds with
+    no delay), unlike People's sync tokens, which lag ~10s. Read-after-write assertions on
+    calendar RSVPs need no poll.
+
+## Contact files (`contacts/`)
+
+Captured from a field-complete contact seeded through `people:createContact` plus the
+contacts the account already had. Resource names → `people/contact-N`,
+`otherContacts/other-N`, `contactGroups/group-N`; every `etag` → `etag-N` (preserving the
+create → update chain); sync tokens → `google-sync-token-N`; the photo URL's per-account
+handle → a placeholder.
+
+| Fixture | Real call | Protects |
+| --- | --- | --- |
+| `contacts/connections.json` | `GET /v1/people/me/connections?personFields=…&requestSyncToken=true` | the owned-contact snapshot + `nextSyncToken`; the seeded card exercises every `personFields` entry |
+| `contacts/connections_delta.json` | replay the `syncToken` after an update | a changed person + the `totalItems`/`totalPeople` counters |
+| `contacts/connections_delta_nochange.json` | replay with nothing changed | **the empty delta**: `{"nextSyncToken": …}` and *no* `connections` key (see Finding 12) |
+| `contacts/connections_delta_removed.json` | replay after `deleteContact` | the `metadata.deleted: true` tombstone (keeps `resourceName`, etag, default photo; no name/email) |
+| `contacts/person.json` | `GET /v1/people/{id}?personFields=…` | the single-person shape |
+| `contacts/person_created.json` | `POST /v1/people:createContact` | the create echo — `resourceName` + first `etag` |
+| `contacts/person_updated.json` | `PATCH /v1/{id}:updateContact` | the update echo with the advanced `etag` |
+| `contacts/connections_photos.json` | `GET /people/me/connections?personFields=names,emailAddresses,photos` | photo normalization: a real photo is kept, a `default: true` generated monogram is dropped, and the URL keeps its real `=s100` option suffix (the size the adapter asks for **replaces** that suffix, so a fixture scrubbed to a bare URL would exercise the wrong path) |
+| `contacts/other_contacts.json` | `GET /v1/otherContacts?readMask=…` | the suggested-source page (**its own narrower mask** — Finding 14) |
+| `contacts/contact_groups.json` | `GET /v1/contactGroups` | group → group-card normalization; no sync token |
+| `contacts/group_created.json` | `POST /v1/contactGroups` | the group create echo |
+| `error/contacts_stale_etag.json` | `updateContact` with a superseded etag | `400 FAILED_PRECONDITION` → `Conflict` (Finding 13) |
+| `error/contacts_directory_precondition.json` | `people:listDirectoryPeople` on a consumer account | `400 FAILED_PRECONDITION` → source `Unavailable` (Finding 15) |
+| `error/contacts_sync_token_invalid.json` | a malformed `syncToken` | `400 INVALID_ARGUMENT` — **not** the `410` expiry signal |
+
+12. **A People page with nothing to report omits the collection key entirely.** A quiet
+    incremental sync answers exactly `{"nextSyncToken": "…"}` — no `connections` array at
+    all. That is the steady state of every idle account, so treating a missing collection
+    as a malformed page fails the common case. An absent key is read as "no entries" only
+    when the page still carries a cursor; a page with neither is malformed and must not
+    advance anything (so a token-less source like `contactGroups` stays strict and a bad
+    page can never empty the store).
+13. **A stale-etag write is `400 FAILED_PRECONDITION`, not `412`.** People rejects
+    `updateContact` with "Request person.etag is different than the current person.etag";
+    it is still a refetch-and-retry conflict. Note the etag advances on *any* mutation,
+    including adding the person to a contact group — so a create echo's etag can already
+    be stale by the time a write uses it.
+14. **`otherContacts.list` accepts only a subset of `personFields`.** Exactly `names`,
+    `emailAddresses`, `phoneNumbers`, `photos`, `metadata` are allowed (determined by
+    probing each field); any other — `nicknames`, `addresses`, `organizations`,
+    `birthdays`, `biographies`, `urls`, `relations`, `userDefined`, `memberships` — fails
+    the **whole request** with `400 INVALID_ARGUMENT`. The suggested source therefore
+    sends its own mask, not the owned-contact one.
+15. **A consumer account refuses the Workspace directory with `400 FAILED_PRECONDITION`**
+    ("Must be a G Suite domain user"), never `403`. Optional sources degrade to
+    `Unavailable` on `403` *or* `400 FAILED_PRECONDITION` — but deliberately **not** on
+    `400 INVALID_ARGUMENT`, which is a real request defect (Finding 14) and would
+    otherwise be masked as a silently empty address book.
+16. **`displayName` is server-derived and a supplied one is ignored.** Creating a person
+    with a full name plus components returns `displayName` recomputed from the
+    components, so a host must not expect its own display name to round-trip.
+17. **Sync tokens are eventually consistent.** A write is visible to a direct `GET`
+    immediately but takes seconds (~5–15 observed) to surface in a delta, so the live
+    tests poll rather than read once.
+18. **Gmail rewrites the `Message-ID` on `drafts.create`, not only on send.** A draft
+    written with `<local@test.local>` comes back carrying `<CALRU+…@mail.gmail.com>`. The
+    consequence lands on a host rather than the adapter: a saved Gmail draft **cannot** be
+    correlated with a local copy by `Message-ID`, so the key `put_draft` returned is the
+    only join. `tests/live_drafts.rs` pins the rewrite and identifies drafts by subject.
+19. **A draft's id outlives its message.** `drafts.update` keeps the `drafts` id and
+    replaces the message under it (`r-3587310113811252119` held while its message went
+    `1a0b3e0689acae42` → `1a0b3e06ad26a21b`). That is why the draft verbs key on the draft
+    id, and why Gmail is the one adapter here whose key survives a re-save. A retried
+    `drafts.delete` answers a clean `404` (no Graph-style second shape).
+20. **A whole-account snapshot can exhaust the per-minute quota.** Gmail meters a "Total
+    Query Cost" of 6000 units/minute/user and a `sync_email` snapshot fetches every
+    message, so a handful in quick succession answers `403 rateLimitExceeded` — which reads
+    like a permissions failure and is not. Live tests take one snapshot per phase and reuse
+    it. The adapter now waits that `403` out rather than failing the scope (finding 21 and
+    `src/throttle.rs`), so a suite that meets it pauses; a suite that keeps spending faster
+    than 6,000 units a minute still outruns every window it waits for.

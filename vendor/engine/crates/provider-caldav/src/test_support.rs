@@ -1,0 +1,192 @@
+//! Shared test fakes for the offline suites (one place instead of a copy per
+//! module). Compiled only under `cfg(test)`.
+
+use std::sync::{Mutex, MutexGuard};
+
+use async_trait::async_trait;
+
+use crate::{
+    error::CalDavError,
+    transport::{DavExecutor, DavMethod, HttpResponse, WriteRequest},
+};
+
+/// A fake [`DavExecutor`] that replays canned responses in request order and
+/// records each request's `(method, href)` for assertions. Reads and writes draw
+/// from the **same** response queue, so a mixed read/write flow replays in order;
+/// each write's full [`WriteRequest`] is captured for header/body assertions.
+pub(crate) struct Replay {
+    responses: Mutex<Vec<HttpResponse>>,
+    seen: Mutex<Vec<(DavMethod, String)>>,
+    reads: Mutex<Vec<(DavMethod, String, String, String)>>,
+    writes: Mutex<Vec<WriteRequest>>,
+}
+
+impl Replay {
+    /// Replays the given responses, in order.
+    pub(crate) fn new(responses: Vec<HttpResponse>) -> Self {
+        Self {
+            responses: Mutex::new(responses),
+            seen: Mutex::new(Vec::new()),
+            reads: Mutex::new(Vec::new()),
+            writes: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// The `(method, href)` of each request received so far.
+    pub(crate) fn seen(&self) -> MutexGuard<'_, Vec<(DavMethod, String)>> {
+        self.seen.lock().expect("seen lock")
+    }
+
+    /// The full [`WriteRequest`] of each write (`PUT`/`DELETE`) received so far.
+    pub(crate) fn writes(&self) -> MutexGuard<'_, Vec<WriteRequest>> {
+        self.writes.lock().expect("writes lock")
+    }
+
+    /// Full read requests `(method, href, depth, body)`.
+    pub(crate) fn reads(&self) -> MutexGuard<'_, Vec<(DavMethod, String, String, String)>> {
+        self.reads.lock().expect("reads lock")
+    }
+}
+
+#[async_trait]
+impl DavExecutor for Replay {
+    async fn send(
+        &self,
+        method: DavMethod,
+        href: &str,
+        depth: &str,
+        body: String,
+    ) -> Result<HttpResponse, CalDavError> {
+        self.seen
+            .lock()
+            .expect("seen lock")
+            .push((method, href.to_owned()));
+        self.reads.lock().expect("reads lock").push((
+            method,
+            href.to_owned(),
+            depth.to_owned(),
+            body,
+        ));
+        Ok(self.responses.lock().expect("responses lock").remove(0))
+    }
+
+    async fn send_write(&self, request: WriteRequest) -> Result<HttpResponse, CalDavError> {
+        self.seen
+            .lock()
+            .expect("seen lock")
+            .push((request.method, request.href.clone()));
+        self.writes.lock().expect("writes lock").push(request);
+        Ok(self.responses.lock().expect("responses lock").remove(0))
+    }
+}
+
+/// Lets a test keep a shared handle to the fake after it is moved into a provider
+/// (which takes an owned `Box<dyn DavExecutor>`): clone the `Arc` into the provider
+/// and inspect [`Replay::writes`]/[`Replay::seen`] afterwards.
+#[async_trait]
+impl DavExecutor for std::sync::Arc<Replay> {
+    async fn send(
+        &self,
+        method: DavMethod,
+        href: &str,
+        depth: &str,
+        body: String,
+    ) -> Result<HttpResponse, CalDavError> {
+        (**self).send(method, href, depth, body).await
+    }
+
+    async fn send_write(&self, request: WriteRequest) -> Result<HttpResponse, CalDavError> {
+        (**self).send_write(request).await
+    }
+}
+
+/// A `207 Multi-Status` response carrying `body`.
+pub(crate) fn ok(body: &str) -> HttpResponse {
+    HttpResponse {
+        status: 207,
+        body: body.to_owned(),
+        location: None,
+        etag: None,
+        dav: None,
+        retry_after: None,
+    }
+}
+
+/// A write response: `status`, an optional new `ETag` header, no body.
+pub(crate) fn wrote(status: u16, etag: Option<&str>) -> HttpResponse {
+    HttpResponse {
+        status,
+        body: String::new(),
+        location: None,
+        etag: etag.map(str::to_owned),
+        dav: None,
+        retry_after: None,
+    }
+}
+
+/// An `OPTIONS` response: `200`, no body, and the `DAV` compliance-class header the
+/// server advertised (RFC 4918 §10.1).
+pub(crate) fn options(dav: Option<&str>) -> HttpResponse {
+    HttpResponse {
+        status: 200,
+        body: String::new(),
+        location: None,
+        etag: None,
+        dav: dav.map(str::to_owned),
+        retry_after: None,
+    }
+}
+
+/// An arbitrary HTTP response used to drive status-dependent recovery.
+pub(crate) fn status(status: u16, body: &str) -> HttpResponse {
+    HttpResponse {
+        status,
+        body: body.to_owned(),
+        location: None,
+        etag: None,
+        dav: None,
+        retry_after: None,
+    }
+}
+
+/// A blocking mock HTTP server answering one canned response per connection — the
+/// same shape `provider-jmap`'s tests use.
+pub(crate) fn mock_server(responses: Vec<String>) -> String {
+    mock_server_bytes(responses.into_iter().map(String::into_bytes).collect())
+}
+
+pub(crate) fn mock_server_bytes(responses: Vec<Vec<u8>>) -> String {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("local addr");
+    std::thread::spawn(move || {
+        for response in responses {
+            let (mut stream, _) = listener.accept().expect("accept");
+            let mut buf = [0u8; 8192];
+            let _ = stream.read(&mut buf);
+            let _ = stream.write_all(&response);
+        }
+    });
+    format!("http://{addr}")
+}
+
+/// A `207 Multi-Status` answer carrying `body`.
+pub(crate) fn multistatus(body: &str) -> String {
+    format!(
+        "HTTP/1.1 207 Multi-Status\r\nContent-Type: application/xml\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+}
+
+/// The `OPTIONS` answer `connect` consumes after discovery: a `DAV` compliance-class
+/// header and no body (RFC 4918 §10.1).
+pub(crate) fn options_response(dav: &str) -> String {
+    format!("HTTP/1.1 200 OK\r\nDAV: {dav}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+}
+
+/// A `307` sending the request on to `location`.
+pub(crate) fn redirect(location: &str) -> String {
+    format!(
+        "HTTP/1.1 307 Temporary Redirect\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    )
+}

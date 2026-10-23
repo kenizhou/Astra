@@ -1,0 +1,66 @@
+[package]
+name = "provider-imap"
+description = "IMAP (RFC 9051) read/sync provider adapter for the PIM sync engine, with SMTP (RFC 5321) submission: a hand-rolled minimal client over a generic async stream (pure-Rust TLS via tokio-rustls), normalizing IMAP mail into the engine's SyncUpdate shapes. Implements the engine-provider contract; IMAP email scope is per-mailbox."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+engine-core = { workspace = true }
+engine-provider = { workspace = true }
+# Deriving a list preview from a synced body (IMAP has no server-side snippet, unlike
+# Graph/JMAP): the shared MIME parser turns a raw message into decoded text.
+engine-mime = { workspace = true }
+# The RFC 5322 / MIME message assembler for SMTP submission (shared with the Graph
+# adapter's MIME send), producing the bytes fed to the SMTP `DATA` command.
+engine-rfc5322 = { workspace = true }
+# `io-util` for the line-protocol reader/writer over any async stream; `net` for
+# the live TCP connect; `time` for the IDLE watcher's keep-alive timeout (the
+# RFC 2177 re-issue clock). The protocol is generic over `AsyncRead + AsyncWrite`,
+# so the offline tests drive it over an in-memory duplex with no socket or TLS.
+tokio = { workspace = true, features = ["io-util", "net", "sync", "time"] }
+tokio-rustls = { workspace = true }
+# `try_stream!` builds the resumable, incremental email chunk stream; `futures-util`
+# drives the inner streamed FETCH loop.
+async-stream = { workspace = true }
+futures-util = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+# Parsing IMAP `INTERNALDATE` (`dd-Mon-yyyy hh:mm:ss +zzzz`) into a UTC instant
+# needs offset normalization with calendar rollover; `time` (the same crate
+# engine-core wraps) does it correctly.
+time = { workspace = true }
+
+[features]
+# Exposes `fuzz_parse` for the `fuzz/` cargo-fuzz target; off in normal builds.
+fuzzing = []
+
+[dev-dependencies]
+# Tests add the blocking/macro pieces and `test-util` for `start_paused` — so the
+# watcher's keep-alive timeout fires deterministically with no real waiting.
+tokio = { workspace = true, features = ["io-util", "net", "time", "sync", "macros", "rt-multi-thread", "test-util"] }
+# The connectors tests/example inject come from the shared TLS factory
+# (`docs/agent-guidance/tls.md`): `dangerous-testing` for the harness's self-signed
+# cert (live tests), and the bundled default for the example's verifying connector.
+# The library itself stays root-store-agnostic — the host injects the connector.
+engine-tls = { workspace = true, features = ["dangerous-testing"] }
+# Generates the self-signed cert the in-process TLS+IMAP server in `tls_info` presents,
+# so the real handshake — and the TLS version read off it — is covered offline. Pure
+# Rust; mirrors `engine-tls`'s own round-trip test.
+rcgen = "0.13"
+# The gated live test deserializes stored objects to assert the seed invariants.
+serde = { workspace = true }
+serde_json = { workspace = true }
+stalwart-harness = { path = "../stalwart-harness" }
+# The offline integration + gated live tests drive the full loop through the store.
+engine-store = { workspace = true }
+engine-search = { workspace = true }
+engine-sync = { workspace = true }
+store-sqlite = { workspace = true }
+# The process-kill suite's store files, one directory per case.
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,175 @@
+//! Mail collections (mailboxes, folders, labels).
+
+use serde::{Deserialize, Serialize};
+
+use super::MailboxRole;
+use crate::{extended::ExtendedProperties, ids::MailboxId, version::RevisionTokens};
+
+/// A mail collection: a mailbox, folder, or label.
+///
+/// Identity ([`MailboxId`]), normalized [`role`](MailboxRole), and display name
+/// are three separate things. Membership of messages in this collection is
+/// modeled on the message side, not here. Per-mailbox access rights remain
+/// provider-specific and, when needed, are carried in
+/// [`extended`](Mailbox::extended) rather than asserted as universal fields; the
+/// exceptions are [`accepts_children`](Mailbox::accepts_children) and
+/// [`selectable`](Mailbox::selectable).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Mailbox {
+    /// The collection's stable id.
+    pub id: MailboxId,
+    /// The display name.
+    pub name: String,
+    /// The parent collection for hierarchical providers; `None` at the top
+    /// level.
+    pub parent: Option<MailboxId>,
+    /// The normalized role, if this collection has one.
+    pub role: Option<MailboxRole>,
+    /// A provider-supplied sort hint (JMAP `sortOrder`); lower sorts first.
+    pub sort_order: u32,
+    /// Whether the user is subscribed to this collection (IMAP subscription).
+    pub subscribed: bool,
+    /// How many messages in this collection are unread, as **the server counts
+    /// them** — not as the synced window does. `None` means the provider did not
+    /// report one, which a host must not read as zero.
+    ///
+    /// Server-side rather than derived because a store holds only the synced
+    /// window (a host may sync three months of a mailbox holding years), so
+    /// counting rows answers a different question than the one a folder badge
+    /// asks. All four mail transports report it: JMAP `unreadEmails`, IMAP
+    /// `STATUS (UNSEEN)`, Gmail `messagesUnread`, Graph `unreadItemCount`.
+    ///
+    /// Counts **messages**, not conversations — JMAP alone offers the
+    /// conversation form (`unreadThreads`), so a portable field cannot mean that.
+    #[serde(default)]
+    pub unread_count: Option<u32>,
+    /// Whether a collection may be made inside this one, or moved into it. `false` only where
+    /// the provider says so: an IMAP `\Noinferiors` or delimiter-less folder, a JMAP mailbox
+    /// without `mayCreateChild`, a Gmail system label. `true` claims nothing, because the server
+    /// still refuses what it will not hold.
+    ///
+    /// A portable field rather than a right in [`extended`](Mailbox::extended) because a host
+    /// decides from it what to offer, and all four transports can answer it.
+    #[serde(default = "accepts_children_unless_told")]
+    pub accepts_children: bool,
+    /// Whether the collection can be opened to list its messages. `false` for a level of the
+    /// hierarchy that holds none: IMAP `\Noselect` (Gmail's `[Gmail]`, a server's parent of a
+    /// nested folder), or a JMAP mailbox without `mayReadItems`. A host keeps it in the tree,
+    /// so its children stay under it, and neither opens nor syncs it.
+    #[serde(default = "selectable_unless_stated")]
+    pub selectable: bool,
+    /// Per-object revision tokens, if the provider supplies any.
+    pub revisions: RevisionTokens,
+    /// Preserved provider-defined extended properties.
+    pub extended: ExtendedProperties,
+}
+
+impl Mailbox {
+    /// Creates a top-level mailbox with the given id and name, no role, and
+    /// default metadata.
+    #[must_use]
+    pub fn new(id: MailboxId, name: impl Into<String>) -> Self {
+        Self {
+            id,
+            name: name.into(),
+            parent: None,
+            role: None,
+            sort_order: 0,
+            subscribed: true,
+            unread_count: None,
+            accepts_children: true,
+            selectable: true,
+            revisions: RevisionTokens::none(),
+            extended: ExtendedProperties::new(),
+        }
+    }
+}
+
+const fn accepts_children_unless_told() -> bool {
+    true
+}
+
+/// A row stored before [`Mailbox::selectable`] existed is a folder a host could open.
+const fn selectable_unless_stated() -> bool {
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn id(value: &str) -> MailboxId {
+        MailboxId::try_from(value).unwrap()
+    }
+
+    #[test]
+    fn new_mailbox_has_sensible_defaults() {
+        let mailbox = Mailbox::new(id("inbox"), "Inbox");
+        assert_eq!(mailbox.name, "Inbox");
+        assert!(mailbox.parent.is_none());
+        assert!(mailbox.role.is_none());
+        assert!(mailbox.subscribed);
+        assert!(mailbox.selectable);
+        // Absent, not zero: a mailbox nobody has counted yet is not an empty one.
+        assert!(mailbox.unread_count.is_none());
+    }
+
+    #[test]
+    fn unread_count_roundtrips_and_a_payload_without_it_still_loads() {
+        let mut counted = Mailbox::new(id("inbox"), "Inbox");
+        counted.unread_count = Some(545);
+        let json = serde_json::to_string(&counted).unwrap();
+        assert_eq!(serde_json::from_str::<Mailbox>(&json).unwrap(), counted);
+
+        // A row stored before this field existed deserializes to "not reported"
+        // rather than failing the read — the store is JSON payloads, so this is
+        // what spares the schema a migration.
+        let stored_earlier = serde_json::to_string(&serde_json::json!({
+            "id": "inbox",
+            "name": "Inbox",
+            "parent": null,
+            "role": null,
+            "sort_order": 0,
+            "subscribed": true,
+            "revisions": RevisionTokens::none(),
+            "extended": ExtendedProperties::new(),
+        }))
+        .unwrap();
+        let loaded: Mailbox = serde_json::from_str(&stored_earlier).unwrap();
+        assert!(loaded.unread_count.is_none());
+        // Nothing was known against it, so nothing is withheld: the server still answers.
+        assert!(loaded.accepts_children);
+        // Every folder stored before the field existed was one a host could open.
+        assert!(loaded.selectable);
+    }
+
+    #[test]
+    fn a_new_mailbox_accepts_children_and_a_refusal_roundtrips() {
+        let mut mailbox = Mailbox::new(id("inbox"), "Inbox");
+        assert!(mailbox.accepts_children);
+        mailbox.accepts_children = false;
+        let json = serde_json::to_string(&mailbox).unwrap();
+        assert!(
+            !serde_json::from_str::<Mailbox>(&json)
+                .unwrap()
+                .accepts_children
+        );
+    }
+
+    #[test]
+    fn a_container_roundtrips_as_one() {
+        let mut container = Mailbox::new(id("work"), "Work");
+        container.selectable = false;
+        let json = serde_json::to_string(&container).unwrap();
+        assert_eq!(serde_json::from_str::<Mailbox>(&json).unwrap(), container);
+    }
+
+    #[test]
+    fn hierarchy_and_role_roundtrip() {
+        let mut child = Mailbox::new(id("work/clients"), "Clients");
+        child.parent = Some(id("work"));
+        child.role = Some(MailboxRole::Archive);
+        let json = serde_json::to_string(&child).unwrap();
+        assert_eq!(serde_json::from_str::<Mailbox>(&json).unwrap(), child);
+    }
+}

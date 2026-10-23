@@ -109,7 +109,7 @@ format); no-op when equal; otherwise `git archive` the new revision into
 the worktree's `vendor/engine`, commit `vendor: upstream <rev> <date>`,
 push, and open (or update) the `vendor-sync -> main` PR with a classified
 digest of the rev range: docs-only / tests-only / ci-docker /
-dependencies (`Cargo.toml`, `Cargo.lock` — the rusqlite watch item) /
+dependencies (`Cargo.toml`, `Cargo.lock`: the rusqlite watch item) /
 behaviour / security-keyword hits. Security-classified syncs are flagged
 in the PR body and never auto-merge. The script never merges main into
 `vendor-sync`, never force-pushes, and any failure exits non-zero into
@@ -150,7 +150,7 @@ battery stays member-only.
 
 PR 1: (1) pristine proof by git blob hashes (`git ls-files -s
 vendor/engine`, prefix-stripped and sorted, equals
-`git ls-tree -r <rev>` — never working-tree bytes, because autocrlf pins
+`git ls-tree -r <rev>`, never working-tree bytes, because autocrlf pins
 LF only for some extensions); (2) full workspace battery green;
 (3) xtask gate green; (4) `cargo tree` and `Cargo.lock` contain no
 `allodia-eu` source lines; (5) `cargo metadata --no-deps` shows no engine

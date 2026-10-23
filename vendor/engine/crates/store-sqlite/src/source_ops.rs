@@ -1,0 +1,337 @@
+//! The on-demand message-content caches: raw *bytes* on the filesystem, body *text*
+//! in SQLite (`store-and-sync.md`).
+//!
+//! Both implement lease-free, idempotent caches for [`SqliteStore`]. The raw bytes go
+//! to the content-addressed filesystem blob area (`blob.rs`) — its read/write runs on
+//! a blocking thread **without** the connection lock ([`SqliteStore::block`]), so a
+//! multi-megabyte blob never serializes the store; only the small metadata SQL takes
+//! the lock. The body text (the reading view + the search source) lives in the
+//! `message_body` table, whose `message_body_fts` index a trigger maintains.
+//!
+//! Both rows are removed with the message they cache ([`drop_cached_content`], called
+//! from the scope tombstone), so sync depth bounds what an account occupies on disk.
+
+use async_trait::async_trait;
+use engine_core::{
+    ids::{AccountId, ProviderKey},
+    mail::MessageBody,
+    raw::RawMime,
+};
+use engine_store::{
+    Clock, MailListRow, MessageBodyStore, MessageSourceCache, Result, SourcesDropped,
+};
+use rusqlite::{Connection, Transaction};
+
+use crate::{SqliteStore, blob, convert::instant_to_text, mail_ops, sql};
+
+#[async_trait]
+impl<C: Clock> MessageSourceCache for SqliteStore<C> {
+    async fn put_message_source(
+        &self,
+        account: &AccountId,
+        key: &ProviderKey,
+        source: RawMime,
+    ) -> Result<()> {
+        // Heavy work — hashing + the blob file write — runs off the connection lock.
+        let root = self.blobs.root().to_path_buf();
+        let bytes = source.into_bytes();
+        // Counted here because this is the only place that knows it: the number a reclaim pass
+        // needs is what we *wrote*, not what a provider estimated, and the two disagree — a
+        // provider that reports no size at all still lands exact bytes on disk.
+        let size = i64::try_from(bytes.len()).unwrap_or(i64::MAX);
+        let hash = Self::block(move || blob::write_source(&root, &bytes)).await?;
+
+        // Only the tiny metadata upsert takes the connection.
+        let fetched_at = instant_to_text(self.clock.now());
+        let account = account.as_str().to_owned();
+        let key = key.as_str().to_owned();
+        self.call(move |conn| upsert_source(conn, &account, &key, &hash, &fetched_at, size))
+            .await
+    }
+
+    async fn drop_message_sources_over(
+        &self,
+        account: &AccountId,
+        octets: u64,
+    ) -> Result<SourcesDropped> {
+        let root = self.blobs.root().to_path_buf();
+        let id = account.as_str().to_owned();
+
+        // Sources cached before the size column existed carry no size, so they would survive
+        // every cap. Measure them from the blob and write the answer back — after this the
+        // column answers on its own.
+        let unsized_rows: Vec<(String, String)> = {
+            let id = id.clone();
+            self.read(move |conn| {
+                sql::query_all(
+                    conn,
+                    "SELECT provider_key, content_hash FROM message_source
+                     WHERE account = ?1 AND size_octets IS NULL",
+                    (id,),
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+            })
+            .await?
+        };
+        if !unsized_rows.is_empty() {
+            let measured = {
+                let root = root.clone();
+                Self::block(move || {
+                    Ok(unsized_rows
+                        .into_iter()
+                        .map(|(key, hash)| {
+                            let size = std::fs::metadata(blob::source_path(&root, &hash))
+                                .ok()
+                                .map(|meta| i64::try_from(meta.len()).unwrap_or(i64::MAX));
+                            (key, size)
+                        })
+                        .collect::<Vec<_>>())
+                })
+                .await?
+            };
+            let id = id.clone();
+            self.call(move |conn| record_measured_sizes(conn, &id, &measured))
+                .await?;
+        }
+
+        let id = id.clone();
+        let cap = i64::try_from(octets).unwrap_or(i64::MAX);
+        self.call(move |conn| delete_sources_over(conn, &id, cap))
+            .await
+    }
+
+    async fn get_message_source(
+        &self,
+        account: &AccountId,
+        key: &ProviderKey,
+    ) -> Result<Option<RawMime>> {
+        let account = account.as_str().to_owned();
+        let key = key.as_str().to_owned();
+        let Some(hash) = self
+            .read(move |conn| select_hash(conn, &account, &key))
+            .await?
+        else {
+            return Ok(None);
+        };
+        // The blob read (and its content-hash verification) runs off the lock; a
+        // missing/corrupt blob reads as a miss so the caller re-fetches.
+        let root = self.blobs.root().to_path_buf();
+        Ok(Self::block(move || blob::read_source(&root, &hash))
+            .await?
+            .map(RawMime::new))
+    }
+}
+
+#[async_trait]
+impl<C: Clock> MessageBodyStore for SqliteStore<C> {
+    async fn put_message_body(
+        &self,
+        account: &AccountId,
+        key: &ProviderKey,
+        body: &MessageBody,
+    ) -> Result<()> {
+        let fetched_at = instant_to_text(self.clock.now());
+        let account = account.as_str().to_owned();
+        let key = key.as_str().to_owned();
+        let plain = body.plain().unwrap_or_default().to_owned();
+        let html = body.html().map(str::to_owned);
+        self.call(move |conn| {
+            upsert_body(conn, &account, &key, &plain, html.as_deref(), &fetched_at)
+        })
+        .await
+    }
+
+    async fn set_mail_preview(
+        &self,
+        account: &AccountId,
+        key: &ProviderKey,
+        preview: &str,
+    ) -> Result<()> {
+        let account = account.as_str().to_owned();
+        let key = key.as_str().to_owned();
+        let preview = preview.to_owned();
+        self.call(move |conn| {
+            // `preview IS NULL` is the whole rule: a provider that sent its own snippet keeps
+            // it, and a message already filled costs a matched-nothing UPDATE rather than a
+            // rewrite. Keyed by account rather than scope because a body is fetched without
+            // one — the same message in two folders shares the row this sets.
+            sql::execute(
+                conn,
+                "UPDATE message SET preview = ?3
+                  WHERE account = ?1 AND provider_key = ?2 AND preview IS NULL",
+                (account.as_str(), key.as_str(), preview.as_str()),
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    async fn get_message_body(
+        &self,
+        account: &AccountId,
+        key: &ProviderKey,
+    ) -> Result<Option<MessageBody>> {
+        let account = account.as_str().to_owned();
+        let key = key.as_str().to_owned();
+        self.read(move |conn| select_body(conn, &account, &key))
+            .await
+    }
+
+    async fn mail_missing_body(
+        &self,
+        accounts: &[AccountId],
+        limit: usize,
+    ) -> Result<Vec<MailListRow>> {
+        let accounts = accounts.to_vec();
+        self.read(move |conn| mail_ops::mail_missing_body(conn, &accounts, limit))
+            .await
+    }
+}
+
+/// Upserts the metadata row mapping `(account, key)` to its blob's content hash.
+fn upsert_source(
+    conn: &Connection,
+    account: &str,
+    key: &str,
+    hash: &str,
+    fetched_at: &str,
+    size: i64,
+) -> Result<()> {
+    sql::execute(
+        conn,
+        "INSERT INTO message_source (account, provider_key, content_hash, fetched_at, size_octets)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(account, provider_key) DO UPDATE SET
+             content_hash = excluded.content_hash,
+             fetched_at   = excluded.fetched_at,
+             size_octets  = excluded.size_octets",
+        (account, key, hash, fetched_at, size),
+    )?;
+    Ok(())
+}
+
+/// Reads the blob content hash recorded for `(account, key)`, if any.
+fn select_hash(conn: &Connection, account: &str, key: &str) -> Result<Option<String>> {
+    sql::query_opt(
+        conn,
+        "SELECT content_hash FROM message_source WHERE account = ?1 AND provider_key = ?2",
+        (account, key),
+        |row| row.get(0),
+    )
+}
+
+/// Upserts the extracted body text for `(account, key)`; the `message_body_au`
+/// trigger keeps `message_body_fts` in sync.
+fn upsert_body(
+    conn: &Connection,
+    account: &str,
+    key: &str,
+    plain: &str,
+    html: Option<&str>,
+    fetched_at: &str,
+) -> Result<()> {
+    sql::execute(
+        conn,
+        "INSERT INTO message_body (account, provider_key, plain, html, fetched_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(account, provider_key) DO UPDATE SET
+             plain = excluded.plain, html = excluded.html, fetched_at = excluded.fetched_at",
+        (account, key, plain, html, fetched_at),
+    )?;
+    Ok(())
+}
+
+/// Reads the cached body text for `(account, key)`, if any. An empty stored `plain`
+/// maps back to "no plain part".
+fn select_body(conn: &Connection, account: &str, key: &str) -> Result<Option<MessageBody>> {
+    let row: Option<(String, Option<String>)> = sql::query_opt(
+        conn,
+        "SELECT plain, html FROM message_body WHERE account = ?1 AND provider_key = ?2",
+        (account, key),
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    Ok(row.map(|(plain, html)| {
+        let plain = (!plain.is_empty()).then_some(plain);
+        MessageBody::new(plain, html)
+    }))
+}
+
+/// Drops the two lease-free content caches for a removed message: the extracted body
+/// text (`message_body`, whose FTS5 shadow follows through its trigger) and the
+/// raw-source metadata (`message_source`). They are the bulk of what an account
+/// occupies on disk, so mail leaving the store takes them with it rather than leaving
+/// them to grow without bound. The blob the source row named is content-addressed and
+/// shared, so it is reclaimed by the blob sweep rather than here.
+///
+/// The caches are keyed by `(account, provider_key)` while a tombstone is per scope, so
+/// a key still live in **another** scope of the same account keeps its cache — a Graph
+/// message id is account-global and immutable, so a move leaves a stale copy in the old
+/// folder's scope until it reconciles. The caller has already deleted the `message` row
+/// for this scope (`derived_ops::delete_derived_rows`), so the guard sees only the others.
+///
+/// Both statements are keyed index lookups and match nothing for a calendar or contact
+/// object, so the non-mail scopes pay two probes rather than a branch here on a domain
+/// this function would have to re-derive from the scope key.
+pub(crate) fn drop_cached_content(tx: &Transaction<'_>, scope_key: &str, key: &str) -> Result<()> {
+    for table in ["message_body", "message_source"] {
+        sql::execute(
+            tx,
+            &format!(
+                "DELETE FROM {table}
+                  WHERE provider_key = ?2
+                    AND account = (SELECT account FROM sync_scope WHERE scope_key = ?1)
+                    AND NOT EXISTS (SELECT 1 FROM message
+                                     WHERE message.account = {table}.account
+                                       AND message.provider_key = ?2)"
+            ),
+            (scope_key, key),
+        )?;
+    }
+    Ok(())
+}
+
+/// Writes back sizes measured from the blob area for rows that never recorded one. A blob that
+/// is gone leaves the row `NULL`: it occupies nothing, so no cap should remove it, and the
+/// sweep has already reclaimed whatever it held.
+fn record_measured_sizes(
+    conn: &Connection,
+    account: &str,
+    measured: &[(String, Option<i64>)],
+) -> Result<()> {
+    for (key, size) in measured {
+        let Some(size) = size else { continue };
+        sql::execute(
+            conn,
+            "UPDATE message_source SET size_octets = ?3
+             WHERE account = ?1 AND provider_key = ?2",
+            (account, key, size),
+        )?;
+    }
+    Ok(())
+}
+
+/// Removes the metadata rows for `account`'s cached sources over `cap` octets and reports what
+/// they held. The blobs themselves are left to the sweep, which is the one place that knows
+/// whether another row still names the same content.
+fn delete_sources_over(conn: &Connection, account: &str, cap: i64) -> Result<SourcesDropped> {
+    let sizes: Vec<i64> = sql::query_all(
+        conn,
+        "SELECT size_octets FROM message_source
+         WHERE account = ?1 AND size_octets IS NOT NULL AND size_octets > ?2",
+        (account, cap),
+        |r| r.get(0),
+    )?;
+    if sizes.is_empty() {
+        return Ok(SourcesDropped::default());
+    }
+    sql::execute(
+        conn,
+        "DELETE FROM message_source
+         WHERE account = ?1 AND size_octets IS NOT NULL AND size_octets > ?2",
+        (account, cap),
+    )?;
+    Ok(SourcesDropped {
+        sources_removed: sizes.len(),
+        octets_freed: sizes.iter().map(|s| u64::try_from(*s).unwrap_or(0)).sum(),
+    })
+}

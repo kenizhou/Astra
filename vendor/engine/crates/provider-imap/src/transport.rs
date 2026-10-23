@@ -1,0 +1,395 @@
+//! IMAP transport: the tagged line protocol over any async stream.
+//!
+//! [`Connection`] is generic over the stream `S`, so the offline tests drive the
+//! whole protocol over an in-memory mock while the live client uses a `tokio-rustls`
+//! TLS stream — command sequencing, literal handling, and parsing are identical in
+//! both (`docs/agent-guidance/imap-smtp.md`). It speaks only the handful of commands
+//! the read/sync slice needs (`LOGIN`, `SELECT`, `UID SEARCH`, `UID FETCH`, `LIST`,
+//! `LOGOUT`); the higher-level snapshot/delta logic lives in [`crate::sync`].
+
+use std::time::Duration;
+
+use tokio::io::{AsyncRead, AsyncWrite, BufReader};
+
+use crate::{
+    capability::Negotiated,
+    deadline::{self, BOUNDS},
+    error::{ImapError, ImapResult},
+    parse::{self, FetchRow, ListRow},
+    transport_command::{list_command, quote},
+};
+
+/// A connected IMAP session over a generic async byte stream.
+pub(crate) struct Connection<S> {
+    pub(crate) inner: BufReader<S>,
+    /// The command-tag counter (`a1`, `a2`, …); `pub(crate)` so
+    /// [`Connection::resume`](crate::transport_starttls) can reset it on the
+    /// post-STARTTLS stream.
+    pub(crate) tag: u32,
+    /// The dialect and extension set this session negotiated (`CAPABILITY` + `ENABLE`),
+    /// which decides the shape of every later command and how mailbox names are encoded.
+    /// `pub(crate)` so [`Connection::resume`](crate::transport_starttls) can seed the
+    /// post-STARTTLS defaults and tests can pin a server's answer.
+    pub(crate) negotiated: Negotiated,
+    /// The tag of a streamed `UID FETCH` ([`Connection::uid_fetch_stream_start`]) whose
+    /// tagged completion has not yet been read — set while its rows are being pulled
+    /// one at a time. If a streaming fetch is **abandoned** mid-response (the caller
+    /// drops its stream on a `StaleLease` restart), this stays set; the next
+    /// [`Connection::command`] drains the leftover response to this tag before issuing
+    /// its own, so the connection self-heals rather than desyncing.
+    pub(crate) pending_tag: Option<String>,
+    /// The mailbox this session has open, if any ([`crate::transport_select`]).
+    pub(crate) selected: Option<crate::transport_select::Selection>,
+}
+
+impl<S> core::fmt::Debug for Connection<S> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Connection")
+            .field("tag", &self.tag)
+            .field("negotiated", &self.negotiated)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<S: AsyncRead + AsyncWrite + Unpin + Send> Connection<S> {
+    /// Wraps a stream and consumes the server greeting.
+    ///
+    /// # Errors
+    ///
+    /// [`ImapError::Bye`] if the server greets with `* BYE` (refusing the
+    /// connection), [`ImapError::Protocol`] on an unrecognized greeting, or
+    /// [`ImapError::Io`] on a transport failure.
+    pub(crate) async fn open(stream: S) -> ImapResult<Self> {
+        let mut connection = Self {
+            inner: BufReader::new(stream),
+            tag: 0,
+            negotiated: Negotiated::default(),
+            pending_tag: None,
+            selected: None,
+        };
+        connection.read_greeting().await?;
+        Ok(connection)
+    }
+
+    /// Marks an extension enabled, for tests that drive a path over a mock transcript
+    /// without replaying the live `CAPABILITY`/`ENABLE` negotiation.
+    #[cfg(test)]
+    pub(crate) fn force_enabled(&mut self, atom: &str) {
+        self.negotiated.confirm_enabled(&[atom.to_owned()]);
+    }
+
+    /// Reads the untagged greeting: `* OK`/`* PREAUTH` is success, `* BYE` is a
+    /// refusal. A server that accepts the connection and never greets is given
+    /// [`Deadlines::reply`](engine_provider::Deadlines::reply), as every response is.
+    async fn read_greeting(&mut self) -> ImapResult<()> {
+        let line = self.read_line().await?;
+        let text = String::from_utf8_lossy(&line);
+        if text.starts_with("* OK") || text.starts_with("* PREAUTH") {
+            Ok(())
+        } else if text.starts_with("* BYE") {
+            Err(ImapError::bye(text.trim().to_owned()))
+        } else {
+            Err(ImapError::protocol(format!(
+                "unexpected greeting: {}",
+                text.trim()
+            )))
+        }
+    }
+
+    /// Allocates the next command tag (`a1`, `a2`, …). `pub(crate)` so the IDLE
+    /// primitives in [`crate::idle`] can tag the `IDLE` command they manage outside
+    /// the normal request/response [`command`](Self::command) round trip.
+    pub(crate) fn next_tag(&mut self) -> String {
+        self.tag += 1;
+        format!("a{}", self.tag)
+    }
+
+    /// Writes raw bytes and flushes — the unframed send the IDLE primitives need to
+    /// issue `<tag> IDLE\r\n` and the bare `DONE\r\n` continuation
+    /// ([`crate::idle`]), which fall outside [`command`](Self::command)'s tagged
+    /// request/response shape. Every write here goes through it, a piece at a time
+    /// ([`deadline::write`]), so a server that stops reading cannot hold one.
+    pub(crate) async fn send_raw(&mut self, bytes: &[u8]) -> ImapResult<()> {
+        Ok(deadline::write(&mut self.inner, bytes).await?)
+    }
+
+    /// Sends a tagged command and collects its untagged responses and completion
+    /// detail. A `NO`/`BAD` completion is an error. `pub(crate)` so the STARTTLS
+    /// preamble (`crate::transport_starttls`) can issue `CAPABILITY`/`STARTTLS` over
+    /// the plaintext connection reusing the tagged round trip.
+    pub(crate) async fn command(&mut self, command: &str) -> ImapResult<Response> {
+        self.command_within(command, BOUNDS.reply()).await
+    }
+
+    /// [`command`](Self::command), with each read of its response bounded by `stall` as
+    /// [`read_line_within`](Self::read_line_within) bounds a line.
+    async fn command_within(&mut self, command: &str, stall: Duration) -> ImapResult<Response> {
+        // If a streamed `UID FETCH` was abandoned mid-response, finish reading it to
+        // its tag first so this command's reply is not corrupted by leftover lines.
+        self.drain_pending().await?;
+        let tag = self.next_tag();
+        self.send_raw(format!("{tag} {command}\r\n").as_bytes())
+            .await?;
+        self.read_response_within(&tag, stall).await
+    }
+
+    /// Reads untagged responses until this command's tagged completion, each line bounded by
+    /// [`Deadlines::reply`](engine_provider::Deadlines::reply).
+    pub(crate) async fn read_response(&mut self, tag: &str) -> ImapResult<Response> {
+        self.read_response_within(tag, BOUNDS.reply()).await
+    }
+
+    async fn read_response_within(&mut self, tag: &str, stall: Duration) -> ImapResult<Response> {
+        let mut untagged = Vec::new();
+        let prefix = format!("{tag} ");
+        loop {
+            let line = self.read_line_within(Some(stall)).await?;
+            if let Some(body) = strip_ascii_prefix(&line, b"* ") {
+                untagged.push(body.to_vec());
+                continue;
+            }
+            if strip_ascii_prefix(&line, b"+ ").is_some() {
+                // We never send synchronizing literals in commands, so the server
+                // should never ask for continuation.
+                return Err(ImapError::protocol("unexpected continuation request"));
+            }
+            let text = String::from_utf8_lossy(&line);
+            let Some(rest) = text.strip_prefix(&prefix) else {
+                return Err(ImapError::protocol(format!(
+                    "unexpected line: {}",
+                    text.trim()
+                )));
+            };
+            let mut parts = rest.trim_end().splitn(2, ' ');
+            let status = parts.next().unwrap_or_default();
+            let detail = parts.next().unwrap_or_default().to_owned();
+            return match status.to_ascii_uppercase().as_str() {
+                "OK" => Ok(Response { untagged, detail }),
+                "NO" => Err(ImapError::no(detail)),
+                "BAD" => Err(ImapError::bad(detail)),
+                other => Err(ImapError::protocol(format!("unknown completion {other}"))),
+            };
+        }
+    }
+
+    /// `LOGIN user password`. A `NO` here is an authentication failure, not a
+    /// generic invalid-state error, unless it carries `[LIMIT]`: the server is refusing
+    /// sessions for this account, and the credential was never judged.
+    ///
+    /// Only here, because RFC 5530's `LIMIT` is any implementation limit: on `STORE` it can
+    /// mean too many keywords, which no wait will fix. Before a session exists, the only
+    /// limit left to hit is on sessions.
+    pub(crate) async fn login(&mut self, user: &str, password: &str) -> ImapResult<()> {
+        let command = format!("LOGIN {} {}", quote(user), quote(password));
+        match self.command(&command).await {
+            Ok(_) => Ok(()),
+            Err(ImapError::No(detail)) if opens_with_code(&detail, "LIMIT") => {
+                Err(ImapError::rate_limited(detail))
+            }
+            Err(ImapError::No(detail)) => Err(ImapError::auth(detail)),
+            Err(other) => Err(other),
+        }
+    }
+
+    /// Reads the post-auth `CAPABILITY` and turns on everything this session can use, in
+    /// one `ENABLE`.
+    ///
+    /// Capabilities are queried explicitly **after** login, because servers (Stalwart
+    /// included) advertise several only post-authentication. What gets enabled is decided
+    /// by [`Negotiated::enable_arguments`]: the IMAP4rev2 dialect where offered, and every
+    /// extension that changes server behaviour on announcement. Enabling the dialect is
+    /// worth the argument on its own — rev2 folds a dozen extensions into the base
+    /// protocol (RFC 9051 Appendix E), so one `ENABLE` buys all of them at once.
+    ///
+    /// Best-effort by design: only what the server confirms in `* ENABLED` takes effect
+    /// (a bare `* ENABLED` enables nothing, RFC 5161 §3.1), and a server that advertises
+    /// something then refuses to enable it (`NO`/`BAD`) leaves the session on the baseline
+    /// rather than failing the connection. A transport error still propagates.
+    ///
+    /// # Errors
+    ///
+    /// [`ImapError::Io`] or another non-refusal failure of `CAPABILITY`/`ENABLE`.
+    pub(crate) async fn negotiate(&mut self) -> ImapResult<()> {
+        let capabilities = self.capabilities().await?;
+        self.negotiated = Negotiated::from_capabilities(&capabilities);
+
+        let arguments = self.negotiated.enable_arguments();
+        if arguments.is_empty() {
+            return Ok(());
+        }
+        match self
+            .command(&format!("ENABLE {}", arguments.join(" ")))
+            .await
+        {
+            Ok(response) => {
+                let enabled = crate::parse_qresync::parse_enabled(response.untagged());
+                self.negotiated.confirm_enabled(&enabled);
+            }
+            Err(ImapError::No(_) | ImapError::Bad(_)) => {}
+            Err(other) => return Err(other),
+        }
+        Ok(())
+    }
+
+    /// `UID FETCH <set> (<items>)`, returning the parsed rows.
+    pub(crate) async fn uid_fetch(&mut self, set: &str, items: &str) -> ImapResult<Vec<FetchRow>> {
+        let response = self.command(&format!("UID FETCH {set} ({items})")).await?;
+        parse::parse_fetch(&response.untagged)
+    }
+
+    /// `UID FETCH <set> (<items>) (CHANGEDSINCE <modseq> VANISHED)` — the QRESYNC
+    /// incremental delta (RFC 7162 §3.1.4.1, §3.2.5). The server returns a `FETCH` for
+    /// every message whose mod-sequence is greater than `modseq` (new arrivals *and*
+    /// flag changes, with full metadata) and a `* VANISHED (EARLIER) <set>` listing the
+    /// UIDs expunged since `modseq`. Returns the changed rows paired with the expanded
+    /// vanished UIDs, both read from the one command's untagged responses.
+    pub(crate) async fn uid_fetch_changedsince(
+        &mut self,
+        set: &str,
+        items: &str,
+        modseq: u64,
+    ) -> ImapResult<(Vec<FetchRow>, Vec<u32>)> {
+        let response = self
+            .command(&format!(
+                "UID FETCH {set} ({items}) (CHANGEDSINCE {modseq} VANISHED)"
+            ))
+            .await?;
+        let rows = parse::parse_fetch(&response.untagged)?;
+        let vanished = crate::parse_qresync::parse_vanished(&response.untagged);
+        Ok((rows, vanished))
+    }
+
+    /// `UID SEARCH <criteria>` in the selected mailbox — the matched UIDs (empty if none
+    /// match), tolerating both the classic `* SEARCH` and the extended `* ESEARCH` reply.
+    /// `criteria` is already-formed search syntax; a caller composing in a non-literal value
+    /// quotes it ([`quote`]) first.
+    pub(crate) async fn uid_search(&mut self, criteria: &str) -> ImapResult<Vec<u32>> {
+        let response = self.command(&format!("UID SEARCH {criteria}")).await?;
+        Ok(parse::parse_search(&response.untagged))
+    }
+
+    /// `UID FETCH <uid> (BODY.PEEK[])`, returning the raw RFC 5322 bytes of the
+    /// message (the whole source, headers + every part), or `None` if the server
+    /// returned no `BODY[]` for that UID — i.e. it was expunged since the last sync
+    /// (fetching a non-existent UID is a tagged `OK` with no data, RFC 9051 §6.4.8).
+    /// `.PEEK` does not set `\Seen` — fetching a body to read it must not silently
+    /// mark it read; the host decides that via a separate edit. Only the matching
+    /// UID's data is accepted, so an unsolicited `FETCH` for another UID (a
+    /// concurrent flag update) cannot return the wrong message's bytes.
+    pub(crate) async fn uid_fetch_body(&mut self, uid: u32) -> ImapResult<Option<Vec<u8>>> {
+        let response = self
+            .command_within(&format!("UID FETCH {uid} (BODY.PEEK[])"), BOUNDS.stall())
+            .await?;
+        Ok(crate::parse_body::parse_fetch_body(&response.untagged, uid))
+    }
+
+    /// `LIST "" "*"`, returning every mailbox — asking for its SPECIAL-USE attributes
+    /// wherever the server advertised RFC 6154, on either dialect (see
+    /// [`Negotiated::must_request_special_use`]; [`crate::place`] resolves the Sent/Drafts
+    /// folder from them).
+    pub(crate) async fn list(&mut self) -> ImapResult<Vec<ListRow>> {
+        let response = self
+            .command(&list_command(
+                self.negotiated.must_request_special_use(),
+                false,
+            ))
+            .await?;
+        parse::parse_list(response.untagged())
+    }
+
+    /// `UID STORE <set> <item>` — alters the flags of the named UIDs, where `item`
+    /// is e.g. `+FLAGS.SILENT (\Seen)` or `-FLAGS.SILENT (\Flagged)` (RFC 9051
+    /// §6.4.6). The `.SILENT` suffix suppresses the per-message `FETCH` echo, so no
+    /// response parsing is needed — a tagged `OK` is success, a `NO`/`BAD` an error.
+    pub(crate) async fn uid_store(&mut self, set: &str, item: &str) -> ImapResult<()> {
+        self.command(&format!("UID STORE {set} {item}")).await?;
+        Ok(())
+    }
+
+    /// `UID MOVE <set> <mailbox>` — moves the named UIDs to `dest` (RFC 6851), so
+    /// the move is atomic server-side (copy + `\Deleted` + expunge in one command,
+    /// where supported). The destination is a quoted string.
+    pub(crate) async fn uid_move(&mut self, set: &str, dest: &str) -> ImapResult<()> {
+        self.command(&format!("UID MOVE {set} {}", self.quoted_name(dest)))
+            .await?;
+        Ok(())
+    }
+
+    /// `UID EXPUNGE <set>` — permanently removes only the named `\Deleted` UIDs
+    /// (UIDPLUS, RFC 4315), so a concurrent `\Deleted` mark elsewhere in the mailbox
+    /// is not collaterally expunged.
+    pub(crate) async fn uid_expunge(&mut self, set: &str) -> ImapResult<()> {
+        self.command(&format!("UID EXPUNGE {set}")).await?;
+        Ok(())
+    }
+}
+
+/// Whether a completion's text opens with the argument-less response code `code`. A code
+/// is only a code at the start of the text (RFC 3501 `resp-text`), and it is an atom, so
+/// case does not matter.
+pub(crate) fn opens_with_code(detail: &str, code: &str) -> bool {
+    detail
+        .strip_prefix('[')
+        .and_then(|rest| rest.split_once(']'))
+        .is_some_and(|(found, _)| found.eq_ignore_ascii_case(code))
+}
+
+/// Extracts `(validity, uid)` from an `[APPENDUID validity uid]` response code
+/// (RFC 4315), if present.
+pub(crate) fn parse_append_uid(detail: &str) -> Option<(u32, u32)> {
+    let start = detail.find("[APPENDUID ")? + "[APPENDUID ".len();
+    let rest = &detail[start..];
+    let end = rest.find(']')?;
+    let mut parts = rest[..end].split_whitespace();
+    let validity = parts.next()?.parse().ok()?;
+    let uid = parts.next()?.parse().ok()?;
+    Some((validity, uid))
+}
+
+/// One command's untagged responses plus its completion detail. `pub(crate)` so
+/// the STARTTLS preamble (`crate::transport_starttls`) can read a `CAPABILITY`
+/// response through the shared [`Connection::command`].
+pub(crate) struct Response {
+    untagged: Vec<Vec<u8>>,
+    /// `pub(crate)` so the `APPEND` half in [`crate::transport_append`] can read the
+    /// completion line its `[APPENDUID …]` response code rides on.
+    pub(crate) detail: String,
+}
+
+impl Response {
+    /// Just the untagged lines — the only place *data* ever arrives.
+    ///
+    /// The counterpart to [`into_all_lines`](Self::into_all_lines), which is for reading a
+    /// **response code** that may ride the completion line instead. Handing the completion
+    /// line to a data parser lets a server's prose masquerade as data: Dovecot answers a
+    /// `LIST` with `List completed (0.003 + 0.000 secs).`, whose first word is the keyword
+    /// and whose trailing period lands where the mailbox name goes.
+    pub(crate) fn untagged(&self) -> &[Vec<u8>] {
+        &self.untagged
+    }
+
+    /// The untagged lines plus the completion detail, consumed (no clone), so a
+    /// `[UIDVALIDITY n]` response code in either place is seen.
+    pub(crate) fn into_all_lines(self) -> Vec<Vec<u8>> {
+        let mut lines = self.untagged;
+        lines.push(self.detail.into_bytes());
+        lines
+    }
+}
+
+/// Strips an ASCII prefix, returning the remainder without its trailing CRLF.
+/// `pub(crate)` so [`crate::idle`] can peel the `* ` from an untagged line before
+/// classifying the IDLE notification it carries.
+pub(crate) fn strip_ascii_prefix<'a>(line: &'a [u8], prefix: &[u8]) -> Option<&'a [u8]> {
+    let rest = line.strip_prefix(prefix)?;
+    let rest = rest.strip_suffix(b"\n").unwrap_or(rest);
+    Some(rest.strip_suffix(b"\r").unwrap_or(rest))
+}
+
+#[cfg(test)]
+#[path = "transport_tests.rs"]
+mod tests;
+
+#[cfg(test)]
+#[path = "transport_negotiate_tests.rs"]
+mod negotiate_tests;

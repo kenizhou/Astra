@@ -1,0 +1,90 @@
+# Deterministic Stalwart protocol test harness (Stalwart v0.16).
+#
+# `docker compose up -d --wait` brings up a Stalwart server that self-bootstraps
+# through its management API, creates the test accounts, and seeds one shared
+# dataset every protocol sees (JMAP, IMAP, SMTP, CalDAV, CardDAV) — then reports healthy
+# once seeding is done (the healthcheck gates on a post-seed marker). Tests
+# connect to the host-mapped ports below via the STALWART_* env vars (see
+# docker/stalwart/README.md and crates/stalwart-harness).
+#
+# Transport: JMAP + CalDAV + management on plaintext HTTP 8080; SMTP plaintext on
+# 25; SMTP submission implicit-TLS on 465; IMAP implicit-TLS on 993 — all Stalwart
+# default listeners, using the server's self-signed test certificate (tests trust-skip
+# explicitly; this never touches a host trust store). The entrypoint additionally
+# provisions STARTTLS listeners for IMAP (143) and SMTP submission (587) — Stalwart
+# supports these ports but recommends implicit TLS (993/465), so a fresh bootstrap does
+# not create them; we add them to cover the engine's STARTTLS transports.
+#
+# Determinism: the image is pinned by sha256 digest and the whole setup is driven
+# from fixed inputs. Start from a clean slate with `docker compose down -v`
+# before `up` (CI always does).
+
+name: stalwart-harness
+
+services:
+  stalwart:
+    # stalwartlabs/stalwart v0.16.24, pinned by multi-arch digest (linux/amd64 +
+    # linux/arm64). Bump deliberately: re-resolve the digest and update CI too.
+    #
+    # Bumped from v0.16.21 in its own change, after running the whole gated suite from a
+    # wiped volume (see docs/agent-guidance/stalwart-harness.md → "The pinned version").
+    # What v0.16.22–v0.16.24 changed *near* this repo:
+    #
+    #   - v0.16.24 stopped `Email/set` giving a message IMAP UID 0 when one patch carries
+    #     a full `mailboxIds` equal to the current membership *and* a keyword change. That
+    #     is the report patch's shape whenever the message already sits in the
+    #     destination: reproduced on v0.16.22, where a junk report of a message already in
+    #     Junk left it at UID 0, which no IMAP client can address
+    #     (`docs/agent-guidance/jmap.md` → reporting).
+    #
+    # Still true from earlier pins: v0.16.21 rejects a `CalendarEvent/set` that asks for
+    # scheduling with a `forbidden` `SetError` when the account cannot schedule (iTIP
+    # disabled, no calendar address, or no `CalendarSchedulingSend`). `provider-jmap` asks
+    # on *every* calendar write, so on such an account every write fails; the harness
+    # accounts can schedule, which is why the suite is unaffected. Tracked as an
+    # engine-side exposure, not a harness one (`docs/agent-guidance/jmap.md`).
+    # `ifInState` enforcement (v0.16.14) is unchanged through v0.16.24, and the engine
+    # still sends no precondition.
+    image: stalwartlabs/stalwart:v0.16.24@sha256:ec011be228596e37e65f41aab17deed573859614430472f7eeb42178c50d87b7
+    # Self-bootstrapping wrapper: bootstrap via API, restart to full server,
+    # create accounts, seed, then run the server in the foreground.
+    entrypoint: ["/bin/sh", "/harness/entrypoint.sh"]
+    environment:
+      # Fixed fallback-admin credential so the management API has a known login
+      # from first boot (no random password, no wizard).
+      STALWART_RECOVERY_ADMIN: "admin:harness-admin-pw"
+      STALWART_HOSTNAME: "mail.test.local"
+      HARNESS_ADMIN_PW: "harness-admin-pw"
+      HARNESS_ALICE_PW: "harness-alice-pw"
+      HARNESS_BOB_PW: "harness-bob-pw"
+      HARNESS_CAROL_PW: "harness-carol-pw"
+    volumes:
+      - ./entrypoint.sh:/harness/entrypoint.sh:ro
+      - ./seed.sh:/harness/seed.sh:ro
+      - ./seed:/harness/seed:ro
+      - stalwart-etc:/etc/stalwart
+      - stalwart-data:/var/lib/stalwart
+    ports:
+      # host:container, loopback only — never expose a test mail server on all
+      # interfaces. High host ports avoid clashing with a real local server.
+      - "127.0.0.1:18080:8080" # HTTP: JMAP + CalDAV/CardDAV + management
+      - "127.0.0.1:11025:25" # SMTP (plaintext)
+      - "127.0.0.1:11465:465" # SMTP submission (implicit TLS) — Stalwart default listener
+      - "127.0.0.1:11993:993" # IMAP (implicit TLS)
+      - "127.0.0.1:11143:143" # IMAP (STARTTLS) — entrypoint adds this listener
+      - "127.0.0.1:11587:587" # SMTP submission (STARTTLS) — entrypoint adds this listener
+    # Healthy only once the shared dataset is seeded: the marker is written at
+    # the end of the entrypoint, and HTTP liveness must also answer. This is the
+    # real readiness signal tests wait on — not a sleep.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - test -f /var/lib/stalwart/.harness-ready && curl -fsS http://127.0.0.1:8080/healthz/live >/dev/null || exit 1
+      interval: 3s
+      timeout: 5s
+      retries: 80
+      start_period: 10s
+
+volumes:
+  stalwart-etc:
+  stalwart-data:

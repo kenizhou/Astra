@@ -1,0 +1,398 @@
+//! Gated JMAP Contacts/CardDAV normalization parity against Stalwart.
+
+use core::future::Future;
+use std::time::Duration;
+
+use engine_core::{
+    contact::{
+        ContactCard, ContactDraft, ContactEmail, ContactField, ContactKind, ContactName,
+        ContactPatch, ContactProperty, Organization, OrganizationUnit, PropertyId, Title,
+    },
+    ids::{AccountId, ContactId},
+    membership::Memberships,
+    sync::SyncUpdate,
+};
+use engine_provider::{ContactSourceSync, ContactsProvider};
+use provider_caldav::{CardDavConfig, CardDavProvider, Credentials};
+use provider_jmap::{Credentials as JmapCredentials, JmapConfig, JmapProvider};
+use stalwart_harness::Harness;
+
+/// Connects, honouring a throttle the way a host is now expected to.
+///
+/// Stalwart rate-limits its DAV endpoint, and the concurrency probe in this same crate
+/// drains that limiter on purpose. A suite running after it meets a `429` with half a
+/// minute still to run — and since #218's follow-up the engine does not sleep through a wait
+/// that long: it hands back the instant the server named, because parking a task on a quota
+/// window holds a lane of the account's gate and stalls everything else on it.
+///
+/// So the caller schedules, which here means this function. It is the smallest honest
+/// version of what a host does, and it is the reason the contract is worth having: the
+/// alternative is a suite that fails for a reason that was never about contacts.
+async fn connect_honouring_throttles<T, E, F, Fut>(what: &str, mut connect: F) -> T
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, E>>,
+    E: Into<engine_provider::ProviderError>,
+{
+    for attempt in 0..3 {
+        match connect().await {
+            Ok(connected) => return connected,
+            Err(err) => {
+                // Through the neutral error, which is where the instant lives — and which
+                // is also the only view of it a host has.
+                let err: engine_provider::ProviderError = err.into();
+                let Some(wait) = err.retry_after() else {
+                    panic!("{what}: {err}");
+                };
+                let wait = Duration::new(wait.seconds(), wait.nanoseconds());
+                eprintln!("{what}: throttled on attempt {attempt}, waiting the {wait:?} asked");
+                tokio::time::sleep(wait + Duration::from_secs(1)).await;
+            }
+        }
+    }
+    panic!("{what}: still throttled after three attempts");
+}
+
+fn cards(sync: ContactSourceSync<ContactCard>) -> Vec<ContactCard> {
+    let ContactSourceSync::Available { sync, .. } = sync else {
+        panic!("seed source unavailable");
+    };
+    match sync.update {
+        SyncUpdate::Snapshot { objects, .. } => objects,
+        SyncUpdate::Delta { changed, .. } => changed,
+    }
+}
+
+fn seeded<'a>(items: &'a [ContactCard], uid: &str) -> &'a ContactCard {
+    items
+        .iter()
+        .find(|card| card.uid.as_deref() == Some(uid))
+        .expect("seeded card")
+}
+
+fn emails(card: &ContactCard) -> std::collections::BTreeSet<String> {
+    card.emails
+        .values()
+        .map(|email| email.value.address.clone())
+        .collect()
+}
+
+#[tokio::test]
+async fn jmap_and_carddav_normalize_the_same_seeded_person() {
+    let Some(harness) = Harness::from_env() else {
+        eprintln!("skipping contact parity: STALWART_HTTP_ADDR unset");
+        return;
+    };
+    harness
+        .wait_until_ready(Duration::from_secs(30))
+        .expect("harness ready");
+    let origin = format!("http://{}", harness.http_addr);
+    let carddav = connect_honouring_throttles("CardDAV connect", || {
+        CardDavProvider::connect(CardDavConfig::new(
+            &origin,
+            Credentials::Basic {
+                username: harness.account.clone(),
+                password: harness.password.clone(),
+            },
+        ))
+    })
+    .await;
+    let jmap = JmapProvider::connect(JmapConfig::new(
+        origin,
+        JmapCredentials::basic(&harness.account, &harness.password),
+    ))
+    .await
+    .expect("JMAP connect");
+    let account = AccountId::try_from("contact-parity").unwrap();
+    let carddav_cards = cards(carddav.sync_contacts(&account, None).await.unwrap());
+    let jmap_cards = cards(jmap.sync_contacts(&account, None).await.unwrap());
+    let dav = seeded(&carddav_cards, "contact-3001@test.local");
+    let jmap = seeded(&jmap_cards, "contact-3001@test.local");
+    assert_eq!(dav.kind, ContactKind::Individual);
+    assert_eq!(dav.kind, jmap.kind);
+    assert_eq!(dav.display_name(), jmap.display_name());
+    assert_eq!(emails(dav), emails(jmap));
+    assert!(dav.raw_vcard.is_some());
+    assert!(jmap.raw_jscontact.is_some());
+
+    let dav_group = seeded(&carddav_cards, "group-3002@test.local");
+    let jmap_group = seeded(&jmap_cards, "group-3002@test.local");
+    assert_eq!(dav_group.kind, ContactKind::Group);
+    assert_eq!(dav_group.kind, jmap_group.kind);
+    assert_eq!(dav_group.display_name(), jmap_group.display_name());
+    let members = |card: &ContactCard| {
+        card.members
+            .values()
+            .map(|member| member.value.uid.clone())
+            .collect::<std::collections::BTreeSet<_>>()
+    };
+    assert_eq!(members(dav_group), members(jmap_group));
+}
+
+/// "There is no photo" is now an outcome rather than an error, so a live run has to
+/// pin **both** directions — a present photo really arrives, and an absent one really
+/// answers `None` — against a real server.
+///
+/// Pinning only the absence would prove nothing: an adapter that never sends a usable
+/// request produces exactly the same `None`, and recording that as server behaviour is
+/// the trap `AGENTS.md` describes. So the present case runs first, over the same
+/// connection, and its bytes are what show the request shape was right.
+#[tokio::test]
+async fn a_seeded_photo_arrives_and_a_missing_one_is_an_absence_not_a_failure() {
+    let Some(harness) = Harness::from_env() else {
+        eprintln!("skipping contact photos: STALWART_HTTP_ADDR unset");
+        return;
+    };
+    harness
+        .wait_until_ready(Duration::from_secs(30))
+        .expect("harness ready");
+    let origin = format!("http://{}", harness.http_addr);
+    let carddav = connect_honouring_throttles("CardDAV connect", || {
+        CardDavProvider::connect(CardDavConfig::new(
+            &origin,
+            Credentials::Basic {
+                username: harness.account.clone(),
+                password: harness.password.clone(),
+            },
+        ))
+    })
+    .await;
+    let account = AccountId::try_from("contact-photos").unwrap();
+    let carddav_cards = cards(carddav.sync_contacts(&account, None).await.unwrap());
+
+    // Present: the seeded card carries an inline `PHOTO;ENCODING=b`, so the vCard the
+    // server returned is itself the image.
+    let card = seeded(&carddav_cards, "contact-3001@test.local");
+    let media = card
+        .media
+        .values()
+        .map(|resource| &resource.value)
+        .find(|resource| resource.kind.as_deref() == Some("photo"))
+        .expect("the seeded card advertises a photo");
+    let photo = carddav
+        .fetch_contact_photo(&account, card, media)
+        .await
+        .expect("the fetch succeeds")
+        .expect("a card that advertises a photo has one");
+    assert_eq!(
+        photo.as_bytes(),
+        b"\x89PNG\r\n\x1a\n",
+        "the inline PHOTO decodes to the seeded bytes"
+    );
+
+    // Absent: a `PHOTO` pointing at a resource this server does not hold. The card
+    // still names one, so only asking can settle it — and the answer must be an
+    // absence a caller can remember, not an error it has to retry.
+    let missing = engine_core::contact::ContactResource {
+        uri: format!("{origin}/dav/card/{}/no-such-photo", harness.account),
+        kind: Some("photo".into()),
+        ..engine_core::contact::ContactResource::default()
+    };
+    assert!(
+        carddav
+            .fetch_contact_photo(&account, card, &missing)
+            .await
+            .expect("a missing photo is not a transport failure")
+            .is_none()
+    );
+
+    // The same seeded person over JMAP: a different request shape entirely — the card
+    // names a `blobId` and the bytes come from the session's `downloadUrl` — so the
+    // parity that matters is that both adapters reach the same image.
+    let jmap = JmapProvider::connect(JmapConfig::new(
+        format!("http://{}", harness.http_addr),
+        JmapCredentials::basic(&harness.account, &harness.password),
+    ))
+    .await
+    .expect("JMAP connect");
+    let jmap_cards = cards(jmap.sync_contacts(&account, None).await.unwrap());
+    let jmap_card = seeded(&jmap_cards, "contact-3001@test.local");
+    if let Some(jmap_media) = jmap_card
+        .media
+        .values()
+        .map(|resource| &resource.value)
+        .find(|resource| resource.kind.as_deref() == Some("photo"))
+    {
+        let jmap_photo = jmap
+            .fetch_contact_photo(&account, jmap_card, jmap_media)
+            .await
+            .expect("the blob download succeeds")
+            .expect("a card naming a blob has one");
+        assert_eq!(
+            jmap_photo.as_bytes(),
+            photo.as_bytes(),
+            "both protocols must reach the same seeded image"
+        );
+    } else {
+        eprintln!("note: Stalwart's JMAP ContactCard advertises no photo media for the seed");
+    }
+
+    // A group has no photo to advertise at all, which is the *other* shape of absence:
+    // answerable from the card, with no request needed.
+    let group = seeded(&carddav_cards, "group-3002@test.local");
+    assert!(
+        group.media.is_empty(),
+        "a card with no PHOTO advertises no media"
+    );
+}
+
+/// The write path against a real CardDAV server, for the two properties the offline suite
+/// cannot vouch for: `ORG` and `TITLE`.
+///
+/// The offline fakes answer canned bytes whatever vCard they are sent, so a create that the
+/// server would reject, or an organisation whose units it stores as one run-on name, passes
+/// every offline test. What this pins is the whole round trip through Stalwart: create, read
+/// back, patch, read back again.
+#[tokio::test]
+async fn a_created_card_keeps_its_organization_and_title_through_a_patch() {
+    let Some(harness) = Harness::from_env() else {
+        eprintln!("skipping contact write: STALWART_HTTP_ADDR unset");
+        return;
+    };
+    harness
+        .wait_until_ready(Duration::from_secs(30))
+        .expect("harness ready");
+    let origin = format!("http://{}", harness.http_addr);
+    let provider = connect_honouring_throttles("CardDAV connect", || {
+        CardDavProvider::connect(CardDavConfig::new(
+            &origin,
+            Credentials::Basic {
+                username: harness.account.clone(),
+                password: harness.password.clone(),
+            },
+        ))
+    })
+    .await;
+    let account = AccountId::try_from("contact-write").unwrap();
+    let destination = provider
+        .contact_destination()
+        .expect("writable destination");
+
+    let mut card = ContactCard::new(
+        ContactId::try_from("ignored-on-create").unwrap(),
+        Memberships::of_one(destination.address_book.clone()),
+    );
+    // A fresh uid per run: a create is `If-None-Match: *`, so a run that aborted before its
+    // cleanup would otherwise leave a card that 412s every later run.
+    let uid = format!(
+        "live-org-title-{}@test.local",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("a clock after 1970")
+            .as_nanos()
+    );
+    card.uid = Some(uid);
+    card.kind = ContactKind::Individual;
+    card.name = Some(ContactName {
+        full: Some("Grace Hopper".into()),
+        ..ContactName::default()
+    });
+    card.emails.insert(
+        PropertyId::new("email").unwrap(),
+        ContactProperty::new(ContactEmail::new("grace@test.local")),
+    );
+    card.organizations.insert(
+        PropertyId::new("organization").unwrap(),
+        ContactProperty::new(Organization {
+            name: "Babbage; Sons".into(),
+            units: vec![OrganizationUnit {
+                name: "Research".into(),
+                ..OrganizationUnit::default()
+            }],
+            ..Organization::default()
+        }),
+    );
+    card.titles.insert(
+        PropertyId::new("title").unwrap(),
+        ContactProperty::new(Title {
+            name: "Rear Admiral".into(),
+            kind: Some("title".into()),
+            ..Title::default()
+        }),
+    );
+
+    let created = provider
+        .create_contact(
+            &account,
+            &ContactDraft {
+                address_book: destination.address_book.clone(),
+                card: card.clone(),
+            },
+        )
+        .await
+        .expect("create");
+    let stored = provider
+        .fetch_contact(&account, &created.contact)
+        .await
+        .expect("read the created card back");
+    let organization = stored
+        .organizations
+        .values()
+        .next()
+        .expect("the server kept the organisation");
+    // The escaped `;` inside the name survives as one name, and the unit stays a unit: a
+    // writer that escaped the joined string, or a parser that split on every `;`, breaks
+    // exactly here and nowhere the offline fakes can see.
+    assert_eq!(organization.value.name, "Babbage; Sons");
+    assert_eq!(
+        organization
+            .value
+            .units
+            .iter()
+            .map(|unit| unit.name.clone())
+            .collect::<Vec<_>>(),
+        vec!["Research".to_owned()]
+    );
+    let title = stored
+        .titles
+        .values()
+        .next()
+        .expect("the server kept the title");
+    assert_eq!(title.value.name, "Rear Admiral");
+
+    let mut replacement = std::collections::BTreeMap::new();
+    replacement.insert(
+        PropertyId::new("title").unwrap(),
+        ContactProperty::new(Title {
+            name: "Commodore".into(),
+            kind: Some("title".into()),
+            ..Title::default()
+        }),
+    );
+    let mut patch = ContactPatch::default();
+    patch
+        .set_properties(ContactField::Titles, &replacement)
+        .unwrap();
+    provider
+        .patch_contact(&account, &stored, &patch)
+        .await
+        .expect("patch");
+    let patched = provider
+        .fetch_contact(&account, &created.contact)
+        .await
+        .expect("read the patched card back");
+    assert_eq!(
+        patched
+            .titles
+            .values()
+            .map(|entry| entry.value.name.clone())
+            .collect::<Vec<_>>(),
+        vec!["Commodore".to_owned()]
+    );
+    // The organisation was not in the patch, so the raw-preserving edit must have left it.
+    assert_eq!(
+        patched
+            .organizations
+            .values()
+            .next()
+            .expect("the patch kept the organisation")
+            .value
+            .name,
+        "Babbage; Sons"
+    );
+
+    provider
+        .delete_contact(&account, &patched)
+        .await
+        .expect("clean up");
+}

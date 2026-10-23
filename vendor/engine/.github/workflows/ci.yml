@@ -1,0 +1,507 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref — but never on `main`. Cache saving is the last thing a
+# job does, so a cancelled run writes nothing, and `main` is now the only ref that writes at all
+# (see the `save-if` note on the cache steps). Cancelling it means a run of merges lands with the
+# shared cache never refreshed, which is precisely when it most needs to be.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  # Treat warnings (including `missing_docs`) as errors everywhere.
+  RUSTFLAGS: -D warnings
+  RUSTDOCFLAGS: -D warnings
+  # `.cargo/config.toml` sends `build.build-dir` outside the checkout so worktrees share one copy
+  # of the compile work. A runner has no worktrees, and the caching here is built around `target/`:
+  # `Swatinem/rust-cache` saves that directory and a few `~/.cargo` subpaths and knows nothing about
+  # a build directory, so with the setting in force it restores a cache holding no intermediates and
+  # every job recompiles the tree. It showed as 238 crates compiled after a "Cache restored
+  # successfully" of 235 MB. Pointing the build directory back at `target/` is what the cache is
+  # shaped for, and it also puts the directory inside the workspace, where nothing else can be
+  # holding it.
+  CARGO_BUILD_BUILD_DIR: ${{ github.workspace }}/target
+
+jobs:
+  # The repository states its licensing once, for every file at once, in `REUSE.toml` rather than in
+  # a header on each source file — which MPL-2.0 Exhibit A explicitly allows. A statement like that
+  # is only as good as its last edit, so this checks it: `reuse lint` fails if any tracked file is
+  # not covered, if a license text is missing from `LICENSES/`, or if an SPDX identifier is wrong.
+  # Without it, adding a directory the glob does not reach would silently leave files unlicensed —
+  # exactly the failure a per-file header would have made visible in review.
+  # No Rust, no cache, no dependency on `toolchain`: it costs seconds, so it runs on every push.
+  reuse:
+    name: REUSE compliance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: fsfe/reuse-action@676e2d560c9a403aa252096d99fcab3e1132b0f5 # v6.0.0
+
+  # `rust-toolchain.toml` is the single source of truth for the Rust version: rustup honours it for
+  # every local cargo invocation, and this job parses it so each job below installs exactly that
+  # channel. Without it CI ran a floating `stable` that drifted ahead of contributors' toolchains,
+  # failing on lints nobody could reproduce locally. The version is therefore never duplicated in
+  # YAML — a bump is a one-line edit to rust-toolchain.toml. Dependency-free (checkout + sed), so
+  # the gate the other jobs wait on costs seconds.
+  toolchain:
+    name: Read the pinned Rust toolchain
+    runs-on: ubuntu-latest
+    outputs:
+      channel: ${{ steps.read.outputs.channel }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - id: read
+        run: |
+          channel=$(sed -n 's/^channel[[:space:]]*=[[:space:]]*"\(.*\)"/\1/p' rust-toolchain.toml)
+          [ -n "$channel" ] || { echo "no [toolchain] channel in rust-toolchain.toml" >&2; exit 1; }
+          echo "Pinned Rust toolchain: $channel"
+          echo "channel=$channel" >>"$GITHUB_OUTPUT"
+
+  verify:
+    name: Format, lint, build, test, docs
+    needs: toolchain
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # rustfmt runs on a PINNED nightly: the workspace rustfmt.toml uses nightly-only
+      # options (crate-granular grouped imports, wrap_comments, style_edition 2024, …) and
+      # nightly rustfmt output drifts between dates — pinning keeps `fmt --check` reproducible
+      # against what contributors run locally (`cargo +nightly fmt`). Bump this date and
+      # re-run fmt when intentionally adopting a newer nightly. Everything else stays on
+      # the pinned channel (installed last, so it is the default toolchain for
+      # clippy/build/test/docs; rust-toolchain.toml would select it inside the checkout
+      # regardless, but installing it explicitly keeps the cache key honest).
+      - name: Install nightly rustfmt (pinned)
+        uses: dtolnay/rust-toolchain@67ef31d5b988238dd797d409d6f9574278e20537 # master
+        with:
+          toolchain: nightly-2026-07-07
+          components: rustfmt
+
+      - name: Install the pinned Rust + clippy
+        uses: dtolnay/rust-toolchain@67ef31d5b988238dd797d409d6f9574278e20537 # master
+        with:
+          toolchain: ${{ needs.toolchain.outputs.channel }}
+          components: clippy
+
+      # Caches are written ONLY on `main`, and every job below does the same. GitHub scopes a cache
+      # to the branch that created it: a PR can restore `main`'s entry, but an entry a PR *saves* is
+      # readable by nothing except that same PR — which will be merged and deleted. Saving from PRs
+      # therefore buys almost nothing and costs a lot, because all of it counts against the repo's
+      # 10 GB budget and evicts entries by LRU — and with six cache steps across the matrix, a PR
+      # writes six of them at once, so the entries `main` wrote are the ones aged out. PRs still
+      # restore `main`'s and rebuild only what they touched.
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # No rustfmt/clippy lint enforces a per-file line cap, so this script is the machine
+      # enforcement of the AGENTS.md 500-line rule. Dependency-free, so it runs first.
+      - name: File length (<= 500 lines per *.rs)
+        run: scripts/ci/check-file-length.sh
+
+      # A fixture built from live debugging carries the debugged account's identifiers, and a
+      # public repo remembers them past any force-push. Machine enforcement of the AGENTS.md
+      # reserved-names rule; dependency-free, so a leak fails in seconds rather than after a build.
+      - name: Fixture identifiers (reserved names only)
+        run: scripts/ci/check-fixture-identifiers.sh
+
+      - name: Format
+        run: cargo +nightly-2026-07-07 fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Build
+        run: cargo build --workspace --all-features
+
+      - name: Test
+        run: cargo test --workspace --all-features
+
+      - name: Docs
+        run: cargo doc --workspace --all-features --no-deps
+
+  # Tier A: build + run tests on real runners. Linux x64 is covered by `verify`
+  # above; this matrix adds the remaining 64-bit desktop targets. We only support
+  # x64/arm64, so no 32-bit runners appear here.
+  test:
+    name: Build & test (${{ matrix.os }})
+    needs: toolchain
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-24.04-arm # Linux arm64
+          - windows-latest # Windows x64
+          - windows-11-arm # Windows arm64
+          - macos-latest # macOS arm64
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install the pinned Rust
+        uses: dtolnay/rust-toolchain@67ef31d5b988238dd797d409d6f9574278e20537 # master
+        with:
+          toolchain: ${{ needs.toolchain.outputs.channel }}
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          key: ${{ matrix.os }}
+          save-if: ${{ github.ref == 'refs/heads/main' }} # main-only; see the `verify` job
+
+      - name: Build
+        run: cargo build --workspace --all-features
+
+      - name: Test
+        run: cargo test --workspace --all-features
+
+  # Tier B: cross-compile only (these targets can't run tests on CI without
+  # emulators/simulators). store-sqlite bundles SQLite (compiled from C), so the
+  # `cc` crate needs a cross C toolchain: Android uses the NDK clang configured
+  # below, while iOS relies on the cc crate's built-in Apple support via the Xcode
+  # already on the macOS runner. The iOS 17 and Android 12 (API 31) floors match
+  # the host app's build config.
+  #
+  # One runner per host OS builds all of its targets, so we spin up two VMs
+  # rather than one per target.
+  cross:
+    name: Cross-compile (${{ matrix.label }})
+    needs: toolchain
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: iOS (arm64 device + simulator)
+            os: macos-latest
+            targets: aarch64-apple-ios,aarch64-apple-ios-sim
+          - label: Android (arm64 + x86_64)
+            os: ubuntu-latest
+            targets: aarch64-linux-android,x86_64-linux-android
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install the pinned Rust
+        uses: dtolnay/rust-toolchain@67ef31d5b988238dd797d409d6f9574278e20537 # master
+        with:
+          toolchain: ${{ needs.toolchain.outputs.channel }}
+          targets: ${{ matrix.targets }}
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          key: ${{ matrix.os }}
+          save-if: ${{ github.ref == 'refs/heads/main' }} # main-only; see the `verify` job
+
+      # Point the cc crate and cargo at the NDK clang/ar/linker so the bundled
+      # SQLite C sources cross-compile for Android (API 31 floor). iOS needs no
+      # equivalent — the cc crate drives Xcode's clang itself.
+      - name: Configure Android NDK toolchain
+        if: contains(matrix.targets, 'android')
+        shell: bash
+        run: |
+          bin="$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          {
+            echo "CC_aarch64-linux-android=$bin/aarch64-linux-android31-clang"
+            echo "AR_aarch64-linux-android=$bin/llvm-ar"
+            echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$bin/aarch64-linux-android31-clang"
+            echo "CC_x86_64-linux-android=$bin/x86_64-linux-android31-clang"
+            echo "AR_x86_64-linux-android=$bin/llvm-ar"
+            echo "CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER=$bin/x86_64-linux-android31-clang"
+          } >> "$GITHUB_ENV"
+
+      - name: Cross-compile (build only)
+        shell: bash
+        env:
+          TARGETS: ${{ matrix.targets }}
+        run: |
+          for target in ${TARGETS//,/ }; do
+            echo "::group::cargo build --target $target"
+            cargo build --workspace --all-features --target "$target"
+            echo "::endgroup::"
+          done
+
+  # Protocol harness: the one job that needs a service. It starts the
+  # deterministic Stalwart fixture (image pinned by digest in the compose file),
+  # seeds the shared dataset, and runs the gated connectivity smoke suite
+  # against it. Kept off the offline `verify`/`test` jobs and off the OS matrix
+  # — those must stay service-free (the offline gate). This job is the only one
+  # that sets STALWART_*, so it is the only one whose Stalwart tests execute;
+  # everywhere else they skip.
+  stalwart:
+    name: Stalwart protocol harness
+    needs: toolchain
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install the pinned Rust
+        uses: dtolnay/rust-toolchain@67ef31d5b988238dd797d409d6f9574278e20537 # master
+        with:
+          toolchain: ${{ needs.toolchain.outputs.channel }}
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          key: stalwart
+          save-if: ${{ github.ref == 'refs/heads/main' }} # main-only; see the `verify` job
+
+      # The Stalwart image is pinned by digest in docker-compose.yml. A
+      # save/load image cache is intentionally omitted: RepoDigests do not
+      # survive `docker save`/`load`, so a digest-pinned `compose up` would
+      # re-pull anyway. The pull is small and deterministic.
+      #
+      # The single service self-bootstraps and seeds inside its entrypoint, then
+      # reports healthy once the post-seed marker exists, so `--wait` returns
+      # only when the shared dataset is ready (real readiness, not a sleep).
+      # The steps below share `scripts/ci/stalwart-live.sh` with local dev, so the
+      # harness lifecycle, the endpoints/credentials, and the exact `cargo test`
+      # invocations live in one file (run `scripts/ci/stalwart-live.sh all` locally).
+      - name: Start Stalwart and seed the shared dataset
+        run: scripts/ci/stalwart-live.sh up
+
+      - name: Run the gated connectivity smoke suite
+        run: scripts/ci/stalwart-live.sh smoke
+
+      - name: Run the gated JMAP provider + sync integration tests (live)
+        run: scripts/ci/stalwart-live.sh test provider-jmap
+
+      - name: Run the gated IMAP/SMTP provider integration tests (live)
+        run: scripts/ci/stalwart-live.sh test provider-imap
+
+      - name: Run the gated CalDAV provider integration tests (live)
+        run: scripts/ci/stalwart-live.sh test provider-caldav
+
+      - name: Dump Stalwart logs on failure
+        if: failure()
+        run: scripts/ci/stalwart-live.sh logs
+
+      - name: Tear down
+        if: always()
+        run: scripts/ci/stalwart-live.sh down
+
+  # The second CalDAV protocol fixture: a SabreDAV server (the stack Soverin/
+  # Fastmail-style providers run). It validates `provider-caldav` against a
+  # different real implementation than Stalwart — two-step RFC 6764 discovery, the
+  # `http://sabre.io/ns/sync/N` sync-token form — using the same shared calendar
+  # seed. Like `stalwart`, it is the only job that sets `SABREDAV_*`, so its gated
+  # test executes only here; everywhere else it skips.
+  sabredav:
+    name: SabreDAV protocol harness
+    needs: toolchain
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install the pinned Rust
+        uses: dtolnay/rust-toolchain@67ef31d5b988238dd797d409d6f9574278e20537 # master
+        with:
+          toolchain: ${{ needs.toolchain.outputs.channel }}
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          key: sabredav
+          save-if: ${{ github.ref == 'refs/heads/main' }} # main-only; see the `verify` job
+
+      # The image is pinned by digest and the PHP deps by composer.lock; the
+      # container self-seeds and reports healthy once the marker exists, so
+      # `--wait` returns only when the calendar fixture is ready.
+      - name: Start the SabreDAV fixture and seed it
+        working-directory: docker/sabredav
+        run: docker compose up -d --wait
+
+      - name: Run the gated SabreDAV CalDAV integration test (live)
+        env:
+          SABREDAV_HTTP_ADDR: 127.0.0.1:18081
+        run: cargo test -p provider-caldav --test live_sabredav -- --nocapture
+
+      - name: Dump SabreDAV logs on failure
+        if: failure()
+        working-directory: docker/sabredav
+        run: docker compose logs --no-color
+
+      - name: Tear down
+        if: always()
+        working-directory: docker/sabredav
+        run: docker compose down -v
+
+  # The second IMAP fixture: **two** Dovecot servers from one image, one per dialect. The
+  # rev1 half is the dialect most real accounts speak — optional extensions that must be
+  # negotiated rather than folded into the base protocol, modified-UTF-7 mailbox names, and
+  # a prose completion line. The rev2 half is a second implementation of the dialect beside
+  # Stalwart, which is what turns a claim about "rev2" into something two servers agree on
+  # (they already disagree about asking for SPECIAL-USE). One server cannot be both: the
+  # client enables rev2 wherever it is offered. Like `stalwart`, this is the only job that
+  # sets `DOVECOT_*`, so its gated tests execute only here; everywhere else they skip.
+  dovecot:
+    name: Dovecot protocol harness
+    needs: toolchain
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install the pinned Rust
+        uses: dtolnay/rust-toolchain@67ef31d5b988238dd797d409d6f9574278e20537 # master
+        with:
+          toolchain: ${{ needs.toolchain.outputs.channel }}
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          key: dovecot
+          save-if: ${{ github.ref == 'refs/heads/main' }} # main-only; see the `verify` job
+
+      # The image is pinned by digest and the configs are committed drop-ins; each
+      # container seeds itself from the shared mail fixtures and reports healthy once its
+      # marker exists, so `--wait` returns only when both mailboxes are ready.
+      - name: Start the Dovecot fixtures and seed them
+        working-directory: docker/dovecot
+        run: docker compose up -d --wait
+
+      # The contract suite runs against every configured server; with only DOVECOT_* set,
+      # its Stalwart half skips and both Dovecot halves run. Each dialect suite then runs
+      # against the server that speaks its dialect — which is why both variables are set
+      # here and why neither suite hard-codes a vendor.
+      - name: Run the gated Dovecot IMAP integration tests (live)
+        env:
+          DOVECOT_REV1_IMAP_ADDR: 127.0.0.1:11994
+          DOVECOT_REV2_IMAP_ADDR: 127.0.0.1:11995
+        run: |
+          cargo test -p provider-imap --test live_imap_contract -- --nocapture
+          cargo test -p provider-imap --test live_imap_rev1 -- --nocapture
+          cargo test -p provider-imap --test live_imap_rev2 -- --nocapture
+          cargo test -p provider-imap --test live_imap_report -- --nocapture
+
+      - name: Dump Dovecot logs on failure
+        if: failure()
+        working-directory: docker/dovecot
+        run: docker compose logs --no-color
+
+      - name: Tear down
+        if: always()
+        working-directory: docker/dovecot
+        run: docker compose down -v
+
+  # The scale baseline. Correctness is settled by the suites above, on mailboxes of a few
+  # messages — where a full scan and an indexed seek measure the same, so none of them can
+  # tell whether a read path is O(mailbox) or O(page). This job builds 100,000 messages
+  # through the ordinary sync path and prints what each operation costs, so the shape of the
+  # answer is on the record for every change rather than reconstructed after a complaint.
+  #
+  # Deliberately **not** a pass/fail gate. A shared runner's timings vary by more than most
+  # real regressions, so a threshold here would either be so loose it catches nothing or so
+  # tight it fails on noise — and a flaky perf gate is one people learn to re-run. The table
+  # in the log is the artifact; read it against the previous run's, and against the same
+  # table a host prints for its own logged durations. What matters is the ratio across
+  # sizes, not the absolute milliseconds this runner happened to produce.
+  bench:
+    name: Scale benchmarks (100k messages)
+    needs: toolchain
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install the pinned Rust
+        uses: dtolnay/rust-toolchain@67ef31d5b988238dd797d409d6f9574278e20537 # master
+        with:
+          toolchain: ${{ needs.toolchain.outputs.channel }}
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          key: bench
+          save-if: ${{ github.ref == 'refs/heads/main' }} # main-only; see the `verify` job
+
+      # `--no-run` first so a compile failure reads as one, rather than as a benchmark that
+      # never printed a number.
+      - name: Build the benchmarks
+        run: cargo bench -p mailbox-fixture --no-run
+
+      - name: Run them and print the table
+        env:
+          ENGINE_BENCH_SCALE: 100k
+        run: cargo bench -p mailbox-fixture
+
+  coverage:
+    name: Code coverage
+    needs: toolchain
+    runs-on: ubuntu-latest
+    # Filename regex excluding test-support from the OFFLINE metric (live/harness tests
+    # run in the `stalwart` job). Defined once here and reused by every llvm-cov step
+    # below. Codecov's own equivalent lives in codecov.yml's `ignore:` — keep the two in
+    # sync (different tools: a regex here, globs there).
+    env:
+      COVERAGE_IGNORE: 'stalwart-harness/|dav-cli/|provider-jmap/tests/|provider-imap/tests/|provider-caldav/tests/|provider-graph/tests/'
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install the pinned Rust + llvm-tools
+        uses: dtolnay/rust-toolchain@67ef31d5b988238dd797d409d6f9574278e20537 # master
+        with:
+          toolchain: ${{ needs.toolchain.outputs.channel }}
+          components: llvm-tools-preview
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }} # main-only; see the `verify` job
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@bffeee26d4db9be238a4ea78d8826604ebcb594d # v2.82.5
+        with:
+          tool: cargo-llvm-cov
+
+      # Run the instrumented test suite once, then report from the same data.
+      - name: Run instrumented tests
+        run: cargo llvm-cov --no-report --workspace --all-features
+
+      # Test-support exclusions keep the metric about the engine's own logic:
+      # `stalwart-harness` (its socket probes only run against a live server in the
+      # `stalwart` job, not in this offline run) and the gated live integration tests
+      # `provider-jmap/tests/` + `provider-imap/tests/` (which skip offline). All are
+      # exercised live in the `stalwart` job; each client's own transport/parsing/
+      # orchestration is covered offline by a mock HTTP server / fake executor (JMAP)
+      # or a mock async stream replaying captured transcripts (IMAP/SMTP). The only
+      # offline-uncovered client `src` lines are the raw TCP+TLS `connect` glue,
+      # which the live tests exercise.
+      - name: Export lcov report
+        run: cargo llvm-cov report --lcov --output-path lcov.info --ignore-filename-regex "$COVERAGE_IGNORE"
+
+      # Upload to Codecov before the threshold gate below so coverage is
+      # recorded even on builds that dip under the bar. `files` points at the
+      # engine-filtered report we just wrote (stalwart-harness already excluded)
+      # rather than letting the CLI auto-search; the token is a repo secret.
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./lcov.info
+
+      - name: Coverage summary
+        run: cargo llvm-cov report --summary-only --ignore-filename-regex "$COVERAGE_IGNORE"
+
+      # The line-coverage floor is defined ONCE in codecov.yml
+      # (coverage.status.project.default.target); this step reads it with `yq` (preinstalled
+      # on GitHub ubuntu runners) so CI, Codecov, and the local pre-PR check (AGENTS.md)
+      # all enforce the same number. It is a deliberately loose backstop, not the aim:
+      # the native line metric reads a touch under the lcov export (region misses inside
+      # macro/generic/serde expansions the export counts as covered, `panic!` arms in
+      # passing tests, a few defensive transport/error branches) and the hand-rolled
+      # `provider-imap` raw TCP+TLS+SMTP dial glue is only exercised by the gated
+      # `stalwart` job, which is excluded from this offline metric. Codecov (the lcov
+      # export above) is the real signal; raise the floor in codecov.yml as native
+      # coverage stabilizes higher.
+      - name: Enforce coverage threshold
+        run: |
+          threshold="$(yq '.coverage.status.project.default.target' codecov.yml | tr -d '%')"
+          echo "Enforcing project line coverage >= ${threshold}% (source: codecov.yml)"
+          cargo llvm-cov report --fail-under-lines "${threshold}" --ignore-filename-regex "$COVERAGE_IGNORE"
+
+      - name: Upload lcov report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: lcov-coverage
+          path: lcov.info
+          if-no-files-found: error

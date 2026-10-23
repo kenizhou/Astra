@@ -1,0 +1,369 @@
+//! Google (Gmail + Calendar) protocol errors and their classification into the
+//! engine taxonomy.
+//!
+//! [`GoogleError`] is the rich protocol-level error. At the provider-trait boundary
+//! it converts into an [`engine_provider::ProviderError`] carrying an engine-neutral
+//! [`FailureClass`], so callers branch on the class and never on Google specifics
+//! (`providers.md`). Google error bodies are a documented
+//! `{ "error": { "code", "message", "status", "errors": [{ "reason" }] } }`
+//! envelope; the machine `reason` (or the canonical `status`) is captured for
+//! diagnostics and for the one place the HTTP status alone is ambiguous — a `403`,
+//! which is a **rate limit** when its reason says so and an insufficient-permission
+//! **permanent** failure otherwise.
+//!
+//! Two status codes drive a resync-style recovery, and they differ by API:
+//! - **Google Calendar** returns `410 Gone` for an expired `syncToken`
+//!   ([`FailureClass::NeedsResync`], the analogue of Graph's `410` / JMAP's
+//!   `cannotCalculateChanges`).
+//! - **Gmail** returns `404` for a `startHistoryId` that has aged out of the history window; that
+//!   is *not* globally a resync (a `404` on a message `get` just means the message is gone), so the
+//!   Gmail fetch layer special-cases a `404` from the `history.list` call rather than classifying
+//!   every `404` here.
+
+use engine_core::error::FailureClass;
+use engine_provider::ProviderError;
+use serde_json::Value;
+
+/// A Google (Gmail / Calendar) protocol failure.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum GoogleError {
+    /// The HTTP exchange itself failed (connect, TLS, a body, or a server that went quiet
+    /// for longer than the shared deadlines allow).
+    #[error("Google transport error: {0}")]
+    Transport(#[from] engine_http::SendError),
+
+    /// The server returned a non-success HTTP status. The machine `reason` (or the
+    /// canonical `status`) is captured when the body carried the standard envelope,
+    /// and the raw body is kept for diagnostics.
+    #[error("Google HTTP {status} (reason {reason:?}): {body}")]
+    Status {
+        /// The HTTP status code.
+        status: u16,
+        /// The Google error `reason` (or canonical `status`), when present.
+        reason: Option<String>,
+        /// The raw response body.
+        body: String,
+        /// When the server said to come back, where it said — read off the reply by
+        /// [`engine_http::Sent::stated_wait`] and carried here so it survives as far as
+        /// [`ProviderError::rate_limited`], which is what the outbox schedules from.
+        retry_after: Option<core::time::Duration>,
+    },
+
+    /// The Gmail `startHistoryId` has aged out of the history window (a `404` from
+    /// `history.list`): a delta from that cursor is impossible, forcing a full resync.
+    /// This is Gmail's analogue of Calendar's `410`/Graph's `410`/JMAP's
+    /// `cannotCalculateChanges`, kept distinct from a plain `404` (a gone message) which
+    /// stays [`Permanent`](FailureClass::Permanent).
+    #[error("Gmail history expired (a full resync is required): {0}")]
+    HistoryExpired(String),
+
+    /// A response was not the JSON the protocol requires.
+    #[error("malformed Google JSON: {0}")]
+    Json(#[from] serde_json::Error),
+
+    /// A response was structurally not what the protocol requires (a missing `id`,
+    /// an absent list array, a malformed value, …).
+    #[error("malformed Google response: {0}")]
+    Protocol(String),
+}
+
+impl GoogleError {
+    /// Builds a [`GoogleError::Status`], extracting the machine `reason` (the first
+    /// `error.errors[].reason`, falling back to the canonical `error.status`) from the
+    /// standard body when present.
+    #[must_use]
+    pub fn status(status: u16, body: impl Into<String>) -> Self {
+        let body = body.into();
+        let reason = error_reason(&body);
+        Self::Status {
+            status,
+            reason,
+            body,
+            retry_after: None,
+        }
+    }
+
+    /// Records when the server said this would clear.
+    ///
+    /// Set by the transport from [`engine_http::Sent::stated_wait`], which is the only place
+    /// that has the reply. Everywhere else builds a status error from a code and a body it
+    /// has already read, and has nothing to say about timing.
+    #[must_use]
+    pub fn with_retry_after(mut self, wait: Option<core::time::Duration>) -> Self {
+        if let Self::Status { retry_after, .. } = &mut self {
+            *retry_after = wait;
+        }
+        self
+    }
+
+    /// When the server said to come back, if it said.
+    #[must_use]
+    pub fn retry_after(&self) -> Option<core::time::Duration> {
+        match self {
+            Self::Status { retry_after, .. } => *retry_after,
+            _ => None,
+        }
+    }
+
+    /// Builds a [`GoogleError::Protocol`].
+    #[must_use]
+    pub fn protocol(detail: impl Into<String>) -> Self {
+        Self::Protocol(detail.into())
+    }
+
+    /// Builds a [`GoogleError::HistoryExpired`] (an aged-out Gmail `startHistoryId`).
+    #[must_use]
+    pub fn history_expired(detail: impl Into<String>) -> Self {
+        Self::HistoryExpired(detail.into())
+    }
+
+    /// What this error is as the failure of a submission: the class it always has, except
+    /// for an exchange that failed after the request may have reached the server. That one
+    /// may have sent the message, so it needs confirming and is never retried
+    /// (`ProviderError::needs_confirmation`).
+    ///
+    /// Two more are the same case. A gateway's `502` or `504` says the server behind it gave
+    /// no answer, not that it refused; every other status is the server's own answer. And a
+    /// success whose body cannot be read is an answer nobody can read.
+    pub(crate) fn into_submission_error(self) -> ProviderError {
+        match &self {
+            Self::Transport(err) if err.may_have_been_received() => {
+                let detail = format!("{self}; the message may have been sent");
+                ProviderError::needs_confirmation(detail).with_source(self)
+            }
+            Self::Status {
+                status: 502 | 504, ..
+            }
+            | Self::Json(_) => {
+                let detail = format!("{self}; the message may have been sent");
+                ProviderError::needs_confirmation(detail).with_source(self)
+            }
+            _ => self.into(),
+        }
+    }
+
+    /// The engine-neutral class this protocol error maps to.
+    #[must_use]
+    pub fn failure_class(&self) -> FailureClass {
+        match self {
+            Self::Transport(e) => transport_class(e),
+            Self::Status { status, reason, .. } => status_class(*status, reason.as_deref()),
+            // An aged-out Gmail historyId forces a full resync.
+            Self::HistoryExpired(_) => FailureClass::NeedsResync,
+            // Malformed JSON or a structurally invalid response is a protocol-level
+            // incompatibility: retrying the same request will not fix it.
+            Self::Json(_) | Self::Protocol(_) => FailureClass::Permanent,
+        }
+    }
+}
+
+/// Maps a failed exchange to a [`FailureClass`]: a body that did not decode is a permanent
+/// protocol mismatch; every other failure, a server gone quiet included, is transient.
+fn transport_class(err: &engine_http::SendError) -> FailureClass {
+    if err.is_decode() {
+        FailureClass::Permanent
+    } else {
+        FailureClass::Retryable
+    }
+}
+
+/// A client error outside any exchange, such as a client that could not be built.
+impl From<reqwest::Error> for GoogleError {
+    fn from(err: reqwest::Error) -> Self {
+        Self::Transport(err.into())
+    }
+}
+
+/// Extracts the machine `reason` from a Google error envelope: the first
+/// `error.errors[].reason`, else the canonical `error.status`, else `None`.
+fn error_reason(body: &str) -> Option<String> {
+    let value: Value = serde_json::from_str(body).ok()?;
+    let error = value.get("error")?;
+    let first_reason = error
+        .get("errors")
+        .and_then(Value::as_array)
+        .and_then(|a| a.first())
+        .and_then(|e| e.get("reason"))
+        .and_then(Value::as_str);
+    first_reason
+        .or_else(|| error.get("status").and_then(Value::as_str))
+        .map(str::to_owned)
+}
+
+/// `true` when a `403`'s reason marks a rate/quota limit rather than a permission
+/// failure — the one case the HTTP status alone cannot classify.
+fn is_rate_limit_reason(reason: Option<&str>) -> bool {
+    matches!(
+        reason,
+        Some(
+            "rateLimitExceeded" | "userRateLimitExceeded" | "dailyLimitExceeded" | "quotaExceeded"
+        )
+    )
+}
+
+/// Maps an HTTP status (and, for `403`, its reason) to a [`FailureClass`]. Google
+/// throttles with `429` and, on some APIs, `403 rateLimitExceeded`; Calendar returns
+/// `410 Gone` for an expired `syncToken` (forcing a full resync); a failed write
+/// precondition — a stale `If-Match` ETag on a calendar write — is `409`/`412`, a
+/// [`Conflict`](FailureClass::Conflict) resolved by refetch-and-retry.
+fn status_class(status: u16, reason: Option<&str>) -> FailureClass {
+    match status {
+        401 => FailureClass::Authentication,
+        // A 403 is a rate limit only when its reason says so; otherwise it is an
+        // insufficient-permission failure, which falls to the permanent default.
+        403 if is_rate_limit_reason(reason) => FailureClass::RateLimited,
+        // People signals a **stale-etag write** with `400 FAILED_PRECONDITION`
+        // ("Request person.etag is different than the current person.etag"), not the
+        // `412` a conditional HTTP write would use. It is still a refetch-and-retry
+        // conflict, so classifying it `Permanent` would make a host drop a recoverable
+        // outbox entry. (The same status/reason pair also marks an optional source as
+        // absent — a consumer account's Workspace directory — but that is intercepted
+        // as `Unavailable` before it is ever classified.)
+        400 if reason == Some("FAILED_PRECONDITION") => FailureClass::Conflict,
+        409 | 412 => FailureClass::Conflict,
+        410 => FailureClass::NeedsResync,
+        429 => FailureClass::RateLimited,
+        500..=599 => FailureClass::Retryable,
+        _ => FailureClass::Permanent,
+    }
+}
+
+impl From<GoogleError> for ProviderError {
+    fn from(err: GoogleError) -> Self {
+        let class = err.failure_class();
+        let detail = err.to_string();
+        // A rate limit is the one class that carries *when*. The outbox obeys a provider's
+        // instant outright — past its own 30-minute cap, because a server naming a time is
+        // an instruction — and a host schedules a throttled scope from the same number.
+        let error = if class == FailureClass::RateLimited {
+            ProviderError::rate_limited(detail, err.retry_after().map(Into::into))
+        } else {
+            ProviderError::new(class, detail)
+        };
+        error.with_source(err)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const UNAUTHORIZED: &str = include_str!("../tests/fixtures/error/unauthorized.json");
+    const RATE_LIMIT: &str = include_str!("../tests/fixtures/error/rate_limit.json");
+    const FORBIDDEN: &str = include_str!("../tests/fixtures/error/forbidden.json");
+    const HISTORY_GONE: &str = include_str!("../tests/fixtures/error/history_gone.json");
+    const SYNC_TOKEN_GONE: &str = include_str!("../tests/fixtures/error/sync_token_gone.json");
+    const INVALID_LABEL: &str = include_str!("../tests/fixtures/error/invalid_label.json");
+
+    #[test]
+    fn real_error_bodies_yield_their_reason_and_class() {
+        let unauth = GoogleError::status(401, UNAUTHORIZED);
+        assert!(matches!(&unauth, GoogleError::Status { reason: Some(r), .. } if r == "authError"));
+        assert_eq!(unauth.failure_class(), FailureClass::Authentication);
+        // Display carries the status, reason, and body.
+        assert!(unauth.to_string().contains("401"));
+        assert!(unauth.to_string().contains("authError"));
+    }
+
+    #[test]
+    fn a_403_is_a_rate_limit_only_when_its_reason_says_so() {
+        // A 403 whose reason is a rate/quota limit throttles (retry with backoff)…
+        let limited = GoogleError::status(403, RATE_LIMIT);
+        assert!(
+            matches!(&limited, GoogleError::Status { reason: Some(r), .. } if r == "rateLimitExceeded")
+        );
+        assert_eq!(limited.failure_class(), FailureClass::RateLimited);
+        // …while a 403 for insufficient scopes is permanent (never retried).
+        let forbidden = GoogleError::status(403, FORBIDDEN);
+        assert_eq!(forbidden.failure_class(), FailureClass::Permanent);
+    }
+
+    #[test]
+    fn an_unknown_label_is_a_permanent_400_not_a_conflict() {
+        // Captured live: `messages.modify` with `addLabelIds:["ALL_MAIL"]` — the synthetic
+        // id this adapter reserves for its All-Mail mailbox — comes back
+        // `400 invalidArgument: Invalid label: ALL_MAIL`. That is what archiving used to
+        // send, and it is why `mutate::move_to` now adds no label for that destination.
+        //
+        // It must classify **Permanent**: no retry fixes a label Gmail does not have, and
+        // the 400 `FAILED_PRECONDITION` → `Conflict` arm (People's stale-etag write) must
+        // not swallow it into a refetch-and-retry loop.
+        let invalid = GoogleError::status(400, INVALID_LABEL);
+        assert!(
+            matches!(&invalid, GoogleError::Status { reason: Some(r), .. } if r == "invalidArgument")
+        );
+        assert_eq!(invalid.failure_class(), FailureClass::Permanent);
+    }
+
+    #[test]
+    fn calendar_410_needs_resync_but_gmail_404_stays_permanent() {
+        // Calendar's expired syncToken → 410 → a full resync.
+        let sync_gone = GoogleError::status(410, SYNC_TOKEN_GONE);
+        assert_eq!(sync_gone.failure_class(), FailureClass::NeedsResync);
+        // Gmail's aged-out historyId → 404, which is *not* globally a resync (a 404 on
+        // a message get just means gone); the fetch layer special-cases the history call
+        // and converts it into the explicit HistoryExpired signal.
+        let history_gone = GoogleError::status(404, HISTORY_GONE);
+        assert_eq!(history_gone.failure_class(), FailureClass::Permanent);
+        let expired = GoogleError::history_expired("startHistoryId too old");
+        assert_eq!(expired.failure_class(), FailureClass::NeedsResync);
+        assert!(expired.to_string().contains("full resync"));
+    }
+
+    #[test]
+    fn status_codes_map_to_engine_classes() {
+        assert_eq!(
+            GoogleError::status(429, "{}").failure_class(),
+            FailureClass::RateLimited
+        );
+        assert_eq!(
+            GoogleError::status(503, "{}").failure_class(),
+            FailureClass::Retryable
+        );
+        assert_eq!(
+            GoogleError::status(412, "{}").failure_class(),
+            FailureClass::Conflict
+        );
+        assert_eq!(
+            GoogleError::status(409, "{}").failure_class(),
+            FailureClass::Conflict
+        );
+        assert_eq!(
+            GoogleError::status(400, "{}").failure_class(),
+            FailureClass::Permanent
+        );
+    }
+
+    #[test]
+    fn a_body_without_the_envelope_has_no_reason() {
+        assert!(matches!(
+            GoogleError::status(400, "not json at all"),
+            GoogleError::Status { reason: None, .. }
+        ));
+        assert!(matches!(
+            GoogleError::status(500, r#"{"unexpected":true}"#),
+            GoogleError::Status { reason: None, .. }
+        ));
+    }
+
+    #[test]
+    fn protocol_and_json_errors_are_permanent() {
+        let protocol = GoogleError::protocol("response had no messages array");
+        assert_eq!(protocol.failure_class(), FailureClass::Permanent);
+        assert!(protocol.to_string().contains("no messages array"));
+
+        let json: GoogleError = serde_json::from_str::<Value>("{ not json")
+            .unwrap_err()
+            .into();
+        assert_eq!(json.failure_class(), FailureClass::Permanent);
+        assert!(json.to_string().contains("malformed Google JSON"));
+    }
+
+    #[test]
+    fn converts_into_classified_provider_error_with_source() {
+        let provider: ProviderError = GoogleError::status(401, UNAUTHORIZED).into();
+        assert_eq!(provider.class(), FailureClass::Authentication);
+        assert!(std::error::Error::source(&provider).is_some());
+    }
+}

@@ -1,0 +1,435 @@
+//! Pure IMAP response parsing (RFC 9051 §4, §7).
+//!
+//! The transport hands each untagged response body (the bytes after the leading
+//! `* `, with any `{n}` literals already inlined — see [`crate::transport`]) to the
+//! `parse_*` functions here, which interpret them into the small structs the
+//! normalizer ([`crate::mail`]) maps to the domain model. Everything in this module
+//! is pure and offline-tested, including against adversarial input: a malformed
+//! response is an [`ImapError::Protocol`], **never** a panic (`north-star.md`
+//! security).
+//!
+//! The shared primitive is a tokenizer over the recursive IMAP data grammar
+//! (`NIL` / atom / quoted-string / `{n}` literal / parenthesized list), defined in
+//! [`crate::tokenize`]; each response is then read off the resulting [`Item`] tree.
+
+use crate::{
+    bodystructure::has_downloadable_part,
+    error::{ImapError, ImapResult},
+    tokenize::{Item, items_of},
+};
+
+/// What a `SELECT`/`EXAMINE` told us about the mailbox: its UID space and message
+/// count (RFC 9051 §6.3.2, §7.3.1, §7.4.1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SelectData {
+    /// `UIDVALIDITY` — bumps when the server renumbers the UID space (a reset).
+    pub uid_validity: u32,
+    /// `UIDNEXT` — the UID the next delivered message will get, if advertised.
+    pub uid_next: Option<u32>,
+    /// `EXISTS` — the number of messages in the mailbox.
+    pub exists: u32,
+    /// `HIGHESTMODSEQ` — the mailbox's current mod-sequence (RFC 7162 §3.1.2.1),
+    /// present only when the mailbox is opened with CONDSTORE/QRESYNC enabled. It is
+    /// the baseline a subsequent QRESYNC delta carries forward in its cursor.
+    pub highest_modseq: Option<u64>,
+    /// Whether `PERMANENTFLAGS` carried `\*` — the server's statement that the client
+    /// may create **new** keywords in this mailbox (RFC 9051 §7.1).
+    ///
+    /// This is the only probe IMAP offers for a failure that is otherwise invisible: a
+    /// server without `\*` answers `UID STORE +FLAGS ($Junk)` with a plain `OK` and
+    /// stores nothing, so a report would read as delivered and be gone on the next
+    /// `FETCH`. An absent `PERMANENTFLAGS` response leaves this `false` — the
+    /// conservative reading, since the client has no statement to rely on.
+    pub permanent_flags_allow_new: bool,
+}
+
+/// One parsed `ENVELOPE` address `(name adl mailbox host)` (RFC 9051 §7.5.2).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct Address {
+    /// The display name, if present.
+    pub name: Option<String>,
+    /// The local part (before `@`).
+    pub mailbox: Option<String>,
+    /// The domain (after `@`).
+    pub host: Option<String>,
+}
+
+/// The parsed `ENVELOPE` fields the normalizer reads (RFC 9051 §7.5.2). `References`
+/// is not an envelope field; it is left to a later threading slice.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct Envelope {
+    /// The `Subject`.
+    pub subject: Option<String>,
+    /// The `From` addresses.
+    pub from: Vec<Address>,
+    /// The `Sender` addresses.
+    pub sender: Vec<Address>,
+    /// The `Reply-To` addresses.
+    pub reply_to: Vec<Address>,
+    /// The `To` recipients.
+    pub to: Vec<Address>,
+    /// The `Cc` recipients.
+    pub cc: Vec<Address>,
+    /// The `Bcc` recipients.
+    pub bcc: Vec<Address>,
+    /// The raw `In-Reply-To` value (with angle brackets), if present.
+    pub in_reply_to: Option<String>,
+    /// The raw `Message-ID` value (with angle brackets), if present.
+    pub message_id: Option<String>,
+}
+
+/// One row of a metadata `UID FETCH` (`crate::metadata_fetch`), or of any narrower one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FetchRow {
+    /// The mailbox-unique UID (RFC 9051 §2.3.1.1) — the identity component.
+    pub uid: u32,
+    /// The IMAP flags (`\Seen`, `\Flagged`, custom keywords).
+    pub flags: Vec<String>,
+    /// The raw `INTERNALDATE` string (`"dd-Mon-yyyy hh:mm:ss +zzzz"`).
+    pub internal_date: Option<String>,
+    /// `RFC822.SIZE` in octets.
+    pub size: Option<u64>,
+    /// The parsed `ENVELOPE`, if requested and present.
+    pub envelope: Option<Envelope>,
+    /// Whether the message carries a downloadable, non-inline attachment: read from
+    /// `BODYSTRUCTURE`, or `false` when the header section shows one text body
+    /// ([`engine_mime::is_single_text_body`]). `None` when neither settled it.
+    pub has_attachment: Option<bool>,
+    /// The raw header section from `BODY[HEADER.FIELDS (…)]` (e.g.
+    /// `"References: <a@x>\r\nContent-Type: text/plain\r\n\r\n"`), if requested.
+    pub header_fields: Option<String>,
+}
+
+/// One `LIST` row: a mailbox's attributes, hierarchy delimiter, and name
+/// (RFC 9051 §7.3.1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ListRow {
+    /// The name attributes (`\HasNoChildren`, `\Sent`, `\Noselect`, …).
+    pub attributes: Vec<String>,
+    /// The hierarchy delimiter, or `None` for a flat namespace (`NIL`).
+    pub delimiter: Option<String>,
+    /// The mailbox name/path.
+    pub name: String,
+}
+
+/// Scans a response line for a bracketed response-code number like
+/// `[UIDVALIDITY 12345]` or `[HIGHESTMODSEQ 42]` (RFC 9051 §7.1, RFC 7162), parsed
+/// into the requested integer width (`u32` for UID-space codes, `u64` for a MODSEQ).
+fn response_code<T: std::str::FromStr>(line: &[u8], code: &str) -> Option<T> {
+    let text = String::from_utf8_lossy(line);
+    let needle = format!("[{code} ");
+    let start = text.find(&needle)? + needle.len();
+    let rest = &text[start..];
+    let end = rest.find(']')?;
+    rest[..end].trim().parse().ok()
+}
+
+/// The message count from a `* <n> EXISTS` line, if that is what this line is.
+fn exists_count(line: &[u8]) -> Option<u32> {
+    let items = items_of(line).ok()?;
+    let [first, second, ..] = items.as_slice() else {
+        return None;
+    };
+    if !second
+        .as_atom()
+        .is_some_and(|a| a.eq_ignore_ascii_case("EXISTS"))
+    {
+        return None;
+    }
+    first.as_atom().and_then(|a| a.parse().ok())
+}
+
+/// Reads `SELECT`/`EXAMINE` untagged responses into a [`SelectData`]. A missing
+/// `UIDVALIDITY` is an [`ImapError::Protocol`]: the sync layer cannot key identity
+/// without it.
+pub(crate) fn parse_select(lines: &[Vec<u8>]) -> ImapResult<SelectData> {
+    let mut uid_validity = None;
+    let mut uid_next = None;
+    let mut exists = 0;
+    let mut highest_modseq = None;
+    let mut permanent_flags_allow_new = false;
+    for line in lines {
+        if permanent_flags_allow_new_keywords(line) {
+            permanent_flags_allow_new = true;
+        }
+        if let Some(v) = response_code(line, "UIDVALIDITY") {
+            uid_validity = Some(v);
+        }
+        if let Some(v) = response_code(line, "UIDNEXT") {
+            uid_next = Some(v);
+        }
+        if let Some(m) = response_code(line, "HIGHESTMODSEQ") {
+            highest_modseq = Some(m);
+        }
+        if let Some(n) = exists_count(line) {
+            exists = n;
+        }
+    }
+    let uid_validity = uid_validity
+        .ok_or_else(|| ImapError::protocol("SELECT response carried no UIDVALIDITY"))?;
+    Ok(SelectData {
+        uid_validity,
+        uid_next,
+        exists,
+        highest_modseq,
+        permanent_flags_allow_new,
+    })
+}
+
+/// Whether an untagged line is `* OK [PERMANENTFLAGS (…)]` carrying the `\*` token
+/// (RFC 9051 §7.1), which is the server saying the client may create new keywords.
+///
+/// Matched on the raw bytes rather than the parenthesised item list: `\*` is a flag
+/// *token* rather than an atom, and the surrounding response-code brackets are not
+/// part of the flag list either.
+fn permanent_flags_allow_new_keywords(line: &[u8]) -> bool {
+    let Some(start) = find_subslice(line, b"[PERMANENTFLAGS ") else {
+        return false;
+    };
+    let rest = &line[start..];
+    let end = rest.iter().position(|&b| b == b']').unwrap_or(rest.len());
+    find_subslice(&rest[..end], b"\\*").is_some()
+}
+
+/// The first index of `needle` in `haystack`, or `None`.
+fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+}
+
+/// Reads `LIST` untagged responses into [`ListRow`]s, skipping any that are not a
+/// `LIST` (the transport may collect interleaved untagged data).
+pub(crate) fn parse_list(lines: &[Vec<u8>]) -> ImapResult<Vec<ListRow>> {
+    let mut rows = Vec::new();
+    for line in lines {
+        let items = items_of(line)?;
+        // `LIST (attrs) delim name`
+        let [keyword, attrs, delim, name, ..] = items.as_slice() else {
+            continue;
+        };
+        if !keyword
+            .as_atom()
+            .is_some_and(|a| a.eq_ignore_ascii_case("LIST"))
+        {
+            continue;
+        }
+        // The attribute list's parentheses are mandatory (RFC 9051 §7.3.1), so a second
+        // item that is not a list means this line is not a `LIST` row however much its
+        // first word looks like one — which is what a completion line's prose looks like.
+        let Some(attrs) = attrs.as_list() else {
+            continue;
+        };
+        let attributes = attrs
+            .iter()
+            .filter_map(|i| i.as_atom().map(str::to_owned))
+            .collect();
+        let delimiter = delim.as_nstring();
+        let Some(name) = name.as_nstring() else {
+            continue;
+        };
+        rows.push(ListRow {
+            attributes,
+            delimiter,
+            name,
+        });
+    }
+    Ok(rows)
+}
+
+/// Reads a `UID SEARCH` result into its matched UIDs. Handles both the classic
+/// untagged `SEARCH <n> <n> …` response (RFC 9051 §7.3.4) and the extended
+/// `ESEARCH … ALL <sequence-set>` form a server may return instead: in both, the
+/// numeric tokens are collected (an `ESEARCH` range like `1:3` contributes its
+/// endpoints, which is enough for the lowest/highest UID the caller needs). Lines
+/// that are not a search result are skipped; an absent or zero-match result yields an
+/// empty vec.
+pub(crate) fn parse_search(lines: &[Vec<u8>]) -> Vec<u32> {
+    for line in lines {
+        let text = String::from_utf8_lossy(line);
+        let mut tokens = text.split_whitespace();
+        let Some(head) = tokens.next() else { continue };
+        if head.eq_ignore_ascii_case("SEARCH") {
+            // `SEARCH 3 7 9` — every remaining token is a matched UID.
+            return tokens.filter_map(|token| token.parse().ok()).collect();
+        }
+        if head.eq_ignore_ascii_case("ESEARCH") {
+            // `ESEARCH (TAG "a3") UID ALL 1:3,7` — the set follows the `ALL` label.
+            return esearch_all_uids(tokens);
+        }
+    }
+    Vec::new()
+}
+
+/// The most UIDs one search result is expanded to. A bound on what a hostile server's
+/// `ALL 1:4294967295` can make the client allocate, far above any mailbox a window covers.
+pub(crate) const MAX_SEARCH_UIDS: usize = 4_000_000;
+
+/// Collects every UID an `ESEARCH` response's `ALL <sequence-set>` names: the set after
+/// `ALL`, split on `,`, each `a:b` range expanded in full. Every UID in a range matched,
+/// and the caller fetches the list, so a range must not be read as its two ends.
+fn esearch_all_uids<'a>(mut tokens: impl Iterator<Item = &'a str>) -> Vec<u32> {
+    let found_all = tokens
+        .by_ref()
+        .any(|token| token.eq_ignore_ascii_case("ALL"));
+    if !found_all {
+        return Vec::new();
+    }
+    let Some(set) = tokens.next() else {
+        return Vec::new();
+    };
+    let mut uids = Vec::new();
+    for range in set.split(',') {
+        let (first, last) = range.split_once(':').unwrap_or((range, range));
+        let (Ok(first), Ok(last)) = (first.parse::<u32>(), last.parse::<u32>()) else {
+            continue;
+        };
+        let room = MAX_SEARCH_UIDS.saturating_sub(uids.len());
+        uids.extend((first.min(last)..=first.max(last)).take(room));
+    }
+    uids
+}
+
+/// Reads `UID FETCH` untagged responses into [`FetchRow`]s. Rows without a `UID`
+/// (e.g. an unsolicited flag-only `FETCH`) are skipped, never errored.
+///
+/// Once UIDONLY is enabled the server answers `<uid> UIDFETCH (…)` instead (RFC 9586), and
+/// the number in front is the UID whether or not the body repeats it.
+pub(crate) fn parse_fetch(lines: &[Vec<u8>]) -> ImapResult<Vec<FetchRow>> {
+    let mut rows = Vec::new();
+    for line in lines {
+        let items = items_of(line)?;
+        // `<seq> FETCH (k v k v ...)` or `<uid> UIDFETCH (k v k v ...)`
+        let [number, keyword, body, ..] = items.as_slice() else {
+            continue;
+        };
+        let numbered_by_uid = match keyword.as_atom() {
+            Some(atom) if atom.eq_ignore_ascii_case("FETCH") => false,
+            Some(atom) if atom.eq_ignore_ascii_case("UIDFETCH") => true,
+            _ => continue,
+        };
+        let Some(pairs) = body.as_list() else {
+            continue;
+        };
+        let leading_uid = numbered_by_uid
+            .then(|| number.as_atom().and_then(|a| a.parse().ok()))
+            .flatten();
+        if let Some(row) = fetch_row(pairs, leading_uid) {
+            rows.push(row);
+        }
+    }
+    Ok(rows)
+}
+
+/// Interprets a `FETCH` body's `key value` pairs into a [`FetchRow`]; `None` if no
+/// `UID` is present there or in `leading_uid`.
+fn fetch_row(pairs: &[Item], leading_uid: Option<u32>) -> Option<FetchRow> {
+    let mut uid = leading_uid;
+    let mut flags = Vec::new();
+    let mut internal_date = None;
+    let mut size = None;
+    let mut envelope = None;
+    let mut structure = None;
+    let mut header_fields = None;
+    let mut iter = pairs.iter();
+    while let Some(key) = iter.next() {
+        let Some(key) = key.as_atom() else { continue };
+        // A body-section item (`BODY[HEADER.FIELDS (REFERENCES)] <value>`) does not
+        // tokenize as a single atom key: the section spec's brackets, list, and
+        // spaces split it into `BODY[HEADER.FIELDS` + `(REFERENCES)` + `]` before the
+        // value. Recognize it structurally by the `BODY[` prefix, drain the rest of
+        // the section spec up to its closing `]` atom, then read the value.
+        if key.to_ascii_uppercase().starts_with("BODY[") {
+            let value = drain_body_section(key, &mut iter);
+            header_fields = value.and_then(Item::as_nstring);
+            continue;
+        }
+        let Some(value) = iter.next() else { break };
+        match key.to_ascii_uppercase().as_str() {
+            "UID" => uid = value.as_atom().and_then(|a| a.parse().ok()),
+            "FLAGS" => {
+                flags = value
+                    .as_list()
+                    .unwrap_or(&[])
+                    .iter()
+                    .filter_map(|i| i.as_atom().map(str::to_owned))
+                    .collect();
+            }
+            "INTERNALDATE" => internal_date = value.as_nstring(),
+            "RFC822.SIZE" => size = value.as_atom().and_then(|a| a.parse().ok()),
+            "ENVELOPE" => envelope = value.as_list().map(envelope_of),
+            "BODYSTRUCTURE" => structure = Some(has_downloadable_part(value)),
+            _ => {}
+        }
+    }
+    let has_attachment = structure.or_else(|| {
+        header_fields
+            .as_deref()
+            .is_some_and(|headers| engine_mime::is_single_text_body(headers.as_bytes()))
+            .then_some(false)
+    });
+    uid.map(|uid| FetchRow {
+        uid,
+        flags,
+        internal_date,
+        size,
+        envelope,
+        has_attachment,
+        header_fields,
+    })
+}
+
+/// Consumes the remainder of a `BODY[...]` section spec and returns the body value
+/// that follows it. The `key` atom is the leading `BODY[...` fragment; if it does
+/// not already contain the closing `]` (the common `BODY[HEADER.FIELDS (REFERENCES)]`
+/// case, split into `BODY[HEADER.FIELDS` + `(REFERENCES)` + `]`), `iter` is advanced
+/// over the spec items up to and including the `]` atom. The next item is the value.
+fn drain_body_section<'a>(key: &str, iter: &mut std::slice::Iter<'a, Item>) -> Option<&'a Item> {
+    if !key.contains(']') {
+        // Drain spec items until the atom that ends with `]`.
+        for item in iter.by_ref() {
+            if item.as_atom().is_some_and(|a| a.ends_with(']')) {
+                break;
+            }
+        }
+    }
+    iter.next()
+}
+
+/// Interprets an `ENVELOPE` list's ten positional fields (RFC 9051 §7.5.2).
+fn envelope_of(fields: &[Item]) -> Envelope {
+    let at = |i: usize| fields.get(i);
+    let addrs = |i: usize| at(i).map(addresses_of).unwrap_or_default();
+    Envelope {
+        subject: at(1).and_then(Item::as_nstring),
+        from: addrs(2),
+        sender: addrs(3),
+        reply_to: addrs(4),
+        to: addrs(5),
+        cc: addrs(6),
+        bcc: addrs(7),
+        in_reply_to: at(8).and_then(Item::as_nstring),
+        message_id: at(9).and_then(Item::as_nstring),
+    }
+}
+
+/// Interprets an address-list item (`((name adl mailbox host) ...)` or `NIL`).
+fn addresses_of(item: &Item) -> Vec<Address> {
+    let Some(list) = item.as_list() else {
+        return Vec::new();
+    };
+    list.iter()
+        .filter_map(|addr| {
+            let parts = addr.as_list()?;
+            Some(Address {
+                name: parts.first().and_then(Item::as_nstring),
+                mailbox: parts.get(2).and_then(Item::as_nstring),
+                host: parts.get(3).and_then(Item::as_nstring),
+            })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+#[path = "parse_tests.rs"]
+mod tests;

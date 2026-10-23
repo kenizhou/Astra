@@ -1,0 +1,260 @@
+# TLS trust policy
+
+Authoritative for how the engine trusts server certificates. Read before touching
+`engine-tls`, a provider's transport construction, or a client's trust wiring.
+
+## The one rule
+
+**Every provider derives its trust from one host-selected [`TlsPolicy`], realized
+into one ring-backed `rustls::ClientConfig` by `engine-tls`.** There is no per-
+provider trust store. Before this, IMAP/SMTP verified against bundled `webpki-roots`
+while the reqwest providers (CalDAV/JMAP/Graph) silently used reqwest 0.13's default
+`rustls-platform-verifier` — two trust sources and two crypto backends
+(`ring` + `aws-lc-rs`) in one app, and the platform verifier's Android OCSP behavior
+broke CalDAV against Let's Encrypt certs. `engine-tls` removes that split.
+
+## The policy (`engine_tls::TlsPolicy`)
+
+```
+Roots { bundled: bool, system: bool, custom: Vec<CertificateDer> }  // rustls's own verifier
+PlatformVerifier { extra_roots: Vec<CertificateDer> }               // OS verifier delegation
+```
+
+- **`Roots`** verifies with rustls's own webpki verifier over the **union** of the
+  enabled sources — bundled Mozilla roots (`webpki-roots`), the OS store
+  (`rustls-native-certs`), and/or explicit `custom` roots. No OS-verifier
+  delegation, so **no Android `Context`** and **no platform revocation/OCSP
+  behavior**.
+- **`PlatformVerifier`** delegates the whole chain decision to the OS
+  (`rustls-platform-verifier`): faithful to platform policy — including Android
+  network-security-config / MDM CAs — but on Android the host **must** initialize
+  the JVM `Context` first, and it carries the platform's revocation behavior.
+
+Presets: `bundled()`, `bundled_and_system()`, `system_only()`, `pinned(roots)`,
+`platform_verifier()`.
+
+## Defaults: the Firefox model, split by layer
+
+We mirror Firefox: bundled Mozilla roots as the base, **augmented** by the OS store
+(Firefox's `security.enterprise_roots`), so an enterprise CA injected into the OS
+store "just works" while public CAs always resolve.
+
+- **Engine library default = `bundled()`** (pure Mozilla roots). Hermetic and
+  reproducible — server/CLI hosts and tests never depend on the build machine's OS
+  store. `TlsClientConfig::default()` is bundled, and each provider config defaults
+  to it, so a host that selects nothing gets bundled trust.
+- **Native clients ship `bundled_and_system()`** (bundled ∪ OS, the Firefox
+  preset) so enterprise/MDM CAs are honored with zero configuration.
+
+> Trusting the OS store means trusting whatever an admin/MDM — or a corporate MITM
+> proxy / local AV interceptor — installed there. Firefox accepts this; a
+> sovereignty-strict tenant can stay on pure `bundled()`, or `pinned(roots)` to
+> trust *only* an explicit CA.
+
+## Certificate exceptions
+
+Some servers cannot be reached by *any* trust policy. A **self-signed CA certificate
+served as its own end-entity certificate** — what Proton Mail Bridge's local IMAP/SMTP
+listener does, and several self-hosted servers besides — fails with
+`CaUsedAsEndEntity`, and **adding it to `custom` does not help**: the webpki verifier
+reads the leaf's own basic constraints before it consults a trust anchor, so the
+certificate is refused for being a CA regardless of whether it is also trusted.
+
+`client_config_with_exceptions(&policy, &exceptions)` is the only mechanism that
+reaches such a server, and it is Thunderbird's model rather than a policy relaxation:
+
+```
+CertificateException { server_name, fingerprint }   // SHA-256 of one certificate's DER
+```
+
+- **Verification is never relaxed.** The policy's own verifier runs first and
+  unchanged; an exception is consulted only once it has *already* refused. A server
+  that verifies normally cannot be affected by one.
+- **One server, one certificate.** An exception admits a certificate whose SHA-256
+  matches, presented under the server name it names. The same name presenting anything
+  else is refused exactly as before, so it is not `danger_accept_invalid_certs` scoped
+  to a host: it is a pin.
+- **It overrides whatever the verifier objected to** for that certificate — expiry and
+  a name mismatch as much as an unbuildable chain. That is what an exception *is*, and
+  it is why the fingerprint is the whole of it.
+- **Every refusal is recorded**, excepted or not. `TlsClientConfig::rejected()` returns
+  the server name and end-entity certificate of the most recent one, which is how a
+  host shows a person what it declined rather than only that something was wrong. A
+  host builds one config per connect attempt, so it answers for the attempt just
+  awaited.
+- **What to show comes with it.** `RejectedCertificate::summary()` reads the names and
+  the validity window out of the DER (`x509-cert`, `CertificateSummary`), because
+  "is this the server I meant?" is the question somebody is actually answering and a
+  bare fingerprint does not answer it. Dates are epoch seconds: this crate carries no
+  timezone data and the host knows the reader. The parse can fail and says so — nothing
+  has validated those bytes, which is the whole point — and the fingerprint is taken
+  over the bytes, so it needs no parse. Nothing else may rest on a summary.
+- ⚠️ **The name to show is `subject_names()`, never the `CN`.** `rustls-webpki` matches a
+  host against `subjectAltName` and has **no `CN` fallback at all**, so a certificate whose
+  `CN` is the server somebody expected and whose SAN is something else fails *because of the
+  SAN* — and a host showing the `CN` would display the expected name as the certificate's
+  claim while asking them to pin it. `subject_common_name()` is kept as a label and its
+  doc says so.
+- **A claim is untrusted text bound for a dialog**, so `CertificateSummary` normalises every
+  string it returns: control and bidi-formatting characters become separators and the value
+  is cut to 128 characters. Without that, a `CN` of `mail.example.com\n\nVerified by a
+  trusted authority` reaches the host as a name to print.
+- **A refusal does not outlive itself.** A later handshake that succeeds on the same config
+  clears the slot, so "is there a certificate question?" cannot stay true forever. One slot
+  is shared by every provider of an account, so a host whose providers dial concurrently
+  compares `server_name` before offering anybody an exception; one config per connect
+  attempt, which is what `mailcal-account` builds, has nothing to compare.
+
+The host decides. This crate offers no policy on when to ask, what to display, or
+where to keep an accepted exception; those are product questions, and an engine that
+answered them would be deciding for every host.
+
+## How each provider consumes it
+
+The host builds **one** `TlsClientConfig` (`engine_tls::client_config(&policy)?`) and
+shares it (cloning is a cheap `Arc` bump):
+
+- **CalDAV / JMAP** carry it in their config (`CalDavConfig::tls` /
+  `JmapConfig::with_tls`), defaulting to bundled. `connect` reads `config.tls`.
+- **Graph** (token-based, no config struct) takes it as a parameter:
+  `GraphClient::connect(token, &tls)` / `for_mailbox` / `with_base`.
+- **IMAP/SMTP** keep taking a `tokio_rustls::TlsConnector` (the host builds it via
+  `tls.connector()`); the library bakes in no root store.
+
+`TlsClientConfig::reqwest_builder()` returns a preconfigured `reqwest::ClientBuilder`.
+Each HTTP provider starts from it through `engine_http::client(tls)`, which adds the dial
+bound (`deadlines.md`), and then adds its own non-TLS settings, e.g. redirect policy. It
+advertises ALPN `h2` then `http/1.1`, so the HTTP providers negotiate HTTP/2 where
+the server supports it (Google does; `graph.microsoft.com` answers HTTP/1.1 even when
+`h2` is offered — measured 2026-09-11 against the live account and confirmed with an
+independent `curl --http2`, so this is the server's choice, not a missing ALPN offer)
+and fall back to HTTP/1.1 —
+reqwest's preconfigured-TLS path keeps the config's ALPN rather than deriving its
+own, so it is set here. The shared connector (IMAP/SMTP) carries no ALPN.
+
+## Crypto backend and the reqwest wiring
+
+- **One backend: `ring`.** Every config is built with an explicit
+  `rustls::crypto::ring::default_provider()`; `aws-lc-rs` is out of the tree.
+- **TLS 1.2 floor, uniform across providers.** The shared config uses
+  `with_safe_default_protocol_versions()` (rustls's safe defaults, TLS 1.2 + 1.3;
+  rustls implements nothing older), so every provider — the reqwest HTTP three and
+  the IMAP/SMTP connector — has the same 1.2 minimum by construction. Do **not**
+  reach for reqwest's `min_tls_version`: it has no effect on the preconfigured-TLS
+  path, so the floor must live in the shared config (which is why it is uniform).
+- reqwest uses the **`rustls-no-provider`** feature (not `rustls`), which gives the
+  rustls integration without `aws-lc-rs` and without reqwest's own platform-verifier
+  path. We always hand reqwest a preconfigured config via `tls_backend_preconfigured`.
+  We also enable reqwest's **`http2`** feature so the preconfigured client can speak
+  HTTP/2 when ALPN negotiates it (see "How each provider consumes it").
+- **Footgun:** under `rustls-no-provider`, a reqwest client built *without*
+  preconfigured TLS panics on its first HTTPS request. All clients must go through
+  `TlsClientConfig::reqwest_builder()`. As insurance, `client_config` installs a
+  `ring` process-default `CryptoProvider` once.
+
+## Cargo features (`engine-tls`)
+
+`default = []` (bundled only). Opt-ins: `reqwest` (the HTTP builder; the HTTP
+providers enable it), `tls-native-certs` (the `system` root source),
+`tls-platform-verifier` (the `PlatformVerifier` policy), `dangerous-testing`
+(`TlsClientConfig::dangerous_accept_any`, for the self-signed harness cert only).
+A `System`/`PlatformVerifier` policy returns `TlsError::Unsupported` when its
+feature is off (the enum stays stable across builds for FFI).
+
+## What the engine reports back (`ConnectionInfo`, `ConnectStep`)
+
+Each adapter surfaces what its transport negotiated through the one post-connect
+seam, `Provider::connection_info()` (`providers.md`). The trust *policy* is
+deliberately **not** in it: the host selected it and already knows it, so the host
+logs it. The object carries only what the **server** decided — and what it can carry
+is asymmetric:
+
+- **IMAP/SMTP** (`tokio-rustls`): `tls_version` comes from rustls'
+  `ClientConnection::protocol_version()`, read off the finished handshake in
+  `provider-imap`'s `tls_info` (the last place the concrete `TlsStream` is visible
+  before `Connection<S>` erases it). No `http_version`. It describes the **IMAP**
+  session; SMTP submission re-dials per send, so its handshake is not a durable fact
+  of the provider.
+The same asymmetry decides who can emit `ConnectStep::TlsEstablished` on the
+connect-phase observer seam (`providers.md`): only `provider-imap`, because that step
+fires *during* connect and only `provider-imap` owns a finished `TlsStream` by then. An
+HTTP adapter learns its TLS version from a **response**, which is one exchange too late
+for that step, so it still emits none.
+
+- **JMAP / CalDAV / Graph / Google** (`reqwest`): both versions come off a response and
+  are recorded together, at each transport's single send/collect funnel, into one
+  `engine_http::ObservedConnection`. `http_version` is `reqwest::Response::version()`;
+  `tls_version` is reqwest's `TlsInfo` response extension, which the shared
+  `TlsClientConfig::reqwest_builder` asks for with `.tls_info(true)` — so every HTTP
+  provider reports it, or none would.
+
+  Both are the **latest** observation, not the first: JMAP and CalDAV disable reqwest's
+  redirect following and resolve the well-known `30x` themselves, so the first response
+  belongs to the redirector — possibly a different origin, over a different TLS session,
+  from the `apiUrl` / calendar home that serves every real request. Latching the first
+  would permanently misreport those providers.
+
+  `tls_version` is `None` before the first response (Graph and Google issue none at
+  connect) and on a plaintext `http://` hop — which is what the Stalwart harness serves,
+  so the live suites see `None` and the real handshake is covered offline instead
+  (`engine-http/tests/observed_connection.rs`, `engine-tls/tests/roundtrip.rs`).
+
+  **Where the translation lives, and why it is not in `engine-provider`.** Reading a
+  reqwest response is `engine-http`'s job: it already wraps reqwest's send, and
+  `engine-provider` states the provider-neutral contract and must not name a concrete
+  HTTP client — the reason `HttpVersion::from_http` takes the leaf `http::Version`.
+  `engine-provider` owns the neutral facts and the two observation cells
+  (`ObservedHttpVersion`, `ObservedTlsVersion`); `engine-http` owns the pairing and the
+  reqwest-facing mapping.
+
+  **Record both together.** They arrive on the same response and the four transports
+  have one to three send funnels each, so two separate `record` calls is a pair that one
+  funnel eventually forgets. `ObservedConnection::record(&response)` takes the whole
+  response for that reason.
+
+  This closed [seanmonstar/reqwest#3066][reqwest-tls-version]; reqwest **0.13.5** added
+  `TlsInfo::version()`, populated from rustls' `CommonState::protocol_version()`. The
+  earlier guidance here was to write no custom connector that downcasts to the rustls
+  stream, and that still stands — the fix was to wait for the upstream accessor, and it
+  landed.
+
+[reqwest-tls-version]: https://github.com/seanmonstar/reqwest/issues/3066
+
+## Testing
+
+- Offline provider fakes bypass TLS entirely, so unit/offline tests are unaffected.
+- The Stalwart harness serves CalDAV/JMAP over **plaintext HTTP** and its IMAP
+  self-signed cert is runtime-generated, so the live suite validates *function*, not
+  reqwest certificate verification.
+- `engine-tls`'s `tests/roundtrip.rs` is the authoritative verification proof: an
+  in-process `tokio-rustls` server proves one policy makes **both** the reqwest
+  client and the connector accept a trusted (pinned/union) cert and reject an
+  untrusted (bundled) one.
+- `engine-tls`'s `tests/exceptions.rs` covers certificate exceptions against a real
+  handshake, with a server presenting a `CA:TRUE` leaf — the Bridge shape. Its first
+  test is the one that decides the design: that certificate is refused **even as a
+  trust anchor**, so the exception is not a convenience for something `custom` could
+  have done. The rest hold the pin: an exception admits the certificate it names, not a
+  second certificate for the same name, not the same certificate under another name,
+  and a valid certificate still verifies normally alongside one.
+- `provider-imap`'s `tls_info` tests stand up an in-process TLS server speaking just
+  enough IMAP to complete `connect_session`, pinned once to the default versions and
+  once to TLS 1.2 — so the reported version is proven to be *read from the handshake*,
+  not assumed. The reqwest adapters' `http_version` is covered the same way, against
+  their in-process mock HTTP/1.1 servers.
+- The reqwest adapters' `tls_version` is covered in the same shape, and has to be: the
+  harness is plaintext, reqwest's `TlsInfo` has private fields so no fake can construct
+  one, and a client built without `.tls_info(true)` reports `None` forever rather than
+  failing. `engine-tls`'s `roundtrip.rs` proves the shared builder asks for the
+  extension (1.2-only and default servers, so the version is read, not assumed);
+  `engine-http`'s `tests/observed_connection.rs` proves `ObservedConnection` gets both
+  facts off one response.
+
+## Host / FFI wiring
+
+The `TlsPolicy` enum + DER bytes is the FFI-facing surface; `TlsClientConfig` is an
+opaque handle. A host builds a policy per platform, realizes one `TlsClientConfig`,
+and threads it into every provider. With `bundled_and_system()`, Android needs no
+JVM `Context` (native-certs reads the store directly); a `PlatformVerifier` build is
+the only one that requires the host to initialize the platform verifier first.
+Exposing `TlsPolicy` over the UniFFI/C-ABI bindings is a later slice.

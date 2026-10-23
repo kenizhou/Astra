@@ -55,7 +55,7 @@ Astra Mail is a desktop mail client being ported, slice by slice, from the mail-
 
 **Layering, bottom to top:**
 
-- `engine-api` (external crate, pinned by git rev in the workspace `Cargo.toml`) is the only door to the sync engine. Protocol parsing (IMAP, SMTP, CalDAV, JMAP, Graph, Google) lives in the engine, never in Astra. Re-pinning means bumping the identical `rev` on every engine line at once.
+- `engine-api` (vendored in-tree at `vendor/engine/`, the full upstream tree, MPL-2.0) is the only door to the sync engine. Protocol parsing (IMAP, SMTP, CalDAV, JMAP, Graph, Google) lives in the engine, never in Astra. In-tree engine edits land as ordinary commits; upstream changes arrive through the nightly vendor-sync flow described in `docs/upstream-sync.md` (a `vendor-sync` branch holds the pristine copy and each sync is a merge PR).
 - `crates/astra-account` turns a stored TOML account config (secrets via the OS keychain) into dialled engine connections; also autodetect and OAuth (`astra-oauth`, `astra-autodetect`).
 - `crates/astra-app` is the application core: a unidirectional loop. A host observes a `Surface` through `AppObserver`, pulls an immutable snapshot, and dispatches an `Intent` back. Intents stay serde-serialisable.
 - `crates/astra-viewmodel` holds pure, immutable snapshots shared by every surface.

@@ -29,7 +29,10 @@ Astra Mail 是一个桌面邮件客户端。产品名为 "Astra Mail"，用户�
 - 身份一律用 newtype；跨模块边界不得出现裸 `String` id。
 - 行为变更先写测试。缺陷修复随回归测试落地，测试放在能观察到该
   契约的最低共享层。
-- 引擎只经 `engine-api` 消费。协议解析属于引擎，绝不在 Astra 中。
+- 引擎只经 `engine-api` 消费。协议解析属于引擎，绝不在 Astra 中。引擎
+  源码以完整上游树 vendored 于 `vendor/engine/`（MPL-2.0）；树内修改以
+  普通 commit 落地，上游变化经 `docs/upstream-sync.md` 的 vendor-sync
+  流程到达。任何 Astra 自己的东西不进 `vendor/`。
 - Intent 保持可被 serde 序列化。Surface 是不可变快照。
 - `docs/capabilities.md` 随其描述的功能在同一个变更中移动。
 - `VERSION` 只在发布 PR 中移动，且始终与工作区包版本一起移动。

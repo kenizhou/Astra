@@ -1,0 +1,234 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+# Shared package metadata. Member crates opt in with `field.workspace = true`.
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96"
+publish = false
+license = "MPL-2.0"
+
+# ---------------------------------------------------------------------------------------------
+# Debug info: the single biggest lever on build time and target/ size, so it is decided HERE
+# rather than left to rustc's default (`debug = 2`, full CodeView/DWARF for everything).
+#
+# Measured on a Surface Pro X (SQ1, 8 cores, arm64), `cargo test --workspace --all-features
+# --no-run` from an empty target dir: 4m51s and 11 GB, of which 4.4 GB was PDBs under
+# `debug/deps` and another 4.4 GB was `debug/incremental` — largely debug info too, since the
+# incremental cache stores what it would otherwise regenerate. Six test binaries carried a PDB
+# over 120 MB each. A drive that cannot hold that turns `cargo clean` into a routine, and every
+# clean throws away the cache that makes a rebuild fast. Small target dirs and warm caches are
+# the same problem.
+#
+# The split below follows from who reads the information:
+#   - Our own crates keep `line-tables-only`. That is exactly what makes a panic backtrace name a
+#     file and a line — which is how an engine panic gets traced from a product-core or client
+#     log, and it is the part worth keeping. Variable-level info is what a *debugger* needs, and
+#     the engine's debugging loop is the Stalwart/SabreDAV harnesses and test output, not
+#     breakpoints.
+#   - Dependencies get nothing. Nobody here has ever stepped into rustls, jiff or bundled SQLite;
+#     their debug info is pure disk. This is the "optimize the dependencies" advice done the way
+#     that actually helps a build — note that the *other* common form of it,
+#     `[profile.dev.package."*"] opt-level = 3`, trades MORE build time for faster dependency
+#     runtime. That is a test-speed knob, not a build-speed one; do not add it expecting this.
+#
+# This does NOT weaken the coverage gate. `cargo llvm-cov` is source-based: `-C
+# instrument-coverage` embeds the region map (with filenames and line/column spans) in the binary
+# itself, and `llvm-cov` reads that plus the profile data — it never consults DWARF. Verified by
+# running `cargo llvm-cov -p engine-core --all-features --summary-only` either side of this
+# change: regions 97.53% / functions 97.56% / lines 98.30%, identical to the digit.
+#
+# Note this governs builds OF this repo — its CI and local dev. The product core consumes these
+# crates as git dependencies, so its own `[profile.dev.package."*"]` already applies to them there.
+# ---------------------------------------------------------------------------------------------
+[profile.dev]
+debug = "line-tables-only"
+
+# `[profile.test]` has to say it again, and this is the trap. `cargo test` builds its targets
+# under the *test* profile, and while the Cargo book describes that profile as inheriting `dev`,
+# the top-level `debug` key measurably does not come with it: setting it on `dev` alone rebuilds
+# nothing for `cargo test`, and adding it here rebuilds everything. So the debug-info fix below
+# applied to `cargo build` and never to the command that does the bulk of the work — 96 test
+# binaries under `--all-features`.
+#
+# Measured, same machine, `touch crates/engine-core/src/lib.rs` then
+# `CARGO_INCREMENTAL=0 cargo test --workspace --all-features --no-run`:
+# **368s before, 149s and 149s after.** User CPU is unchanged (170s vs 173s) and only wall time
+# moves, because what this removes is the writing of debug info, not the compiling of code.
+#
+# The `package."*"` override below does NOT need repeating — that one is inherited, verified by
+# adding a `[profile.test.package."*"]` twin and watching cargo rebuild nothing.
+[profile.test]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = 0
+
+# Opt in when you genuinely need a debugger (`cargo build --profile debugger`). It lands in
+# `target/debugger/` rather than `target/debug/`, so turning it on does not evict the warm dev
+# cache — at the cost of a second target dir while it exists, so `cargo clean -p <crate>` it
+# afterwards.
+[profile.debugger]
+inherits = "dev"
+debug = true
+
+# Centralized dependency versions so every crate agrees on one version.
+[workspace.dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+thiserror = "2.0.18"
+time = { version = "0.3.51", features = ["macros", "parsing", "formatting"] }
+async-trait = "0.1.89"
+# Async streaming for the paged email sync primitive: `futures-core` for the
+# runtime-neutral `Stream` trait in the provider's return type, `futures-util` for
+# the orchestrator/drain combinators (`StreamExt`), and `async-stream` for the
+# ergonomic `try_stream!` generators the adapters build their chunk streams with.
+# All pure-Rust and runtime-neutral, so `engine-sync` keeps no hard runtime dep.
+futures-core = "0.3.32"
+futures-util = { version = "0.3.32", default-features = false, features = ["std"] }
+async-stream = "0.3.6"
+tokio = { version = "1.52.3", features = ["macros", "rt", "rt-multi-thread"] }
+# SQLite backend: `bundled` compiles a pinned SQLite amalgamation (FTS5 enabled),
+# so the build needs no system libsqlite3 and every platform agrees on one engine.
+rusqlite = { version = "0.40.1", features = ["bundled", "functions"] }
+tempfile = "3.27.0"
+# Recurrence expansion resolves wall-clock times through IANA zones. We force the
+# bundled, version-pinned tzdb and disable jiff's defaults so it never reads the
+# host's `/usr/share/zoneinfo`/`TZDIR`/system zone: expansion must be identical
+# across a user's devices (`calendar-semantics.md`). `jiff_tzdb::VERSION` is the
+# pinned release recorded on each occurrence.
+jiff = { version = "0.2.29", default-features = false, features = ["std", "tzdb-bundle-always"] }
+jiff-tzdb = "0.1.6"
+# Product HTTP stack for JMAP, CalDAV, and Graph. `rustls-no-provider` gives the
+# rustls integration WITHOUT aws-lc-rs and without reqwest's own platform-verifier
+# path: every provider hands reqwest a preconfigured, ring-backed `rustls::ClientConfig`
+# from `engine-tls` (one trust policy for all providers; `docs/agent-guidance/tls.md`).
+# `http2` lets those providers negotiate HTTP/2 via ALPN where the server supports it
+# (JMAP and Graph do), falling back to HTTP/1.1. Default features stay off otherwise
+# so we do not pull native TLS.
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls-no-provider", "charset", "http2"] }
+# The HTTP primitives reqwest is built on. Used only for `http::Version`, so
+# `engine-provider` can map what `reqwest::Response::version` returns onto its neutral
+# `HttpVersion` in one place (`engine-provider`'s `http` feature). Must stay on the same
+# major as the copy reqwest resolves, or the versions would be distinct types.
+http = "1.4.1"
+# The request body `engine-http` hands reqwest in pieces, so the send funnel can see how much
+# of a request a server has taken (`docs/agent-guidance/deadlines.md`). Both are leaf crates
+# reqwest already resolves, on the same majors, so they compile nothing new.
+bytes = "1.11.1"
+http-body = "1.0.1"
+# URL parsing for `engine-provider`'s `same_origin` credential guard: an adapter must
+# not send the account's `Authorization` header to a host named by remote content.
+# Same major as the copy reqwest resolves, for one `Url` type across the tree.
+url = "2.5.7"
+# Pure-Rust TLS for the hand-rolled IMAP transport (implicit-TLS on 993). `ring`
+# (not rustls' default `aws-lc-rs`) keeps the hand-rolled transport's crypto
+# provider explicit. The transport is generic over any async stream; this only
+# backs the live `connect()` path, with the host injecting trust policy
+# (`docs/agent-guidance/imap-smtp.md`).
+tokio-rustls = { version = "0.26.4", default-features = false, features = ["ring", "tls12"] }
+# The no-verify verifier for Stalwart's self-signed test cert lives in test code
+# only (a dev-dependency), never the host store — same posture as stalwart-harness.
+rustls = { version = "0.23.41", default-features = false, features = ["ring", "std", "tls12"] }
+# Root trust material for the unified TLS stack (`engine-tls`, `docs/agent-guidance/tls.md`).
+# `webpki-roots` is the bundled Mozilla program — the hermetic engine default. The two
+# OS-trust crates back host-selected system trust and are pulled only through `engine-tls`'s
+# `tls-native-certs` / `tls-platform-verifier` features, so they stay out of the default build.
+# `rustls-platform-verifier` is pinned to match the copy reqwest resolves (one crate, one
+# Android `Context` init).
+webpki-roots = "1.0.8"
+rustls-native-certs = "0.8.4"
+rustls-platform-verifier = "0.7.0"
+# Pure-Rust streaming XML reader for the CalDAV/WebDAV multistatus parser
+# (`provider-caldav`). WebDAV responses are namespaced XML with CDATA-wrapped
+# calendar data and per-property status; a hardened, battle-tested reader is the
+# right tool for hostile input (calendar data is untrusted — `north-star.md`
+# security), and hand-rolling one would be a correctness/safety risk for no gain.
+# No C dependency, so it cross-compiles to mobile like the rest of the stack.
+quick-xml = "0.42.0"
+# Pure-Rust MIME/RFC 5322 parser (`engine-mime`), by the same authors as our
+# Stalwart test target. Mail bodies are hostile input (`north-star.md` security),
+# and charset/encoded-word/nested-multipart decoding is spec-heavy and a known
+# correctness/safety minefield — a hardened, fuzzed parser is the right tool, and
+# it is pure Rust so it cross-compiles to mobile like the rest of the stack. The
+# `full_encoding` feature (no longer default since 0.11.2) pulls the full legacy
+# charset tables so non-UTF-8 bodies decode correctly.
+mail-parser = { version = "0.11.4", default-features = false, features = ["full_encoding"] }
+# Content addressing for the on-disk raw-message/attachment blob area
+# (`store-sqlite`): blobs are named by the SHA-256 of their bytes, deduping IMAP
+# copies of one message and giving filesystem-safe, fixed-length names. Pure Rust,
+# no C surface.
+sha2 = { version = "0.11.0", default-features = false }
+# Reads the names and validity window out of a refused certificate, for the summary
+# `engine-tls` hands a host to show (`docs/agent-guidance/tls.md`). `std` only: none of the
+# crate's builder or signature halves.
+x509-cert = { version = "0.3", default-features = false, features = ["std"] }
+# IDNA domain canonicalization for conservative cross-provider contact identity.
+# Only the email domain is folded; the local part remains byte/case exact
+# (`docs/agent-guidance/contacts.md`).
+idna = "1.1.0"
+
+# Internal crates, referenced by path so members opt in with `workspace = true`.
+engine-core = { path = "crates/engine-core" }
+# `Retry-After`'s HTTP-date form, which RFC 9110 §5.6.7 requires a recipient to accept in
+# all three syntaxes. Already in the lock via hyper, so declaring it compiles nothing new.
+httpdate = "1.0.3"
+
+engine-http = { path = "crates/engine-http" }
+engine-tls = { path = "crates/engine-tls" }
+engine-mime = { path = "crates/engine-mime" }
+# The iCalendar layer is transport-neutral: iMIP carries it over *mail* on every
+# account type, so it cannot live inside the CalDAV adapter (see the crate docs).
+engine-ical = { path = "crates/engine-ical" }
+engine-store = { path = "crates/engine-store" }
+engine-search = { path = "crates/engine-search" }
+engine-recurrence = { path = "crates/engine-recurrence" }
+engine-provider = { path = "crates/engine-provider" }
+engine-rfc5322 = { path = "crates/engine-rfc5322" }
+provider-jmap = { path = "crates/provider-jmap" }
+provider-imap = { path = "crates/provider-imap" }
+provider-caldav = { path = "crates/provider-caldav" }
+engine-sync = { path = "crates/engine-sync" }
+store-sqlite = { path = "crates/store-sqlite" }
+engine-api = { path = "crates/engine-api" }
+
+# Strict, workspace-wide lint policy (AGENTS.md / rust.md). Member crates inherit
+# via `[lints] workspace = true`. Verification runs clippy with `-D warnings`, so
+# every lint below is effectively an error in CI.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+
+# Rustdoc's lints, denied here rather than only through CI's `RUSTDOCFLAGS: -D warnings`. Without
+# this a broken doc link is a *warning* locally and an error on the runner, so the `cargo doc` line
+# in AGENTS.md — the one that exists to catch exactly this — cannot fail on a developer's machine.
+[workspace.lints.rustdoc]
+all = "deny"
+
+# Clippy's `pedantic` group is a hard error (`priority = -1` lets the per-lint `allow`s
+# below win). The allows are the ones that fire almost entirely on false positives for this
+# codebase; everything else in `pedantic` is fixed, not silenced.
+[workspace.lints.clippy]
+pedantic = { level = "deny", priority = -1 }
+# Our module/type naming (e.g. `mail::MailboxId`) intentionally repeats the module
+# name for clarity at the call site; this pedantic lint fights that convention.
+module_name_repetitions = "allow"
+# `doc_markdown` flags domain proper nouns (CalDAV, JMAP, JSCalendar, VTIMEZONE,
+# RFC/protocol names) as if they were unticked code identifiers. Our docs are
+# protocol-heavy prose where these are proper nouns, not code, so the lint fires
+# almost entirely on false positives.
+doc_markdown = "allow"
+# `must_use_candidate` flags nearly every pure getter/builder; the signal-to-noise is too
+# low to gate the build on.
+must_use_candidate = "allow"
+# `too_many_lines` (a per-function 100-line threshold) fights the under-500-lines-per-file
+# rule (AGENTS.md) and fires on cohesive-but-long functions.
+too_many_lines = "allow"
+# Internal invariant `expect()`s (e.g. a poisoned lock) are unrecoverable programmer errors,
+# not documented API behavior a caller can act on, so a uniform "# Panics" note is noise.
+# (`missing_errors_doc` stays denied — a fallible result IS part of the contract.)
+missing_panics_doc = "allow"

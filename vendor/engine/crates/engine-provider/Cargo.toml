@@ -1,0 +1,41 @@
+[package]
+name = "engine-provider"
+description = "Provider/transport trait surface for the PIM sync engine: a minimal, provider-neutral contract that adapters (JMAP now; IMAP/SMTP/CalDAV later) implement to return normalized SyncUpdate batches plus opaque cursors, expose capabilities, and classify failures. No network or async-runtime dependencies; those live in the provider crates."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+engine-core = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+# `futures-core` for the `Stream` in the email streaming primitive's return type;
+# `futures-util` for the drain default that collects the stream into one update.
+futures-core = { workspace = true }
+futures-util = { workspace = true }
+# Only for `HttpVersion::from_http`, which maps what `reqwest::Response::version`
+# returns onto the engine's `HttpVersion`. Optional so this crate stays dependency-light
+# for the pure-logic consumers (`engine-sync`, `engine-api`); the three HTTP provider
+# adapters turn it on. `http` is a leaf crate reqwest already resolves.
+http = { workspace = true, optional = true }
+# Only for `same_origin`, the rule that keeps an account's credentials off a host
+# named by remote *content* (a vCard `PHOTO` URI). Optional alongside `http` for the
+# same reason: the pure-logic consumers never speak HTTP. `url` is a leaf crate
+# reqwest already resolves.
+url = { workspace = true, optional = true }
+
+[features]
+# The `HttpVersion::from_http` conversion and the `same_origin` credential guard
+# (and their `http`/`url` dependencies). Enabled by the reqwest-backed adapters:
+# `provider-jmap`, `provider-caldav`, `provider-graph`, `provider-google`.
+http = ["dep:http", "dep:url"]
+
+[dev-dependencies]
+tokio = { workspace = true }
+serde_json = { workspace = true }
+futures-util = { workspace = true }
+
+[lints]
+workspace = true
