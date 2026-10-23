@@ -1,0 +1,371 @@
+//! Conversions across the SQL boundary, plus the small lease-time helpers.
+//!
+//! Everything the store persists is mapped here between the contract's domain
+//! types (`SyncScope`, `UtcDateTime`, `PendingOpState`, fencing generations) and
+//! the `TEXT`/`INTEGER` columns the schema (`schema.rs`) stores them in. Keeping
+//! the mapping in one place means the row shapes have a single source of truth.
+
+use core::time::Duration;
+
+use engine_core::{
+    error::FailureClass,
+    search_index::{AddressField, MembershipKind, ParticipantField},
+    sync::SyncScope,
+    time::UtcDateTime,
+    write::{PendingOpId, PendingOpKind},
+};
+use engine_store::{PendingOpState, Result, StoreError};
+
+/// Wraps any backend failure (rusqlite, serde, integer range) as a redacted
+/// [`StoreError::Backend`]; the concrete cause stays at the SQL layer.
+pub(crate) fn backend(err: impl core::fmt::Display) -> StoreError {
+    StoreError::Backend(err.to_string())
+}
+
+/// The stable primary-key text for a scope.
+///
+/// `SyncScope` is an enum of string/enum fields, so its JSON form is canonical
+/// and unambiguous (no map keys to reorder) — and serialization cannot fail.
+pub(crate) fn scope_key(scope: &SyncScope) -> String {
+    serde_json::to_string(scope).expect("SyncScope serialization is infallible")
+}
+
+/// Renders an instant for storage, in the one form every time column holds:
+/// `YYYY-MM-DDThh:mm:ss.nnnnnnnnnZ` ([`UtcDateTime::to_sortable_string`]).
+///
+/// SQLite has no date-time type: a `TEXT` column compares byte by byte, which is time order only
+/// when every value has the same width. Exact to the nanosecond, because SQLite keeps the text as
+/// written. Its own date functions (`datetime()`, `julianday()`, `unixepoch()`) would read only
+/// the first three fraction digits, which is one reason no query here uses them. A query
+/// parameter compared with one of these columns goes through this function too, or a hand-built
+/// `…T00:00:00Z` sorts after a stored midnight.
+pub(crate) fn instant_to_text(instant: UtcDateTime) -> String {
+    instant.to_sortable_string()
+}
+
+/// The stored text for a mail address junction's `field` column.
+pub(crate) fn address_field_text(field: AddressField) -> &'static str {
+    match field {
+        AddressField::From => "from",
+        AddressField::To => "to",
+        AddressField::Cc => "cc",
+    }
+}
+
+/// The stored text for a `membership.kind` column.
+pub(crate) fn membership_kind_text(kind: MembershipKind) -> &'static str {
+    match kind {
+        MembershipKind::Mailbox => "mailbox",
+        MembershipKind::Keyword => "keyword",
+        MembershipKind::Calendar => "calendar",
+    }
+}
+
+/// The stored text for an event participant junction's `role` column.
+pub(crate) fn participant_field_text(field: ParticipantField) -> &'static str {
+    match field {
+        ParticipantField::Attendee => "attendee",
+        ParticipantField::Organizer => "organizer",
+    }
+}
+
+/// Parses a stored instant back from its canonical text form.
+pub(crate) fn parse_instant(text: &str) -> Result<UtcDateTime> {
+    text.parse().map_err(backend)
+}
+
+/// Parses an optional stored instant (a `NULL` lease expiry means "not held").
+pub(crate) fn parse_opt_instant(text: Option<String>) -> Result<Option<UtcDateTime>> {
+    match text {
+        Some(value) => Ok(Some(parse_instant(&value)?)),
+        None => Ok(None),
+    }
+}
+
+/// True if a lease is held and has not expired at `now` (mirrors the reference
+/// store: liveness is by expiry, supremacy is by fencing token).
+pub(crate) fn is_live(expiry: Option<UtcDateTime>, now: UtcDateTime) -> bool {
+    expiry.is_some_and(|e| e > now)
+}
+
+/// Computes a lease expiry from the current instant and a TTL.
+///
+/// # Errors
+///
+/// Returns [`StoreError::Backend`] if the expiry would overflow representable
+/// time (a real clock never reaches it).
+pub(crate) fn expiry_after(now: UtcDateTime, ttl: Duration) -> Result<UtcDateTime> {
+    now.checked_add(ttl)
+        .ok_or_else(|| StoreError::Backend("lease ttl overflow".to_owned()))
+}
+
+/// Encodes a pending-op lifecycle state as the text stored in its column.
+pub(crate) fn state_to_text(state: PendingOpState) -> &'static str {
+    match state {
+        PendingOpState::Pending => "Pending",
+        PendingOpState::InFlight => "InFlight",
+        PendingOpState::NeedsConfirmation => "NeedsConfirmation",
+        PendingOpState::Succeeded => "Succeeded",
+        PendingOpState::Failed => "Failed",
+        PendingOpState::Cancelled => "Cancelled",
+    }
+}
+
+/// Decodes a stored pending-op state.
+///
+/// # Errors
+///
+/// Returns [`StoreError::Backend`] on an unrecognized state string (corruption).
+pub(crate) fn parse_state(text: &str) -> Result<PendingOpState> {
+    Ok(match text {
+        "Pending" => PendingOpState::Pending,
+        "InFlight" => PendingOpState::InFlight,
+        "NeedsConfirmation" => PendingOpState::NeedsConfirmation,
+        "Succeeded" => PendingOpState::Succeeded,
+        "Failed" => PendingOpState::Failed,
+        "Cancelled" => PendingOpState::Cancelled,
+        other => {
+            return Err(StoreError::Backend(format!(
+                "unknown pending-op state: {other}"
+            )));
+        }
+    })
+}
+
+/// Encodes which write an op's payload describes.
+pub(crate) fn kind_to_text(kind: PendingOpKind) -> &'static str {
+    match kind {
+        PendingOpKind::MailSubmit => "MailSubmit",
+        PendingOpKind::MailEdit => "MailEdit",
+        PendingOpKind::MailReport => "MailReport",
+        PendingOpKind::MailDraftPut => "MailDraftPut",
+        PendingOpKind::MailDraftDelete => "MailDraftDelete",
+        PendingOpKind::MailboxEdit => "MailboxEdit",
+        PendingOpKind::CalendarCreate => "CalendarCreate",
+        PendingOpKind::CalendarPatch => "CalendarPatch",
+        PendingOpKind::CalendarDocument => "CalendarDocument",
+        PendingOpKind::CalendarRsvp => "CalendarRsvp",
+        PendingOpKind::CalendarDelete => "CalendarDelete",
+        PendingOpKind::ContactCreate => "ContactCreate",
+        PendingOpKind::ContactPatch => "ContactPatch",
+        PendingOpKind::ContactDelete => "ContactDelete",
+    }
+}
+
+/// Decodes a stored op kind.
+///
+/// `None` for a `NULL` column: a row enqueued before v14, whose kind was never
+/// recorded. That is a normal state, not corruption, so it is not an error.
+///
+/// # Errors
+///
+/// Returns [`StoreError::Backend`] on an unrecognized kind string (corruption).
+pub(crate) fn parse_kind(text: Option<&str>) -> Result<Option<PendingOpKind>> {
+    let Some(text) = text else { return Ok(None) };
+    Ok(Some(match text {
+        "MailSubmit" => PendingOpKind::MailSubmit,
+        "MailEdit" => PendingOpKind::MailEdit,
+        "MailReport" => PendingOpKind::MailReport,
+        "MailDraftPut" => PendingOpKind::MailDraftPut,
+        "MailDraftDelete" => PendingOpKind::MailDraftDelete,
+        "MailboxEdit" => PendingOpKind::MailboxEdit,
+        "CalendarCreate" => PendingOpKind::CalendarCreate,
+        "CalendarPatch" => PendingOpKind::CalendarPatch,
+        "CalendarDocument" => PendingOpKind::CalendarDocument,
+        "CalendarRsvp" => PendingOpKind::CalendarRsvp,
+        "CalendarDelete" => PendingOpKind::CalendarDelete,
+        "ContactCreate" => PendingOpKind::ContactCreate,
+        "ContactPatch" => PendingOpKind::ContactPatch,
+        "ContactDelete" => PendingOpKind::ContactDelete,
+        other => {
+            return Err(StoreError::Backend(format!(
+                "unknown pending-op kind: {other}"
+            )));
+        }
+    }))
+}
+
+/// Encodes a failure classification for the `failure_class` column.
+///
+/// The column is read back only to tell a user *why* something is still queued; the
+/// retry decision is made from the live `FailureClass` before the row is written and
+/// never from this. So a class this build does not know (the enum is `non_exhaustive`)
+/// stores as `Unknown` and reads back as `None`, costing a label rather than a write.
+pub(crate) fn class_to_text(class: FailureClass) -> &'static str {
+    match class {
+        FailureClass::Retryable => "Retryable",
+        FailureClass::RateLimited => "RateLimited",
+        FailureClass::Authentication => "Authentication",
+        FailureClass::Conflict => "Conflict",
+        FailureClass::InvalidState => "InvalidState",
+        FailureClass::NeedsResync => "NeedsResync",
+        FailureClass::Permanent => "Permanent",
+        _ => "Unknown",
+    }
+}
+
+/// Decodes a stored failure classification; `None` for a row that has not failed.
+///
+/// # Errors
+///
+/// Returns [`StoreError::Backend`] on an unrecognized class string (corruption).
+pub(crate) fn parse_class(text: Option<&str>) -> Result<Option<FailureClass>> {
+    let Some(text) = text else { return Ok(None) };
+    Ok(Some(match text {
+        "Retryable" => FailureClass::Retryable,
+        "RateLimited" => FailureClass::RateLimited,
+        "Authentication" => FailureClass::Authentication,
+        "Conflict" => FailureClass::Conflict,
+        "InvalidState" => FailureClass::InvalidState,
+        "NeedsResync" => FailureClass::NeedsResync,
+        "Permanent" => FailureClass::Permanent,
+        "Unknown" => return Ok(None),
+        other => {
+            return Err(StoreError::Backend(format!(
+                "unknown failure class: {other}"
+            )));
+        }
+    }))
+}
+
+/// Narrows a fencing generation to the `i64` SQLite stores (generations are tiny;
+/// this never fails in practice).
+pub(crate) fn generation_to_i64(generation: u64) -> Result<i64> {
+    i64::try_from(generation).map_err(backend)
+}
+
+/// Widens a stored generation back to the `u64` the fencing token uses.
+pub(crate) fn generation_from_i64(generation: i64) -> Result<u64> {
+    u64::try_from(generation).map_err(backend)
+}
+
+/// Narrows a [`PendingOpId`] to the `i64` rowid it maps to.
+pub(crate) fn op_id_to_i64(id: PendingOpId) -> Result<i64> {
+    i64::try_from(id.get()).map_err(backend)
+}
+
+/// Rebuilds a [`PendingOpId`] from a stored rowid.
+pub(crate) fn op_id_from_i64(id: i64) -> Result<PendingOpId> {
+    Ok(PendingOpId::new(generation_from_i64(id)?))
+}
+
+#[cfg(test)]
+mod tests {
+    use engine_core::{
+        ids::AccountId,
+        sync::{JmapDataType, SyncScope},
+    };
+
+    use super::*;
+
+    fn instant(text: &str) -> UtcDateTime {
+        text.parse().expect("valid instant")
+    }
+
+    fn scope(data_type: JmapDataType) -> SyncScope {
+        SyncScope::JmapType {
+            account: AccountId::try_from("a").expect("valid account"),
+            data_type,
+        }
+    }
+
+    #[test]
+    fn index_enum_text_maps_every_variant() {
+        assert_eq!(address_field_text(AddressField::From), "from");
+        assert_eq!(address_field_text(AddressField::To), "to");
+        assert_eq!(address_field_text(AddressField::Cc), "cc");
+        assert_eq!(membership_kind_text(MembershipKind::Mailbox), "mailbox");
+        assert_eq!(membership_kind_text(MembershipKind::Keyword), "keyword");
+        assert_eq!(membership_kind_text(MembershipKind::Calendar), "calendar");
+        assert_eq!(
+            participant_field_text(ParticipantField::Attendee),
+            "attendee"
+        );
+        assert_eq!(
+            participant_field_text(ParticipantField::Organizer),
+            "organizer"
+        );
+    }
+
+    #[test]
+    fn scope_key_is_stable_and_distinguishes_scopes() {
+        assert_eq!(
+            scope_key(&scope(JmapDataType::Email)),
+            scope_key(&scope(JmapDataType::Email))
+        );
+        assert_ne!(
+            scope_key(&scope(JmapDataType::Email)),
+            scope_key(&scope(JmapDataType::Mailbox))
+        );
+    }
+
+    #[test]
+    fn instants_round_trip_through_text() {
+        let t = instant("2026-03-01T09:00:00Z");
+        assert_eq!(parse_instant(&instant_to_text(t)).unwrap(), t);
+        assert!(parse_instant("not-a-time").is_err());
+        assert_eq!(parse_opt_instant(None).unwrap(), None);
+        assert_eq!(
+            parse_opt_instant(Some(instant_to_text(t))).unwrap(),
+            Some(t)
+        );
+    }
+
+    #[test]
+    fn lease_liveness_and_expiry() {
+        let now = instant("2026-01-01T00:00:00Z");
+        assert!(expiry_after(now, Duration::from_secs(30)).unwrap() > now);
+        // Past the end of representable time, the expiry overflows to an error.
+        assert!(expiry_after(instant("9999-12-31T23:59:59Z"), Duration::from_secs(30)).is_err());
+        assert!(is_live(Some(instant("2026-01-01T00:00:30Z")), now));
+        assert!(!is_live(Some(now), now)); // expiry must be strictly after now
+        assert!(!is_live(None, now));
+    }
+
+    #[test]
+    fn pending_op_states_round_trip_and_reject_garbage() {
+        for state in [
+            PendingOpState::Pending,
+            PendingOpState::InFlight,
+            PendingOpState::NeedsConfirmation,
+            PendingOpState::Succeeded,
+            PendingOpState::Failed,
+        ] {
+            assert_eq!(parse_state(state_to_text(state)).unwrap(), state);
+        }
+        assert!(parse_state("Unknown").is_err());
+    }
+
+    #[test]
+    fn integer_conversions_round_trip() {
+        assert_eq!(
+            generation_from_i64(generation_to_i64(5).unwrap()).unwrap(),
+            5
+        );
+        let id = PendingOpId::new(9);
+        assert_eq!(op_id_from_i64(op_id_to_i64(id).unwrap()).unwrap(), id);
+    }
+}
+
+#[cfg(test)]
+mod kind_tests {
+    use engine_core::write::PendingOpKind;
+
+    use super::{kind_to_text, parse_kind};
+
+    #[test]
+    fn every_kind_reads_back_as_itself() {
+        // The two halves are written separately: `kind_to_text` is an exhaustive match, so
+        // the compiler demands a new variant there, while `parse_kind` matches strings and
+        // has a catch-all. A kind added to one and not the other would store correctly and
+        // fail to load, which no compiler catches and this does.
+        for kind in PendingOpKind::ALL {
+            let text = kind_to_text(kind);
+            assert_eq!(
+                parse_kind(Some(text)).unwrap(),
+                Some(kind),
+                "{kind:?} does not survive the column"
+            );
+        }
+    }
+}

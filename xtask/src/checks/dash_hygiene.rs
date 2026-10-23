@@ -17,7 +17,12 @@ pub(crate) fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
         ],
     ) {
         let r = super::rel(root, &f);
-        if r == "LICENSE" || r.starts_with("docs/zh/") || super::is_zh_mirror(&f) {
+        // The vendored engine's own docs, CI files, and configs use dashes.
+        if r == "LICENSE"
+            || r.starts_with("docs/zh/")
+            || r.starts_with(super::VENDORED_ROOT)
+            || super::is_zh_mirror(&f)
+        {
             continue;
         }
         let is_markdown = Path::new(&r)
@@ -62,6 +67,12 @@ fn spaced_hyphen_as_punctuation(line: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::super::test_support::fixture;
+
+    #[test]
+    fn the_vendored_engine_tree_is_exempt() {
+        let root = fixture(&[("vendor/engine/README.md", "a dash \u{2014} here\n")]);
+        assert!(super::check(&root).is_ok());
+    }
 
     #[test]
     fn passes_on_clean_prose() {

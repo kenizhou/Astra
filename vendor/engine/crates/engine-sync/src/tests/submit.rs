@@ -1,0 +1,186 @@
+//! Mail-submission outbox-driver tests: enqueue-then-send success recording,
+//! failure recorded without a blind retry, an ambiguous post-DATA send parked for
+//! confirmation, and durable draft-payload round-trip. Uses the shared fakes and
+//! helpers from the parent module via `use super::*`.
+
+use super::*;
+
+#[tokio::test]
+async fn submit_mail_enqueues_then_sends_and_records_success() {
+    let provider = FakeMail::new(vec![], vec![]);
+    let store = SqliteStore::open_in_memory(clock()).unwrap();
+
+    let outcome = submit_mail(
+        &provider,
+        &store,
+        &account(),
+        worker(),
+        Duration::from_mins(1),
+        &draft("send-1@test.local"),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(outcome.email_key.as_str(), "sent-1");
+    assert_eq!(outcome.message_id.as_str(), "send-1@test.local");
+    // The durable op reached terminal success.
+    assert_eq!(
+        store.pending_op_state(outcome.op).await.unwrap(),
+        Some(PendingOpState::Succeeded)
+    );
+}
+
+#[tokio::test]
+async fn submit_mail_keeps_a_rate_limited_send_queued_rather_than_losing_it() {
+    // The provider throttles, which is retryable: the send did not go out, and the
+    // message must still be somewhere. It stays queued with the failure recorded,
+    // rather than settling as Failed with nothing holding the draft.
+    let provider = FakeMail::new(vec![], vec![]).failing(Fault::Submit);
+    let store = SqliteStore::open_in_memory(clock()).unwrap();
+
+    let err = submit_mail(
+        &provider,
+        &store,
+        &account(),
+        worker(),
+        Duration::from_mins(1),
+        &draft("send-2@test.local"),
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, crate::SyncError::Provider(_)));
+
+    // The caller got an error, and the queue still holds the send.
+    let queued = store.list_pending_ops(account()).await.unwrap();
+    assert_eq!(queued.len(), 1);
+    assert_eq!(queued[0].kind, Some(PendingOpKind::MailSubmit));
+    assert_eq!(queued[0].state, PendingOpState::Pending);
+    assert_eq!(queued[0].attempts, 1);
+    assert_eq!(queued[0].failure_class, Some(FailureClass::RateLimited));
+    assert!(queued[0].next_attempt_at.is_some());
+    // The draft itself is in the payload, so nothing else has to have kept it.
+    assert_eq!(
+        serde_json::from_value::<Draft>(queued[0].payload.clone())
+            .unwrap()
+            .message_id
+            .as_str(),
+        "send-2@test.local"
+    );
+}
+
+#[tokio::test]
+async fn submit_mail_settles_a_permanent_failure_instead_of_queueing_it() {
+    // A rejected recipient is not a wait: retrying sends the same message to the same
+    // server for the same answer, so the op settles and the caller is told.
+    let provider = FakeMail::new(vec![], vec![]).failing(Fault::PermanentSubmit);
+    let store = SqliteStore::open_in_memory(clock()).unwrap();
+
+    let err = submit_mail(
+        &provider,
+        &store,
+        &account(),
+        worker(),
+        Duration::from_mins(1),
+        &draft("send-3@test.local"),
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, crate::SyncError::Provider(_)));
+
+    // Settled, and listed as failed with the message it would have sent: it will not be
+    // attempted again unless the user asks.
+    let rows = store.list_pending_ops(account()).await.unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].state, PendingOpState::Failed);
+    assert_eq!(
+        serde_json::from_value::<Draft>(rows[0].payload.clone()).unwrap(),
+        draft("send-3@test.local")
+    );
+    let op_id = store
+        .enqueue_pending_op(
+            account(),
+            PendingOp::new(
+                IdempotencyKey::new("submit:send-3@test.local").unwrap(),
+                PendingOpKind::MailSubmit,
+                ResourceKey::new("draft:send-3@test.local").unwrap(),
+                serde_json::Value::Null,
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        store.pending_op_state(op_id).await.unwrap(),
+        Some(PendingOpState::Failed)
+    );
+}
+
+#[tokio::test]
+async fn submit_mail_parks_an_ambiguous_send_for_confirmation() {
+    // A post-DATA ambiguity must be recorded NeedsConfirmation, not Failed — so the
+    // outbox never blind-retries and risks a double-send (`providers.md`).
+    let provider = FakeMail::new(vec![], vec![]).failing(Fault::AmbiguousSubmit);
+    let store = SqliteStore::open_in_memory(clock()).unwrap();
+
+    let err = submit_mail(
+        &provider,
+        &store,
+        &account(),
+        worker(),
+        Duration::from_mins(1),
+        &draft("send-3@test.local"),
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, crate::SyncError::Provider(_)));
+
+    let op_id = store
+        .enqueue_pending_op(
+            account(),
+            PendingOp::new(
+                IdempotencyKey::new("submit:send-3@test.local").unwrap(),
+                PendingOpKind::MailSubmit,
+                ResourceKey::new("draft:send-3@test.local").unwrap(),
+                serde_json::Value::Null,
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        store.pending_op_state(op_id).await.unwrap(),
+        Some(PendingOpState::NeedsConfirmation)
+    );
+}
+
+#[test]
+fn draft_round_trips_through_a_durable_payload() {
+    // The outbox stores the draft as a JSON payload; it must survive intact for a
+    // recovery worker to re-submit it.
+    let original = draft("durable@test.local");
+    let payload = serde_json::to_value(&original).unwrap();
+    let restored: Draft = serde_json::from_value(payload).unwrap();
+    assert_eq!(restored, original);
+}
+
+#[tokio::test]
+async fn submit_mail_reports_the_keywords_the_filed_copy_carries() {
+    let provider = FakeMail::new(vec![], vec![]);
+    let store = SqliteStore::open_in_memory(clock()).unwrap();
+    let keyword = engine_core::mail::Keyword::new("project-x").unwrap();
+    let draft = draft("send-kw@test.local").with_sent_copy_keyword(keyword.clone());
+
+    let outcome = submit_mail(
+        &provider,
+        &store,
+        &account(),
+        worker(),
+        Duration::from_mins(1),
+        &draft,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        outcome.sent_copy_keywords,
+        std::collections::BTreeSet::from([keyword])
+    );
+}

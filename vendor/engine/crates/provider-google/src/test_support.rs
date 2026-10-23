@@ -1,0 +1,464 @@
+//! Offline test helpers: a fixture-routing fake [`GoogleTransport`] so the fetch and
+//! provider orchestration run against captured real responses without network, plus a
+//! fixture-replay HTTP server and a request-capturing server (for asserting write
+//! request *shapes*, which the fakes ignore — `AGENTS.md`).
+
+use std::sync::{Mutex, OnceLock};
+
+use async_trait::async_trait;
+use engine_provider::HttpVersion;
+use engine_tls::TlsClientConfig;
+use serde_json::Value;
+
+use crate::{
+    error::GoogleError,
+    transport::{GoogleClient, GoogleTransport},
+};
+
+/// A shared bundled TLS config for tests that build a real transport. The offline
+/// tests drive it over the plaintext replay server, so trust is never actually
+/// exercised — this just satisfies the constructor.
+pub(crate) fn tls() -> &'static TlsClientConfig {
+    static TLS: OnceLock<TlsClientConfig> = OnceLock::new();
+    TLS.get_or_init(TlsClientConfig::bundled)
+}
+
+/// A throttling policy for tests that build a real transport. No offline route answers
+/// `429`, so nothing here ever waits.
+///
+/// **A fresh one per call, deliberately.** A `RetryConfig` carries an `engine_http::RequestGate`,
+/// and a shared config is a shared gate — which the transport then narrows to this server's
+/// per-account ceiling. One `OnceLock` here would put every test in the binary inside one
+/// account's ceiling and make them wait on each other, which is exactly the scope error the
+/// gate exists to prevent, reproduced in the test helper.
+pub(crate) fn retry() -> engine_http::RetryConfig {
+    engine_http::RetryConfig::default()
+}
+
+/// What a fake route answers with: a fixture body, or an HTTP status plus the Google
+/// error envelope to fail with. The failing form exists so a recovery path can be
+/// driven offline — notably Google Calendar answering `410 fullSyncRequired` or Gmail
+/// answering `404` once a stored cursor has aged out.
+pub(crate) type FakeRoute = Result<Value, (u16, Value)>;
+
+/// Returns the first routed answer whose key is a substring of the requested URL. A key may
+/// start with a method (`"POST /labels"`) to answer that method alone, for an endpoint whose
+/// read and write share a URL.
+///
+/// `unauthenticated` records the URLs fetched without the OAuth token, so a test can
+/// assert that an off-origin photo URL never carries the account's credentials.
+struct Fake {
+    routes: Vec<(String, FakeRoute)>,
+    unauthenticated: Mutex<Vec<String>>,
+    /// Set only by [`probe_client`]: records how concurrently the caller fetched. `None` for
+    /// every other fake, which is also what keeps the yield below out of their way.
+    probe: Option<std::sync::Arc<ProbeState>>,
+    /// Set only by [`recording_client`]: every request, in order, with its body.
+    log: Option<std::sync::Arc<Mutex<Vec<Request>>>>,
+}
+
+/// The methods a route key may start with.
+const METHODS: &[&str] = &["GET", "POST", "PUT", "PATCH", "DELETE"];
+
+/// One request a [`recording_client`] saw: method, URL and the JSON body, if any.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Request {
+    pub(crate) method: &'static str,
+    pub(crate) url: String,
+    pub(crate) body: Option<Value>,
+}
+
+impl Fake {
+    fn route(&self, url: &str) -> Result<&FakeRoute, GoogleError> {
+        self.route_for("GET", url)
+    }
+
+    fn route_for(&self, method: &str, url: &str) -> Result<&FakeRoute, GoogleError> {
+        self.routes
+            .iter()
+            .find(|(key, _)| match key.split_once(' ') {
+                Some((wanted, path)) if METHODS.contains(&wanted) => {
+                    wanted == method && url.contains(path)
+                }
+                _ => url.contains(key.as_str()),
+            })
+            .map(|(_, answer)| answer)
+            .ok_or_else(|| GoogleError::protocol(format!("no fake route for {method} {url}")))
+    }
+
+    fn record(&self, method: &'static str, url: &str, body: Option<&[u8]>) {
+        if let Some(log) = &self.log {
+            log.lock().expect("request log").push(Request {
+                method,
+                url: url.to_owned(),
+                body: body.and_then(|b| serde_json::from_slice(b).ok()),
+            });
+        }
+    }
+
+    fn answer(&self, method: &'static str, url: &str) -> Result<Option<Value>, GoogleError> {
+        match self.route_for(method, url)? {
+            Ok(Value::Null) => Ok(None),
+            Ok(doc) => Ok(Some(doc.clone())),
+            Err((status, body)) => Err(GoogleError::status(*status, body.to_string())),
+        }
+    }
+}
+
+#[async_trait]
+impl GoogleTransport for Fake {
+    async fn get(&self, url: &str) -> Result<Value, GoogleError> {
+        // Held to the end of the call, so the in-flight count falls however this returns.
+        let _in_flight = match &self.probe {
+            Some(state) => {
+                state.enter();
+                // The yield is what makes a fan-out visible: without it every answer is ready
+                // on its first poll, and even a concurrent caller never holds two at once.
+                tokio::task::yield_now().await;
+                Some(InFlightGuard(std::sync::Arc::clone(state)))
+            }
+            None => None,
+        };
+        self.record("GET", url, None);
+        match self.route(url)? {
+            Ok(doc) => Ok(doc.clone()),
+            Err((status, body)) => Err(GoogleError::status(*status, body.to_string())),
+        }
+    }
+
+    async fn get_bytes(&self, url: &str) -> Result<Vec<u8>, GoogleError> {
+        match self.route(url)? {
+            Ok(Value::String(bytes)) => Ok(bytes.as_bytes().to_vec()),
+            Ok(value) => Ok(value.to_string().into_bytes()),
+            Err((status, body)) => Err(GoogleError::status(*status, body.to_string())),
+        }
+    }
+
+    async fn get_bytes_unauthenticated(&self, url: &str) -> Result<Vec<u8>, GoogleError> {
+        self.unauthenticated
+            .lock()
+            .expect("unauthenticated lock")
+            .push(url.to_owned());
+        GoogleTransport::get_bytes(self, url).await
+    }
+
+    async fn post(
+        &self,
+        url: &str,
+        _content_type: &str,
+        body: Vec<u8>,
+    ) -> Result<Option<Value>, GoogleError> {
+        // The answer is canned whatever was sent (`AGENTS.md`); a request shape is asserted
+        // through a [`recording_client`]'s log, the capturing server, or a live test. A route
+        // to `Value::Null` models a no-body (204) action.
+        self.record("POST", url, Some(&body));
+        self.answer("POST", url)
+    }
+
+    async fn put(
+        &self,
+        url: &str,
+        _content_type: &str,
+        body: Vec<u8>,
+    ) -> Result<Option<Value>, GoogleError> {
+        self.record("PUT", url, Some(&body));
+        self.answer("PUT", url)
+    }
+
+    async fn patch(
+        &self,
+        url: &str,
+        _content_type: &str,
+        _if_match: Option<&str>,
+        body: Vec<u8>,
+    ) -> Result<Option<Value>, GoogleError> {
+        self.record("PATCH", url, Some(&body));
+        self.answer("PATCH", url)
+    }
+
+    async fn delete(&self, url: &str, _if_match: Option<&str>) -> Result<(), GoogleError> {
+        self.record("DELETE", url, None);
+        self.answer("DELETE", url).map(|_| ())
+    }
+
+    fn http_version(&self) -> Option<HttpVersion> {
+        // A fake never speaks HTTP, but reporting a version lets the provider's
+        // connection_info be exercised offline.
+        Some(HttpVersion::Http2)
+    }
+}
+
+/// Builds a [`GoogleClient`] backed by URL-substring → fixture routes.
+pub(crate) fn fake_client(routes: Vec<(&str, Value)>) -> GoogleClient {
+    fake_client_fallible(
+        routes
+            .into_iter()
+            .map(|(key, doc)| (key, Ok(doc)))
+            .collect(),
+    )
+}
+
+/// Builds a [`GoogleClient`] whose routes may *fail* with an HTTP status, so an
+/// error-recovery path is drivable without a live server (see [`FakeRoute`]).
+pub(crate) fn fake_client_fallible(routes: Vec<(&str, FakeRoute)>) -> GoogleClient {
+    let routes = routes
+        .into_iter()
+        .map(|(key, answer)| (key.to_owned(), answer))
+        .collect();
+    GoogleClient::with_transport(
+        Box::new(Fake {
+            routes,
+            unauthenticated: Mutex::new(Vec::new()),
+            probe: None,
+            log: None,
+        }),
+        "https://google.test".to_owned(),
+    )
+}
+
+/// Builds a [`GoogleClient`] over `routes` that also logs every request it is sent, so a
+/// write test can assert the method, path and body of each call, in order.
+pub(crate) fn recording_client(
+    routes: Vec<(&str, FakeRoute)>,
+) -> (GoogleClient, std::sync::Arc<Mutex<Vec<Request>>>) {
+    let log = std::sync::Arc::new(Mutex::new(Vec::new()));
+    let client = GoogleClient::with_transport(
+        Box::new(Fake {
+            routes: routes
+                .into_iter()
+                .map(|(key, answer)| (key.to_owned(), answer))
+                .collect(),
+            unauthenticated: Mutex::new(Vec::new()),
+            probe: None,
+            log: Some(std::sync::Arc::clone(&log)),
+        }),
+        "https://google.test".to_owned(),
+    );
+    (client, log)
+}
+
+/// Parses a fixture string into JSON.
+pub(crate) fn json(fixture: &str) -> Value {
+    serde_json::from_str(fixture).unwrap()
+}
+
+/// What a [`probe_client`] transport records about the calls made through it.
+#[derive(Default)]
+pub(crate) struct ProbeState {
+    in_flight: std::sync::atomic::AtomicUsize,
+    /// The most calls that were ever in flight at the same instant.
+    pub(crate) peak: std::sync::atomic::AtomicUsize,
+    /// How many calls were made in total.
+    pub(crate) calls: std::sync::atomic::AtomicUsize,
+}
+
+impl ProbeState {
+    /// Records one more call entering, and the new high-water mark.
+    fn enter(&self) {
+        use std::sync::atomic::Ordering::SeqCst;
+        let now = self.in_flight.fetch_add(1, SeqCst) + 1;
+        self.calls.fetch_add(1, SeqCst);
+        self.peak.fetch_max(now, SeqCst);
+    }
+
+    /// Reads [`peak`](Self::peak).
+    pub(crate) fn peak(&self) -> usize {
+        self.peak.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Reads [`calls`](Self::calls).
+    pub(crate) fn calls(&self) -> usize {
+        self.calls.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+/// Decrements the in-flight count however a probed call leaves.
+struct InFlightGuard(std::sync::Arc<ProbeState>);
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        self.0
+            .in_flight
+            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// Builds a [`GoogleClient`] whose transport also records how concurrently it was driven,
+/// returning the shared counters beside it.
+pub(crate) fn probe_client(
+    routes: Vec<(&str, FakeRoute)>,
+) -> (GoogleClient, std::sync::Arc<ProbeState>) {
+    let state = std::sync::Arc::new(ProbeState::default());
+    let client = GoogleClient::with_transport(
+        Box::new(Fake {
+            routes: routes
+                .into_iter()
+                .map(|(key, answer)| (key.to_owned(), answer))
+                .collect(),
+            unauthenticated: Mutex::new(Vec::new()),
+            probe: Some(std::sync::Arc::clone(&state)),
+            log: None,
+        }),
+        "https://google.test".to_owned(),
+    );
+    (client, state)
+}
+
+/// Spawns a deterministic fixture-replay HTTP server and returns its base URL.
+///
+/// Serves the first routed fixture whose key is a substring of the request path (404
+/// otherwise), over real HTTP — so a `GoogleClient::with_base` drives the whole stack
+/// (reqwest transport + fetch orchestration) end-to-end in CI without a live token.
+/// Routes are matched in order, so list the most specific first. The background thread
+/// serves connections for the test's lifetime.
+pub(crate) fn replay_server(routes: Vec<(&'static str, Value)>) -> String {
+    use std::io::{Read, Write};
+    let routes: Vec<(String, String)> = routes
+        .into_iter()
+        .map(|(key, doc)| (key.to_owned(), doc.to_string()))
+        .collect();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let mut buf = [0u8; 8192];
+            let n = stream.read(&mut buf).unwrap_or(0);
+            let request = String::from_utf8_lossy(&buf[..n]);
+            let path = request
+                .lines()
+                .next()
+                .and_then(|line| line.split_whitespace().nth(1))
+                .unwrap_or("");
+            let response = match routes.iter().find(|(key, _)| path.contains(key.as_str())) {
+                Some((_, body)) => format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                ),
+                None => "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    .to_owned(),
+            };
+            let _ = stream.write_all(response.as_bytes());
+        }
+    });
+    format!("http://{addr}")
+}
+
+/// Spawns a one-shot HTTP server that **captures** the full request (headers + body,
+/// read to `Content-Length`) and answers with `status`/`body`, returning its base URL
+/// and a receiver for the captured request text.
+///
+/// The fixture-routing [`Fake`] and [`replay_server`] ignore the request body (like
+/// every offline fake — `AGENTS.md`), so this is how a write test asserts the *shape*
+/// of what the real reqwest transport actually sent (`POST`, `Content-Type`, the JSON
+/// body, the base64url MIME) without a live token.
+pub(crate) fn capturing_server(
+    status: &str,
+    body: &str,
+) -> (String, std::sync::mpsc::Receiver<String>) {
+    use std::io::Write;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let response = format!(
+        "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    std::thread::spawn(move || {
+        if let Ok((mut stream, _)) = listener.accept() {
+            let request = read_full_request(&mut stream);
+            let _ = tx.send(request);
+            let _ = stream.write_all(response.as_bytes());
+        }
+    });
+    (format!("http://{addr}"), rx)
+}
+
+/// Spawns a routing HTTP server that **captures every** request (headers + body) and
+/// answers each from `routes` — [`replay_server`]'s path routing plus
+/// [`capturing_server`]'s body capture, for a write that takes more than one round-trip.
+///
+/// A `MoveTo` is exactly that: it reads the message's current labels, *then* `POST`s the
+/// `modify` delta computed from them. Asserting the delta therefore needs a server that
+/// both answers the read with a routed fixture and hands back the write's body — neither
+/// single-purpose helper can (`capturing_server` is one-shot and unrouted;
+/// `replay_server` discards bodies).
+///
+/// Routes match as in [`replay_server`] (first key that is a substring of the path;
+/// `404` otherwise), and captured requests arrive on the receiver in the order sent.
+pub(crate) fn capturing_replay_server(
+    routes: Vec<(&'static str, Value)>,
+) -> (String, std::sync::mpsc::Receiver<String>) {
+    use std::io::Write;
+    let routes: Vec<(String, String)> = routes
+        .into_iter()
+        .map(|(key, doc)| (key.to_owned(), doc.to_string()))
+        .collect();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let request = read_full_request(&mut stream);
+            let path = request
+                .lines()
+                .next()
+                .and_then(|line| line.split_whitespace().nth(1))
+                .unwrap_or("")
+                .to_owned();
+            if tx.send(request).is_err() {
+                break;
+            }
+            let response = match routes.iter().find(|(key, _)| path.contains(key.as_str())) {
+                Some((_, body)) => format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                ),
+                None => "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    .to_owned(),
+            };
+            let _ = stream.write_all(response.as_bytes());
+        }
+    });
+    (format!("http://{addr}"), rx)
+}
+
+/// Reads a full HTTP request (headers + `Content-Length` body) off `stream`.
+fn read_full_request(stream: &mut std::net::TcpStream) -> String {
+    use std::io::Read;
+    let mut data = Vec::new();
+    let mut buf = [0u8; 4096];
+    while let Ok(n) = stream.read(&mut buf) {
+        if n == 0 {
+            break;
+        }
+        data.extend_from_slice(&buf[..n]);
+        if request_complete(&data) {
+            break;
+        }
+    }
+    String::from_utf8_lossy(&data).into_owned()
+}
+
+/// Whether `data` holds a complete HTTP request: the header terminator plus at least
+/// the `Content-Length` body bytes that follow it.
+fn request_complete(data: &[u8]) -> bool {
+    let Some(header_end) = data
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .map(|p| p + 4)
+    else {
+        return false;
+    };
+    let headers = String::from_utf8_lossy(&data[..header_end]);
+    let len = headers
+        .lines()
+        .find_map(|line| {
+            line.to_ascii_lowercase()
+                .strip_prefix("content-length:")
+                .and_then(|v| v.trim().parse::<usize>().ok())
+        })
+        .unwrap_or(0);
+    data.len() >= header_end + len
+}

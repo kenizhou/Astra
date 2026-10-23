@@ -1,0 +1,332 @@
+//! Unit tests for the JMAP session resource ([`super::Session`]) — capability
+//! derivation, URL rebasing, and the read-only / EventSource gates. Split out to
+//! keep `session.rs` under the 500-line limit (AGENTS.md).
+
+use serde_json::json;
+
+use super::*;
+
+/// A representative session subset, mirroring the live Stalwart shape (account
+/// id `"c"`, an advertised foreign `apiUrl`, the core limits).
+fn session_doc() -> Value {
+    json!({
+        "capabilities": {
+            "urn:ietf:params:jmap:core": {
+                "maxCallsInRequest": 16,
+                "maxObjectsInGet": 500,
+                "maxObjectsInSet": 500,
+                "maxConcurrentRequests": 4
+            },
+            "urn:ietf:params:jmap:mail": {},
+            "urn:ietf:params:jmap:submission": {},
+            "urn:ietf:params:jmap:calendars": {}
+        },
+        "primaryAccounts": {
+            "urn:ietf:params:jmap:mail": "c",
+            "urn:ietf:params:jmap:submission": "c",
+            "urn:ietf:params:jmap:calendars": "c"
+        },
+        "accounts": {
+            "c": { "name": "alice@test.local", "isReadOnly": false }
+        },
+        "apiUrl": "https://mail.test.local/jmap/",
+        "downloadUrl": "https://mail.test.local/download/{accountId}/{blobId}/{name}?accept={type}",
+        "uploadUrl": "https://mail.test.local/upload/{accountId}/",
+        "eventSourceUrl": "https://mail.test.local/eventsource/?types={types}&closeafter={closeafter}&ping={ping}",
+        "state": "2f72d7c8"
+    })
+}
+
+#[test]
+fn rebases_api_url_onto_connection_base_by_default() {
+    let base = Url::parse("http://127.0.0.1:18080").unwrap();
+    let session =
+        Session::parse(&session_doc(), &base, SessionUrlPolicy::RebaseToConnection).unwrap();
+    // The advertised foreign HTTPS origin is replaced by the connection origin.
+    assert_eq!(session.api_url(), "http://127.0.0.1:18080/jmap/");
+    assert_eq!(session.mail_account_id().unwrap(), "c");
+    assert_eq!(session.submission_account_id().unwrap(), "c");
+    assert_eq!(session.calendar_account_id().unwrap(), "c");
+    assert_eq!(session.state(), Some("2f72d7c8"));
+}
+
+#[test]
+fn trust_advertised_keeps_the_server_origin() {
+    let base = Url::parse("http://127.0.0.1:18080").unwrap();
+    let session = Session::parse(&session_doc(), &base, SessionUrlPolicy::TrustAdvertised).unwrap();
+    assert_eq!(session.api_url(), "https://mail.test.local/jmap/");
+}
+
+#[test]
+fn rebases_download_template_onto_connection_keeping_placeholders() {
+    let base = Url::parse("http://127.0.0.1:18080").unwrap();
+    let session =
+        Session::parse(&session_doc(), &base, SessionUrlPolicy::RebaseToConnection).unwrap();
+    // Origin rebased to the connection; the `{…}` placeholders survive intact
+    // (they would be percent-encoded if run through URL parsing).
+    assert_eq!(
+        session.download_url(),
+        Some("http://127.0.0.1:18080/download/{accountId}/{blobId}/{name}?accept={type}")
+    );
+    // TrustAdvertised keeps the server origin, still un-mangled.
+    let trusted = Session::parse(&session_doc(), &base, SessionUrlPolicy::TrustAdvertised).unwrap();
+    assert_eq!(
+        trusted.download_url(),
+        Some("https://mail.test.local/download/{accountId}/{blobId}/{name}?accept={type}")
+    );
+}
+
+#[test]
+fn reads_capabilities_and_limits() {
+    let base = Url::parse("http://127.0.0.1:18080").unwrap();
+    let session =
+        Session::parse(&session_doc(), &base, SessionUrlPolicy::RebaseToConnection).unwrap();
+    let caps = session.capabilities();
+    assert!(caps.mail() && caps.submission() && caps.calendars());
+    // Submission ⇒ the filed copy can be given keywords.
+    assert!(caps.sent_copy_keywords());
+    // Mail + a download template ⇒ on-demand message-source fetch is advertised.
+    assert!(caps.message_source());
+    // Mail + a writable account ⇒ mail writes (`Email/set`) are advertised.
+    assert!(caps.mail_writes());
+    // An EventSource endpoint ⇒ push / change notification is advertised.
+    assert!(caps.idle());
+    assert_eq!(session.limits().max_objects_in_get, 500);
+    assert_eq!(session.limits().max_calls_in_request, 16);
+    // What a concurrent body warm is allowed to be: the server's number, not a guess.
+    assert_eq!(session.limits().max_concurrent_requests, 4);
+}
+
+#[test]
+fn a_session_that_names_no_concurrency_limit_stays_one_at_a_time() {
+    // Widening past an unstated limit is refused rather than queued (a `400`
+    // `urn:ietf:params:jmap:error:limit`), so silence has to mean one.
+    let mut doc = session_doc();
+    doc["capabilities"]["urn:ietf:params:jmap:core"]
+        .as_object_mut()
+        .unwrap()
+        .remove("maxConcurrentRequests");
+    let base = Url::parse("http://127.0.0.1:18080").unwrap();
+    let session = Session::parse(&doc, &base, SessionUrlPolicy::RebaseToConnection).unwrap();
+    assert_eq!(session.limits().max_concurrent_requests, 1);
+}
+
+#[test]
+fn rebases_upload_and_event_source_templates_keeping_placeholders() {
+    let base = Url::parse("http://127.0.0.1:18080").unwrap();
+    let session =
+        Session::parse(&session_doc(), &base, SessionUrlPolicy::RebaseToConnection).unwrap();
+    // Origin rebased onto the connection; the `{…}` placeholders survive intact.
+    assert_eq!(
+        session.upload_url(),
+        Some("http://127.0.0.1:18080/upload/{accountId}/")
+    );
+    assert_eq!(
+        session.event_source_url(),
+        Some(
+            "http://127.0.0.1:18080/eventsource/?types={types}&closeafter={closeafter}&ping={ping}"
+        )
+    );
+}
+
+/// The live Fastmail shape: the API on one origin, blob downloads on a separate
+/// cookie-less user-content origin.
+fn cross_origin_session_doc() -> Value {
+    json!({
+        "capabilities": { "urn:ietf:params:jmap:mail": {} },
+        "primaryAccounts": { "urn:ietf:params:jmap:mail": "u1" },
+        "apiUrl": "https://api.fastmail.com/jmap/api/",
+        "downloadUrl": "https://www.fastmailusercontent.com/jmap/download/{accountId}/{blobId}/{name}?type={type}",
+        "uploadUrl": "https://api.fastmail.com/jmap/upload/{accountId}/"
+    })
+}
+
+#[test]
+fn a_deliberately_cross_origin_template_is_left_verbatim() {
+    // Connected to the session's own origin, so nothing needs rebasing — but the
+    // download template lives somewhere else on purpose. Rewriting its origin pointed
+    // the blob fetch at a path `api.fastmail.com` does not route, and every
+    // message-source download came back as a catch-all `302` to a marketing page.
+    let base = Url::parse("https://api.fastmail.com/jmap/session").unwrap();
+    let session = Session::parse(
+        &cross_origin_session_doc(),
+        &base,
+        SessionUrlPolicy::RebaseToConnection,
+    )
+    .unwrap();
+    assert_eq!(
+        session.download_url(),
+        Some(
+            "https://www.fastmailusercontent.com/jmap/download/{accountId}/{blobId}/{name}?type={type}"
+        )
+    );
+    // A sibling template on the session's *own* origin still rebases, so one foreign
+    // endpoint does not opt the whole session out.
+    assert_eq!(
+        session.upload_url(),
+        Some("https://api.fastmail.com/jmap/upload/{accountId}/")
+    );
+}
+
+#[test]
+fn a_cross_origin_template_survives_an_actual_rebase() {
+    // The two behaviours together: reached through a proxy, so the session's own URLs
+    // *are* rewritten onto the connection — and the foreign one still is not.
+    let base = Url::parse("http://127.0.0.1:18080").unwrap();
+    let session = Session::parse(
+        &cross_origin_session_doc(),
+        &base,
+        SessionUrlPolicy::RebaseToConnection,
+    )
+    .unwrap();
+    assert_eq!(session.api_url(), "http://127.0.0.1:18080/jmap/api/");
+    assert_eq!(
+        session.upload_url(),
+        Some("http://127.0.0.1:18080/jmap/upload/{accountId}/")
+    );
+    assert_eq!(
+        session.download_url(),
+        Some(
+            "https://www.fastmailusercontent.com/jmap/download/{accountId}/{blobId}/{name}?type={type}"
+        )
+    );
+}
+
+#[test]
+fn a_relative_template_keeps_its_path() {
+    // A template advertised as a path carries no origin to compare, so it is the
+    // session's own by definition and is anchored on the connection — path intact.
+    // (It used to collapse to the bare origin, silently losing the whole path.)
+    let base = Url::parse("http://127.0.0.1:18080").unwrap();
+    let mut doc = session_doc();
+    doc["downloadUrl"] = json!("/download/{accountId}/{blobId}/{name}?accept={type}");
+    let session = Session::parse(&doc, &base, SessionUrlPolicy::RebaseToConnection).unwrap();
+    assert_eq!(
+        session.download_url(),
+        Some("http://127.0.0.1:18080/download/{accountId}/{blobId}/{name}?accept={type}")
+    );
+}
+
+#[test]
+fn read_only_account_does_not_advertise_mail_writes() {
+    let base = Url::parse("http://127.0.0.1:18080").unwrap();
+    let doc = json!({
+        "capabilities": { "urn:ietf:params:jmap:mail": {} },
+        "primaryAccounts": { "urn:ietf:params:jmap:mail": "c" },
+        "accounts": { "c": { "isReadOnly": true } },
+        "apiUrl": "https://mail.test.local/jmap/"
+    });
+    let session = Session::parse(&doc, &base, SessionUrlPolicy::RebaseToConnection).unwrap();
+    // Mail is readable, but the read-only account cannot write.
+    assert!(session.capabilities().mail());
+    assert!(!session.capabilities().mail_writes());
+    assert!(!session.capabilities().mailbox_writes());
+}
+
+#[test]
+fn no_event_source_means_no_idle_capability() {
+    let base = Url::parse("http://127.0.0.1:18080").unwrap();
+    let doc = json!({
+        "capabilities": { "urn:ietf:params:jmap:mail": {} },
+        "primaryAccounts": { "urn:ietf:params:jmap:mail": "c" },
+        "apiUrl": "https://mail.test.local/jmap/"
+    });
+    let session = Session::parse(&doc, &base, SessionUrlPolicy::RebaseToConnection).unwrap();
+    assert!(session.capabilities().mail());
+    assert!(!session.capabilities().idle());
+    assert_eq!(session.event_source_url(), None);
+    assert_eq!(session.upload_url(), None);
+}
+
+#[test]
+fn event_source_without_a_syncable_domain_does_not_advertise_idle() {
+    // A push endpoint but no mail/calendar domain the engine can sync → no `idle`,
+    // so a host never opens a watcher that could not map a change to a synced scope.
+    let base = Url::parse("http://127.0.0.1:18080").unwrap();
+    let doc = json!({
+        "capabilities": { "urn:ietf:params:jmap:contacts": {} },
+        "primaryAccounts": { "urn:ietf:params:jmap:contacts": "c" },
+        "apiUrl": "https://mail.test.local/jmap/",
+        "eventSourceUrl": "https://mail.test.local/eventsource/?types={types}&closeafter={closeafter}&ping={ping}"
+    });
+    let session = Session::parse(&doc, &base, SessionUrlPolicy::RebaseToConnection).unwrap();
+    assert!(!session.capabilities().mail() && !session.capabilities().calendars());
+    assert!(session.event_source_url().is_some());
+    assert!(!session.capabilities().idle());
+}
+
+#[test]
+fn contacts_capability_exposes_account_and_write_features() {
+    let base = Url::parse("http://127.0.0.1:18080").unwrap();
+    let doc = json!({
+        "capabilities": {
+            "urn:ietf:params:jmap:core": {},
+            "urn:ietf:params:jmap:contacts": {}
+        },
+        "primaryAccounts": { "urn:ietf:params:jmap:contacts": "contacts" },
+        "accounts": { "contacts": { "isReadOnly": false } },
+        "apiUrl": "https://mail.test.local/jmap/",
+        "downloadUrl": "https://mail.test.local/download/{accountId}/{blobId}/{name}?accept={type}"
+    });
+    let session = Session::parse(&doc, &base, SessionUrlPolicy::RebaseToConnection).unwrap();
+    assert_eq!(session.contact_account_id().unwrap(), "contacts");
+    let capabilities = session.capabilities();
+    assert!(capabilities.contacts());
+    assert!(capabilities.contact_groups());
+    assert_eq!(capabilities.contact_write_guard(), Some(WriteGuard::Absent));
+    assert!(capabilities.contact_photos());
+}
+
+#[test]
+fn mail_capability_without_a_primary_account_is_not_offered() {
+    // The mail URN is advertised but `primaryAccounts` names no mail account. Every mail call is
+    // addressed to that account, so the session parses and offers no mail rather than an
+    // account whose first call fails.
+    let base = Url::parse("http://127.0.0.1:18080").unwrap();
+    let doc = json!({
+        "capabilities": { "urn:ietf:params:jmap:mail": {} },
+        "primaryAccounts": {},
+        "apiUrl": "https://mail.test.local/jmap/"
+    });
+    let session = Session::parse(&doc, &base, SessionUrlPolicy::RebaseToConnection).unwrap();
+    assert!(!session.capabilities().mail());
+    assert!(!session.capabilities().mail_writes());
+    assert!(session.mail_account_id().is_err());
+}
+
+#[test]
+fn no_download_template_means_no_message_source_capability() {
+    let base = Url::parse("http://127.0.0.1:18080").unwrap();
+    let doc = json!({
+        "capabilities": { "urn:ietf:params:jmap:mail": {} },
+        "primaryAccounts": { "urn:ietf:params:jmap:mail": "c" },
+        "apiUrl": "https://mail.test.local/jmap/"
+    });
+    let session = Session::parse(&doc, &base, SessionUrlPolicy::RebaseToConnection).unwrap();
+    assert!(session.capabilities().mail());
+    assert!(!session.capabilities().message_source());
+    assert_eq!(session.download_url(), None);
+}
+
+#[test]
+fn missing_api_url_is_a_session_error() {
+    let base = Url::parse("http://127.0.0.1:18080").unwrap();
+    let doc = json!({ "capabilities": {}, "primaryAccounts": {} });
+    assert!(matches!(
+        Session::parse(&doc, &base, SessionUrlPolicy::RebaseToConnection),
+        Err(JmapError::Session(_))
+    ));
+}
+
+#[test]
+fn absent_core_capability_falls_back_to_default_limits() {
+    let base = Url::parse("http://127.0.0.1:18080").unwrap();
+    let doc = json!({
+        "capabilities": { "urn:ietf:params:jmap:mail": {} },
+        "primaryAccounts": { "urn:ietf:params:jmap:mail": "c" },
+        "apiUrl": "https://mail.test.local/jmap/"
+    });
+    let session = Session::parse(&doc, &base, SessionUrlPolicy::RebaseToConnection).unwrap();
+    assert_eq!(session.limits(), CoreLimits::default());
+    assert!(session.mail_account_id().is_ok());
+}

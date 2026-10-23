@@ -1,0 +1,142 @@
+//! `provider-imap` — the IMAP (RFC 9051) read/sync provider, with SMTP (RFC 5321)
+//! submission.
+//!
+//! This is the legacy-mail counterpart to `provider-jmap`: where JMAP is one
+//! stateless HTTP session, IMAP is a **stateful, per-mailbox** protocol and SMTP a
+//! separate submission transport. The crate is a hand-rolled minimal client over a
+//! generic async stream — no third-party IMAP/SMTP library — so the SMTP
+//! per-recipient and post-DATA invariants stay under our control and the whole
+//! protocol is offline-testable by replaying captured transcripts through an
+//! in-memory stream (mirroring the harness probe and `provider-jmap`'s executor
+//! seam). It implements the [`engine_provider::Provider`] contract so the sync
+//! orchestrator never switches on provider kind.
+//!
+//! # Shape (and how it differs from JMAP)
+//!
+//! - **An account is connected once; folders are bound to it.** [`ImapAccount::connect`] dials and
+//!   logs in, and every [`ImapProvider`] and [`ImapWatcher`] is made from it, borrowing from one
+//!   bounded pool of connections. IMAP gives a client no way to learn a server's connection limit,
+//!   and exceeding it surfaces as a failed login, so the budget is the engine's to keep (`pool`).
+//! - **Email scope is per mailbox.** A JMAP account has one `Email` scope; an IMAP account has one
+//!   [`SyncScope::ImapMailbox`](engine_core::sync::SyncScope) per folder. So an [`ImapProvider`] is
+//!   **bound to a single mailbox** for email: its
+//!   [`email_scope`](engine_provider::Provider::email_scope) names that mailbox, and
+//!   [`stream_email`](engine_provider::Provider::stream_email) is a UID-window `FETCH` over it. The
+//!   folder list syncs under the per-account
+//!   [`SyncScope::ImapMailboxList`](engine_core::sync::SyncScope). The cross-folder fan-out is the
+//!   later orchestrator's job.
+//! - **Identity is synthesized.** A mail object's key is `(mailbox, UIDVALIDITY, UID)`, so an IMAP
+//!   copy in another folder is a **distinct** object with a single membership (contrast JMAP, where
+//!   the same copy is one object with two memberships). `Message-ID` is a hint, never identity.
+//! - **A UIDVALIDITY reset is a snapshot.** When the mailbox's UID space is renumbered, every old
+//!   key is invalid; the pass becomes a snapshot (rediscovery) that tombstones the stale rows — the
+//!   IMAP analogue of `cannotCalculateChanges`.
+//!
+//! # Layers
+//!
+//! - `transport` — connect (TCP + injected `tokio-rustls` connector) and the tagged line protocol
+//!   over any `AsyncRead + AsyncWrite` stream.
+//! - `parse` — pure response parsers (`SELECT`/`SEARCH`/`FETCH`/`ENVELOPE`/`LIST`); hostile input
+//!   is rejected, never panicked on.
+//! - `mail` — normalize parsed rows into [`Message`](engine_core::mail::Message) /
+//!   [`Mailbox`](engine_core::mail::Mailbox).
+//! - `cursor` — the per-mailbox `SyncState` (UIDVALIDITY/UIDNEXT, plus an optional QRESYNC
+//!   `HIGHESTMODSEQ`) and opaque [`PageToken`](engine_provider::PageToken) encodings.
+//! - `sync` — the snapshot/delta + UID-window paging orchestration.
+//! - `qresync` — the QRESYNC incremental delta (RFC 7162): flag changes + expunges of
+//!   already-synced mail via `CHANGEDSINCE`/`VANISHED`, when the session negotiates it.
+//! - `mutate` — applying a [`MailEdit`](engine_provider::MailEdit) (`UID STORE`/`MOVE`/`EXPUNGE`)
+//!   to the bound mailbox.
+//! - `filing` — SMTP submission + `APPEND` filing of sent copies and drafts.
+//! - `config` — [`ImapConfig`]: the dial settings (address, TLS server name, [`Credentials`], SMTP
+//!   submission, sync depth, connect observer).
+//! - `credentials` / `sasl` — [`Credentials`] (a password, or an OAuth 2.0 access token) and the
+//!   two SASL mechanisms that carry a token: `OAUTHBEARER` (RFC 7628) and `XOAUTH2`. Which one is
+//!   negotiated from the server's advertised `AUTH=` set, so a host never has to know which
+//!   provider it is talking to.
+//! - `probe` — [`probe_imap_auth`] / [`probe_smtp_auth`]: what a server accepts, read off its
+//!   pre-authentication `CAPABILITY`/`EHLO` **before** a credential exists. The question account
+//!   setup asks first; no credential is sent, and nothing is attempted that a provider would record
+//!   as a failed sign-in.
+//! - `pool` / `account` — the account's bounded, reusable connections, and [`ImapAccount`], the one
+//!   handle per account that every folder's provider and watcher is made from.
+//! - `provider` — [`ImapProvider`], the [`Provider`](engine_provider::Provider) impl.
+//! - `idle` / `watch` — push via `IDLE` (RFC 2177): [`ImapWatcher`] holds a dedicated standing
+//!   connection and turns the `IDLE`/`DONE` keep-alive loop into a
+//!   [`Watch`](engine_provider::Watch) stream of change notifications, so a host can sync "as it
+//!   comes in" instead of polling.
+//!
+//! Tier-1 metadata only: like step 4, the raw RFC 5322 body is not materialized
+//! yet (durable blob storage is a later store sub-step).
+
+mod account;
+mod base64;
+mod bodystructure;
+mod capability;
+mod config;
+mod credentials;
+mod cursor;
+mod deadline;
+mod dial;
+mod drafts;
+mod error;
+mod fetch;
+mod fetch_batch;
+mod fetch_stream;
+pub(crate) mod filing;
+mod idle;
+mod mail;
+mod mailbox_write;
+mod metadata_fetch;
+mod mutate;
+mod parse;
+mod parse_body;
+mod parse_qresync;
+mod place;
+mod pool;
+mod pool_lease;
+mod probe;
+mod provider;
+mod qresync;
+mod report;
+mod resync;
+mod sasl;
+mod smtp;
+mod smtp_auth;
+mod smtp_stream;
+mod stream;
+mod sync;
+mod target;
+mod tls_info;
+mod tokenize;
+mod transport;
+mod transport_append;
+mod transport_auth;
+mod transport_command;
+mod transport_read;
+mod transport_search;
+mod transport_select;
+mod transport_session;
+mod transport_starttls;
+mod unseen;
+mod utf7;
+mod watch;
+
+#[cfg(test)]
+mod integration;
+#[cfg(test)]
+mod mock;
+#[cfg(test)]
+mod process_kill_tests;
+#[cfg(test)]
+mod uidonly_tests;
+#[cfg(test)]
+mod unchanged_tests;
+
+pub use account::ImapAccount;
+pub use config::{ImapConfig, ImapSecurity};
+pub use credentials::{CredentialSource, Credentials};
+pub use error::ImapError;
+pub use probe::{AuthOffer, probe_imap_auth, probe_smtp_auth};
+pub use provider::ImapProvider;
+pub use watch::{DEFAULT_IDLE_KEEPALIVE, ImapWatcher};

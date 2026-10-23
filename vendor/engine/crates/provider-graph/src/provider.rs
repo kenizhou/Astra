@@ -1,0 +1,402 @@
+//! The [`Provider`] implementation: a Microsoft Graph client bound to one mail
+//! folder for email, with the folder list synced at the account level.
+//!
+//! Graph mail `delta` is per-folder (`jmap.md`/this crate's docs), so — like
+//! `provider-imap` — a [`GraphProvider`] is bound to a single folder: its
+//! [`email_scope`](Provider::email_scope) names that folder
+//! ([`SyncScope::GraphFolder`]) and [`stream_email`](Provider::stream_email)
+//! streams its `messages/delta`. The folder list syncs under the per-account
+//! [`SyncScope::GraphFolderList`]. The cross-folder fan-out is the orchestrator's
+//! job.
+
+use std::collections::BTreeSet;
+
+use async_trait::async_trait;
+use engine_core::{
+    error::FailureClass,
+    ids::{AccountId, MailboxId, ProviderKey},
+    mail::{Mailbox, Message},
+    raw::RawMime,
+    sync::{SyncScope, SyncState, SyncUpdate, SyncWindow},
+    time::CalendarDate,
+};
+use engine_provider::{
+    CalendarWrites, Capabilities, ConnectionInfo, Draft, EmailChunk, EmailStream, IdentityControls,
+    KeywordName, MailEdit, MailEditReceipt, MailboxEdit, MailboxEditReceipt, MailboxWrites,
+    PageToken, PassMode, Provider, ProviderResult, ReportControls, ReportEvidence, ReportVerdicts,
+    ScopeSync, SenderIdentity, SubmissionReceipt, SyncKind, split_page,
+};
+
+use crate::{categories::Categories, fetch, transport::GraphClient};
+
+/// The folder list is re-discovered as a snapshot each pass (`GET /me/mailFolders`),
+/// so it carries no provider cursor of its own — like IMAP's folder list.
+const FOLDER_LIST_CURSOR: &str = "graph-folders";
+
+/// A Microsoft Graph read/sync provider bound to one mail folder for email.
+///
+/// Construct one with [`GraphProvider::new`] from a connected
+/// [`GraphClient`](crate::GraphClient) and the folder to bind. It advertises mail
+/// read/sync, mutating writes (mark-read/flag, move, delete), and submission; calendar
+/// is a separate provider.
+pub struct GraphProvider {
+    client: GraphClient,
+    folder: MailboxId,
+    capabilities: Capabilities,
+    /// The sync-depth cutoff the whole-scope drain ([`Provider::sync_email`]) syncs
+    /// under via [`Provider::default_sync_window`]: when set, its initial message
+    /// snapshot is windowed to messages received on or after this date (`None` syncs
+    /// the whole folder). The streaming [`Provider::stream_email`] takes its window
+    /// per call instead.
+    since: Option<CalendarDate>,
+    /// The keywords kept as categories ([`GraphProvider::with_keyword_names`]).
+    categories: Categories,
+}
+
+impl core::fmt::Debug for GraphProvider {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("GraphProvider")
+            .field("folder", &self.folder)
+            .field("capabilities", &self.capabilities)
+            .finish_non_exhaustive()
+    }
+}
+
+impl GraphProvider {
+    /// Binds a connected client to one mail folder for email sync.
+    ///
+    /// Submission is an **account-level** capability, not a folder one — `sendMail`
+    /// posts to `/me/sendMail` and Graph files the Sent copy itself — so every bound
+    /// `GraphProvider` advertises it. The cross-folder orchestrator submits through any
+    /// one of an account's folder-bound providers.
+    #[must_use]
+    pub fn new(client: GraphClient, folder: MailboxId) -> Self {
+        Self {
+            client,
+            folder,
+            capabilities: Capabilities::none()
+                .with_mail()
+                .with_mail_writes()
+                // Create, rename, move, trash and delete a folder (`crate::mailbox_write`).
+                .with_mailbox_writes()
+                // A draft is created from the same MIME `/sendMail` takes, into the
+                // account's Drafts folder by Graph's own default (`crate::drafts`).
+                .with_mail_drafts()
+                // The one transport here that takes a report as an *action* and answers
+                // whether it landed, hence `Acknowledged`. All three verdicts exist —
+                // `junk`, `notJunk`, `phish` — and only those three (`crate::report`).
+                .with_mail_report(ReportControls {
+                    verdicts: ReportVerdicts::all(),
+                    evidence: ReportEvidence::Acknowledged,
+                })
+                // Both submission capabilities: this transport hands the server assembled RFC
+                // 5322 bytes (`engine-rfc5322`), so it owns every `Content-Type` parameter —
+                // including the `method=` that makes an iTIP object a scheduling message
+                // rather than a calendar file (RFC 6047 §2.4). Contrast JMAP, which hands the
+                // server a body structure and cannot.
+                .with_submission()
+                .with_scheduling_submission()
+                // Readable, never writable: the mailbox's display name is a directory
+                // attribute a tenant administrator owns, so an editor here would offer an
+                // edit that cannot land (`crate::identity`).
+                .with_sender_identities(IdentityControls::ReadOnly),
+            since: None,
+            categories: Categories::default(),
+        }
+    }
+
+    /// Sets the default sync-depth cutoff for the whole-scope [`Provider::sync_email`]
+    /// drain: its initial message snapshot is windowed to messages received on or after
+    /// `since`. Later incremental syncs follow the server's deltaLink, which carries the
+    /// window. Streaming callers pass a window per call to [`Provider::stream_email`].
+    #[must_use]
+    pub fn with_since(mut self, since: CalendarDate) -> Self {
+        self.since = Some(since);
+        self
+    }
+
+    /// Keeps each of `names`' keywords as an Outlook category under one of its names.
+    ///
+    /// Graph stores no free-form keyword, so a keyword a draft asks for on its filed copy
+    /// ([`Draft::sent_copy_keywords`]) is kept only when it has a name here, and sync reports
+    /// a message carrying any of a keyword's names as carrying the keyword. With at least one
+    /// name, the adapter advertises
+    /// [`sent_copy_keywords`](Capabilities::sent_copy_keywords).
+    #[must_use]
+    pub fn with_keyword_names(mut self, names: Vec<KeywordName>) -> Self {
+        if !names.is_empty() {
+            self.capabilities = self.capabilities.with_sent_copy_keywords();
+        }
+        self.categories = Categories::new(names);
+        self
+    }
+}
+
+/// How many `$value` fetches a caller may keep in flight against one mailbox.
+///
+/// A Graph delta returns whole message objects inline, so the metadata sync costs one round
+/// trip per *page* and has nothing to overlap. The **source** does not come with them:
+/// `GET /messages/{id}/$value` is one request per message, which is what a host warming
+/// bodies pays, one round trip deep, however fast the link is.
+///
+/// Exchange Online caps a mailbox at four concurrent requests
+/// (<https://learn.microsoft.com/en-us/graph/throttling-limits>), and a live mailbox agrees
+/// exactly: **4 is the last clean width**, and both 5 and 6 draw `429`s. Going wider survives
+/// now that a throttle is waited out rather than dropped, and is still wrong — the mailbox's
+/// other ceiling is 10,000 requests per 10 minutes, and requests spent being refused come out
+/// of it.
+///
+/// **Narrower is wrong too, which is less obvious.** Leaving a lane free would stop a
+/// background body warm from occupying every slot of a host-side per-mailbox semaphore, and
+/// measured over five alternating rounds a 3-wide drain runs at 68% of a 4-wide one — a third
+/// of the throughput for that headroom. It buys less than it looks: the request-per-window
+/// ceiling is what actually throttles a large mailbox, and narrowing only postpones it. Ten
+/// thousand bodies exhaust the 10-minute budget in about 3.4 minutes at four wide and about
+/// 5.0 at three; both then wait, so the narrow one has paid a third of its speed to arrive at
+/// the same wall later.
+///
+/// Rates here are the *shape*, not constants to compare across runs: the same width measured
+/// in two sweeps minutes apart differed by 40%, so any comparison has to alternate widths
+/// inside one run.
+///
+/// The `$batch` endpoint is deliberately not used. Graph hands Outlook at most four
+/// sub-requests at a time whatever the batch holds, so it buys no parallelism this does not
+/// already have; measured at equal width it was within noise of plain concurrency, and it
+/// base64-encodes every body for about 25% more bytes.
+pub(crate) const MAX_CONCURRENT_SOURCE_FETCHES: usize = 4;
+
+#[async_trait]
+impl Provider for GraphProvider {
+    /// The fixed mail capabilities plus the transport's negotiated HTTP version.
+    ///
+    /// Graph has no session-discovery step, so [`GraphClient::connect`] issues no
+    /// request and both transport versions are `None` until this provider's first
+    /// fetch — unlike JMAP/CalDAV, which learn them while connecting
+    /// (`docs/agent-guidance/tls.md`).
+    fn connection_info(&self) -> ConnectionInfo {
+        ConnectionInfo {
+            http_version: self.client.http_version(),
+            tls_version: self.client.tls_version(),
+            ..ConnectionInfo::new(self.capabilities)
+                .with_concurrent_fetches(MAX_CONCURRENT_SOURCE_FETCHES)
+        }
+    }
+
+    fn mailbox_scope(&self, account: &AccountId) -> SyncScope {
+        SyncScope::GraphFolderList {
+            account: account.clone(),
+        }
+    }
+
+    fn email_scope(&self, account: &AccountId) -> SyncScope {
+        SyncScope::GraphFolder {
+            account: account.clone(),
+            folder: self.folder.clone(),
+        }
+    }
+
+    async fn sync_mailboxes(
+        &self,
+        _account: &AccountId,
+        _cursor: Option<&SyncState>,
+    ) -> ProviderResult<ScopeSync<Mailbox>> {
+        let mailboxes = fetch::folders(&self.client).await?;
+        // `GET /me/mailFolders` is a full snapshot every pass, so every folder is present.
+        let present: BTreeSet<ProviderKey> = mailboxes.iter().map(|m| m.id.key().clone()).collect();
+        Ok(ScopeSync::new(
+            SyncUpdate::snapshot(mailboxes, present),
+            SyncState::new(FOLDER_LIST_CURSOR),
+        ))
+    }
+
+    /// The whole-scope [`Provider::sync_email`] drain windows under the cutoff fixed at
+    /// construction ([`GraphProvider::with_since`]); [`Provider::stream_email`] takes its
+    /// window per call.
+    fn default_sync_window(&self) -> SyncWindow {
+        self.since.map_or_else(SyncWindow::full, SyncWindow::since)
+    }
+
+    fn stream_email<'a>(
+        &'a self,
+        _account: &'a AccountId,
+        cursor: Option<&'a SyncState>,
+        window: SyncWindow,
+        // Graph consumer `messages/delta` page size is server-controlled (`graph.md`),
+        // so the fetch-batch knob has no lever here; each server page is drained whole.
+        _fetch_batch: usize,
+        chunk_size: usize,
+    ) -> EmailStream<'a> {
+        // A sync-depth window bounds a snapshot via a `receivedDateTime` `$filter`. A
+        // delta cannot carry one (the `deltaLink` is opaque), so a message moved into the
+        // folder is reported however old it is; the engine drops it on apply
+        // (`SyncWindow::admits`), which is where the delta's bound holds for every adapter.
+        // The snapshot's bound is this `$filter`, and is not re-checked there.
+        let floor = window.floor();
+        Box::pin(async_stream::try_stream! {
+            // Each Graph page is fetched whole over HTTP and re-chunked for incremental
+            // commit; intermediate chunks hold the cursor and a final marker advances it
+            // (a delta is not cheaply resumable mid-pass).
+            let mut page_token: Option<PageToken> = None;
+            let mut mode: Option<PassMode> = None;
+            let mut total: Option<usize> = None;
+            // Shadowed, so an aged-out deltaLink can be dropped and the pass restarted below.
+            let mut cursor = cursor;
+            let final_cursor = loop {
+                let page = match fetch::messages_page(
+                    &self.client,
+                    &self.folder,
+                    cursor,
+                    page_token.as_ref(),
+                    floor,
+                    self.categories.names(),
+                )
+                .await
+                {
+                    Ok(page) => page,
+                    // Graph has expired the stored deltaLink (`410 SyncStateNotFound`): it cannot
+                    // produce a delta from that cursor again, ever. Drop it and restart the pass
+                    // as a full snapshot. Without this the folder is wedged for good — every pass
+                    // replays the same dead cursor, upserts nothing, and no new mail is delivered
+                    // again.
+                    //
+                    // It restarts the *pass*, not just this one call, and that distinction is
+                    // load-bearing: `cursor` is what decides each page's `SyncKind`, and a
+                    // reconciling pass tombstones against the `present` set that *every* page
+                    // contributes. Re-fetching only this page without the cursor, while later
+                    // pages still carried it, would leave those pages `Delta` — contributing
+                    // nothing to `present` — and the reconcile would then tombstone every message
+                    // they returned. Hence only before the first page is committed; after that
+                    // the mode is already fixed and a restart would drop what was yielded.
+                    Err(err)
+                        if cursor.is_some()
+                            && page_token.is_none()
+                            && err.failure_class() == FailureClass::NeedsResync =>
+                    {
+                        cursor = None;
+                        continue;
+                    }
+                    Err(err) => Err(err)?,
+                };
+                total = total.or(page.total);
+                // Decide the pass mode once, from the first page: a snapshot (first sync)
+                // reconciles — its present set tombstones absent rows; a delta is additive.
+                let pass_mode = *mode.get_or_insert(match page.kind {
+                    SyncKind::Snapshot => PassMode::Reconcile,
+                    SyncKind::Delta => PassMode::Additive,
+                });
+                let is_last = page.next_page.is_none();
+                let next_cursor = page.next_cursor.clone();
+                for chunk in split_page(
+                    pass_mode,
+                    page.changed,
+                    page.patched,
+                    page.removed,
+                    page.present,
+                    total,
+                    chunk_size,
+                ) {
+                    yield chunk;
+                }
+                if is_last {
+                    break next_cursor;
+                }
+                page_token = page.next_page;
+            };
+            // The final marker carries the cursor (and, for reconcile, tombstones against
+            // the accumulated present set).
+            yield match mode.unwrap_or(PassMode::Additive) {
+                PassMode::Additive => {
+                    EmailChunk::additive(Vec::new(), Vec::new(), total, final_cursor)
+                }
+                PassMode::Reconcile => {
+                    EmailChunk::reconcile_last(Vec::new(), Vec::new(), total, final_cursor)
+                }
+            };
+        })
+    }
+
+    async fn fetch_message_source(
+        &self,
+        _account: &AccountId,
+        message: &Message,
+    ) -> ProviderResult<RawMime> {
+        // Graph streams a message's full RFC 822 MIME from `/messages/{id}/$value`;
+        // the message's provider key is that immutable id. One credential (the bound
+        // client's token) backs the fetch, like every other call on this provider.
+        Ok(fetch::message_source(&self.client, message.id.key()).await?)
+    }
+
+    /// Sends `draft` via `POST /me/sendMail` in MIME format (`submit`), so the caller's
+    /// pre-generated `Message-ID` and threading survive to the wire. The outbox owns
+    /// durability/idempotency; this performs only the provider call.
+    async fn submit_email(
+        &self,
+        _account: &AccountId,
+        draft: &Draft,
+        hand_over: &engine_provider::HandOver<'_>,
+    ) -> ProviderResult<SubmissionReceipt> {
+        crate::submit::send(&self.client, draft, &self.categories, hand_over).await
+    }
+
+    /// Applies a [`MailEdit`] to an already-synced message: mark-read/flag (a `PATCH` of
+    /// `isRead`/`flag`), move (`POST …/move`), or permanent delete (`POST …/permanentDelete`).
+    ///
+    /// Stores a draft (`POST /me/messages` in MIME format), removing the message it
+    /// supersedes. Graph has no MIME update, so a re-save creates and deletes, and the
+    /// key moves (`crate::drafts`).
+    async fn put_draft(
+        &self,
+        _account: &AccountId,
+        draft: &Draft,
+        replacing: Option<&ProviderKey>,
+    ) -> ProviderResult<ProviderKey> {
+        crate::drafts::put_draft(&self.client, draft, replacing).await
+    }
+
+    /// Removes a stored draft (`DELETE /me/messages/{id}`), reporting one that is already
+    /// gone as done.
+    async fn delete_draft(&self, _account: &AccountId, draft: &ProviderKey) -> ProviderResult<()> {
+        crate::drafts::delete_draft(&self.client, draft).await
+    }
+
+    /// The target's mailbox comes from its provider key, not this provider's bound folder,
+    /// so one connected provider can edit a message in any of the account's folders — Graph
+    /// addresses a message by its immutable id alone (`crate::mutate`).
+    async fn edit_mail(
+        &self,
+        _account: &AccountId,
+        edit: &MailEdit,
+    ) -> ProviderResult<MailEditReceipt> {
+        crate::mutate::edit_mail(&self.client, edit).await
+    }
+
+    async fn sender_identities(&self, _account: &AccountId) -> ProviderResult<Vec<SenderIdentity>> {
+        Ok(crate::identity::sender_identity(&self.client).await?)
+    }
+
+    async fn report_message(
+        &self,
+        _account: &AccountId,
+        report: &engine_provider::MessageReport,
+    ) -> ProviderResult<engine_provider::ReportReceipt> {
+        crate::report::report_message(&self.client, report).await
+    }
+}
+
+/// Folder changes are account-level, like submission: any of an account's folder-bound
+/// providers can make one (`crate::mailbox_write`).
+#[async_trait]
+impl MailboxWrites for GraphProvider {
+    async fn edit_mailbox(
+        &self,
+        _account: &AccountId,
+        edit: &MailboxEdit,
+    ) -> ProviderResult<MailboxEditReceipt> {
+        crate::mailbox_write::edit_mailbox(&self.client, edit).await
+    }
+}
+impl CalendarWrites for GraphProvider {}
+
+#[cfg(test)]
+#[path = "provider_tests.rs"]
+mod tests;

@@ -9,3 +9,8 @@
 *.yml  text eol=lf
 *.toml text eol=lf
 *.txt  text eol=lf
+
+# The vendored engine tree is byte-pristine upstream content: no line-ending
+# conversion ever, on any file, or fixture bytes (CRLF .eml/.xml fixtures)
+# would hash differently from the upstream blobs.
+vendor/** -text

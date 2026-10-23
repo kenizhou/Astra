@@ -1,0 +1,500 @@
+//! The durable schema, as versioned DDL.
+//!
+//! Each `const` here is one migration step's SQL; [`crate::migrations`] runs them
+//! in order keyed on `PRAGMA user_version`. To evolve the schema, add a new `Vn`
+//! const and append it to the migration list — never edit a shipped step, since
+//! existing databases have already applied it.
+//!
+//! Five tables back the store contract. `sync_scope` holds the per-scope fencing
+//! generation, lease expiry, and cursor; `object` holds the serialized normalized
+//! payloads keyed by `(scope, provider key)`; `fts_doc` and `event_occurrence`
+//! hold the precomputed derived rows (`DerivedWrite`); `pending_op` is the outbox.
+//!
+//! Derived rows are deliberately **not** foreign-keyed to `object`: maintenance
+//! can index a body before its object row exists, and the reference store imposes
+//! no such constraint either. The object→derived tombstone cascade is therefore
+//! explicit (see `scope_ops::tombstone`), not a `FOREIGN KEY … ON DELETE CASCADE`.
+//!
+//! The search layer is migration [`V2`]: it reshapes `fts_doc` to carry a stable
+//! integer rowid and typed text columns (`subject`/`body`/`location`), builds the
+//! FTS5 external-content index over it, and adds the normalized structured-filter
+//! tables and junctions plus the per-chunk embedding table.
+//!
+//! Migration [`V3`] adds `event_occurrence.tzdata_version`: the bundled IANA
+//! tzdata release each occurrence was expanded under, so a tzdata-version bump can
+//! find and re-expand exactly the affected occurrences (`calendar-semantics.md`).
+//!
+//! `STRICT` enforces column types; the composite-key tables are `WITHOUT ROWID`
+//! (clustered by their key), while `pending_op` keeps a rowid so it maps onto
+//! `PendingOpId`. Time is fixed-width ISO-8601 `TEXT` (`convert::instant_to_text`);
+//! generations and ids are `INTEGER`; opaque normalized payloads are `TEXT` JSON
+//! (never queried in SQL — structured filters use derived columns, not payload
+//! introspection — so JSONB would only cost debuggability and portability here).
+
+/// Migration v1: the mechanical-store base schema.
+pub(crate) const V1: &str = "\
+CREATE TABLE sync_scope (
+    scope_key    TEXT    NOT NULL PRIMARY KEY,
+    account      TEXT    NOT NULL,
+    token        INTEGER NOT NULL,
+    lease_expiry TEXT,
+    cursor       TEXT
+) STRICT;
+
+CREATE TABLE object (
+    scope_key    TEXT NOT NULL,
+    provider_key TEXT NOT NULL,
+    payload      TEXT NOT NULL,
+    PRIMARY KEY (scope_key, provider_key)
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE fts_doc (
+    scope_key    TEXT NOT NULL,
+    provider_key TEXT NOT NULL,
+    fields       TEXT NOT NULL,
+    PRIMARY KEY (scope_key, provider_key)
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE event_occurrence (
+    scope_key     TEXT NOT NULL,
+    event         TEXT NOT NULL,
+    start_utc     TEXT NOT NULL,
+    end_utc       TEXT NOT NULL,
+    recurrence_id TEXT NOT NULL,
+    PRIMARY KEY (scope_key, event, start_utc, recurrence_id)
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX event_occurrence_range
+    ON event_occurrence (scope_key, start_utc, end_utc);
+
+CREATE TABLE pending_op (
+    id              INTEGER PRIMARY KEY,
+    account         TEXT    NOT NULL,
+    idempotency_key TEXT    NOT NULL,
+    resource_key    TEXT    NOT NULL,
+    depends_on      TEXT    NOT NULL,
+    payload         TEXT    NOT NULL,
+    state           TEXT    NOT NULL,
+    token           INTEGER NOT NULL,
+    lease_expiry    TEXT,
+    UNIQUE (account, idempotency_key)
+) STRICT;
+";
+
+/// Migration v2: the search layer.
+///
+/// Reshapes `fts_doc` into an FTS5 external-content source (a stable integer
+/// rowid plus typed `subject`/`body`/`location` columns), builds the `fts_index`
+/// virtual table over it with triggers that keep the index in sync, and adds the
+/// normalized structured-filter tables (`mail_index`/`event_index` scalars and the
+/// `mail_address`/`membership`/`event_participant` junctions) plus the per-chunk
+/// `embedding` table. The DSL→table mapping is `north-star.md`'s Search Contract.
+///
+/// `fts_doc` is a re-derivable cache, so the forward-only reshape drops and
+/// recreates it (a re-sync or re-index repopulates) rather than copying data — the
+/// discipline `migrations.rs` documents.
+pub(crate) const V2: &str = "\
+DROP TABLE fts_doc;
+
+CREATE TABLE fts_doc (
+    rowid        INTEGER PRIMARY KEY,
+    scope_key    TEXT NOT NULL,
+    provider_key TEXT NOT NULL,
+    subject      TEXT NOT NULL DEFAULT '',
+    body         TEXT NOT NULL DEFAULT '',
+    location     TEXT NOT NULL DEFAULT '',
+    UNIQUE (scope_key, provider_key)
+) STRICT;
+
+CREATE VIRTUAL TABLE fts_index USING fts5 (
+    subject, body, location,
+    content = 'fts_doc',
+    content_rowid = 'rowid',
+    tokenize = 'porter unicode61'
+);
+
+CREATE TRIGGER fts_doc_ai AFTER INSERT ON fts_doc BEGIN
+    INSERT INTO fts_index (rowid, subject, body, location)
+    VALUES (new.rowid, new.subject, new.body, new.location);
+END;
+
+CREATE TRIGGER fts_doc_ad AFTER DELETE ON fts_doc BEGIN
+    INSERT INTO fts_index (fts_index, rowid, subject, body, location)
+    VALUES ('delete', old.rowid, old.subject, old.body, old.location);
+END;
+
+CREATE TRIGGER fts_doc_au AFTER UPDATE ON fts_doc BEGIN
+    INSERT INTO fts_index (fts_index, rowid, subject, body, location)
+    VALUES ('delete', old.rowid, old.subject, old.body, old.location);
+    INSERT INTO fts_index (rowid, subject, body, location)
+    VALUES (new.rowid, new.subject, new.body, new.location);
+END;
+
+CREATE TABLE mail_index (
+    scope_key      TEXT    NOT NULL,
+    provider_key   TEXT    NOT NULL,
+    date_utc       TEXT,
+    has_attachment INTEGER NOT NULL,
+    thread_id      TEXT,
+    PRIMARY KEY (scope_key, provider_key)
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX mail_index_date ON mail_index (scope_key, date_utc);
+
+CREATE TABLE mail_address (
+    scope_key    TEXT NOT NULL,
+    provider_key TEXT NOT NULL,
+    field        TEXT NOT NULL,
+    addr         TEXT NOT NULL,
+    name         TEXT,
+    PRIMARY KEY (scope_key, provider_key, field, addr)
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX mail_address_lookup ON mail_address (scope_key, field, addr);
+
+CREATE TABLE membership (
+    scope_key    TEXT NOT NULL,
+    provider_key TEXT NOT NULL,
+    kind         TEXT NOT NULL,
+    value        TEXT NOT NULL,
+    PRIMARY KEY (scope_key, provider_key, kind, value)
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX membership_lookup ON membership (scope_key, kind, value);
+
+CREATE TABLE event_index (
+    scope_key      TEXT    NOT NULL,
+    provider_key   TEXT    NOT NULL,
+    has_conference INTEGER NOT NULL,
+    my_partstat    TEXT,
+    PRIMARY KEY (scope_key, provider_key)
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE event_participant (
+    scope_key    TEXT NOT NULL,
+    provider_key TEXT NOT NULL,
+    role         TEXT NOT NULL,
+    addr         TEXT NOT NULL,
+    partstat     TEXT NOT NULL,
+    PRIMARY KEY (scope_key, provider_key, role, addr)
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX event_participant_lookup ON event_participant (scope_key, role, addr);
+
+CREATE TABLE embedding (
+    scope_key    TEXT    NOT NULL,
+    provider_key TEXT    NOT NULL,
+    chunk_ix     INTEGER NOT NULL,
+    model        TEXT    NOT NULL,
+    dim          INTEGER NOT NULL,
+    vector       BLOB    NOT NULL,
+    PRIMARY KEY (scope_key, provider_key, chunk_ix)
+) STRICT, WITHOUT ROWID;
+";
+
+/// Migration v3: per-occurrence tzdata version.
+///
+/// Each materialized occurrence records the bundled IANA tzdata release it was
+/// expanded under (`OccurrenceRow::tzdata_version`). A tzdata-version bump
+/// re-expands the affected occurrences through the maintenance path
+/// (`store-and-sync.md`); the index lets that pass find occurrences expanded under
+/// a stale release without a full scan. The column is **not** part of the primary
+/// key — re-expansion updates it in place. The `''` default applies only to
+/// hypothetical pre-V3 rows (occurrence materialization did not exist before this).
+pub(crate) const V3: &str = "\
+ALTER TABLE event_occurrence ADD COLUMN tzdata_version TEXT NOT NULL DEFAULT '';
+
+CREATE INDEX event_occurrence_tzdata ON event_occurrence (tzdata_version);
+";
+
+/// Migration v4: the engine-meta key/value table.
+///
+/// Holds small build-level markers, currently `normalizer_version` (see
+/// `engine_store::NORMALIZER_VERSION`): on open the store compares the stored value to
+/// the build's and clears sync cursors when they differ, so a normalization change forces
+/// a re-normalizing re-sync (`store-and-sync.md`). A pre-V4 database has no row, which
+/// reads as a mismatch and triggers exactly that one-time re-sync.
+pub(crate) const V4: &str = "\
+CREATE TABLE meta (
+    key   TEXT NOT NULL PRIMARY KEY,
+    value TEXT NOT NULL
+) STRICT;
+";
+
+/// Migration v5: on-demand message content — text in SQLite, bytes on disk.
+///
+/// The split is by **text vs bytes** (`north-star.md`): searchable text lives in
+/// SQLite, the heavy byte payload on the filesystem.
+///
+/// - `message_source` is metadata for the raw RFC 5322 bytes, which live in a content-addressed
+///   filesystem blob area, **not** SQLite — a single message can carry 1–15 MB of inline
+///   attachments that would bloat the database. The SHA-256 `content_hash` names the blob (two IMAP
+///   copies of one message dedupe to one file); `fetched_at` is kept for future quota/eviction.
+/// - `message_body` holds the extracted, displayable body text (the reading view and the search
+///   source). `message_body_fts` is an FTS5 index over the `plain` text, maintained by triggers
+///   (mirroring V2's `fts_doc`/`fts_index`), so a search matches body content. It is **lease-free**
+///   and never touched by sync, so an IMAP re-snapshot cannot wipe it; stale rows for deleted
+///   messages are filtered at query time by joining to the live `mail_index`.
+///
+/// Both are keyed by `(account, provider_key)`.
+pub(crate) const V5: &str = "\
+CREATE TABLE message_source (
+    account      TEXT NOT NULL,
+    provider_key TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    fetched_at   TEXT NOT NULL,
+    PRIMARY KEY (account, provider_key)
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE message_body (
+    rowid        INTEGER PRIMARY KEY,
+    account      TEXT NOT NULL,
+    provider_key TEXT NOT NULL,
+    plain        TEXT NOT NULL DEFAULT '',
+    html         TEXT,
+    fetched_at   TEXT NOT NULL,
+    UNIQUE (account, provider_key)
+) STRICT;
+
+CREATE VIRTUAL TABLE message_body_fts USING fts5 (
+    plain,
+    content = 'message_body',
+    content_rowid = 'rowid',
+    tokenize = 'porter unicode61'
+);
+
+CREATE TRIGGER message_body_ai AFTER INSERT ON message_body BEGIN
+    INSERT INTO message_body_fts (rowid, plain) VALUES (new.rowid, new.plain);
+END;
+
+CREATE TRIGGER message_body_ad AFTER DELETE ON message_body BEGIN
+    INSERT INTO message_body_fts (message_body_fts, rowid, plain)
+    VALUES ('delete', old.rowid, old.plain);
+END;
+
+CREATE TRIGGER message_body_au AFTER UPDATE ON message_body BEGIN
+    INSERT INTO message_body_fts (message_body_fts, rowid, plain)
+    VALUES ('delete', old.rowid, old.plain);
+    INSERT INTO message_body_fts (rowid, plain) VALUES (new.rowid, new.plain);
+END;
+";
+
+/// Migration v6: the per-scope **expansion window** — the horizon an event scope's
+/// occurrence rows are materialized over, and the zone they were resolved through.
+///
+/// Nullable, and only ever set for event scopes: the rows were always *relative to* a
+/// window, but the window itself was implicit, so a pass that re-derived one changed event
+/// over whatever horizon its caller happened to hold deleted that event's rows outside it
+/// and re-materialized only its own — silently dropping occurrences the host had already
+/// expanded. Recording it lets a sync (and a post-write reconcile) re-expand a changed
+/// event over the window the store actually holds.
+pub(crate) const V6: &str = "\
+ALTER TABLE sync_scope ADD COLUMN horizon_start TEXT;
+ALTER TABLE sync_scope ADD COLUMN horizon_end   TEXT;
+ALTER TABLE sync_scope ADD COLUMN expansion_zone TEXT;
+";
+
+/// Migration v7: contacts, unified people, photos, and recipient observations.
+///
+/// Provider contacts continue to live in `object`; `contact_state.generation`
+/// changes with contact-card applies and fences atomic replacement of the
+/// derived people tables. Recipient rows keep their source identity after
+/// suppression so replay cannot resurrect cleared history.
+pub(crate) const V7: &str = "\
+CREATE TABLE contact_state (
+    singleton      INTEGER NOT NULL PRIMARY KEY CHECK (singleton = 1),
+    generation     INTEGER NOT NULL,
+    next_person_id INTEGER NOT NULL
+) STRICT, WITHOUT ROWID;
+
+INSERT INTO contact_state (singleton, generation, next_person_id)
+VALUES (1, 0, 1);
+
+CREATE TABLE person (
+    id           INTEGER NOT NULL PRIMARY KEY,
+    ordinal      INTEGER NOT NULL UNIQUE,
+    display_name TEXT    NOT NULL,
+    payload      TEXT    NOT NULL
+) STRICT;
+
+CREATE INDEX person_display_name ON person (display_name, id);
+
+CREATE TABLE person_alias (
+    retired_id INTEGER NOT NULL PRIMARY KEY,
+    current_id INTEGER NOT NULL
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE person_source (
+    person_id INTEGER NOT NULL,
+    account   TEXT    NOT NULL,
+    contact   TEXT    NOT NULL,
+    PRIMARY KEY (person_id, account, contact)
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX person_source_lookup ON person_source (account, contact);
+
+CREATE TABLE person_email (
+    person_id INTEGER NOT NULL,
+    email     TEXT    NOT NULL,
+    PRIMARY KEY (person_id, email)
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX person_email_lookup ON person_email (email);
+
+CREATE TABLE contact_source_availability (
+    scope_key TEXT NOT NULL PRIMARY KEY,
+    available INTEGER NOT NULL,
+    reason    TEXT
+) STRICT, WITHOUT ROWID;
+
+-- One row per *media resource*, not per card: a card may carry several (a PHOTO and
+-- a LOGO both land in `ContactCard::media`). Keying on (account, contact) alone made
+-- them share a row, so with the card-ETag fingerprint fallback — identical for every
+-- resource on one card — a LOGO fetch would satisfy a later PHOTO read and return the
+-- wrong bytes. `resource` is a stable digest of the resource's URI.
+CREATE TABLE contact_photo (
+    account       TEXT NOT NULL,
+    contact       TEXT NOT NULL,
+    resource      TEXT NOT NULL,
+    fingerprint   TEXT NOT NULL,
+    content_hash  TEXT NOT NULL,
+    media_type    TEXT,
+    fetched_at    TEXT NOT NULL,
+    PRIMARY KEY (account, contact, resource)
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE recipient_observation (
+    account        TEXT    NOT NULL,
+    source_message TEXT    NOT NULL,
+    email          TEXT    NOT NULL,
+    name           TEXT,
+    sent_at        TEXT,
+    suppressed     INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (account, source_message, email)
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX recipient_email
+    ON recipient_observation (email, suppressed, sent_at);
+
+CREATE TABLE recipient_coverage (
+    account                  TEXT    NOT NULL PRIMARY KEY,
+    window_json              TEXT    NOT NULL,
+    sent_collection_present  INTEGER NOT NULL
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE recipient_index_state (
+    account TEXT    NOT NULL PRIMARY KEY,
+    version INTEGER NOT NULL
+) STRICT, WITHOUT ROWID;
+";
+
+/// Migration v11: remembering that a contact *has* no photo.
+///
+/// `contact_photo` could previously only record a photo it held, so "this person has
+/// no picture" — the answer for almost every correspondent outside the user's address
+/// books — was indistinguishable from "never asked", and every pass re-asked the
+/// provider about the same strangers. A negative row carries no bytes, so its
+/// `content_hash` is empty and `missing` is what separates the two; `fetched_at`,
+/// already written and until now never read, is what expires it.
+pub(crate) const V11: &str = "\
+ALTER TABLE contact_photo ADD COLUMN missing INTEGER NOT NULL DEFAULT 0;
+";
+
+/// Migration v12: how big a message is, and how big the copy we kept turned out to be.
+///
+/// Two columns because they answer different questions and disagree on purpose.
+/// `message.size_octets` is what the **provider** said before anything was fetched — the number a
+/// size cap has to decide on, nullable because Graph and CalDAV say nothing. `message_source
+/// .size_octets` is what we actually **wrote**, exact on every provider because we counted the
+/// bytes, and the only honest answer to "how much disk would dropping this reclaim".
+///
+/// Neither is indexed. The gating query orders by date and filters on size, so it rides
+/// `message_date` and an index here would not be chosen; the reclaim query scans one row per
+/// cached body. Add one when a measurement asks for it.
+pub(crate) const V12: &str = "\
+ALTER TABLE message ADD COLUMN size_octets INTEGER;
+ALTER TABLE message_source ADD COLUMN size_octets INTEGER;
+";
+
+/// Migration v13: find the op holding a resource without reading the account's outbox.
+///
+/// The targeted claim asks whether a **live in-flight** op already holds the resource it
+/// wants. Without this, the only usable index is `UNIQUE (account, idempotency_key)`, whose
+/// `account = ?` prefix visits every op the account ever enqueued, and nothing prunes
+/// `pending_op`: it is the idempotency record, so it grows by one row per write forever.
+/// That scan sits on the path of every mail write, and is repeated once per poll while a
+/// write waits its turn.
+///
+/// Partial, because only `InFlight` rows can answer the question, and they are the few.
+pub(crate) const V13: &str = "\
+CREATE INDEX pending_op_held_resource
+    ON pending_op (account, resource_key)
+    WHERE state = 'InFlight';
+";
+
+/// Migration v14: make `pending_op` a queue rather than a log of attempts.
+///
+/// Six columns, all nullable or defaulted, so the step is a pure `ALTER` over a table
+/// that holds non-re-derivable user writes and must be migrated data-preservingly
+/// (`migrations.rs`).
+///
+/// `kind` says which request type `payload` deserializes as. The payload is an untagged
+/// serialization and nothing else distinguishes the verbs: a mail edit and a report both
+/// serialize on `mail:{key}`, every calendar verb on `event:{uid}`, and the idempotency
+/// key is caller-minted for all but a submission. A drainer cannot dispatch what it
+/// cannot identify.
+///
+/// **Rows already in the table keep a `NULL` kind, and are never attempted.** They cannot
+/// be classified: the information was never written. Guessing would replay a months-old
+/// archive or send against a mailbox that has moved on, which is worse than dropping it,
+/// so they are listed for a host to show and withdraw instead. New rows always carry one.
+///
+/// `attempts` and `next_attempt_at` are how a retryable failure parks instead of settling;
+/// `failure_class` and `detail` are how a host says *why* something is still queued, and
+/// survive the park back into `Pending`.
+pub(crate) const V14: &str = "\
+ALTER TABLE pending_op ADD COLUMN kind            TEXT;
+ALTER TABLE pending_op ADD COLUMN attempts        INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE pending_op ADD COLUMN next_attempt_at TEXT;
+ALTER TABLE pending_op ADD COLUMN failure_class   TEXT;
+ALTER TABLE pending_op ADD COLUMN detail          TEXT;
+";
+
+/// Migration v15: a person may have no display name.
+///
+/// `Person::display_name` is `None` for a card with neither a name nor an address, and the v7
+/// column refused it, failing the whole people write. SQLite cannot drop `NOT NULL` in place, so
+/// the table is rebuilt and its rows copied: the ids are what a host holds, and a rebuild that
+/// kept none would re-issue every one.
+pub(crate) const V15: &str = "CREATE TABLE person_v15 (
+    id           INTEGER NOT NULL PRIMARY KEY,
+    ordinal      INTEGER NOT NULL UNIQUE,
+    display_name TEXT,
+    payload      TEXT    NOT NULL
+) STRICT;
+
+INSERT INTO person_v15 (id, ordinal, display_name, payload)
+SELECT id, ordinal, display_name, payload FROM person;
+
+DROP TABLE person;
+ALTER TABLE person_v15 RENAME TO person;
+CREATE INDEX person_display_name ON person (display_name, id);
+";
+
+/// Migration v16: an outbox op records whether its attempt handed the message over.
+///
+/// `handed_over` holds the token of the attempt that recorded, just before the first byte that
+/// could deliver a send, that it was about to write it (`Store::record_hand_over`). Recovering a
+/// dead attempt turns on it: none, and the send is retried; one, and it awaits confirmation.
+///
+/// **A send already in flight when the store upgrades is taken as handed over.** Its build
+/// recorded nothing, so nothing proves it stopped short of the server, and asking is the only
+/// answer that cannot deliver a message twice.
+pub(crate) const V16: &str = "\
+ALTER TABLE pending_op ADD COLUMN handed_over INTEGER;
+UPDATE pending_op SET handed_over = token WHERE state = 'InFlight' AND kind = 'MailSubmit';
+";
+
+mod mail;
+
+pub(crate) use mail::{V8, V9, V10, V17, V18};

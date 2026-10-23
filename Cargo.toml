@@ -1,6 +1,10 @@
 [workspace]
 resolver = "2"
 members = ["crates/*", "xtask", "cli", "client/desktop", "plugins/*"]
+# The vendored engine tree (vendor/engine) is its own nested workspace and
+# must never be auto-enlisted as a member: without this line Cargo tries to
+# make every vendored crate a member and the two workspace roots collide.
+exclude = ["vendor"]
 # Bare `cargo build`/`test`/`run` stay on the engine-side crates; the desktop
 # host builds explicitly (`cargo build -p astra-desktop`) because its Tauri
 # dependency tree is heavy and needs the platform webview libraries.
@@ -65,32 +69,30 @@ too_many_lines = "allow"
 missing_panics_doc = "allow"
 
 [workspace.dependencies]
-# The sync engine, consumed only through its `engine-api` facade (AGENTS.md).
-# Pinned by git commit to the public allodia-eu/email-calendar-sync-engine, so
-# the build is reproducible everywhere with no sibling checkout (and no repo
-# credentials: it is public). The rev matches refs/refs-lock.toml. To develop
-# against a local engine checkout at the same time, use the `[patch]` pattern
-# documented as comments in `.cargo/config.toml`. Re-pin: bump `rev` on every
-# line below to the new engine commit, keeping them identical.
-engine-api = { git = "https://github.com/allodia-eu/email-calendar-sync-engine", rev = "68eab00e6a9a9fe5a200218e156dbaae1ba00caa" }
-engine-core = { git = "https://github.com/allodia-eu/email-calendar-sync-engine", rev = "68eab00e6a9a9fe5a200218e156dbaae1ba00caa" }
-engine-provider = { git = "https://github.com/allodia-eu/email-calendar-sync-engine", rev = "68eab00e6a9a9fe5a200218e156dbaae1ba00caa" }
+# The sync engine, consumed only through its `engine-api` facade (AGENTS.md),
+# vendored in-tree at vendor/engine/ (the full upstream tree at the revision
+# refs/refs-lock.toml records, MPL-2.0). In-tree edits land as ordinary
+# commits; upstream changes arrive through the nightly vendor-sync flow in
+# docs/upstream-sync.md.
+engine-api = { path = "vendor/engine/crates/engine-api" }
+engine-core = { path = "vendor/engine/crates/engine-core" }
+engine-provider = { path = "vendor/engine/crates/engine-provider" }
 # The engine's own RFC 5322 assembler, used by the crypto bypass so a wrapped
 # message is byte-identical to a non-crypto send before the gate runs.
-engine-rfc5322 = { git = "https://github.com/allodia-eu/email-calendar-sync-engine", rev = "68eab00e6a9a9fe5a200218e156dbaae1ba00caa" }
+engine-rfc5322 = { path = "vendor/engine/crates/engine-rfc5322" }
 # The one host-selected TLS policy shared across IMAP/CalDAV/JMAP/Graph.
-engine-tls = { git = "https://github.com/allodia-eu/email-calendar-sync-engine", rev = "68eab00e6a9a9fe5a200218e156dbaae1ba00caa", features = ["tls-native-certs"] }
+engine-tls = { path = "vendor/engine/crates/engine-tls", features = ["tls-native-certs"] }
 # Concrete provider adapters the account layer connects.
-provider-imap = { git = "https://github.com/allodia-eu/email-calendar-sync-engine", rev = "68eab00e6a9a9fe5a200218e156dbaae1ba00caa" }
-provider-caldav = { git = "https://github.com/allodia-eu/email-calendar-sync-engine", rev = "68eab00e6a9a9fe5a200218e156dbaae1ba00caa" }
+provider-imap = { path = "vendor/engine/crates/provider-imap" }
+provider-caldav = { path = "vendor/engine/crates/provider-caldav" }
 # The Microsoft Graph mail read/sync plus writes adapter (bearer-token).
-provider-graph = { git = "https://github.com/allodia-eu/email-calendar-sync-engine", rev = "68eab00e6a9a9fe5a200218e156dbaae1ba00caa" }
+provider-graph = { path = "vendor/engine/crates/provider-graph" }
 # The Google (Gmail and Google Calendar) native-API adapter (bearer-token),
 # the cloud-API counterpart of provider-graph.
-provider-google = { git = "https://github.com/allodia-eu/email-calendar-sync-engine", rev = "68eab00e6a9a9fe5a200218e156dbaae1ba00caa" }
+provider-google = { path = "vendor/engine/crates/provider-google" }
 # The JMAP mail read/sync plus submission plus calendar-read adapter (RFC
 # 8620/8621).
-provider-jmap = { git = "https://github.com/allodia-eu/email-calendar-sync-engine", rev = "68eab00e6a9a9fe5a200218e156dbaae1ba00caa" }
+provider-jmap = { path = "vendor/engine/crates/provider-jmap" }
 # Serialisation for the types that cross the Tauri IPC.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -1,0 +1,56 @@
+[package]
+name = "provider-google"
+description = "Google Gmail, Calendar, and People provider: sync, guarded writes, submission, contact groups/directories/photos, and bearer-auth HTTP transport."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+engine-core = { workspace = true }
+# Google states a series' exclusions as raw iCalendar `EXDATE` lines inside its own
+# JSON, and the engine has exactly one iCalendar parser.
+engine-ical = { workspace = true }
+# `http` enables `HttpVersion::from_http`, the one place a reqwest response's version is
+# mapped onto the engine's neutral `HttpVersion` (`ConnectionInfo`).
+engine-provider = { workspace = true, features = ["http"] }
+# The shared RFC 5322 / MIME assembler, for `messages.send` in MIME format (submission
+# preserves the caller's Message-ID and threading — see `submit`).
+engine-rfc5322 = { workspace = true }
+# Gmail hands back raw RFC 5322 header values, so subjects and display names still need
+# RFC 2047 decoding — through the engine's one decoder, shared with the IMAP adapter.
+engine-mime = { workspace = true }
+# One shared TLS trust policy across every provider (`docs/agent-guidance/tls.md`);
+# `reqwest` enables the preconfigured-client builder this HTTP transport uses.
+# One throttling answer for every HTTP provider (docs/agent-guidance/http-throttling.md).
+engine-http = { workspace = true }
+engine-tls = { workspace = true, features = ["reqwest"] }
+# reqwest + rustls (pure-Rust TLS, mobile cross-compile) on the engine's standard
+# HTTP stack, mirroring provider-graph/provider-jmap.
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+# `async-stream` builds the `stream_email` chunk stream with `try_stream!`.
+async-stream = { workspace = true }
+# `buffered` fans a page's per-message `messages.get` calls out concurrently — Gmail is the
+# one adapter whose list endpoint returns bare ids with no companion batch-get.
+futures-util = { workspace = true }
+# The generated `Date` header for the assembled `messages.send` message reads the wall
+# clock at submission (engine time types deliberately cannot), mirroring the Graph path.
+time = { workspace = true }
+
+[dev-dependencies]
+# `time` for the gated live send test's delivery poll (`tokio::time::sleep`); `macros`/`rt`
+# for `#[tokio::test]`.
+tokio = { workspace = true, features = ["time", "test-util"] }
+# The silent servers the deadline tests meet (`engine_http::test_server`), and `test-util`
+# above for the paused clock they are measured on.
+engine-http = { workspace = true, features = ["test-server"] }
+# The gated live test builds a (bundled) TlsClientConfig to pass into `connect`.
+engine-tls = { workspace = true }
+
+[lints]
+workspace = true

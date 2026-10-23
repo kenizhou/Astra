@@ -1,0 +1,312 @@
+# Provider Guidance
+
+Provider code is allowed to be messy internally, but must present clean capabilities and changes to the engine.
+
+## Implementation Order
+
+Recommended first provider spine:
+1. Reproducible Stalwart Docker protocol harness. **Implemented** (step 3).
+2. JMAP read/write against Stalwart. **Implemented** (step 4); `jmap.md` is
+   authoritative for the client (`engine-provider`/`provider-jmap`/`engine-sync`).
+   Mail read/sync, submission (**with attachments**), on-demand raw-source fetch,
+   **mail writes** (`edit_mail` via `Email/set`), **push** (EventSource `Watch`), and
+   **calendar writes** (`CalendarEvent/set` — create/patch/destroy) are all implemented.
+   Participant *RSVP* is implemented (`CalendarEvent/set` on `participationStatus`). Its calendar writes carry **no
+   lost-update guard**, and say so (`WriteGuard::Absent`); see `jmap.md`.
+3. IMAP/SMTP + CalDAV/CardDAV against the same Stalwart fixture. The **IMAP/SMTP
+   mail half is implemented** (step 5a); `imap-smtp.md` is authoritative for the
+   `provider-imap` client. **CalDAV calendar read/sync (step 5b) and writes
+   (step 5c) are implemented** under `provider-caldav`; `caldav.md` is
+   authoritative. **iTIP/iMIP inbound parse/reconcile/trust/apply + the RSVP write
+   primitive (step 5d) are implemented** in `engine_core::scheduling` +
+   `provider_caldav::imip` (`calendar-semantics.md`/`caldav.md`); the residual
+   scheduling deferrals (mail-sync wiring, Scheduling-Inbox `REPORT`, client-iMIP
+   SMTP delivery, `ClientImip` persistence) remain. **CardDAV contacts are
+   implemented** as a separate `CardDavProvider` sharing only the DAV transport
+   with CalDAV.
+4. External cloud providers. **Microsoft Graph mail read/sync is implemented**
+   under `provider-graph`; `graph.md` is authoritative. Graph's mail sync is
+   per-folder (no account-wide message delta), so it follows the IMAP/CalDAV
+   container+member shape (a folder-bound provider + `GraphFolderList`/`GraphFolder`
+   scopes), not JMAP's account-global one — and unlike JMAP, an incremental `delta`
+   returns *partial* changed objects that the adapter re-fetches. It is the first
+   adapter validated without the Stalwart fixture: deterministically by a
+   fixture-replay HTTP server over scrubbed real captures, plus an optional
+   token-gated live test. Graph **submission** (`sendMail` in MIME format) and
+   **calendar read/sync + writes** (`calendarView`/delta, `If-Match`-guarded
+   create/patch/delete) are also implemented. **Google (Gmail + Google Calendar) is
+   implemented** under `provider-google`; `google.md` is authoritative. Unlike Graph,
+   Gmail's mail sync is **account-global** (`historyId`, JMAP-like — one
+   `GmailMessages` scope, no per-folder fan-out; labels are multi-membership), and
+   Google Calendar is **IANA-native** with **RRULE masters** (no Windows-zone table,
+   no pre-expanded `calendarView`). Gmail has read/sync + on-demand source + writes +
+   send; Google Calendar has read/sync + `If-Match`-guarded writes. Graph
+   personal/org/directory contacts and Google Connections/Other
+   Contacts/directory/groups are implemented as independent contact sources,
+   with optional permissions degrading per source. Same replay + token-gated
+   live validation pattern as mail/calendar.
+5. Optional further external-provider smoke tests against real hosted or
+   self-managed servers.
+
+If product pressure changes the order, the domain model tests still need JMAP and JSCalendar coverage before IMAP assumptions land.
+
+## Provider Contract
+
+- Provider adapters return normalized `SyncUpdate` values plus opaque next cursors.
+- Contact adapters implement the separate `ContactsProvider` contract. Discovery
+  and source-bound card sync are separate scopes; writes carry neutral
+  `ContactDraft`/`ContactPatch` intent, name one destination, and refetch the
+  server-canonical card without advancing the normal cursor. Capabilities report
+  reads, groups, photos, and contact-write guard strength independently. JMAP and
+  Graph are `WriteGuard::Absent`; Google and CardDAV are
+  `WriteGuard::Enforced`.
+- **A new optional verb goes on `Provider` with a rejecting default, never on its own
+  sub-trait.** The default is what makes it optional: an adapter that cannot do it
+  implements nothing and says nothing, and `Capabilities` gates the caller before it
+  asks. A sub-trait is for a distinct data domain with its own methods — the
+  `ContactsProvider` above is the one that earns it, and its ten methods are why.
+
+  A one-method sub-trait costs what a rejecting default does not, and the cost lands
+  outside this repo. Rust will not upcast `dyn Provider` to `dyn Sub`, so a host that
+  wants the verb has to widen its trait object where the box is *built* and then through
+  every signature naming the bound. Measured on one host when `report_message` moved off
+  such a sub-trait onto `Provider`: 97 changed files became 36, with no behaviour
+  difference. Ask which half of that a new verb is before adding the trait.
+
+  **A *super*trait is a different thing and does not carry that cost.** `CalendarWrites`
+  holds the five calendar verbs and the read of the addresses they schedule as, and
+  `Provider: CalendarWrites`, so a `dyn Provider`
+  still exposes them, a host's bound is unchanged, and nothing upcasts. What it exists
+  for is the 500-line file limit: the trait *is* `provider.rs`, so a file that cannot be
+  split any other way splits here, along the line a data domain already draws. The price
+  is real but bounded and inside this repo — every adapter writes one explicit impl,
+  empty where it cannot write calendars, and every caller of a moved verb imports the
+  trait. Reach for it when `provider.rs` is at the limit, not to make a verb optional:
+  the rejecting default already does that.
+- The streaming primitive is `stream_email(account, cursor, window, fetch_batch, chunk_size) -> EmailStream`: a pull stream of `EmailChunk`s for one sync pass. Each chunk carries a `PassMode` (additive or reconcile, constant across the pass), its `changed` upserts and explicit `removed` keys, a `present` id set (reconcile only — the orchestrator accumulates it to tombstone at end of pass), an optional `total`, and an `advance_to` cursor disposition: additive chunks checkpoint the cursor on **every** commit (so a killed cold backfill resumes where it stopped), reconcile chunks hold it until a final tombstoning chunk. The two knobs are decoupled (`store-and-sync.md`): `fetch_batch` bounds each network round trip, `chunk_size` bounds how many messages a chunk commits/reports — a large batch with a small chunk gives *both* few round trips *and* row-as-it-arrives commits. `sync_email` is a **default drain** over the stream (one combined `SyncUpdate`), so a new adapter implements one streaming method and gets both incremental streaming and whole-scope fetch for free; it drains under `default_sync_window` (the provider's default depth, e.g. an IMAP/Graph `with_since`), while the streaming path takes its `window` **per sync** so a host changes depth without reconnecting.
+- `PageToken`/`SyncPage`/`SyncKind` are provider-**internal** paging helpers (an HTTP adapter re-chunks its own whole-page fetch into the stream with `split_page`), not trait surface. Whatever resumes an adapter's fetch — JMAP query position or `Email/changes` state, IMAP UID range, Gmail/Graph page token or delta link — the adapter encodes and decodes it itself; the engine only round-trips the opaque `SyncState` cursor.
+- Adapters own protocol pagination, retries, throttling, and provider quirks. Chunks should be ordered so the first ones are the most useful (mail newest-first), since a streaming host renders them as they commit.
+- The store owns atomic application of changes, cursor persistence, and pending-op reconciliation. A streaming additive chunk commits as a delta and **checkpoints** the cursor (`ApplyBatch::with_cursor(Some)`); a reconcile pass commits intermediate chunks with the cursor held (`None`) and tombstones on the final chunk (`store-and-sync.md`).
+- On-demand content fetch is one provider-neutral method, `fetch_message_source(account, &Message) -> RawMime`, gated by the `message_source` capability (distinct from read `mail` — an adapter can sync envelopes without downloading full bodies, like `submission` vs `mail`). It returns the whole raw RFC 5322 source (headers + every part); the engine extracts displayable text, inline CID parts, and downloadable attachments with `engine-mime`, and caches the raw in the store's content-addressed blob area, so one fetch serves body, inline resources, and attachment downloads (the north-star Tier-3 path). `&Message` carries everything an adapter needs to address it — the `id` key (IMAP `UID FETCH BODY.PEEK[]`) and the `blob_id` (a JMAP/Graph download handle). A stale IMAP target (UID under a changed `UIDVALIDITY`) is a `Conflict` → re-sync then retry. It is driven by `engine_sync::fetch_message_body` / `fetch_inline_parts` / `fetch_message_attachments` / `fetch_message_attachment` (lease-free read-through caches, **not** outbox-mediated — reads need no durable op). (Method + capability **implemented** in `engine-provider`; the IMAP adapter implements it — `imap-smtp.md`; JMAP/Graph overrides via blob download are a later slice.)
+- **Storing a draft is two neutral verbs, and the key is the adapter's answer, not the caller's assumption.** `put_draft(account, &Draft, replacing: Option<&ProviderKey>) -> ProviderKey` and `delete_draft(account, &ProviderKey)`, gated by the `mail_drafts` capability. A host hands over the same `Draft` it would submit, plus the draft this one supersedes, and stores **whatever key comes back** — because on three of the four adapters the key *moves* and on one it does not:
+
+  | adapter | a re-save is | key after | why |
+  |---|---|---|---|
+  | IMAP | `APPEND`, then `UID STORE \Deleted` + `UID EXPUNGE` | **moves** | a stored message is immutable; two commands, no transaction |
+  | JMAP | one `Email/set` carrying `create` **and** `destroy` | **moves** | an `Email` is immutable (measured, not assumed), but RFC 8620 §5.3 fixes create-before-destroy, so it is atomic |
+  | Graph | `PATCH /me/messages/{id}`, plus the attachment collection | **stays** | a draft's `subject`/`body`/recipients are writable, and an attachment is a resource of its own |
+  | Gmail | `drafts.update` | **stays** | the one transport with a draft object of its own, outliving each message it wraps |
+
+  That is the whole reason this is one verb rather than a create and an update: the difference is real, it is not a capability a host could usefully branch on, and the engine absorbing it is the engine doing its job. Gmail's key is a **draft** id and its synced message carries a different one, which is safe only because these two verbs are the sole consumers of what `put_draft` returns.
+  - **Rewrite in place wherever the transport allows it, and send only what changed.** A saved draft is saved *repeatedly*, so the cost that matters is the second and hundredth save, not the first. Creating a replacement and removing the original costs two requests, moves the key, and makes the draft jump to the top of the Drafts folder every time. Graph and Gmail can rewrite instead, and Graph goes further: an attachment is a resource of its own there, so a draft that gains or loses one sends just that attachment and keeps its message. Re-uploading every attachment on every save, or replacing the message to change one, is the thing to design out: a draft with a large file attached should not get more expensive each time it is saved. Where a transport *must* replace the message, the attachments can still be carried over: a JMAP replacement references the `blobId`s the stored draft already holds rather than sending the bytes again.
+  - **Where it is two calls, the new copy comes first, and a failed removal does not fail the save.** The order decides which way a partial failure falls: append-then-remove leaves the user two drafts, remove-then-append can leave them none, and for a message nobody has sent a duplicate is recoverable while a loss is not. Returning an error after the new copy is stored would be worse still, because the caller retries and appends another.
+  - **An absent draft is a successful delete.** The verb sits behind a retryable op, so it *will* be called again on a draft the first call removed; an adapter that reported that as a failure would park the op forever. Getting this right is per-adapter and not guessable: JMAP answers a `notFound` `SetError`, Gmail and Graph answer `404` — **and Graph also answers `403 ErrorCannotDeleteObject`** for a message that existed and was deleted, which is the shape a retry actually meets. Both Graph answers were observed against a real mailbox, in both directions, and are pinned as fixtures; the match is on the error *code*, since a genuine permission failure is also a `403`.
+  - **There is no lost-update guard**, and none is claimed. A draft has one author at a time in practice, the transports offer nothing to guard it with, and a `mail_drafts` flag that implied otherwise would be the same mistake `WriteGuard` exists to prevent on the calendar side.
+
+- **Changing the folder tree is one neutral verb over four very different transports.** `MailboxWrites::edit_mailbox(account, &MailboxEdit) -> MailboxEditReceipt`, a supertrait of `Provider` (the `CalendarWrites` pattern: `provider.rs` is at the file-length limit), gated by `Capabilities::mailbox_writes`. `MailboxEdit` is `Create`, `Update` (rename, move, or both: the name and parent it is to have, `None` meaning the top), `Trash` (with the Trash folder and a name already chosen free there) and `Delete` (permanent, subtree included). The receipt names the folder the edit **resolved to**, because on IMAP that is not the key that went in.
+
+  | adapter | create | rename or move | trash | delete | key moves? |
+  |---|---|---|---|---|---|
+  | IMAP | `CREATE` + `SUBSCRIBE` | `RENAME`; the subtree follows, subscriptions are moved | `RENAME` under Trash; where Trash is `\Noinferiors` or refuses with `[CANNOT]`, `UID MOVE 1:*` of each folder into Trash, then `DELETE` | `DELETE` deepest first | **yes**: the path is the key, for the folder and everything beneath it |
+  | JMAP | `Mailbox/set` create, `isSubscribed: true` | update `name` + `parentId` | the same update, under Trash | one destroy of the subtree, deepest first, `onDestroyRemoveEmails: true` | no |
+  | Graph | `POST …/{parent\|msgfolderroot}/childFolders` | `PATCH displayName`, then `POST …/move` | rename, then move into Deleted Items | `POST …/permanentDelete` | no |
+  | Gmail | `labels.create` of `<parent's full name>/<name>` | `labels.patch` of every label beneath, then the label | each message filed nowhere else gets `TRASH` (`batchModify`), then `labels.delete` of the subtree | `labels.delete` of the subtree; the mail stays in All Mail | no |
+
+  Gmail is the one transport that cannot file a folder inside Trash (a label cannot nest under a system label), so there `Trash` moves the mail and removes the labels, and its receipt names no folder. What the four share, and what the verb promises: nothing leaves the user's reach through `Trash`, and a message also filed elsewhere (a JMAP mailbox, a Gmail label) keeps that filing.
+  - **A create that finds its folder already there, and a delete that finds nothing, succeed.** The verb sits behind a retryable op. JMAP's `alreadyExists` carries the `existingId`; IMAP's `[ALREADYEXISTS]` and Graph's duplicate answer are resolved by listing the parent.
+  - **The adapter never judges staleness; the caller already has.** The outbox reads the folder list and refuses a change whose folder moved since the user saw it before this is called (`store-and-sync.md`). What an adapter still refuses is what only it can know: a name carrying its hierarchy separator (IMAP's is the server's, and may be `.`), a subfolder on a flat namespace, a system label.
+  - **A host learns before it asks which folders can hold one**, from `Mailbox::accepts_children`, so it need not offer what the adapter would refuse. `false` is the provider's word: IMAP `\Noinferiors` or no delimiter, JMAP `myRights.mayCreateChild`, a Gmail system label (and the synthetic All Mail). Graph lets any folder hold folders. `true` promises nothing, so the refusals above stand.
+  - **Verified live:** IMAP on Stalwart and on Dovecot (rev1 and rev2), JMAP on Stalwart, both in `tests/live_mailbox_writes.rs`. The Graph and Gmail live suites exist beside them and have not yet run against a real mailbox; their offline fixtures follow the documented shapes and say so.
+
+- **Post-connect facts are one object.** `Provider::connection_info() -> ConnectionInfo` is the single seam a caller reads after an adapter connects: `{ capabilities, tls_version, http_version }`. There is no separate `capabilities()` method — capabilities are a *field* of the object, so the facts cannot drift apart. Callers must not switch on provider kind for normal behavior. `ConnectionInfo` is `Copy`, so it is returned by value and an adapter may either store it or compose it per call. The two version fields are independently optional because what an adapter can observe is asymmetric (`tls.md`): a `tokio-rustls` adapter (IMAP/SMTP) reports `tls_version` — read off its finished handshake — and never `http_version`; a `reqwest` adapter (JMAP/CalDAV/Graph/Google) reports both, and learns **both from a response** (`http_version` from `Response::version()`, `tls_version` from reqwest's `TlsInfo` extension, which the shared `reqwest_builder` asks for). TLS *policy* stays out of the object: the host chose it and already knows it. Both are the **most recently** observed response's version, recorded together at each transport's single send/collect funnel into one `engine_http::ObservedConnection` — *not* the first, because JMAP and CalDAV follow the well-known `30x` themselves and the redirector may be a different origin, over a different TLS session, from the endpoint that then serves every real request. So JMAP (session discovery) and CalDAV (discovery `PROPFIND`) have values as soon as `connect` returns and keep them accurate thereafter, while Graph and Google — which issue no request at connect — report `None` until their first fetch. An HTTP adapter's `tls_version` is also `None` on a plaintext `http://` hop, which is what the Stalwart harness serves.
+- **`concurrent_fetches` is how many fetches are worth having in flight; it is not what
+  enforces a ceiling.** It answers "would overlapping fetches through this provider help or
+  merely contend", which is what a caller draining a work list needs. On `provider-imap` it is
+  the account pool's worker capacity (its ceiling less the watches, read per call), because
+  each fetch borrows its own pooled connection; on an HTTP adapter it is what the service
+  tolerates. What *enforces* a bound is elsewhere and per account: the IMAP pool's permits,
+  and on HTTP `engine_http::RequestGate`, narrowed by the adapter as it connects and enforced
+  inside `send_retrying` where every request passes (`http-throttling.md`). Both facts come
+  from the adapter, so a host still never switches on provider kind.
+- **`sources_per_request` is how many message sources one `fetch_message_sources` call carries
+  in a single request.** `1` (the default, which fetches one at a time through
+  `fetch_message_source`) says a caller gains nothing from larger batches; `provider-imap`
+  answers a batch with one `UID FETCH <set> (BODY.PEEK[])` per mailbox and reports 25;
+  `provider-jmap` answers with one `Blob/get` (RFC 9404) where the mail account advertises the
+  blob extension, and reports 25 there and 1 elsewhere (`jmap.md`). A warm cuts its work list
+  into batches of this size and runs `concurrent_fetches` of them at once
+  (`Engine::warm_message_sources`), so a first sync costs a round trip per batch rather than
+  per message. Graph and Google keep the default and overlap single fetches; whether a batch
+  endpoint of theirs can return the raw source this path caches is not yet surveyed.
+- **The connect phase is observable; the connect *state* is not modeled.** `ConnectionInfo` reports the *outcome* of a connect — it is sync and infallible, so it can only describe a connection that already exists. What happened on the way there is reported as it happens, through a `ConnectObserver` an adapter's **config** carries (`ImapConfig`/`JmapConfig`/`CalDavConfig::with_connect_observer`, each holding an `Option<Arc<dyn ConnectObserver>>`). Carrying it on the config, rather than as a `connect` argument, means a host that rebuilds a provider from that config after a dropped session observes the redial for free. The default is no observer, so the seam is additive. The payload is a borrowed `ConnectStep<'_>`: `Redirected { from, to }` (one per well-known `30x` hop the adapter resolves itself), `TlsEstablished(TlsVersion)`, `Authenticated`, `Discovered { endpoint }`. Shape and no-op default (`IgnoreConnectSteps`) mirror `engine-sync`'s `SyncObserver`, including the blanket impl over `Fn`.
+  - **Redaction is a type-level guarantee, not a convention.** `Redirected` and `Discovered` carry `Cow<'_, str>` and their variants are `#[non_exhaustive]`, so only `engine-provider` constructs them: an adapter must go through `ConnectStep::redirected`/`::discovered`, which strip the whole `userinfo@` component from a URL's authority. A `Location` or an advertised `apiUrl` may carry `user:pw@`, and these steps exist to feed logs, which `north-star.md` forbids secrets from reaching. A clean URL borrows; a `@` outside the authority (a path, a relative CalDAV href) is untouched.
+  - **Steps, never states.** There is deliberately no `Disconnected`/`Connecting`/`Connected` machine in the engine: three of the four adapters are only constructible via a completed `connect()`, so `Connecting` is unobservable through any accessor, and `connection_info()` cannot detect a socket that has since died. A **host** owns that state machine; the engine gives it the inputs — the `connect()` future, its `Ok`/`Err`, the `FailureClass`, the `ConnectionInfo`, and these steps.
+  - **What each adapter emits** is asymmetric for the same reasons `ConnectionInfo`'s version fields are (`tls.md`): `provider-imap` → `TlsEstablished` (the only adapter that can — it drives rustls directly), `Authenticated` after the credential is accepted (`LOGIN`, or a SASL `AUTHENTICATE` for an OAuth token — `imap-smtp.md`), then `Negotiated` with the dialect and usable extension set (the only adapter with a dialect to settle); `provider-jmap` → `Redirected` per hop, `Authenticated` on the session `2xx`, `Discovered` with the `apiUrl`; `provider-caldav` → `Redirected` per hop, `Discovered` with the calendar-home href (no auth step — credentials ride on each `PROPFIND`, there is no discrete exchange); `provider-graph` → **nothing**, because `GraphClient::connect` performs no I/O. Documented, not faked.
+  - **`Negotiated` reports what the session may *use*, not what the server advertised** — on IMAP4rev2 that includes everything RFC 9051 folded into the base protocol, which is the difference a support report turns on. Both payloads name server software rather than the account, so unlike `Redirected`/`Discovered` they need no scrubbing and a host may log them verbatim.
+- **Calendar writes are four neutral verbs that carry *intent*, never a protocol payload.** `create_event(account, &EventDraft)`, `patch_event(account, base: &Event, &EventEdit)`, `delete_event(account, &EventDeletion)` — gated by the `calendar_writes` capability — and `rsvp_event(account, base: &Event, &EventRsvp)`, gated by `calendar_rsvp`. A host states *what the user did* — a title, a new start, which occurrence — and the **adapter** renders it: CalDAV builds/patches an iCalendar document and `PUT`s it, JMAP posts a JSCalendar object or a JSON-pointer PatchObject. So a host never touches a `RawIcal`, an href or an `ETag` to edit an event, and never switches on provider kind. (**Implemented** in all four calendar adapters.)
+  - `patch_event`'s `base` is the event **as the caller read it**, and it is load-bearing twice: it carries the provider-native payload the patch applies to (so an update never re-serializes the lossy projection — `calendar-semantics.md`), and the revision the write is guarded by. *Where* the surgery happens is the adapter's business and differs completely: CalDAV has no partial write, so the **client** must rewrite the stored `RawIcal` in place (`patch_event_ical` — fold-aware content-line editing, `DTEND`-vs-`DURATION` exclusion, `SEQUENCE` bookkeeping); JMAP's `update` *is* a patch, so the **server** does it. Only the intent (`EventPatch`/`PatchTarget`) is neutral, which is why the patcher stays in `provider-caldav`.
+  - Two rules the neutral intent carries are genuinely universal, and an adapter that gets either wrong corrupts data behind a successful save: **a move must never resolve a zoned event to a UTC instant** (both iCalendar's `DTSTART;TZID=` and JSCalendar's `start`+`timeZone` state the wall clock separately from the zone; writing the instant moves the event for every reader elsewhere and re-times the series at the next DST boundary) — so a form change is *rejected*, not converted (`CalendarDateTime::has_same_form`, in `engine-core` precisely so the two adapters cannot drift). And **series-vs-one-occurrence is a question for the user, never a default** — hence `PatchTarget` has no `Default`.
+  - **`rsvp_event` is a verb of its own for a reason the bytes hide: answering an invitation makes the server *tell the organizer*, and an edit does not.** Graph routes it through `POST /events/{id}/accept`, Google through `sendUpdates`, CalDAV and JMAP through a server that watches the participation status. Expressing it as an `EventEdit` of the attendee array would change the same field on every transport and schedule nothing. It has its own capability because an adapter can create and patch events without being able to schedule, and because two controls around it — a `comment` for the organizer, and choosing *not* to notify — are not universal: `Capabilities::calendar_rsvp() -> Option<RsvpControls>` states which the transport honours, **plus the guard on this specific request**, which is not always `calendar_write_guard` (Graph's action endpoint takes no `If-Match` while its `PATCH` does). An adapter **refuses** a control it cannot honour rather than dropping it — `RsvpControls::accept`, one shared implementation, so an adapter cannot advertise what it ignores or ignore what it advertises.
+  - The address travels with the intent (`EventRsvp::attendee`) and an adapter uses it **verbatim**: identity is a *set*, and only the caller knows which member of it the invitation matched. An alias invitation that answered as the account's primary would match no attendee at all.
+  - `put_event(account, &EventWrite)` — replace the whole stored document — is **not** part of that spine and is default-unsupported. Only a *document-oriented* transport has such a verb (CalDAV `PUT`; JMAP has none), and only an operation naturally expressed as a finished document should use it. An adapter may advertise `calendar_writes` and still leave it rejecting; the capability covers the neutral spine, not this escape hatch.
+  - **`put_event` stores a document; it does not only *replace* one.** `EventWrite.guard` is a three-state `WritePrecondition` — `Unconditional` / `IfUnchanged(RevisionTokens)` / `IfAbsent` — because a create's precondition is the *inverse* of an update's: not "the revision I read is still current" but "nothing is there at all" (CalDAV `If-None-Match: *`, RFC 7232 §3.2). Collapsing the two would leave a **guarded create** unrepresentable, and the fallback a caller then reaches for is an unconditional write — which silently overwrites the copy an auto-scheduling server deposited a moment ago. `EventWrite::creating` is how an invitation that arrived as mail goes onto the calendar with its `ORGANIZER`/`ATTENDEE`/`SEQUENCE` intact; `EventDraft` carries none of those, so the neutral create would store a plain appointment with nothing to answer on. Proven live on both harness servers.
+- **"Can this transport express an answer?" and "will anyone be told?" are different questions.** `Capabilities::calendar_rsvp` answers the first. `Capabilities::calendar_scheduling` answers the second, and on CalDAV they come apart: RFC 4791 is calendar *access*, RFC 6638 adds scheduling on top, and on a server without it a rewritten `PARTSTAT` is stored correctly and the organizer is told nothing — the silent success `RsvpControls` exists to prevent, arriving from the transport instead of from a caller.
+  - **CalDAV discovers it**, at connect: `OPTIONS` on the *calendar home* (not the connection base — a server's site root need not be a DAV resource; Stalwart's answers `302` with no `DAV:` header at all), then the `calendar-auto-schedule` token in the `DAV:` response header, matched as a whole token and case-insensitively (RFC 6638 §2). Both answers are real and live-pinned: the Stalwart harness advertises it, the SabreDAV fixture does not. A response with no such token — whatever its status — is `false`, never a connect failure: a server may answer `OPTIONS` with a `405` and still read and write perfectly well.
+  - **Graph, Google and JMAP are constants**, for two different reasons. Graph and Google schedule server-side with no opt-out a client can reach. JMAP reports `true` because `sendSchedulingMessages` makes it the *request's* choice and the adapter asks on every write — but there is nothing to *detect*: JMAP Calendars leaves scheduling to the implementation and offers no capability to probe, so a server that accepted the argument and quietly did nothing would look identical.
+- **A capability cannot say "…and it works", so the RSVP receipt reports what actually happened.** `EventWriteReceipt::reply_delivery` carries a neutral `ReplyDelivery` — `Delivered` / `Failed` / `NotReported` / `Unrecognized` — answering *per answer, after the fact* what a connect-time capability cannot. **`NotReported` is not success**: branch on `ReplyDelivery::failed()`, the only actionable state. The four adapters genuinely differ, and this is a protocol difference rather than an adapter gap:
+
+  | adapter | write response | reports delivery? |
+  |---|---|---|
+  | CalDAV | `204`/`201` | **yes, where it auto-schedules** — RFC 6638 §3.2.9 `SCHEDULE-STATUS`, read back off the stored object |
+  | Graph | `202 Accepted`, **no body** | no — `202` is *queued*, not done |
+  | Google | `200` + the patched event | no — confirms the write; `sendUpdates` is fire-and-forget |
+  | JMAP | — | no — cannot send iMIP at all (`jmap.md`) |
+
+  Graph, Google and JMAP therefore return `NotReported` honestly rather than claiming a delivery they never observed. The three that cannot report also *own* delivery end to end and surface their own failures into the user's mailbox, so a host loses nothing by their silence — which is precisely why silence must not read as either verdict.
+
+- **When the server will not schedule, the caller must send the iTIP message itself — and not every transport can.** `Capabilities::scheduling_submission` says whether this one can. Read together with `calendar_scheduling` the pair answers the only question that matters to a host holding an invitation: *can this account answer it at all?* Neither means no, and saying so beats storing a `PARTSTAT` nobody will see.
+  - The message is a `Draft` carrying a `DraftCalendar { ical, method }`, assembled as an **alternative body part** — a sibling of the text body inside `multipart/alternative`, with `method=` on its `Content-Type` (RFC 6047 §2.4) and no `Content-Disposition`. Not a `DraftAttachment`: an attachment part carries a disposition and cannot express `method=`, and an answer sent as one is filed as `invite.ics` rather than processed.
+  - **IMAP/SMTP, Graph and Google are `true`** — all three submit assembled RFC 5322 bytes through `engine-rfc5322`, so they own every `Content-Type` parameter. **JMAP is `false` and refuses the draft**, because it hands the server a `bodyStructure` instead: an `EmailBodyPart`'s `type` is a media type *without* parameters, and RFC 8621 §4.1.3's raw `header:Content-Type` does not rescue it — driven against Stalwart, that shape makes the server emit **two** `Content-Type` fields (ours, then its own generated one), and every variant sends successfully while arriving unprocessable. Pinned in `provider-jmap/tests/live_imip.rs`; a server limitation, but the only JMAP server this repo can drive (`jmap.md`).
+- **Which addresses the server schedules as is a read of its own, and it is per server, not per account.** `CalendarWrites::calendar_user_addresses(account) -> CalendarUserAddresses` answers `Known(addresses)`, `NotEnabled` or `Unknown` (the default). RFC 6638 §3.1 has a CalDAV server act only for an `ORGANIZER` or `ATTENDEE` in the principal's address set, and one outside it gets no server-sent message and no `SCHEDULE-STATUS` saying so, so `calendar_scheduling` alone does not say the server will answer for a given address. CalDAV reads the principal's `calendar-user-address-set` (`caldav.md`); JMAP calls `ParticipantIdentity/get` on the calendars account, reading each identity's address the way a participant's is read (`calendarAddress`, or an earlier draft's `sendTo.imip`), and a server without the method is `Unknown`; Graph answers the mailbox address its sender identity carries (proxy addresses are not listed); Google answers the id of the `primary` calendar, which is the account's address. Only email addresses are kept, bare, in the server's order; `recognises` compares them the way iCalendar addresses are compared.
+- **"Can write" and "can refuse a stale write" are different promises, and only the first is universal.** So `Capabilities::calendar_write_guard() -> Option<WriteGuard>` states which an adapter can keep, and a host reads it **before** writing. `WriteGuard::Enforced` (CalDAV) means a write naming a superseded revision is rejected — `If-Match` → `412`, proven live against both harness servers. `WriteGuard::Absent` (JMAP) means it is **not**: a `CalendarEvent` carries no per-object revision at all, and RFC 8620 §5.3's `ifInState` is scoped to the account's whole type state rather than the object, so it would reject a write because an *unrelated* event changed — the wrong instrument, not merely a broken one (and Stalwart ignores it regardless; `jmap.md`). Under `Absent` a stale edit silently wins, so "the write succeeded" does not mean "no concurrent edit was lost", and a host that cares must detect it above the engine. A neutral write API that *looked* like it gave optimistic concurrency everywhere would be the worst outcome available; this is the type that prevents it.
+- Provider errors should classify retryable, authentication, rate-limit, invalid-state, conflict, and permanent failures.
+- Provider adapters must expose whether a sync response is a delta or a complete snapshot.
+- Provider object ids may not be stable across container moves; adapters expose a stable or immutable id as the `ProviderKey`, plus a version token (ETag, `changeKey`, MODSEQ) for concurrency.
+- Sync cursors are provider-specific (state strings, MODSEQ, sync-tokens, history ids, delta tokens); calendar sync may be inherently time-windowed (a date-bounded view), surfaced as scoped, possibly-incomplete coverage.
+- Providers that support push or idle signals emit wake hints; the engine still performs pull sync to fetch changes. This is a **provider-neutral** capability: the `idle` capability flag advertises it, and a `Watch` session (`engine-provider`) yields a `WatchEvent` stream (`Changed` | `KeepAlive`) for one scope. A watch event carries **no data** and is never a source of truth — it means only "run the scope's normal sync," which is the authoritative, idempotent reconciliation. So a missed/coalesced/spurious notification cannot corrupt the store; push only lowers the *latency* of seeing a change, and a poll-only host is fully correct. (**Implemented** for IMAP `IDLE` — `imap-smtp.md` — and for **JMAP EventSource** (`StateChange`, RFC 8620 §7.3) via `JmapWatcher` — `jmap.md`; a Graph webhook is a later slice over the same `Watch` contract.)
+
+## Stalwart Test Spine
+
+Use Stalwart Docker for deterministic local and CI tests across JMAP, IMAP, SMTP, CalDAV, and CardDAV. **Implemented** as build-order step 3 under `docker/stalwart/` (compose + a self-bootstrapping entrypoint that drives Stalwart v0.16's registry setup through its management API, plus a curl seeder) and `crates/stalwart-harness` (readiness + gated smoke suite); `stalwart-harness.md` is authoritative for its design, the bootstrap flow, the per-fixture invariants, the gating contract, and the determinism rules. The harness must seed one shared dataset that every protocol sees:
+- Domain and account credentials.
+- Mailboxes/folders and labels where supported.
+- Messages with duplicate/missing Message-ID cases, attachments, flags/keywords, and moved/copied messages.
+- Calendars with one-off events, recurring events, exceptions, attendees, and virtual locations.
+- Contacts/address-book entries for shared JMAP/CardDAV parity. The generic and
+  adapter behavior is covered offline now; adding these objects to the live
+  Stalwart seed remains the harness follow-up tracked in `stalwart-harness.md`.
+
+The JMAP suite must cover (all **implemented** — see `jmap.md`):
+- Session discovery and capability detection.
+- `Email/changes` with `Email/get` back-references.
+- `Mailbox/changes`, `Thread/get`, and state cursor persistence.
+- `cannotCalculateChanges` leading to invalidation/full resync.
+- Multiple mailbox membership and keyword updates.
+- `Email/set` draft creation.
+- `EmailSubmission/set` with `onSuccessUpdateEmail`.
+- CalendarEvent read/write with JSCalendar recurrence, participants, and virtual locations.
+  (Read **and** write: `CalendarEvent/set` create/patch/destroy, including a
+  `recurrenceOverrides` edit of one occurrence — all proven live, because the offline fake
+  cannot validate a request shape.)
+- Provider search fallback for locally incomplete bodies.
+- Push/EventSource or equivalent state-change wake hints where available.
+  (**Implemented**: `JmapWatcher` over the session `eventSourceUrl` maps
+  `StateChange` events onto the neutral `Watch` stream — `jmap.md`.)
+
+## IMAP/SMTP/CalDAV Requirements
+
+Run the first deterministic IMAP/SMTP/CalDAV tests against Stalwart. Add external-provider smoke tests later for provider drift, not as the first correctness gate.
+
+- IMAP identity includes mailbox, UIDVALIDITY, and UID.
+- UIDVALIDITY reset invalidates the scope and triggers rediscovery.
+- CONDSTORE/QRESYNC paths are optional capabilities, not assumptions. (**Implemented**
+  in `provider-imap`: when the server advertises QRESYNC the delta reconciles flag
+  changes + expunges via `CHANGEDSINCE`/`VANISHED`; a server without it reconciles by
+  reading every held message's flags and the set still present — `imap-smtp.md`.)
+- IMAP `IDLE` (RFC 2177) push is an optional capability too, advertised by the `idle`
+  flag. (**Implemented** in `provider-imap`: an `ImapWatcher` holds a *dedicated*
+  standing connection that turns the `IDLE`/`DONE` keep-alive loop into the neutral
+  `Watch` stream — `imap-smtp.md`. A non-`IDLE` server simply isn't watchable, and the
+  host polls.)
+- IMAP SEARCH is a provider-search fallback when local body coverage is incomplete.
+- A send that may have reached the server and then lost its answer (SMTP after the final
+  `.`; a JMAP, Graph or Gmail submission once its request may have been received) must
+  enter `NeedsConfirmation`; never blind-retry. A timeout there is the same case
+  (`deadlines.md`).
+- **A submission records its hand-over immediately before its point of no return**, through
+  the `HandOver` that `submit_email` receives, and writes the irreversible byte only once the
+  record succeeded (`store-and-sync.md` → "A send survives its process"). A
+  `SubmissionReceipt` cannot be built without the proof `HandOver::commit` returns. The point
+  is the latest byte without which the server cannot deliver, chosen per transport, and every
+  earlier step is safe to repeat:
+
+  | Transport | Point of no return | Safe to repeat before it |
+  |---|---|---|
+  | SMTP (IMAP accounts) | the `.` line that ends `DATA` (`SmtpStream::write_terminator`, which takes the proof) | dial, TLS, `EHLO`, `AUTH`, `MAIL`/`RCPT`, all of the message text |
+  | JMAP | the last piece of the body of the request carrying `EmailSubmission/set` | the context read, every blob upload, the connect and that request's head |
+  | Graph | the last piece of the `sendMail` body | the connect, the head, all but the end of the base64 message |
+  | Gmail | the last piece of the `messages.send` body | the connect, the head, all but the end of the `raw` message |
+
+  The HTTP transports cross it inside `engine_http`: an `Exchange::Submission` carries the
+  `HandOver`, and the funnel holds the body's last piece until it is committed. reqwest asks
+  for a body only on a connection that is up, so a process that ends while connecting, or
+  while a large message is still going up, is on the side where the send is simply retried.
+  A server acts on a request only once it has all of it, which is what makes the last piece,
+  not the first, the line. A request with no body (none submits today) commits before it is
+  sent.
+- SMTP per-recipient acceptance/rejection before DATA must be represented.
+- Sent folder placement must reconcile by generated Message-ID.
+- Mail mutations (mark-read/flag, move, delete) are one provider-neutral method, `edit_mail(account, &MailEdit) -> MailEditReceipt`, gated by the `mail_writes` capability (distinct from read `mail`, like `calendar_writes` vs `calendars`). `MailEdit` mirrors the three independent mail axes (`modeling.md`): `SetKeywords{add,remove}` (the `$seen`/`$flagged` state), `MoveTo{destination}` (membership — and the mechanism behind a Trash "delete"), and `Delete` (permanent). It is outbox-driven by `engine_sync::edit_mail`, exactly like the calendar writes. JMAP maps all three to one `Email/set` (keywords/mailboxIds patch or `destroy`); IMAP maps them to `UID STORE`, `UID MOVE`, and `UID STORE \Deleted` + `UID EXPUNGE`. A stale target (an IMAP UID under a changed `UIDVALIDITY`) is a `Conflict` → re-sync then retry. (Shape + capability + trait method **implemented** in `engine-provider`; the IMAP adapter implements it — `imap-smtp.md` — as does the JMAP adapter, folding all three edits onto one `Email/set` — `jmap.md`.)
+- **Reporting a message as junk / not junk / phishing is its own verb**, `report_message(account, &MessageReport) -> ReportReceipt` on `Provider`, optional the way every other write is — a rejecting default, gated by `Capabilities::mail_report() -> Option<ReportControls>` and outbox-driven by `engine_sync::report_message`. Not a `MailEdit` variant: an edit changes an object, a report tells the *provider* something — and on Graph it leaves the account — the same split the calendar side draws between `patch_event` and `rsvp_event`. Every transport also **files** the message (Junk for junk/phishing, the Inbox for not-junk); they differ only in who moves it, so `MessageReport::destination` is the caller's resolved mailbox and the adapters that need it use it. (**Implemented** in all four mail adapters, each live-verified.)
+  - **`ReportControls` carries two things a bare flag could not**, both established against real servers rather than read off a spec. `verdicts` — Gmail has **no phishing verdict** (its label set has no member and `messages.modify` answers `400 Invalid label`), so an adapter asked for one it lacks **refuses** via the shared `ReportControls::accept` rather than filing it as junk. `evidence` — `Acknowledged` on Graph, whose action answers with a status; `Convention` on JMAP, IMAP and Gmail, where we set a keyword or a label and the protocol offers no way to learn whether anything trained on it. RFC 8621 §4.1.1's "clients SHOULD set `$junk` … to help train" is a *client*-side SHOULD with nothing to probe, which is the same shape as JMAP `calendar_scheduling`: a server that ignored it would look identical. A host reads `evidence` to decide what it may honestly claim reporting achieves.
+  - **No transport blocks the sender.** Outlook's own dialog says it does, and Graph's deprecated `markAsJunk` did; the `reportMessage` action that replaced it was observed not to (`graph.md`). So there is deliberately no `blocks_sender` field — adding one now would be a knob with a single value. A provider that blocks is what earns it, because that is a promise a user must be shown before they press the button.
+- **Who the account sends *as* is its own read, and its write is not universal.** `sender_identities(account) -> Vec<SenderIdentity>` on `Provider` returns the addresses the account may send from with the display name the server holds for each, and `set_sender_name(account, &SenderIdentityId, &str)` changes one. Gated by `Capabilities::sender_identities() -> Option<IdentityControls>`, which is three answers and not a flag, because the transports genuinely differ about **who owns the name**:
+  - **`None`** — the provider has no identity object at all (IMAP/SMTP). The name is the host's alone, and the host puts it in the `From` header itself.
+  - **`ReadOnly`** — the server holds it and the account holder may not change it. A Graph mailbox's display name is a directory attribute a tenant administrator owns, so an editor offered there offers an edit that cannot land.
+  - **`Writable`** — the server holds it and the account holder may change it (JMAP `Identity/set`, Gmail `sendAs.patch`).
+
+  Neither `Some` variant promises a given server will *accept* a write, and neither could: a captured Stalwart `Identity/get` carries `mayDelete` and no "may write" of any kind, and a Gmail token may simply lack the settings scope. A capability says which door exists, never that it opens — the same honesty `ReportEvidence` carries. A refusal therefore arrives as a classified error, and the two kinds stay apart: `forbidden` is `Permanent` (stop asking), an unknown identity is `Conflict` (re-read and retry).
+
+  **Nothing here decides what goes on the wire.** Every adapter assembles the `From` from the caller's `Draft`, so a host's own copy of the name is what reaches the recipient and the server's copy is a courtesy to the account's other clients. That is also why neither call touches the store: a sender name is host preference, not synced PIM state. The order of the returned list is the provider's and carries no meaning — match an address (`addresses_match`), never take the first entry. (**Implemented** in JMAP — live-verified against the harness — Graph and Gmail; IMAP and CalDAV advertise `None`.)
+- CalDAV/CardDAV sync uses RFC 6578 sync-token where supported; otherwise CTag plus per-resource ETag diffing. (**Implemented** for the sync-token path in `provider-caldav`; the CTag fallback is a documented follow-up — `caldav.md`.)
+- CalDAV writes use ETags and `If-Match`; conflicts refetch before merge. (**Implemented** in `provider-caldav` — the neutral create/patch/delete verbs render as a conditional `PUT` (`If-None-Match`/`If-Match`) + `DELETE`, outbox-driven by `engine_sync::create_calendar_event`/`patch_calendar_event`/`delete_calendar_event`, a `412` → `Conflict`; `caldav.md`. This is the transport that can actually promise the guard — `WriteGuard::Enforced`.)
+- iTIP/iMIP scheduling is distinct from ordinary event storage. (**Implemented** for the inbound half: detect (`find_calendar_part`) → parse (`provider_caldav::imip::parse`) → `reconcile`/trust → apply, and the outbound half as the neutral `rsvp_event` verb across all four adapters. The CalDAV Scheduling-Inbox `REPORT`, client-iMIP SMTP delivery, and `ClientImip` local-origin persistence stay deferred; `calendar-semantics.md`.)
+
+## Credentials and remote-content URLs
+
+Some URLs an adapter fetches are **not** server-issued endpoints — they come from
+remote *content* that a hostile or compromised source controls: a vCard
+`PHOTO;VALUE=uri`, a JSContact resource `uri`, a Graph/People photo link. Such a URL
+may name any host.
+
+**Never attach the account's `Authorization` header to a URL without first checking
+its origin.** Use `engine_provider::same_origin(url, base)`: credentials travel only
+to the origin the account is configured against; anything else is fetched
+anonymously. This costs nothing in practice — Google serves contact photos publicly
+from `googleusercontent.com`, and a card's relative href resolves onto the account's
+own origin — while removing the path by which one shared address book could exfiltrate
+a user's CardDAV password or OAuth token.
+
+Two traps this rule exists for:
+- `Url::join(base, href)` returns an **absolute foreign URL unchanged**, so resolving
+  an href against the base does not confine it to the base.
+- A same-origin *prefix* is not a same-origin host: `dav.example.com.evil.test` must
+  not match `dav.example.com`. `same_origin` compares scheme, host, and effective port
+  for equality — never a prefix or substring.
+
+Adapters therefore expose a `get_bytes_unauthenticated` alongside the authenticated
+byte fetch, and the client picks between them by origin.
+
+**The guard is about who named the URL, not about which origin it is.** A host named by
+*content* never gets the credential. A host the account's **own server** redirects
+discovery to is the opposite case: it is that server saying where its resources live, so
+the connection adopts the new origin and credentials follow (`provider-jmap`'s
+`fetch_session`, `provider-caldav`'s `adopt_origin`). Both adapters resolve a `Location`
+against the URL that issued it (RFC 9110 §10.2.2, `engine_provider::redirect_target`) and
+refuse a hop that leaves TLS. Resolving a redirect against the *configured base* instead
+is what one of these adapters shipped: it turned a provider whose apex redirects to its
+mail host into an unconnectable account.
+
+Placeholder substitution into a URL **template** (RFC 8620 §6.2 `downloadUrl`) has the
+same shape of hazard: percent-encode every substituted value (RFC 6570 level-1 simple
+expansion) so a payload-supplied media type cannot introduce `?`, `#`, `&`, or `/../`
+and re-point the request. JMAP ids are already unreserved, so encoding is a no-op for
+them; it is the non-id values that matter.
+
+## Fixtures
+
+Fixtures must be deterministic and scrubbed of secrets. Captured live transcripts should record:
+- Provider name/version when known.
+- Account/server capability responses.
+- Exact request/response flow.
+- Why the fixture exists and which invariant it protects.

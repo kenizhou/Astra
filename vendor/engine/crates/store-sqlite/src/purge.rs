@@ -1,0 +1,158 @@
+//! Account teardown: drop every trace of one account from the store.
+//!
+//! The targeted, destructive counterpart of the cursor-only `reset_sync`
+//! (`store-and-sync.md`): a host removing an account calls this so a later re-add of
+//! the same login starts clean rather than inheriting stale cursors and orphan rows.
+//! It is not lease-gated — the account is already detached from the runtime, so no
+//! sync should be in flight — and it commits every table in one transaction.
+
+use engine_core::ids::AccountId;
+use engine_store::{Clock, Result};
+use rusqlite::Connection;
+
+use crate::{SqliteStore, convert::backend};
+
+mod domain;
+
+/// Tables keyed by `scope_key`: every row whose scope belongs to the account is
+/// removed via the `sync_scope` sub-select. `fts_doc`'s FTS5 shadow (`fts_index`)
+/// follows through its delete trigger, so it is not listed here.
+const SCOPE_TABLES: &[&str] = &[
+    "object",
+    "fts_doc",
+    "event_occurrence",
+    "message",
+    "msgid_ref",
+    "mail_address",
+    "membership",
+    "event_index",
+    "event_participant",
+    "embedding",
+    "contact_source_availability",
+];
+
+/// Tables keyed directly by `account`. `message_body`'s FTS5 shadow
+/// (`message_body_fts`) follows through its delete trigger. `sync_scope` is also
+/// account-keyed but is deleted last (below), since the [`SCOPE_TABLES`] deletes
+/// resolve their sub-select against it.
+const ACCOUNT_TABLES: &[&str] = &[
+    "pending_op",
+    "message_source",
+    "message_body",
+    "contact_photo",
+    "recipient_observation",
+    "recipient_coverage",
+    "recipient_index_state",
+    "server_keywords",
+];
+
+impl<C: Clock> SqliteStore<C> {
+    /// Purges every durable trace of `account`: its synced objects, the derived
+    /// search/occurrence rows, its sync scopes and cursors, the queued outbox ops, and
+    /// the cached message bodies — all in one transaction. A host calls this when it
+    /// **removes** an account, so a later re-add of the same login (account ids derive
+    /// from the address, so it hits the same scopes) starts from a clean slate instead
+    /// of resuming from stale cursors over orphaned rows.
+    ///
+    /// This is the destructive counterpart of [`reset_sync`](Self::reset_sync): reset
+    /// clears only the cursors and lets the next sync reconcile the still-present
+    /// objects, whereas this drops the objects too and forgets the scopes entirely.
+    ///
+    /// The content-addressed blobs on disk are **not** deleted here: they are deduplicated
+    /// by content hash (a blob may back another account) and carry no refcount, so no row
+    /// owns one. They are reclaimed by
+    /// [`sweep_unreferenced_blobs`](Self::sweep_unreferenced_blobs), which a host runs
+    /// after this. A re-add before that sweep re-adopts an identical blob on the next
+    /// on-demand fetch rather than re-downloading it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`engine_store::StoreError::Backend`] on a backend failure.
+    pub async fn forget_account(&self, account: &AccountId) -> Result<()> {
+        let account = account.as_str().to_owned();
+        self.call(move |conn| purge_account(conn, &account)).await
+    }
+}
+
+/// Deletes every row belonging to `account` across the scope-keyed and account-keyed
+/// tables in one transaction, `sync_scope` last so the scope-keyed sub-selects still
+/// resolve against it.
+fn purge_account(conn: &mut Connection, account: &str) -> Result<()> {
+    let tx = conn.transaction().map_err(backend)?;
+    for table in SCOPE_TABLES {
+        tx.execute(
+            &format!(
+                "DELETE FROM {table} \
+                 WHERE scope_key IN (SELECT scope_key FROM sync_scope WHERE account = ?1)"
+            ),
+            [account],
+        )
+        .map_err(backend)?;
+    }
+    for table in ACCOUNT_TABLES {
+        tx.execute(
+            &format!("DELETE FROM {table} WHERE account = ?1"),
+            [account],
+        )
+        .map_err(backend)?;
+    }
+    // A person can span accounts, and its serialized payload contains all of its
+    // source provenance. Clear the replaceable index wholesale rather than leave
+    // stale account data; the next contact rebuild repopulates it.
+    for table in ["person_email", "person_source", "person_alias", "person"] {
+        tx.execute(&format!("DELETE FROM {table}"), [])
+            .map_err(backend)?;
+    }
+    tx.execute(
+        "UPDATE contact_state
+         SET generation = generation + 1
+         WHERE singleton = 1",
+        [],
+    )
+    .map_err(backend)?;
+    tx.execute("DELETE FROM sync_scope WHERE account = ?1", [account])
+        .map_err(backend)?;
+    tx.commit().map_err(backend)?;
+    Ok(())
+}
+
+/// Drops one scope's rows from every scope-keyed table and clears its cursor, window and
+/// lease, if `token` is still the scope's generation. The `sync_scope` row itself stays, so
+/// the generation does and a lease older than this one remains fenced out.
+///
+/// # Errors
+///
+/// Returns [`engine_store::StoreError::StaleLease`] when `token` is not current, or
+/// [`engine_store::StoreError::Backend`] on a backend failure.
+pub(crate) fn forget_scope(conn: &mut Connection, scope_key: &str, token: u64) -> Result<()> {
+    let tx = conn.transaction().map_err(backend)?;
+    let current: Option<i64> = crate::sql::query_opt(
+        &tx,
+        "SELECT token FROM sync_scope WHERE scope_key = ?1",
+        [scope_key],
+        |r| r.get(0),
+    )?;
+    if !current.is_some_and(|t| crate::convert::generation_from_i64(t).is_ok_and(|g| g == token)) {
+        return Err(engine_store::StoreError::StaleLease);
+    }
+    for table in SCOPE_TABLES {
+        tx.execute(
+            &format!("DELETE FROM {table} WHERE scope_key = ?1"),
+            [scope_key],
+        )
+        .map_err(backend)?;
+    }
+    tx.execute(
+        "UPDATE sync_scope
+         SET cursor = NULL, lease_expiry = NULL,
+             horizon_start = NULL, horizon_end = NULL, expansion_zone = NULL
+         WHERE scope_key = ?1",
+        [scope_key],
+    )
+    .map_err(backend)?;
+    tx.commit().map_err(backend)?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests;

@@ -30,7 +30,10 @@ branding/default.env at build time.
 - Test-first for behaviour changes. A bug fix lands with a regression test
   at the lowest shared layer that observes the contract.
 - The engine is consumed only through `engine-api`. Protocol parsing belongs
-  in the engine, never in Astra.
+  in the engine, never in Astra. The engine's source is vendored in-tree at
+  `vendor/engine/` (the full upstream tree, MPL-2.0); in-tree edits land as
+  ordinary commits, and upstream changes arrive through the vendor-sync flow
+  in `docs/upstream-sync.md`. Nothing Astra-specific lives under `vendor/`.
 - Intents stay serde-serialisable. Surfaces are immutable snapshots.
 - `docs/capabilities.md` moves in the same change as the feature it
   describes.

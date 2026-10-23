@@ -1,0 +1,465 @@
+//! Unit tests for the JMAP client handle ([`super::JmapClient`]) — credential
+//! redaction, session discovery over a mock HTTP server, and the parse pipeline's
+//! hostile-input guards. Split out to keep `lib.rs` under the 500-line limit.
+
+use super::*;
+
+#[test]
+fn credentials_debug_is_redacted() {
+    let basic = Credentials::basic("alice@test.local", "harness-alice-pw");
+    let shown = format!("{basic:?}");
+    assert!(shown.contains("alice@test.local"));
+    assert!(
+        !shown.contains("harness-alice-pw"),
+        "password must not leak: {shown}"
+    );
+    let bearer = Credentials::bearer("super-secret-token");
+    let shown = format!("{bearer:?}");
+    assert!(
+        !shown.contains("super-secret-token"),
+        "token must not leak: {shown}"
+    );
+}
+
+#[test]
+fn config_debug_omits_credentials() {
+    let config = JmapConfig::new(
+        "http://127.0.0.1:18080",
+        Credentials::basic("alice@test.local", "harness-alice-pw"),
+    );
+    let shown = format!("{config:?}");
+    assert!(shown.contains("127.0.0.1:18080"));
+    assert!(!shown.contains("harness-alice-pw"));
+}
+
+#[test]
+fn config_builder_overrides_defaults() {
+    let config = JmapConfig::new("http://h", Credentials::bearer("t"))
+        .with_session_path("/jmap/session")
+        .with_session_urls(SessionUrlPolicy::TrustAdvertised);
+    assert_eq!(config.session_path, "/jmap/session");
+    assert_eq!(config.session_urls, SessionUrlPolicy::TrustAdvertised);
+}
+
+/// Hostile-input guard (the `fuzz/` cargo-fuzz target's in-gate counterpart):
+/// the JMAP parsers must return errors, never panic, on adversarial JSON.
+#[test]
+fn parsers_never_panic_on_hostile_json() {
+    use serde_json::json;
+    let adversarial = [
+        json!(null),
+        json!(7),
+        json!("x"),
+        json!([]),
+        json!({}),
+        json!({ "id": 123 }),
+        json!({ "mailboxIds": "nope", "keywords": 5 }),
+        json!({ "id": "e", "calendarIds": { "c": true }, "start": "not-a-date" }),
+        json!({ "id": "e", "uid": "u", "calendarIds": { "c": true }, "start": "2026-13-40T99:99:99" }),
+        json!({ "recurrenceRule": { "frequency": "fortnightly" } }),
+        json!({ "id": "e", "uid": "u", "calendarIds": { "c": true }, "start": "2026-01-01T00:00:00",
+                    "recurrenceOverrides": { "bad-rid": { "start": "also-bad" } } }),
+        json!({ "methodResponses": "not-an-array" }),
+        json!({ "methodResponses": [["only-two", {}]] }),
+        json!({ "created": [1, 2, 3], "newState": 9 }),
+        json!({ "participants": { "p": { "calendarAddress": 5, "roles": "nope" } } }),
+    ];
+    for case in &adversarial {
+        let _ = mail::mailbox_from_json(case);
+        let _ = mail::message_from_json(case);
+        let _ = calendar::calendar_from_json(case);
+        let _ = calendar::event_from_json(case);
+        let _ = request::Response::parse(case);
+        let _ = sync_ops::Changes::parse(case);
+    }
+}
+
+#[test]
+fn raw_bytes_never_panic_through_the_pipeline() {
+    for raw in [
+        b"".as_slice(),
+        b"{",
+        b"[1,2,",
+        b"\xff\xfe\x00",
+        b"1e9999",
+        br#"{"start":"2026-02-30T00:00:00","timeZone":""}"#,
+    ] {
+        if let Ok(value) = serde_json::from_slice::<serde_json::Value>(raw) {
+            let _ = calendar::event_from_json(&value);
+            let _ = mail::message_from_json(&value);
+        }
+    }
+}
+
+#[cfg(feature = "fuzzing")]
+#[test]
+fn fuzz_entry_point_runs_without_panicking() {
+    // Drive the fuzz entry the cargo-fuzz target calls, so it is covered under
+    // `--all-features` even without nightly.
+    for raw in [
+        br#"{"id":"e","mailboxIds":{"a":true}}"#.as_slice(),
+        b"garbage",
+        b"{}",
+    ] {
+        fuzz_parse(raw);
+    }
+}
+
+// A blocking single-shot mock HTTP server lets the live-only transport,
+// session discovery, and `execute` be exercised offline (no harness).
+pub(super) fn mock_server(http_responses: Vec<String>) -> String {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    std::thread::spawn(move || {
+        for response in http_responses {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 8192];
+            let _ = std::io::Read::read(&mut stream, &mut buf);
+            let _ = std::io::Write::write_all(&mut stream, response.as_bytes());
+        }
+    });
+    format!("http://{addr}")
+}
+
+pub(super) fn http_ok(body: &str) -> String {
+    format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+}
+
+/// A `200 application/octet-stream` response — the raw-blob download shape.
+fn http_bytes(body: &str) -> String {
+    format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+}
+
+const SESSION_DOC: &str = r#"{"capabilities":{"urn:ietf:params:jmap:core":{"maxObjectsInGet":500},"urn:ietf:params:jmap:mail":{}},"primaryAccounts":{"urn:ietf:params:jmap:mail":"c"},"apiUrl":"https://mail.test.local/jmap/"}"#;
+
+#[tokio::test]
+async fn connect_and_execute_against_a_mock_server() {
+    let api = r#"{"methodResponses":[["Mailbox/get",{"state":"s1","list":[]},"0"]]}"#;
+    let base = mock_server(vec![http_ok(SESSION_DOC), http_ok(api)]);
+    let client = JmapClient::connect(
+        JmapConfig::new(base, Credentials::basic("alice", "pw")).with_session_path("/jmap/session"),
+    )
+    .await
+    .unwrap();
+    assert!(client.session().capabilities().mail());
+    assert!(format!("{client:?}").contains("JmapClient"));
+
+    let mut req = request::Request::new([request::capability::CORE]);
+    req.invoke("Mailbox/get", serde_json::json!({ "accountId": "c" }));
+    let resp = client.execute(&req, Exchange::Ordinary).await.unwrap();
+    assert!(resp.result("0").is_ok());
+}
+
+#[tokio::test]
+async fn connect_follows_the_well_known_redirect() {
+    let redirect = "HTTP/1.1 307 Temporary Redirect\r\nLocation: /jmap/session\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+    let base = mock_server(vec![redirect.to_owned(), http_ok(SESSION_DOC)]);
+    // Default session path is /.well-known/jmap → 307 → /jmap/session (rebased).
+    let client = JmapClient::connect(JmapConfig::new(base, Credentials::basic("a", "b")))
+        .await
+        .unwrap();
+    assert!(client.session().capabilities().mail());
+    // The redirect was the *first* response this transport saw. The reported version
+    // must describe the endpoint that actually served the session, not the redirector
+    // — which on a real provider can be a different origin negotiating a different
+    // version. Both hops are HTTP/1.1 here; the ordering invariant is locked in
+    // `engine_provider::ObservedHttpVersion`'s own tests.
+    assert_eq!(
+        client.http_version(),
+        Some(engine_provider::HttpVersion::Http1_1)
+    );
+}
+
+#[tokio::test]
+async fn http_error_status_surfaces_as_a_classified_error() {
+    let body =
+        "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 3\r\nConnection: close\r\n\r\nerr";
+    let base = mock_server(vec![body.to_owned()]);
+    let err = JmapClient::connect(
+        JmapConfig::new(base, Credentials::basic("a", "b")).with_session_path("/jmap/session"),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(
+        err.failure_class(),
+        engine_core::error::FailureClass::Retryable
+    );
+}
+
+#[tokio::test]
+async fn jmap_provider_connects_and_syncs_through_the_real_client() {
+    use engine_provider::Provider;
+    let mailboxes = r#"{"methodResponses":[["Mailbox/get",{"state":"s1","list":[]},"0"]]}"#;
+    let base = mock_server(vec![http_ok(SESSION_DOC), http_ok(mailboxes)]);
+    let provider = JmapProvider::connect(
+        JmapConfig::new(base, Credentials::basic("a", "b")).with_session_path("/jmap/session"),
+    )
+    .await
+    .unwrap();
+    assert!(format!("{provider:?}").contains("JmapProvider"));
+
+    // Connecting fetched the session over the mock server's HTTP/1.1, so the
+    // post-connect object already reports the negotiated version. TLS is `None` because
+    // the mock speaks plaintext — the same response would carry a TLS version over
+    // `https://` (`engine-http`'s `ObservedConnection`).
+    let info = provider.connection_info();
+    assert_eq!(
+        info.http_version,
+        Some(engine_provider::HttpVersion::Http1_1)
+    );
+    assert_eq!(info.tls_version, None);
+    assert!(info.capabilities.mail());
+    // This session names no `maxConcurrentRequests`, so the body warm stays one at a
+    // time rather than guessing a width the server never granted.
+    assert_eq!(info.concurrent_fetches, 1);
+    let account = engine_core::ids::AccountId::try_from("acct").unwrap();
+    assert!(
+        provider
+            .sync_mailboxes(&account, None)
+            .await
+            .unwrap()
+            .is_snapshot()
+    );
+}
+
+#[tokio::test]
+async fn transport_connect_failure_is_retryable() {
+    // A refused connection surfaces as a retryable transport error.
+    let err = JmapClient::connect(
+        JmapConfig::new("http://127.0.0.1:1", Credentials::basic("a", "b"))
+            .with_session_path("/jmap/session"),
+    )
+    .await
+    .unwrap_err();
+    assert!(err.failure_class().is_retryable());
+}
+
+#[tokio::test]
+async fn malformed_session_body_is_a_permanent_decode_error() {
+    let base = mock_server(vec![http_ok("this is not json")]);
+    let err = JmapClient::connect(
+        JmapConfig::new(base, Credentials::basic("a", "b")).with_session_path("/jmap/session"),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(
+        err.failure_class(),
+        engine_core::error::FailureClass::Permanent
+    );
+}
+
+#[tokio::test]
+async fn bearer_auth_connects() {
+    let base = mock_server(vec![http_ok(SESSION_DOC)]);
+    let client = JmapClient::connect(
+        JmapConfig::new(base, Credentials::bearer("tok")).with_session_path("/jmap/session"),
+    )
+    .await
+    .unwrap();
+    assert!(client.session().capabilities().mail());
+}
+
+// --- Blob download / upload over the real reqwest transport (mock server, no Docker).
+// Exercises `Transport::get_bytes`/`post_bytes` + `JmapClient::download`/`upload` + the
+// `Executor` delegation end-to-end, the paths otherwise only hit by the live tests.
+
+/// A session advertising the download + upload + submission surface these tests need.
+/// The same session, advertising the concurrency limit RFC 8620 §2 defines.
+const CONCURRENT_SESSION_DOC: &str = r#"{"capabilities":{"urn:ietf:params:jmap:core":{"maxObjectsInGet":500,"maxConcurrentRequests":6},"urn:ietf:params:jmap:mail":{}},"primaryAccounts":{"urn:ietf:params:jmap:mail":"c"},"apiUrl":"https://mail.test.local/jmap/"}"#;
+
+#[tokio::test]
+async fn the_body_warm_is_as_wide_as_the_session_says_it_may_be() {
+    let base = mock_server(vec![http_ok(CONCURRENT_SESSION_DOC)]);
+    let provider = JmapProvider::connect(
+        JmapConfig::new(base, Credentials::basic("a", "b")).with_session_path("/jmap/session"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        engine_provider::Provider::connection_info(&provider).concurrent_fetches,
+        6
+    );
+}
+
+pub(super) const RICH_SESSION_DOC: &str = r#"{"capabilities":{"urn:ietf:params:jmap:core":{"maxObjectsInGet":500},"urn:ietf:params:jmap:mail":{},"urn:ietf:params:jmap:submission":{}},"primaryAccounts":{"urn:ietf:params:jmap:mail":"c","urn:ietf:params:jmap:submission":"c"},"apiUrl":"https://mail.test.local/jmap/","downloadUrl":"https://mail.test.local/download/{accountId}/{blobId}/{name}?accept={type}","uploadUrl":"https://mail.test.local/upload/{accountId}/"}"#;
+
+pub(super) fn rich_config(base: String) -> JmapConfig {
+    JmapConfig::new(base, Credentials::basic("a", "b")).with_session_path("/jmap/session")
+}
+
+#[tokio::test]
+async fn fetch_message_source_downloads_the_blob_through_the_real_client() {
+    use engine_core::{
+        ids::{AccountId, BlobId, MailboxId, MessageId},
+        mail::Message,
+        membership::Memberships,
+    };
+    use engine_provider::Provider;
+
+    let raw = "From: a@test.local\r\nSubject: probe\r\n\r\nbody";
+    let base = mock_server(vec![http_ok(RICH_SESSION_DOC), http_bytes(raw)]);
+    let provider = JmapProvider::connect(rich_config(base)).await.unwrap();
+
+    let mut msg = Message::new(
+        MessageId::try_from("e1").unwrap(),
+        Memberships::of_one(MailboxId::try_from("mb").unwrap()),
+    );
+    msg.blob_id = Some(BlobId::try_from("blob-1").unwrap());
+    let raw_mime = provider
+        .fetch_message_source(&AccountId::try_from("acct").unwrap(), &msg)
+        .await
+        .unwrap();
+    // The GET body came back verbatim through get_bytes → download → the Executor.
+    assert_eq!(raw_mime.as_bytes(), raw.as_bytes());
+}
+
+#[tokio::test]
+async fn upload_without_a_blob_id_is_a_protocol_error() {
+    // The upload endpoint returns a body missing `blobId` — a permanent protocol error.
+    let base = mock_server(vec![http_ok(RICH_SESSION_DOC), http_ok("{}")]);
+    let client = JmapClient::connect(rich_config(base.clone()))
+        .await
+        .unwrap();
+    let err = client
+        .upload(&format!("{base}/upload/c/"), "text/plain", b"x")
+        .await
+        .unwrap_err();
+    assert_eq!(
+        err.failure_class(),
+        engine_core::error::FailureClass::Permanent
+    );
+}
+
+/// Records connect steps as the log lines a host would emit, so the assertions below
+/// read as "exactly what would have reached the log, in order".
+#[derive(Default)]
+struct Recorder(std::sync::Mutex<Vec<String>>);
+
+impl engine_provider::ConnectObserver for Recorder {
+    fn step(&self, step: &ConnectStep<'_>) {
+        let line = match step {
+            ConnectStep::Redirected { from, to, .. } => format!("redirected {from} -> {to}"),
+            ConnectStep::TlsEstablished(version) => format!("tls {version:?}"),
+            ConnectStep::Authenticated => "authenticated".to_owned(),
+            ConnectStep::Discovered { endpoint, .. } => format!("discovered {endpoint}"),
+            other => format!("unmodeled {other:?}"),
+        };
+        self.0.lock().unwrap().push(line);
+    }
+}
+
+impl Recorder {
+    fn steps(&self) -> Vec<String> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
+fn http_redirect(location: &str) -> String {
+    format!(
+        "HTTP/1.1 307 Temporary Redirect\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    )
+}
+
+#[tokio::test]
+async fn connect_reports_every_well_known_hop_then_auth_then_the_api_url() {
+    // Two hops, so the chain is a *sequence* and not a single latched observation:
+    // /.well-known/jmap -> /jmap/hop -> /jmap/session -> 200.
+    let base = mock_server(vec![
+        http_redirect("/jmap/hop"),
+        http_redirect("/jmap/session"),
+        http_ok(SESSION_DOC),
+    ]);
+    let recorder = Arc::new(Recorder::default());
+    JmapClient::connect(
+        JmapConfig::new(base.clone(), Credentials::basic("a", "b"))
+            .with_connect_observer(recorder.clone()),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        recorder.steps(),
+        [
+            format!("redirected {base}/.well-known/jmap -> {base}/jmap/hop"),
+            format!("redirected {base}/jmap/hop -> {base}/jmap/session"),
+            "authenticated".to_owned(),
+            // `SESSION_DOC` advertises https://mail.test.local/jmap/; the default
+            // `RebaseToConnection` policy resolves it onto the connection origin.
+            format!("discovered {base}/jmap/"),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_session_served_without_a_redirect_reports_no_hop() {
+    let base = mock_server(vec![http_ok(SESSION_DOC)]);
+    let recorder = Arc::new(Recorder::default());
+    JmapClient::connect(
+        JmapConfig::new(base.clone(), Credentials::basic("a", "b"))
+            .with_session_path("/jmap/session")
+            .with_connect_observer(recorder.clone()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        recorder.steps(),
+        [
+            "authenticated".to_owned(),
+            format!("discovered {base}/jmap/")
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_connect_without_an_observer_is_the_no_op_default() {
+    // The seam is additive: the existing whole-config path still connects.
+    let base = mock_server(vec![http_ok(SESSION_DOC)]);
+    let client = JmapClient::connect(
+        JmapConfig::new(base, Credentials::basic("a", "b")).with_session_path("/jmap/session"),
+    )
+    .await
+    .unwrap();
+    assert!(client.session().capabilities().mail());
+}
+
+#[tokio::test]
+async fn credentials_in_the_connection_url_never_reach_the_observer() {
+    // `RebaseToConnection` derives both the fetched session URL and the advertised
+    // `apiUrl` from the connection base, so userinfo on the base propagates into every
+    // URL a step would carry. These steps exist to be logged (`north-star.md`).
+    let base = mock_server(vec![http_redirect("/jmap/session"), http_ok(SESSION_DOC)]);
+    let authority = base.strip_prefix("http://").unwrap();
+    let recorder = Arc::new(Recorder::default());
+    JmapClient::connect(
+        JmapConfig::new(
+            format!("http://alice:hunter2@{authority}"),
+            Credentials::basic("alice", "hunter2"),
+        )
+        .with_connect_observer(recorder.clone()),
+    )
+    .await
+    .unwrap();
+
+    let steps = recorder.steps();
+    assert_eq!(
+        steps,
+        [
+            format!("redirected {base}/.well-known/jmap -> {base}/jmap/session"),
+            "authenticated".to_owned(),
+            format!("discovered {base}/jmap/"),
+        ]
+    );
+    assert!(
+        !steps.concat().contains("hunter2"),
+        "the password must not leak into a step: {steps:?}"
+    );
+}
+
+#[path = "lib_submit_tests.rs"]
+mod submit;

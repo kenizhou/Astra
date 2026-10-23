@@ -1,0 +1,45 @@
+[package]
+name = "engine-api"
+description = "Stable host facade for provider-neutral mail, calendar, contact, people, recipient, search, sync, and durable write APIs over SQLite."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+engine-core = { workspace = true }
+# Re-exported so a host configures throttling through the facade, like the rest of its
+# provider wiring (docs/agent-guidance/http-throttling.md).
+engine-http = { workspace = true }
+# The single hardened iCalendar parser, for `Engine::message_scheduling`. iMIP arrives over
+# *mail* on every account type, so this read must not depend on the CalDAV adapter being in
+# the build — which is exactly why the parser is its own transport-neutral crate.
+engine-ical = { workspace = true }
+engine-store = { workspace = true }
+engine-sync = { workspace = true }
+engine-provider = { workspace = true }
+engine-recurrence = { workspace = true }
+engine-search = { workspace = true }
+store-sqlite = { workspace = true }
+serde = { workspace = true }
+# Deserializes the store's normalized object payloads (Value) into the domain types
+# the read methods return (Mailbox/Message).
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+# `OffsetDateTime::now_utc` needs time's `std` feature; require it explicitly so the
+# crate keeps compiling even if the workspace dep ever turns default features off.
+time = { workspace = true, features = ["std"] }
+# Maps the per-message outcomes of `Engine::warm_message_sources` onto `ApiError` as they
+# stream.
+futures-util = { workspace = true }
+
+[dev-dependencies]
+# `sync` adds tokio::sync::oneshot, used to deterministically interleave two syncs
+# in the concurrent-scope (ApiError::Busy) test.
+tokio = { workspace = true, features = ["sync"] }
+async-trait = { workspace = true }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

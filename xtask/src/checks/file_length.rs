@@ -16,6 +16,8 @@ const UPSTREAM_EXEMPT_PREFIXES: &[&str] = &[
     // The SP4b store is likewise a kylins port (sqlx -> rusqlite being the
     // only sanctioned rewrite), kept diffable against its source.
     "crates/astra-crypto-store/",
+    // The vendored sync engine: upstream's own tree, measured by its own CI.
+    super::VENDORED_ROOT,
 ];
 
 /// True for package manager lockfiles, which are generated output.
@@ -80,6 +82,14 @@ mod tests {
     fn markdown_is_exempt() {
         let long = "line\n".repeat(super::MAX_LINES + 1);
         let root = fixture(&[("a.md", &long), ("docs/zh/a.zh-CN.md", &long)]);
+        assert!(super::check(&root).is_ok());
+    }
+
+    #[test]
+    fn the_vendored_engine_tree_is_exempt() {
+        let long = "line
+".repeat(super::MAX_LINES + 1);
+        let root = fixture(&[("vendor/engine/crates/engine-core/src/lib.rs", &long)]);
         assert!(super::check(&root).is_ok());
     }
 

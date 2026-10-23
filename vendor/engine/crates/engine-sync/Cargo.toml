@@ -1,0 +1,43 @@
+[package]
+name = "engine-sync"
+description = "Sync orchestration for the PIM sync engine. Step 4 ships the thin per-scope loop (claim → provider fetch → project/derive → atomic apply → release) with StaleLease re-claim and container-before-member ordering; the full cross-scope orchestrator, outbox workers, and tzdata fan-out are later steps."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+engine-core = { workspace = true }
+engine-store = { workspace = true }
+engine-provider = { workspace = true }
+engine-recurrence = { workspace = true }
+engine-mime = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+# A draft op is named by a hash of what it would store, so saving the same text twice is
+# one op and an edited draft is a new one.
+sha2 = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+# `StreamExt` to drive the provider's email chunk stream in the streaming loop.
+futures-util = { workspace = true }
+# `time` for the outbox driver's bounded wait on a resource another op holds in flight.
+tokio = { workspace = true, features = ["time"] }
+
+[dev-dependencies]
+# `test-util` for `pause()`, so the outbox wait's upper bound is asserted in virtual
+# time rather than by making the suite sit through it.
+tokio = { workspace = true, features = ["time", "test-util"] }
+store-sqlite = { workspace = true }
+# `try_stream!` to build the fake providers' chunk streams in the sync tests.
+async-stream = { workspace = true }
+futures-util = { workspace = true }
+# One test needs a store state no public call can produce: mail in the message-id graph with no
+# thread, which is what the v10 migration leaves and what only the repair can fix. It is written
+# with a second connection to the same file, so the store under test stays the real one.
+rusqlite = { workspace = true }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

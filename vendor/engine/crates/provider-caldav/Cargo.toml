@@ -1,0 +1,59 @@
+[package]
+name = "provider-caldav"
+description = "CalDAV and CardDAV read/sync/write adapters with shared WebDAV transport, conditional writes, and separate iCalendar/vCard normalization."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+engine-core = { workspace = true }
+# The iCalendar parser/serializer/patcher. It used to live *in* this crate; it is
+# transport-neutral (iMIP carries iCalendar over mail on accounts with no CalDAV in
+# the picture at all), so CalDAV is now one of its callers rather than its owner.
+engine-ical = { workspace = true }
+# `http` enables `HttpVersion::from_http`, the one place a reqwest response's version is
+# mapped onto the engine's neutral `HttpVersion` (`ConnectionInfo`).
+engine-provider = { workspace = true, features = ["http"] }
+# One shared TLS trust policy across every provider (`docs/agent-guidance/tls.md`);
+# `reqwest` enables the preconfigured-client builder this HTTP transport uses.
+# One throttling answer for every HTTP provider (docs/agent-guidance/http-throttling.md).
+engine-http = { workspace = true }
+engine-tls = { workspace = true, features = ["reqwest"] }
+reqwest = { workspace = true }
+quick-xml = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+
+[features]
+# Exposes `fuzz_parse` for a cargo-fuzz target driving the iCalendar parser; off
+# in normal builds (mirrors `provider-jmap`).
+fuzzing = []
+
+[dev-dependencies]
+# `sync` for the live tests' serialization Mutex (held across awaits); `time` for
+# the SabreDAV connect retry's sleep.
+tokio = { workspace = true, features = ["sync", "time", "test-util"] }
+# The silent servers the deadline tests meet (`engine_http::test_server`), and `test-util`
+# above for the paused clock they are measured on.
+engine-http = { workspace = true, features = ["test-server"] }
+# The scheduling fixture dates its invitation a fixed offset from today — a server only
+# auto-schedules a meeting that has not already finished — which needs calendar-aware date
+# arithmetic (month/year rollover), not a duration in seconds.
+time = { workspace = true }
+stalwart-harness = { path = "../stalwart-harness" }
+# The gated live integration test drives the full calendar sync loop through the
+# real store, exactly like provider-jmap's live_sync.
+engine-store = { workspace = true }
+engine-search = { workspace = true }
+engine-recurrence = { workspace = true }
+engine-sync = { workspace = true }
+store-sqlite = { workspace = true }
+rustls = { workspace = true }
+provider-jmap = { path = "../provider-jmap" }
+
+[lints]
+workspace = true

@@ -1,0 +1,1211 @@
+# Store and Sync Concurrency Contract
+
+This document fixes the concurrency, transaction, and lease semantics of the
+`Store` trait and the sync/outbox workers that drive it. `north-star.md` states
+the Store Contract guarantees at a high level; this document is the
+authoritative source for the trait signature and its concurrency model. Read it
+before working in `engine-store`, `store-sqlite`, or `engine-sync`.
+
+## Scope
+
+Covered here: what a sync scope is, how writers are serialized, what commits
+atomically, and how the outbox claims and resolves work.
+
+Out of scope (owned elsewhere): object identity and membership
+(`modeling.md`), provider cursor formats and capability detection
+(`providers.md`), and the search/index data model (`north-star.md` Search
+Contract). This document only constrains *when and under what lock* those land.
+
+What it does **not** constrain is what any of it costs. The suite's mailboxes hold
+single digits of messages, where a full scan and an indexed seek measure the same.
+Before changing a read path, an apply, or the derivation pass, take a baseline against a
+mailbox that can tell them apart: `cargo bench -p mailbox-fixture` (`rust.md` →
+"Measuring at scale").
+
+## Principles
+
+- **At most one effective writer per scope, and per in-flight op, at a time.**
+  Enforced by store-issued fencing tokens checked inside the write
+  transaction — never by trusting a worker to behave.
+- **Every durable state transition is lease-gated and atomic.** Provider data,
+  derived search/occurrence rows, the next cursor, reconciliations, and
+  tombstones for one scope commit together or not at all.
+- **The store is mechanical.** It performs no normalization, text extraction, or
+  recurrence expansion. All such work is done by pure `engine-core` /
+  `engine-recurrence` functions *before* the store call; the store writes the
+  result. (Occurrence expansion is `engine_recurrence::expand`; text/structured
+  projection is `engine_core::search_index`.)
+
+  **One exception, and it is the only one: the derived thread id** (`threading.md`). It is a
+  function of the incoming object *and* of what is already stored across every scope of the
+  account, so it cannot be precomputed: reading the components, releasing, then writing leaves a
+  window in which a concurrent scope of the same account merges into the same component, and the
+  per-scope sync lease cannot fence that. The apply's transaction can. Every backend therefore
+  implements the same incremental rule, and the shared contract suite is what holds them to one
+  answer.
+- `engine-core` stays I/O-free and async-free. Async and I/O live only in store
+  implementations and provider crates.
+
+## One writer, a pool of readers
+
+WAL admits one writer and many readers at once, so a store that funnels both
+through a single connection makes a committing sync block the list read a user is
+waiting on. `store-sqlite` therefore opens a writer plus a small pool of readers
+for a file database (`pool.rs`), and each call site picks: transactions and
+pragmas take `call`, everything else takes `read`.
+
+Three things hold that split honest, and each is load-bearing:
+
+- **Readers are `query_only`.** A write handed to `read` fails outright rather
+  than quietly taking a reader's lock and serializing again. Routing is a
+  judgement per call site; a judgement nothing checks is one that drifts.
+- **The contract suite runs on disk as well as in memory.** An in-memory database
+  is a single connection — one connection *is* the database, so a second would be
+  a different, empty one — which means `:memory:` alone exercises no routing at
+  all.
+- **Every statement goes through `sql::execute` / `query_opt` / `query_all`**, so
+  it is compiled once per connection instead of on every call. The point queries
+  behind a windowed read and the upserts behind a sync page are the same dozen
+  statements run thousands of times, and re-parsing them was most of what they
+  cost.
+
+An index is part of the query that uses it. Adding one without the read that plans
+through it is write cost for no read benefit, and no test can tell the difference —
+a list read returns the same rows scanned or seeked. Assert the plan
+(`EXPLAIN QUERY PLAN`) when you add an index, and add it in the same change as its
+reader. Where the planner's choice decides whether a read costs the page or the
+mailbox, **name the index** (`INDEXED BY`) rather than hoping: SQLite plans this schema
+unanalysed, and the failure mode is a correct answer arrived at by sorting everything.
+
+## The mail list is a table, not a scan
+
+`message` holds one row per stored mail object carrying exactly what a list row, a sort,
+a conversation group and a date filter need — `(account, scope_key, provider_key)`,
+`thread_id`, `message_id`, `date_utc`, the `flags` bitfield, `has_attachment`, and the
+row's visible text (`from_name`, `from_addr`, `subject`, `preview`). `object.payload`
+stays the canonical normalized record and is off the list path entirely: opening a
+message reads it, showing a message in a list does not.
+
+`StoreRead::list_mail(accounts, selector, limit)` is that read, and the only one a
+mailbox list is built from. Three selectors, one projection:
+
+- `Newest` — one ordered statement over every account named. **A unified inbox is a
+  predicate, not a loop with a merge above it**: the ordering across accounts is the
+  backend's, so two accounts cannot be interleaved differently by two callers.
+- `Threads(&[ThreadId])` and `Keys(&[ProviderKey])` — targeted seeks, one cached
+  statement per value, against `message_account_thread` / `message_account_key`.
+
+Order is `date_utc DESC` with undated mail last, ties broken on the row's own identity
+so the window a `LIMIT` cuts is the same on every read of an unchanged store — a host
+reconciling by row id must not see movement a data change did not cause.
+
+`flags` carries the four RFC 8621 system keywords a row's appearance depends on
+(`$seen`, `$flagged`, `$draft`, `$answered`), because a sort or a filter must not pay a
+join for them. Every keyword, system and user alike, still lands in `membership`, which
+is what `keyword:` searches and where a set of arbitrary cardinality belongs.
+
+## SyncScope
+
+A scope is the unit of sync state, leasing, and serialization. Its granularity
+is dictated by the protocol, and the three protocols disagree — so `SyncScope`
+is an enum, not a single id:
+
+- **JMAP:** state is **per account, per data type** (`Email/changes`,
+  `Mailbox/changes`, `CalendarEvent/changes`, … each carry their own state
+  string). There is no per-mailbox email state. Scope = `(account, JmapType)`.
+- **IMAP:** email state is **per mailbox** (`UIDVALIDITY`, `UIDNEXT`, and
+  `HIGHESTMODSEQ` under CONDSTORE). Scope = `(account, MailboxKey)`
+  (`ImapMailbox`). The account's **folder list** is a separate per-account
+  container scope, `ImapMailboxList{account}` — a `LIST` re-snapshots it each pass
+  (no folder-list cursor), applied before the per-mailbox email it parents
+  (`imap-smtp.md`).
+- **CalDAV/CardDAV:** state is **per collection** (RFC 6578 sync-token, or
+  CTag + per-resource ETags). Scope = `(account, CollectionKey)`
+  (`DavCollection`). The account's **collection list** (calendar discovery) is a
+  separate per-account container scope, `DavCollectionList{account}`
+  — a `PROPFIND` of the home re-snapshots it each pass (no list cursor), applied
+  before the per-collection members it parents (`caldav.md`), exactly as
+  `ImapMailboxList` parents `ImapMailbox`. CardDAV has its own pair,
+  `CardDavAddressBookList{account}` and `CardDavAddressBook{account, address_book}`,
+  so a calendar scope and an address-book scope are never the same variant.
+- **SMTP** is not a sync scope. It is an outbox transport only; the outbox is
+  leased per account (see below).
+- **Push (IMAP `IDLE`) is not a sync scope either.** A `Watch` session
+  (`providers.md`, `imap-smtp.md`) only signals that a scope *may* have changed; the
+  host responds by running that scope's normal sync, under the same lease and atomic
+  apply as a poll. Push adds no lease semantics and writes nothing itself — it is a
+  latency optimization over polling, and the scope sync stays the authoritative,
+  idempotent reconciliation.
+
+Consequences that the orchestrator must not paper over:
+
+- **Lease cardinality differs by provider.** A JMAP account syncs under a few
+  coarse leases (one per type); an IMAP and a Graph account under many fine leases
+  (one per mailbox/folder). Do not assume a fixed fan-out per account.
+- **The fan-out is a store bound, and it is not the network bound.** `MAX_CONCURRENT_FOLDERS`
+  caps how many folders contend for the single write connection. How many *requests* an
+  account may have in flight is a different question with a different answer per server, and
+  it is enforced where every request passes — `engine_http::RequestGate`, one per account
+  (`http-throttling.md`). Conflating them breaks in both directions: an IMAP folder holds its
+  own socket, so its ceiling is per connection, while every Graph folder shares the mailbox's.
+- **Referential apply order.** Container scopes (mailboxes, calendars, address
+  books) are applied before the member scopes that reference them (emails,
+  events, contacts). Membership rows resolve against already-applied containers,
+  and snapshot tombstoning of a container set precedes member tombstoning.
+- The cursor inside `SyncState` is opaque and provider-specific. The engine
+  never parses it; it only round-trips it through the store.
+
+## Leases and fencing tokens
+
+There is one serialization mechanism, not two: **a store-issued lease carrying a
+monotonic fencing token; a write is admitted iff its token is still current for
+the scope.** The fencing token *is* the compare-and-swap key — leasing and CAS
+are one mechanism here, not alternatives.
+
+- `claim_sync_scope` atomically acquires the lease and returns the current
+  `SyncState`, so the planner sees a consistent `(lease, state)` pair with no
+  load-then-claim race. `load_sync_state` is a lease-free read for diagnostics
+  and UI only; never plan a write from it.
+- Each claim bumps the scope's stored fencing generation. An older lease is now
+  stale. `apply_sync_update` and `apply_maintenance` re-check the token **inside
+  the transaction** and fail with `StaleLease` if it is not current.
+- Leases have a TTL (host-tunable via the injected clock). This matters most on
+  mobile: an app suspended mid-sync sails past its TTL, another worker re-claims
+  and bumps the generation, and when the suspended worker resumes its apply is
+  rejected as stale instead of corrupting state. Workers handle `StaleLease` by
+  re-claiming and recomputing — never by retrying the stale write.
+- `release_sync_scope` frees a scope before its TTL so a finished worker does not
+  block the next sync for the full lease window.
+- **The claim → fetch → apply → release cycle lives in exactly one place**:
+  `engine_sync::run_scope`, parameterized by `ScopeSyncer`. Every scope — mailboxes,
+  email, calendars, events, address books, contact cards — goes through it. This is
+  the part that is easy to get subtly wrong (release on fetch failure so a leaked
+  lease does not become a spurious `ScopeHeld`; re-claim rather than retry on
+  `StaleLease`), so a scope with an extra requirement **extends the trait, it does not
+  copy the loop**. The seams that exist for that: `ScopeSyncer::observations` (extra
+  rows to write in the *same* transaction — email's recipient observations use it),
+  `ScopeFetch::Halt`/`ScopeRun::Halted` (a fetch that declines to produce a batch —
+  an unavailable contact source), and the `Meta` associated type (per-fetch
+  information carried back to the caller, e.g. "the cursor was rebuilt"). Bookkeeping
+  a specific scope needs *around* the loop (contact-source availability) belongs in a
+  thin wrapper, not inside the driver.
+- `abandon_sync_leases` is the explicit **process-startup recovery** primitive for
+  a host that knows prior workers for the store are gone after abrupt termination.
+  It clears held sync leases, preserves cursors and objects, and bumps each
+  affected fencing token so an abandoned worker cannot later commit under its old
+  lease. It is not an in-process contention workaround: a live `ScopeHeld` still
+  means "retry after the current worker finishes."
+- `recover_interrupted_ops` is the same primitive for the outbox, under the same contract:
+  every op left `InFlight` is recovered as `interrupted_outcome` says, live lease or not,
+  and its token is bumped. Every other outbox path recovers an attempt too, but only once its
+  lease has lapsed, so this call saves the next process waiting out a dead process's lease.
+  What a recovery records is "The outbox" → "A send survives its process".
+
+## The atomic apply
+
+`apply_sync_update` commits exactly one transaction for one scope, gated by the
+lease token. The transaction contains, all-or-nothing:
+
+1. Normalized provider objects and their preserved raw payloads.
+2. Membership rows.
+3. Derived FTS rows (from extracted text) and structured-filter rows — the scalar
+   index rows and the address/participant/membership junctions that back the
+   non-text filters.
+4. Derived `event_occurrence` rows within the current horizon.
+5. The next `SyncState` (cursor).
+6. Pending-op reconciliations.
+7. Tombstones for snapshot reconciliation.
+8. Recipient observations derived from everything the update says is now filed in a resolved
+   Sent collection — whole messages **and** messages a `MailStateChange` moved there. The second
+   half is how a message usually *becomes* sent: JMAP's `EmailSubmission/set` moves the existing
+   draft with `onSuccessUpdateEmail` and Gmail's `drafts.send` adds `SENT` to the message the
+   draft already had, so neither mints a new object and neither arrives as a `created`. A change
+   carries filing and keywords but no envelope, so the recipients are read from the message's
+   stored payload — and only for a change whose resulting filing actually reaches Sent, so an
+   ordinary mark-read costs no read. A change with no filing at all (`mailboxes: None`) is
+   skipped outright: that is a provider filing through identity, where the move arrives as a
+   whole object anyway. Their `(account, source message, canonical email)` identity is
+   committed with the message/cursor so replay cannot inflate counts.
+
+Contact-card applies also advance a contact-source generation. Unified people
+are rebuilt from a consistent generation and atomically replaced only when that
+generation is still current; a raced rebuild retries. Provider source rows are
+never coalesced. Stable `PersonId` assignment, merge aliases, split retention,
+history suppression, and the one-time existing-message interaction backfill are
+owned by `ContactStore`; `contacts.md` is authoritative.
+
+Contact-photo metadata is stored by `(account, contact)` with its provider
+fingerprint and content hash. Bytes use the content-addressed blob area;
+fingerprint mismatch or a missing/corrupt blob is a cache miss.
+
+Items 3–4 are **precomputed by pure engine code before the call** and carried in
+the batch; the store does not compute them. This keeps the transaction short
+(no expansion under lock) and the store logic-free. The batch is one struct so
+the atomic set is self-documenting:
+
+```rust
+pub struct ApplyBatch<'a, T> {                  // T is the scope's SyncObject
+    pub update: &'a SyncUpdate<T>,              // provider-normalized objects, raw, membership
+    pub derived: &'a DerivedWrite,              // FTS + structured-filter + occurrence rows, pure engine fns
+    pub reconcile: &'a [PendingReconciliation],
+    pub next_state: Option<&'a SyncState>,      // Some => advance cursor; None => leave it (streaming page)
+}
+```
+
+- **Cursor disposition.** `next_state` is `Some(state)` to advance the scope
+  cursor on commit (the normal case; `ApplyBatch::new`), or `None` to apply the
+  objects/derived rows but **leave the cursor unchanged** (`ApplyBatch::with_cursor`).
+  The non-streaming whole-scope apply always advances. A **streaming** apply picks
+  its disposition per chunk from the chunk's `PassMode` (see **Streaming sync**
+  below): an *additive* chunk passes `Some(checkpoint)` so the cursor advances with
+  every commit (resumable), while a *reconcile* chunk passes `None` until its final
+  chunk, which carries the real `Some(cursor)` and tombstones. So the store
+  primitive is unchanged; only which disposition the orchestrator picks per chunk is
+  new. The contract suite's `streaming_page_keeps_cursor` locks the `with_cursor`
+  primitive for every backend.
+
+- **Delta vs snapshot.** `SyncUpdate` is either a delta or a bounded/full
+  snapshot. A snapshot carries the complete current provider-id set for its
+  scope; the store tombstones local rows in that scope absent from the set.
+  `cannotCalculateChanges` (JMAP) and a UIDVALIDITY reset (IMAP) produce
+  snapshots, not deltas.
+- **Reconciliation is re-validated in the transaction.** Matching an incoming
+  object to an outstanding send (by generated `Message-ID`) is planned off the
+  transaction by reading pending ops, so there is a TOCTOU window. Inside the
+  apply transaction the store re-checks that each `PendingReconciliation`
+  references an op still in its expected pre-resolution state, recovering a dead attempt
+  first: the planner read the op as the queue read shows it, as its recovery will leave it,
+  so a stored `InFlight` under a lapsed lease would otherwise never match. On mismatch it
+  **skips** that reconciliation and stores the incoming object normally;
+  duplicate suppression then falls back to presentation-layer dedup
+  (consistent with "UI/search dedup is presentation policy, not storage
+  identity").
+  `engine_sync`'s mail stream plans them (`sent_copies.rs`) for sends in
+  `NeedsConfirmation` only, and only from a copy filed in a **Sent** mailbox, whole or moved
+  there by a state change (JMAP and Gmail send by moving the draft). A draft saved to the
+  server carries the same `Message-ID`, so a copy anywhere else proves nothing; a send still
+  `InFlight` records its own outcome.
+- **A change is whole, partial, or a removal.** `SyncUpdate::Delta` carries all three:
+  `changed` (whole objects), `patched` (partials), `removed`. A partial names the fields that
+  moved and nothing else, so the store writes those columns and leaves the rest — including the
+  normalized payload — alone. The partial form is per object type, `SyncObject::Patch`; it is
+  `MailStateChange` for a message and the uninhabited `NoPatch` for everything else, so
+  `Vec<NoPatch>` makes "a calendar pass carries no partials" a fact the compiler checks.
+
+  A key present in both `changed` and `patched` is resolved **in favour of `changed`**, inside
+  `with_patched`: a whole object is strictly more information, and an adapter fetches it after
+  learning of the change, so it is the later word. Gmail's history API produces both for one id
+  in a single page, so this is a real case. Resolving it centrally means no adapter has to
+  remember to and no store has to guess.
+
+  A snapshot has no partials by construction — it is the scope's whole current state.
+
+  Both drivers reach those two conclusions from the *same* code. The whole-scope
+  `drain_email` and the streaming mail pass each put a chunk's partials **into**
+  the `SyncUpdate` (via `with_patched`) rather than carrying them beside it, so neither can
+  drift from the other and so the update is a complete account of the pass. Carrying them
+  alongside is how a message moved into Sent by a state change became invisible to the
+  recipient observations, which read the update.
+
+- **A partial destroys nothing it is silent about.** `None` in a partial means *not reported*,
+  never *gone*, and every provider produces that silence: Gmail's history record and JMAP's
+  `Email/changes` carry no revision token at all, IMAP's `FLAGS` row carries no `MODSEQ` unless
+  it was asked for, and Graph's narrow `$select` cannot name `@odata.etag` (an OData annotation
+  is not selectable) so it answers with one only because the service chooses to. A store that
+  wrote the silence through would blank the token the next conditional write quotes — and a
+  write that quotes nothing is unguarded last-writer-wins, which fails as lost data rather than
+  as an error. `store-sqlite` expresses this as `COALESCE(?, column)`; a backend that cannot
+  uses `RevisionTokens::or`, the same rule in Rust. A **whole object** is authoritative about
+  every token and replaces them instead.
+
+- **A partial for a key the store does not hold writes nothing — in every table.** The row
+  write is an `UPDATE`, so it no-ops; the membership junction does *not* no-op on its own,
+  because `DELETE`/`INSERT` there does not care whether the message exists. `store-sqlite` gates
+  the membership writes on the `UPDATE`'s row count (SQLite counts every row an `UPDATE`
+  matched, identical values included, so `0` really means absent); the reference store gates on
+  the row being present. Without the gate, a windowed sync with an account-global delta (Gmail's
+  history, JMAP's `Email/changes`) accrues orphan rows on every label change to mail older than
+  the window — invisible to every read, since they all join through the `message` row, and never
+  cleaned up.
+
+- **A message is an immutable half and a mutable half, and they are stored apart.** The content
+  never changes once the server holds it — editing a draft mints a *new* provider object on every
+  protocol we speak (a JMAP `Email` is immutable; IMAP does APPEND + EXPUNGE and the UID changes),
+  so that half can be written once and never reconciled. It is `MailContent`, and it is the
+  normalized payload.
+
+  Everything that moves *without* those bytes moving is `MailState`: keywords, a derived thread,
+  and the revision tokens plus `last_modified` that bump when any of it changes. Its home is the
+  `message` row and the `membership` junction. A payload carrying a copy could only ever be a copy
+  that disagrees.
+
+  **Adding a state axis is adding a field to `MailState`**, not a new mechanism — Graph's
+  `categories` is the next one, and it needs that field plus a `membership` kind. A category a
+  host registered a name for already travels as a keyword (`KeywordName`, `graph.md`). A thread is
+  present in the payload only when the **provider** assigned it, because then it is the provider's
+  word; a derived one is the engine's and lives in the row alone.
+
+  This is why a mark-read can no longer destroy anything: there is no second copy to overwrite.
+  It replaces the old carry-forward, which refilled `thread` and `preview` from the stored copy
+  before every apply because the apply was about to replace the whole payload.
+
+  `MailContent` is built by **destructuring** `Message`, so a new field on `Message` stops the
+  conversion compiling until someone decides whether it belongs in the payload or in the row. A
+  silent default is exactly the failure the type exists to prevent.
+
+  Reading is the mirror: a `Message` decoded from a payload alone is incomplete by construction,
+  and `Engine::compose` rebuilds its state from the row and the junction. Every
+  path from storage back to a `Message` goes through it. A provider-assigned thread that came
+  back with the payload is left as it is — relabelling it derived would tell the derivation pass
+  it may re-thread mail the provider threaded.
+
+  **A provider key is not unique within an account** — the store's key is `(scope, key)`, and
+  two of an account's mail scopes really can hold one key. A Microsoft Graph move keeps the
+  message's immutable id (live-verified) and Graph mail sync is per folder, so between the
+  destination folder's delta creating it and the source folder's reporting it `@removed`, both
+  scopes hold it. `compose` therefore composes a key **once**, keeping the row with the later
+  `last_modified` — the move bumped it, so that is where the message actually is. The payload is
+  the immutable half and is the same bytes in either scope, so which one it was read from does
+  not matter.
+- **Idempotent replay.** Re-applying the same batch after a crash is a no-op:
+  object writes are upserts keyed by provider key, the cursor advance is
+  conditional on the prior state, and a resurrected stale-token worker is
+  rejected before it can write.
+
+## Streaming sync: additive checkpointing vs reconcile
+
+The responsive mail path (`engine-sync::sync_mail`, driven from `Engine::sync_mail`) commits mail
+**chunk by chunk** under one lease, so a host renders recent mail and live progress
+before a pass finishes. The provider primitive is `Provider::stream_email`
+(`providers.md`): a pull `EmailStream` of `EmailChunk`s. Each chunk carries a
+`PassMode` (constant across the pass), its `changed` upserts, explicit `removed` keys,
+a `present` id set (reconcile only), an optional `total`, and an `advance_to` cursor
+disposition. The two modes differ in **resumability**:
+
+- **Additive** — a first cold backfill, and every steady-state delta. Nothing local
+  needs tombstoning (a first sync stored nothing; a delta reports its own removals),
+  so each chunk applies as a `Delta { changed, removed }` and **advances the cursor to
+  its own `advance_to` checkpoint** (`Some(cursor)` on every chunk). A crash therefore
+  resumes from the last committed checkpoint instead of re-downloading from the start:
+  the IMAP cold backfill checkpoints its lowest-committed UID per fetch group
+  (`imap-smtp.md`), so a killed backfill of a large mailbox continues below the
+  watermark. (A JMAP/Graph backfill is fast HTTP paging that is not cheaply resumable
+  mid-pass, so its intermediate chunks are *held* — visible but no checkpoint — and a
+  final marker chunk carries the cursor; a crash there re-runs the pass.)
+- **Reconcile** — a re-snapshot: an IMAP `UIDVALIDITY` reset, a JMAP
+  `cannotCalculateChanges`. Local rows exist and must be reconciled against the
+  server's current set, so intermediate chunks apply **additively** (upsert, no
+  removals) while the orchestrator accumulates `present` across chunks and **holds the
+  cursor** (`None`); only the final chunk applies the real `Snapshot` with the complete
+  accumulated `present` set — tombstoning exactly the genuinely-absent rows, never an
+  earlier chunk's — and advances the cursor in one commit. It is **not**
+  checkpoint-resumable (a crash re-runs the pass), acceptable because a re-snapshot is
+  the rare path. A crash mid-reconcile leaves the prior cursor intact, so the next sync
+  re-runs it idempotently.
+
+**Two decoupled knobs (`StreamTuning { window, fetch_batch, chunk_size }`).** A single
+page size used to conflate network batching with commit granularity. `fetch_batch`
+bounds each provider round trip (an IMAP `UID FETCH` window, a JMAP `Email/get` page, a
+Graph `$top`); `chunk_size` bounds how many messages accumulate before a chunk is
+committed and reported. A large `fetch_batch` with a small `chunk_size` gives *both*
+few round trips *and* row-as-it-arrives commits (`StreamTuning::responsive` is the
+interactive default, `bulk` the throughput one). `window` is the per-sync **depth**
+(`SyncWindow { since }`, `engine-core`) — a provider-neutral date floor, passed per sync so
+a host changes depth without reconnecting providers. It bounds the pass twice, and the two
+are different jobs:
+
+- **What is fetched.** Each adapter maps the floor to its protocol's date filter on the
+  snapshot/backfill: IMAP `UID SEARCH SINCE`, JMAP an `Email/query` `after`, Graph a
+  `receivedDateTime ge` `$filter`, Gmail `q: after:`. **No delta can carry one** — a
+  `deltaLink`, a `startHistoryId` and `Email/changes` all take a cursor, not a query.
+- **What a `PassMode::Additive` delta stores.** The orchestrator drops any incoming message
+  the window does not admit (`SyncWindow::admits`) before the apply. A delta's "new arrival"
+  is new to *us*, not recent: IMAP has no in-place edit, so filing a three-year-old message
+  into a folder mints a UID above the cursor; Graph, Gmail and JMAP report a move the same
+  way. Unfiltered, mail the user asked this device not to keep walks back in through every
+  protocol, and no later pass removes it, because a delta never re-lists what it did not
+  change. This is the only place that can say no — a delta has no present set, so nothing
+  downstream revisits the decision.
+
+**A `PassMode::Reconcile` snapshot is not filtered, deliberately.** Its `present` set *is* the
+adapter's enumeration of the window, and the store tombstones by diffing against it, so the
+adapter has already decided — with its server's date semantics, which are not the engine's.
+Re-deciding with a second rule can only disagree: IMAP `SINCE` compares `INTERNALDATE` in the
+**server's** timezone, so a message the snapshot deliberately asked for can read as
+out-of-window here and be dropped *while its key stays in `present`* — absent from the store
+and never tombstoned either. Depth on the snapshot path is the adapter's job, and
+`prune_account_mail_outside_window` is the backstop when a host wants it enforced locally.
+
+`admits` compares **dates**, inclusively, against `received_at` falling back to `sent_at` —
+the same value `MailRow::date_utc` carries — and admits **undated** mail, which is not provably
+outside the window.
+
+**Change events (`SyncObserver` / `SyncCommit`).** After every committed chunk the
+orchestrator calls the caller's `SyncObserver::committed` with a `SyncCommit { scope,
+fetched, total, upserted, removed }` — the running progress *and* the exact rows that
+just landed (borrowed, zero-copy on the engine side). A host splices its view from
+`upserted`/`removed` **without re-querying** the mailbox. (Reconcile tombstones are
+computed by present-set diff inside the store, so they are not enumerated in `removed`;
+the pass's `SyncApplied::tombstoned` count signals a host may re-read to reconcile.)
+`IgnoreCommits` is the no-op sink, and a closure is a `SyncObserver` via the blanket
+impl. `AccountProgress` is a ready-made observer that folds per-scope commits into one
+account-level "downloaded Y of X" over a concurrent per-folder fan-out — keeping the
+total indeterminate until every expected scope has reported one (so the bar never
+rebases upward as later folders start) and tracking in-flight passes via `begin`/`finish`.
+
+## Derived-data maintenance (writes not driven by sync)
+
+Some FTS/occurrence writes do not come from a sync cycle and must obey the same
+discipline:
+
+- The rolling occurrence **horizon advances** over time.
+- **Timezone data changes** invalidate already-materialized occurrences.
+- A **Tier-3 body fetched on demand** must be indexed so it becomes searchable.
+
+These go through `apply_maintenance`, which writes only derived rows under the
+**same scope lease** as sync — so maintenance and sync of one scope cannot race.
+A cross-cutting trigger (a tzdata bump) fans out by acquiring each affected
+scope's lease in turn.
+
+For the occurrence triggers, the per-scope step is: re-run `engine_recurrence::expand`
+for the scope's events over the (advanced) horizon with the current tzdata, then
+commit a maintenance batch through `apply_maintenance`. Because `DerivedWrite::removed`
+clears **every** derived kind for a key — not just occurrences — the batch re-derives
+each event in full: `removed: [event keys]` plus a fresh projection
+(`push_event`/`push_mail`) **and** the fresh occurrences, so a horizon advance does
+not strip an event's FTS/structured rows. `removed`-before-upserts makes the replace
+atomic, and unchanged occurrence instants stay byte-stable.
+
+`engine_sync::expand_calendar_horizon` implements this, fanning out across the
+account's event scopes (enumerated by `SyncScope::object_kind`, so a CalDAV account's
+one-scope-per-collection and a JMAP account's single event type are both handled), and
+is exposed on the facade as `Engine::expand_horizon`.
+
+## The expansion window is the store's, not the caller's
+
+`event_occurrence` rows are keyed by `(scope, event, start, recurrence-id)` and **upserted**,
+so a changed event whose key set moved — a start that shifted, an `RRULE` that shrank — would
+*add* rows beside its stale ones rather than replace them, and render at both instants on a
+grid forever. So `EventScope::derive` clears each changed event's occurrence rows before
+re-deriving them (`DerivedWrite::reset_occurrences` — the narrow counterpart of `removed`:
+every other derived kind is a single upserted row or a per-object junction replace, so
+clearing those too would be churn). This is not a calendar-write concern; a *remote* move
+mis-synced the same way.
+
+But that clear is **unwindowed**, and that is what forces the rest of this design. The rows
+were always *relative to* a horizon, and the horizon was implicit — so re-expanding a cleared
+event over whatever horizon the **caller** happened to hold silently destroyed everything
+outside it: a routine one-month delta that touched one event deleted that event's whole
+already-expanded year, while every *unchanged* event kept theirs. A weekly meeting vanished
+from next month's grid because somebody renamed it, and no host signal said to re-expand.
+
+So the store owns the window. `sync_scope` records the `ExpansionWindow` — the horizon its
+occurrence rows span and the zone they were resolved through (schema v6) —
+`Store::set_expansion_window` writes it under the scope lease, and
+`StoreRead::expansion_window` reads it back:
+
+- **`expand_calendar_horizon` is the only call that moves it**, and it has just re-expanded
+  *every* event in the scope to match, so recording it there is honest by construction.
+- **A sync re-expands a changed event over the stored window**, never over its own `horizon`
+  argument — which now only *seeds* the window on the very first sync of a scope, so a host
+  that has not called `expand_horizon` yet still materializes something.
+- **A post-write reconcile takes the same window**, so `Engine`'s calendar writes need no
+  `horizon`/`host_zone` at all: a write is not the place to state what the UI is showing.
+  Reconciling a scope that has never been expanded is `SyncError::NoExpansionWindow` rather
+  than a silent no-op — expanding nothing would store the events with zero occurrences *and*
+  advance the cursor, leaving the grid confidently empty forever.
+
+**A sync will not do this, and that is the trap.** `ScopeSyncer::derive` expands only
+the objects the delta *changed*, so once an account is synced, a provider reporting "no
+changes" (the steady state) derives no occurrences at all. A host that widens its
+horizon and re-syncs to fill the new range gets **nothing, permanently** — the range
+read over it returns empty, and syncing again never fixes it. Only a maintenance
+re-expansion (or a full reset) materializes it. The same applies to a **host-zone
+change**: a floating event's stored `start_utc` is only correct for the zone it was
+expanded under.
+
+Still deferred: a `tzdata-version` index to find *only* stale scopes, and an
+occurrence-only clear so a pure horizon advance need not re-project unchanged text.
+Today `expand_calendar_horizon` re-expands every event in the scope on every call, so a
+host widens in coarse chunks against its own watermark rather than calling it per page.
+
+On-demand fetched bodies **are** searchable (resolving the "does opening old mail
+make it searchable?" question: yes), via a separate lease-free body index — **not**
+the scope-derived FTS — so opening a message indexes its body immediately and a
+later re-snapshot cannot wipe it (below). Search coverage metadata must therefore
+reflect that local coverage can grow over time; it is not a static property of the
+corpus.
+
+## On-demand message content: text vs bytes (Tier-3 bodies)
+
+A message's on-demand content splits by **text vs bytes** (`north-star.md`):
+searchable text in SQLite, the heavy byte payload on the filesystem. Both are cached
+through **separate, lease-free** traits in `engine-store` (beside `Store`), keyed by
+`(account, ProviderKey)`:
+
+- They sit **outside** the scope-fencing/lease contract on purpose. The raw bytes for
+  a `(UIDVALIDITY, UID)` (or JMAP blob) are immutable and the extracted text is a pure
+  function of them, so the caches are idempotent and need no lease — a host opens and
+  searches a message *while a sync of its scope is in flight*; taking the scope lease
+  would needlessly serialize reads behind sync.
+- **Bytes — `MessageSourceCache`** (`put_message_source`/`get_message_source`). The
+  raw RFC 5322 source (the whole `BODY.PEEK[]`, which carries the attachments) can be
+  1–15 MB, so it does **not** live in SQLite. `store-sqlite` writes it to a
+  **content-addressed filesystem blob area** (`<db>.blobs/sources/<sha256>.eml`; an
+  in-memory store uses a temp dir), deduping identical payloads and verifying the
+  content hash on read; SQLite keeps only metadata (`message_source`). The blob I/O
+  runs off the connection lock. The same raw-source blob is re-parsed on demand for
+  inline CID parts and downloadable attachment bytes. This is the content-addressed blob
+  foundation durable attachment entities will reuse. Kept for losslessness
+  (DKIM/view-source/forward).
+- **Text — `MessageBodyStore`** (`put_message_body`/`get_message_body`). The extracted
+  body (plain + html) lives in the `message_body` table — small, the reading-view fast
+  path (no disk read, no re-parse), and the **search** source. A trigger maintains
+  `message_body_fts` (FTS5 over the plain text). Because this index is lease-free, an
+  IMAP re-snapshot cannot wipe it wholesale — sync reaches it only through the tombstone,
+  which drops the row for a message that is gone; `search_mail` matches it
+  alongside the scope FTS (RRF-fused) and joins to the live `message` rows so stale rows
+  for deleted messages drop out, and to `message_body.account` so IMAP keys that
+  collide across accounts cannot cross over (`search.md`).
+- The fetch-throughs are `engine_sync::fetch_message_body` (text in SQLite → on-disk
+  raw → one provider fetch; best-effort caching of both),
+  `fetch_inline_parts`, `fetch_message_attachments`, and `fetch_message_attachment`
+  (raw blob → one provider fetch if missing; best-effort raw caching). They surface as
+  `Engine::message_body`, `message_inline_parts`, `message_attachments`, and
+  `message_attachment` (`engine-api.md`). Durable per-attachment blob entities and
+  embeddings/RAG over the indexed text are later slices.
+- **Both are bounded by sync depth, not by a size cap.** The scope tombstone removes a
+  message's cached body and source with it, so the caches hold exactly the window the host
+  chose to sync (below). A size cap survives only as a possible backstop for an account
+  synced over all time.
+- A host warming the cache in bulk (an offline-first client fetching every body in its
+  synced window) plans its work with `Engine::mail_missing_body(accounts, limit)` —
+  the list read's ranking (newest first) with the already-warm rows filtered out **in the
+  query**, then pulls each result through `Engine::message_body` as usual. The absence
+  test belongs in the store because the warm set is the larger half: answered in the
+  caller, an already-warm mailbox has every cached key read out and diffed, every pass,
+  to conclude there is nothing to do. The warming loop itself (pacing, retry, when to
+  run) is host policy, not engine state.
+
+## Re-normalization on a normalizer-version change
+
+The store is a re-derivable cache of **normalized** provider data — how a provider
+decodes wire bytes into objects (subject charset, header parsing) and how
+`engine-core` projects them. When that logic changes, already-synced objects hold the
+*old* normalization and an incremental delta sync will never refresh them (it only
+fetches what changed on the server, not what the engine now decodes differently).
+
+`engine_store::NORMALIZER_VERSION` is the marker for that logic. A backend records it
+(store-sqlite: a `meta` row) and, **on open**, clears every scope cursor when the stored
+value differs — so the next sync re-snapshots and re-normalizes everything. A pre-marker
+database (no row) reads as a mismatch and gets exactly that one-time re-sync. Bump
+`NORMALIZER_VERSION` whenever a change alters the bytes-to-object mapping in any provider
+or in `engine-core` (e.g. the Windows-1252 subject fix); a purely additive change need
+not. The cursor clear leaves scope rows and objects in place — the re-snapshot overwrites
+and tombstones them — so nothing is orphaned, and the durable outbox is untouched.
+
+A fix to one adapter's **sync**, rather than to decoding, does not need this: the adapter
+versions its own cursor and reads an older one as no cursor, so only its scopes re-sync
+(IMAP: `CURSOR_VERSION`, `imap-smtp.md`).
+
+The **host-triggered reset** (`Engine::reset`) uses the same primitive: clear the cursors
+so the next sync is a full refetch. It is the manual counterpart of the automatic
+version-driven clear — a "reset / clean state" action a host exposes, and the escape hatch
+if a store is ever suspected stale.
+
+## Forgetting an account, or one domain of it
+
+`forget_account` (`SqliteStore`, wrapped as `Engine::forget_account`) purges everything the
+store holds for an account, for a host removing it. `forget_account_domain(account, domain)`
+(`Engine::forget_account_domain`) purges one `SearchDomain` of it (mail, calendar or
+contacts) and leaves the other two with their objects, scopes and cursors, for a host that
+stops syncing that domain. Either way the purged domain's next sync is a full snapshot rather
+than a delta off a cursor over rows that are gone.
+
+- **Scopes are placed by `SyncScope::domain()`**, one exhaustive match over every variant,
+  containers and discovery scopes included, and JMAP's `Thread` and `EmailSubmission` (which
+  `object_kind` leaves out) as mail. It answers `None` only for a JMAP data type the build does
+  not know; such a scope is kept.
+- **Queued writes are placed by `PendingOpKind::domain()`.** A row enqueued before the store
+  recorded kinds cannot be placed, is never attempted anyway (see the outbox), and is kept.
+  Forgetting the account removes both.
+- **Mail** also takes the cached bodies and raw sources and the recipient history, except a
+  **suppressed** observation: it records that the user asked to forget an address, and
+  dropping it would let the same Sent mail, synced again, bring the address back.
+- **Contacts** also takes the cached photos and moves the contact generation; the facade then
+  rebuilds the people index from the sources that remain, so person ids survive for everyone
+  else and nobody is listed from a card the account no longer holds. `forget_account` instead
+  clears the index outright and leaves the rebuild to the next contact sync.
+- **Calendar** has no account-keyed rows of its own; its scopes carry everything.
+- Neither is lease-gated: the host stops the account's (or the domain's) syncs and writes
+  first, and the store's single connection serialises the purge. Both are **SQLite-only**, like
+  the prune below, because the facade is bound to `SqliteStore`; the reference store has no
+  lifecycle purge to hold them to. The purge tests read the schema, so a new account-keyed
+  table that no domain names fails them rather than surviving a forget.
+
+## Local depth narrowing without a provider
+
+The per-sync `window` (`SyncWindow { since }`, above) lets a host **widen or narrow** sync
+depth on the next sync without reconnecting. Narrowing is enforced for a reachable account by
+clearing the mail cursors and re-syncing: the snapshot under the narrower window carries only
+in-window ids, so its reconciliation **tombstones the out-of-window rows**. That path needs the
+provider. When the account cannot reach it, the app can store the new depth but cannot force
+that re-snapshot — so the engine owns a local cleanup that reproduces the *same* end state
+offline: `SqliteStore::prune_account_mail_outside_window` (`Engine::prune_account_mail_outside_window`),
+returning a `PruneReport { messages_removed }` (`engine-store`).
+
+- It filters `message.date_utc` — the message's `received_at` falling back to `sent_at`,
+  which is exactly the field a provider window maps to (IMAP `SINCE`, JMAP `after` on
+  `receivedAt`, Graph `receivedDateTime ge`) — so it tombstones precisely the mail a
+  narrower-window snapshot would. Comparison is on the UTC **date** prefix against the window's
+  **inclusive** floor date, so mail *on* the floor is kept and only strictly-earlier mail drops.
+- **Undated mail is kept.** A message with no `date_utc` is not provably out of window, and a
+  prune must never over-delete; a `NULL` date is left in place (an unbounded window is likewise
+  a no-op — nothing is outside it).
+- It reuses the scope **tombstone** (object + all derived search/thread/occurrence rows), so
+  the removed mail leaves nothing orphaned and search/reads reflect it immediately — the same
+  cleanup a snapshot reconciliation performs. It runs only over the account's **mail** scopes
+  (`SyncScope::search_domain() == Mail`); calendar/contact objects, account metadata, and other
+  accounts are untouched.
+- Like `forget_account` it is **not lease-gated** — the store's single connection serializes it
+  atomically against any in-flight sync — and it **advances no cursor**, so a later delta sync
+  resumes unaffected: no delta re-adds the pruned tail (a QRESYNC delta's state changes match
+  no row there, and the IMAP reconcile without QRESYNC reads only the window).
+- The **caches follow the mail**: the scope tombstone drops the message's `message_body` and
+  `message_source` rows with it, so depth bounds the caches too. Afterwards run
+  `sweep_unreferenced_blobs` (the files) and `vacuum` (the database pages) — the two halves of
+  the space a prune frees, and the file half is far the larger one.
+
+## Dropping bytes without dropping mail
+
+A prune removes *mail*. `drop_message_sources_over(account, octets)`
+(`MessageSourceCache`, wrapped as `Engine::drop_message_sources_over`) removes only the cached
+**raw sources** above a size, for a host lowering a message-size cap. It returns
+`SourcesDropped { sources_removed, octets_freed }`.
+
+- The message row and its `message_body` text **stay**, so the list, the threads and body search
+  are unchanged. Dropping the text too would silently make old mail unsearchable to free bytes
+  that are not where the bytes are. A body fetch is text-first, so the message goes on **reading
+  offline**; what a later open re-fetches is the raw source itself — the attachments and inline
+  images sliced from it.
+- **`mail_missing_body` tests both halves for exactly this reason.** A dropped source leaves a
+  message that reads fine, so a text-only work list would call it warm for ever and a raised cap
+  would fetch nothing back.
+- **A warm needs `ensure_message_source` as well as `message_body`.** The body fetch is
+  text-first, so on a message whose text outlived its bytes it returns without a provider call
+  and cannot put them back — the message would sit on the work list, looked at by every pass and
+  fixed by none. `ensure_message_source` is that second half: one indexed metadata read where
+  there is nothing to do, a single fetch where there is. It is deliberately **not** folded into
+  `message_body`, because an *open* wants the text as fast as possible and re-caching bytes a
+  lowered cap just discarded is the opposite of what the user asked for.
+- `message_source.size_octets` is the byte count taken as the source was written, and blobs are
+  stored uncompressed, so it is the file's size on disk rather than an estimate of it. It is what
+  makes this one indexed-free scan of one row per cached body rather than a walk of the blob area.
+- A row cached **before that column existed** carries `NULL`, which is every row in a store that
+  predates it — so the pass measures those from their blobs and writes the answer back before
+  filtering. Without that, the first lowering on an installed copy would free nothing and read as
+  a bug. A row whose blob is already gone stays `NULL`: it occupies nothing.
+- Like a prune it frees no disk by itself. Follow with `sweep_unreferenced_blobs` and `vacuum`,
+  and note the sweep's five-minute grace period below — a body warmed moments ago waits for the
+  next pass.
+
+## Reclaiming blobs: the delete is asymmetric
+
+A blob's name is the SHA-256 of its bytes, so two copies of one message share one file and **no
+row owns a file**. Dropping the last `message_source` row that names a hash therefore cannot
+delete it: another account's row may name the same hash. The file half is a mark-and-sweep —
+`SqliteStore::sweep_unreferenced_blobs` (`Engine::sweep_unreferenced_blobs`), returning a
+`SweepReport { blobs_removed, bytes_reclaimed }`.
+
+- It covers **every** namespace in `blob::NAMESPACES` (raw sources and contact photos). A
+  namespace missing from that list is a namespace that leaks, which is why it is one constant
+  rather than a call site per kind.
+- **Ordering is the safety.** A blob is written *before* the row that names it, so it lists the
+  blob area **first** and reads the live hashes second: a file written after the listing is not a
+  candidate at all. A five-minute grace period covers the remaining window (one directory scan),
+  and any file young enough to be mid-write is skipped.
+- It takes no lease and holds no transaction. A blob removed a moment early reads back as a
+  **cache miss** — `read_source` verifies the hash — so the caller re-fetches; it can never serve
+  wrong bytes.
+- A host runs it after anything that drops mail in quantity: a depth narrowing, a narrower-window
+  re-snapshot, `forget_account`, or `forget_account_domain`. Nothing calls it on a sync's own tombstones, so mail deleted
+  on the server leaves its blob until the next sweep.
+
+## The outbox
+
+An illustrated overview of this section and the next, for a first read, is
+[`../outbox-and-sending.md`](../outbox-and-sending.md). Its pictures are generated from
+`docs/images/outbox-diagrams.py`: a change to a rule they show updates them in the same change.
+
+Pending ops are durable before any side effect and are claimed with the same
+fencing discipline as scopes. The thin inline drivers built on this are
+`engine_sync::{submit_mail, edit_mail, create_calendar_event, patch_calendar_event,
+delete_calendar_event, put_calendar_document}`. `edit_mail` applies a `MailEdit`
+(mark-read/flag, move, or permanent delete) and serializes on the target message key
+(`mail:{key}`). It is `queue_mail_edit` (record the op, no connection needed) then
+`send_mail_edit` (claim, call the provider, record), and a host that shows the edit before
+the server answers calls the two separately. A failure the outbox will retry is not an error:
+the op parks and the answer is `MailEditSent::Queued`. Only one that settles the op is
+returned, as a plain classified `Failed` (no `NeedsConfirmation`: a mail edit is not
+post-`DATA`-ambiguous like an SMTP send, and a stale-target `Conflict` self-corrects after a
+re-sync). The calendar drivers do the same, and serialize on the
+event's **`UID`** (`event:{uid}`) — the cross-system identity, which exists *before* a
+create has a provider id and survives a transport that assigns its own (JMAP), so writes to
+one event never race on either provider.
+
+- **The payload is the intent, not the rendered bytes.** A calendar patch stores the
+  `EventEdit` — which occurrence, and what changed — never the document it produced. That is
+  what makes a `Conflict` recoverable: the retry re-applies the edit to a **freshly fetched**
+  base. Re-sending bytes built from the copy the server has moved past would silently revert
+  somebody else's edit with a write the server happily accepts. (The drainer that will do
+  that recovery is issue #60; today a `Conflict` is recorded and surfaced to the caller.)
+
+- **A write does not update the store; a *reconcile* does** (issue #65). The drivers are
+  deliberately pure: they record the op, call the provider, record the outcome. They never
+  touch the stored object — a write's response is a receipt, not a document, and the store's
+  copy must keep coming from the **server** (`caldav.md`). So the read-your-writes step is a
+  separate primitive, `engine_sync::reconcile_calendar_events`: the **event-scope delta**,
+  which re-delivers the object the server now holds, tombstones a delete, and advances the
+  cursor — one round trip, no new provider verb. The `Engine` facade runs it after every
+  calendar write (`engine-api.md`), so a host gets read-your-writes by construction while the
+  drivers stay usable by a **headless** caller — the #60 drainer has no host `horizon`/zone
+  and cannot expand occurrences, which is exactly why the reconcile is not folded into them.
+  It can never fail the write: a write that landed but did not reconcile is still a write,
+  reported as `Reconciled::{Busy, Failed}` rather than as an error.
+
+- **One exception: a queued keyword change is shown before the server has it.** A mark-read
+  or a flag is a change the user watches for, and an outbox may hold it for minutes (offline,
+  rate limited, backing off). So a `MailEdit::SetKeywords` op carries a
+  `write::KeywordEdit`, and the store applies it to the message **in the transaction that
+  queues the op**. The server stays the authority, kept beside the message:
+  - the store records the keyword set the server last reported for a message with a change
+    still unsettled (`server_keywords`), and shows it with every unsettled change applied, in
+    the order queued;
+  - a sync's write is the server's word, so it replaces that set and the changes go back on
+    top: a sync never undoes a change still waiting;
+  - an accepted change joins the server's set, and one refused for good or withdrawn simply
+    stops being applied, so a refusal takes back only its own change and keeps whatever the
+    server reported meanwhile;
+  - a change accepted after a pass began reading (`ApplyBatch::observed_from`, the pass's
+    claim instant) is applied over that pass too, because it may have read the message
+    before the change landed.
+
+  A move or a delete is not shown early: hiding a row is the host's to do and undo, and the
+  next sync brings the server's word. The rule is the same in both stores, held by the
+  contract suite (`outbox_cases/keyword_edits.rs`).
+
+- **An op says which write it is.** `PendingOp::kind` is a `PendingOpKind`, one variant per
+  driver, stored in its own column. The payload is an *untagged* serialization of the
+  provider-layer request type, and nothing else in the row distinguishes the verbs: a mail
+  edit and a report both serialize on `mail:{key}`, every calendar verb on `event:{uid}`, and
+  the idempotency key is caller-minted for all but a submission. A drainer cannot dispatch
+  what it cannot identify.
+  ⚠️ **A row enqueued before v14 has no kind, and is never attempted.** The information was
+  never written, and guessing would replay a months-old archive or send against a mailbox
+  that has moved on. Such a row is listed by the queue read so a host can show it and cancel
+  it, and refused by both claims as `Unknown`. One an older build left `InFlight` is
+  released by recovery as a retryable failure, parked in `Pending`, so its dead lease holds no
+  resource and the host can still withdraw it.
+
+- **A throttled *read* does not park at all — it reports when to come back.** A scope
+  refused by a rate limit fails with `FailureClass::RateLimited` and, where the server named
+  an instant, `ApiError::retry_after()`. The engine does not sleep on it: the wait is a
+  scheduling decision, scheduling is the host's (`north-star.md`), and a task asleep inside
+  a sync call holds a lane of the account's `RequestGate` and stalls that account's *other*
+  providers against limits they have not reached. Re-run the same call once the wait has
+  passed; a refused read has done nothing and changed nothing. A short wait never reaches a
+  host — `engine-http` absorbs it (`http-throttling.md`).
+- **A retryable failure parks; it does not settle.** `mark_pending_op` reads the outcome's
+  `FailureClass`: one that `is_retryable` puts the op back in `Pending` with `attempts`
+  raised and `next_attempt_at` set from `engine_store::retry_delay` (the provider's own
+  `retry_after` when it sent one, else 30s doubling to a 30-minute cap), and it becomes
+  claimable again when that time passes. **The provider's own number is obeyed past that
+  cap** — a server saying "come back in forty-five minutes" is an instruction, not a hint to
+  average down — and every HTTP adapter now supplies one where its server named one
+  (`http-throttling.md`); before that it was a path nothing ever exercised. It settles as `Failed` only once `attempts` reaches
+  `MAX_ATTEMPTS`, **and a send never does** (`engine_store::settles_on_attempts`): the
+  message is the user's own work, settling it on a count turns a server that was down for an
+  afternoon into a message quietly not sent, and waiting costs nothing because an attempt
+  happens only when the host drains. Every other class settles at once: a conflict or an auth
+  failure needs recomputation or a human, and backing off changes neither. `Failed` therefore
+  means *the outbox gave up*, not *one attempt failed*, and a claim refused for a backoff
+  answers `ClaimRejection::Backoff` rather than `Settled`, because the caller must not
+  conclude the op is finished. The rule is one function, `engine_store::record_outcome`,
+  which both stores and their queue reads call.
+
+- **The queue is readable, and withdrawable.** `StoreRead::list_pending_ops(account)` returns
+  every row that has not settled, and every send that settled `Failed`
+  (`engine_store::stays_listed`), in enqueue order, with its kind, payload, attempts, backoff
+  and last failure class. This is what makes the outbox a queue rather than a set of ids a
+  caller had to remember: `pending_op_state` answers about one op the caller already holds
+  the id of, which a host that has restarted does not. A failed send stays because it is a
+  message that has not gone: it leaves the queue only when the host sends it again
+  (`retry_pending_op_now`, back to `Pending`) or withdraws it (`cancel_pending_op`).
+  `Store::cancel_pending_op` settles a queued op as `Cancelled` (a state of its own: a user
+  deleting a queued message is not a failure) and bumps its fence, refusing rather than
+  erroring when the op is under a live lease or awaiting confirmation, neither of which can be
+  called back.
+
+- **The drainer is what comes back for a queued op.** `engine_sync::drain_outbox` reads the
+  account's queue, keeps the ops it dispatches, and takes each under a **targeted** claim,
+  because the batch claim would lease kinds it cannot run and hold them for a whole lease:
+  the failure #202 removed from the inline path. It dispatches mail only so far
+  (`MailSubmit`, `MailEdit`, `MailReport`, `MailDraftPut`, `MailDraftDelete`, `MailboxEdit`),
+  whose
+  provider calls are complete in the
+  payload; a calendar patch or delete takes the `base` event *beside* the request, so
+  draining one means re-reading it and re-applying the stored intent, which is the conflict
+  recovery and is its own work. Everything else stays queued and untouched, counted as
+  deferred. A provider failure is not an error: it is recorded against its own op and
+  reported, so one bad recipient does not stop the rest of the queue going out.
+  **The host decides when a pass runs** (on reconnect, after a sync, when a user asks). The
+  engine holds no timer: the reachability signal is the host's, and polling from here would
+  wake a dead network on a battery.
+- ⚠️ **`DrainedOp::provider_key` is the only place a caller learns what a queued write
+  became.** An op that parked while offline succeeds with nobody watching, and a settled op
+  is not in the queue read (`list_pending_ops` returns what is still outstanding), so the
+  report is the one channel. A **draft** is what makes this load-bearing: the next save has
+  to name the copy it supersedes, and on three of the four adapters the key it resolved to
+  is not the one that went in (`providers.md`). A host that drops the report stores a
+  second draft beside the first.
+
+- **A queued draft save supersedes the one before it.** A draft is saved *repeatedly*, so
+  five saves with no network must not become five rounds of store-and-remove against a
+  folder the user is watching. `put_draft_mail` withdraws an unsettled save already queued
+  for the same draft before enqueuing, which needs no new primitive: `cancel_pending_op` is
+  the same one a host uses. Two ops it leaves alone, each for a reason:
+  - **One a worker holds**, because its provider call may be in flight and withdrawing it
+    would claim to have stopped something that has gone. The resource key serialises the
+    new save behind it anyway.
+  - **The one this save would itself reuse.** The op is named by a hash of what it would
+    store, so saving identical text twice is the *same* op by design; withdrawing it would
+    cancel the row the enqueue then dedups onto, leaving the save with nothing to claim.
+    (Found by a test, which is the only reason it is not a bug.)
+- **A draft's writes serialise on the resource its submission uses** (`draft:<Message-ID>`),
+  so saving and sending one composition cannot run at once: whichever is claimed first holds
+  the resource and the other waits.
+
+- **A folder change is judged when it runs, not when it was queued.**
+  `engine_sync::edit_mailbox` stores a `MailboxChange`: the host's intent, plus `seen`, the
+  place (name and parent) the user saw the folder in. It never stores the `MailboxEdit` the
+  intent comes to. Before anything is sent, inline or from the drainer, the op reads the
+  folder list from the server and plans against it (`outbox/mailbox_plan.rs`):
+  - a folder that is gone, or no longer at `seen`, is a `Conflict`, settled and never
+    sent. On JMAP, Graph and Gmail a folder id survives a rename, so without this a
+    queued rename would silently overwrite one made in another client while this device
+    was offline;
+  - a create that finds its folder already made, and a delete that finds nothing, are
+    **done** without a request: the op is retried, and a retry meets what the first
+    attempt did;
+  - the name a trashed folder takes inside Trash (`Bills`, `Bills 2` …) is chosen from
+    the list as it stands then.
+  Every change to one account's tree serialises on one resource (`mailbox-tree`), because
+  an IMAP rename moves the key of every folder beneath it. The names no transport accepts
+  (empty, surrounded by whitespace, a control character, `/`) are refused before enqueue
+  (`validate_mailbox_name`, which a host can call while the user types).
+- **A folder the list no longer holds takes its mail with it.** Where message sync is per
+  folder (IMAP, Graph) a folder's mail is its own scope, and on IMAP a rename is a new path,
+  so the old path's scope would otherwise keep a full copy of the mail that every search
+  finds. `forget_vanished_folders` runs after every applied folder list (in `sync_mail`,
+  before the fan-out, and in `reconcile_folders`) and forgets each per-folder scope
+  (`SyncScope::folder`) the list does not name, through `Store::forget_scope`: objects,
+  derived rows **and** cursor, since a folder that returns under the same path must start
+  over rather than resume past mail that was dropped. A list that arrives empty judges
+  nothing.
+
+- **Enqueue is idempotent.** Every `PendingOp` carries a client
+  `idempotency_key`. Re-enqueuing the same key (e.g. after a crash between the
+  side effect's commit and the caller learning its id) returns the existing
+  `PendingOpId` instead of creating a duplicate.
+- ⚠️ **A settled row is the idempotency record — do not prune one.** `UNIQUE (account,
+  idempotency_key)` is the whole mechanism above, so deleting a `Succeeded` row re-arms a replay
+  of that op, and the ops include **sends**. Reclaiming the space needs a `settled_at` column and
+  a retention window rather than a `DELETE`, and it buys very little: a production store after a
+  five-account sync of 7,118 messages held **34** `Succeeded` rows in a 235 MB database.
+- **Claim returns only runnable ops.** `claim_pending_ops` excludes any op whose
+  `depends_on` are not all in a terminal-success state, and any op whose
+  `resource_key` collides with an already-leased op. This both honors offline
+  `create → edit` dependency chains (the edit waits until the create's provider
+  id is known) and serializes writes to the same provider resource.
+- **There are two claims, and an inline driver takes the targeted one.**
+  `claim_pending_ops` asks *what may run now* and is the drainer's primitive: ordered
+  by id, capped at a batch size, leasing whatever it gets. `claim_pending_op` asks
+  *may this op run now*, by id, and is what a driver resolving the op it just
+  enqueued needs. Mixing them up is a queue with a head: an op the caller will not
+  resolve gets leased and abandoned for the lease's whole TTL, and, worse, the batch
+  never reaches an op past its cap, so once an account accumulates more runnable ops
+  than the cap, **every** later write is refused and each refusal leaves one more
+  behind. That is unrecoverable while the drainer is still future work, which is
+  exactly why the targeted claim is not an optimisation.
+- **A refusal names its condition.** `claim_pending_op` returns
+  `PendingOpClaim::Refused(ClaimRejection::{Unknown, Settled, DependencyUnmet, Busy})`
+  rather than an empty result, because the caller acts on the difference: `Busy` is a
+  wait and nothing else is. Both stores answer with the batch claim's own predicate —
+  runnable means `Pending` **and due**, and in both stores a row with no kind is runnable in
+  neither. An `InFlight` op is never runnable as it stands: one whose lease died is recovered
+  first ("A send survives its process").
+- **Serializing on a resource means waiting, not refusing.** The store defers an op
+  whose `resource_key` a live lease holds; the inline drivers wait that out
+  (`engine_sync::outbox::RESOURCE_WAIT`, an upper bound on one provider round trip)
+  instead of failing. A host marks a message read when it opens and archives it a
+  moment later, so the second write routinely arrives inside the first's round trip;
+  a refusal there loses the archive, and with no drainer it loses it permanently.
+- **Resolution is fenced.** Each claimed op is leased individually with its own
+  fencing token (`OpLease`). `mark_pending_op` takes the `OpLease`, not a bare
+  id, and the store rejects a stale token. The outbox path is fenced exactly
+  like the sync path: a sync-only fence would let a suspended-then-resumed mobile
+  worker clobber an op that was already re-claimed.
+- The outbox lease is **account-scoped**, independent of sync scopes.
+
+### A send survives its process
+
+A message the user pressed Send on is never lost and never delivered twice, whatever ends,
+stalls or suspends the process at any point of the attempt. Four rules make it so.
+
+- **The hand-over is recorded before the point of no return.** Immediately before the first
+  byte that could deliver the message, the attempt records through the outbox, under its
+  lease, that it is handing the message over (`Store::record_hand_over`, reached only
+  through `engine_provider::HandOver`; where that byte is on each transport is
+  `providers.md`). A provider writes the byte only once the record succeeded; a record that
+  fails (a store error, a lease another worker took) ends the attempt as `Retryable` with
+  nothing sent. The record is the token of the attempt that made it, and it is synced to disk
+  before the provider goes on, as is every enqueue and every withdrawal: SQLite runs WAL with
+  `synchronous = NORMAL`, which a power cut can roll back, and losing the record would make
+  a delivered send look like one that never left.
+- **A dead attempt is recovered by what the record says, on every path.** An attempt whose
+  lease has lapsed is gone (or suspended, which is the same thing to everyone else). The store
+  recovers it before any decision about the op, inside the same transaction: both claims, the
+  host's verbs (`cancel_pending_op`, `retry_pending_op_now`, `confirm_pending_op`) and
+  `recover_interrupted_ops`; the queue read and `pending_op_state` show it as the recovery
+  will leave it. Recovery records `engine_store::interrupted_outcome` and bumps the token:
+  - a send **with no record** never reached the point of no return, so it is a retryable
+    failure due at once: "Send now" sends it, and so does the next drain;
+  - a send **with the record** may be in front of its recipients, so it awaits confirmation
+    (`NeedsConfirmation`), which no claim takes;
+  - any other write never records one, and is the retryable failure a timeout is, with its
+    backoff.
+- **A live attempt keeps its lease for as long as it runs.** A large upload on a slow line or
+  a server that takes ten minutes to accept a message (`deadlines.md`) outlasts any fixed
+  lease, so the worker renews it every third of its TTL (`engine_sync::outbox::holding`,
+  `Store::renew_pending_op_lease`) and stops when the attempt ends. A renewal refused as
+  stale means another worker recovered the op (a suspended process past its lease); the
+  record decides what is left: an attempt that had not handed over cannot any more, and one
+  that had can still report its outcome.
+- **Only the attempt that handed over, or the host, settles a send it may have delivered.**
+  `mark_pending_op` hears one stale lease: that of the attempt whose record a recovery
+  parked the send under, because it alone can know what happened (a process suspended mid-send
+  that resumes). Otherwise a `NeedsConfirmation` send resolves by its copy syncing into a Sent
+  mailbox (`engine_sync`'s `sent_copies`), or by `Store::confirm_pending_op`:
+  `Confirmation::Delivered` settles it, `NotDelivered` makes it due at once under a new
+  token, so a late answer from the old attempt cannot settle the new one.
+
+What the server says after the hand-over decides the rest: a refusal it states (an SMTP
+`4xx`/`5xx` to the end of the message, an HTTP status other than a gateway's `502`/`504`, a
+JMAP `SetError`) is classified as such and clears the record, so the next attempt starts
+clean; an answer that never comes or cannot be read is `NeedsConfirmation` (`deadlines.md`).
+
+`recover_interrupted_ops` assumes the previous process has ended, as `abandon_sync_leases`
+does. A store shared with a process that has not (an app and its background task) loses
+nothing by it: the record is fenced, so a recovered attempt that had not handed over cannot
+any more. The outbox's write transactions take SQLite's write lock up front
+(`BEGIN IMMEDIATE`), so two processes claiming one op queue on `busy_timeout` and one wins,
+rather than one failing with `SQLITE_BUSY`.
+
+## Revised trait
+
+```rust
+#[async_trait]
+pub trait Store: Send + Sync {
+    // Read-only inspection. Never plan a write from this.
+    async fn load_sync_state(
+        &self,
+        account: AccountId,
+        scope: &SyncScope,
+    ) -> Result<Option<SyncState>>;
+
+    // Sync writer path. The lease pins (account, scope) + fencing token, so the
+    // apply call carries no loose account/scope args to disagree with it.
+    async fn claim_sync_scope(
+        &self,
+        account: AccountId,
+        scope: &SyncScope,
+        req: LeaseRequest,
+    ) -> Result<SyncClaim>; // { lease, state: Option<SyncState> }
+
+    async fn apply_sync_update<T>(
+        &self,
+        lease: &SyncLease,
+        batch: ApplyBatch<'_, T>,
+    ) -> Result<SyncApplied>
+    where
+        T: SyncObject + Serialize + Send + Sync;
+
+    async fn apply_maintenance(
+        &self,
+        lease: &SyncLease,
+        derived: &DerivedWrite,
+    ) -> Result<()>;
+
+    async fn release_sync_scope(&self, lease: SyncLease) -> Result<()>;
+    async fn forget_scope(&self, lease: SyncLease) -> Result<()>; // objects, rows, cursor
+    async fn abandon_sync_leases(&self) -> Result<usize>; // startup recovery only
+    async fn recover_interrupted_ops(&self) -> Result<usize>; // startup recovery only
+
+    // Outbox.
+    async fn enqueue_pending_op(
+        &self,
+        account: AccountId,
+        op: PendingOp,
+    ) -> Result<PendingOpId>; // idempotent by (account, op key); PendingOp carries no account
+    async fn list_pending_ops(&self, account: AccountId) -> Result<Vec<PendingOpRow>>;
+    async fn cancel_pending_op(
+        &self,
+        account: AccountId,
+        op: PendingOpId,
+    ) -> Result<Option<OpRejection>>;
+    async fn claim_pending_ops(
+        &self,
+        account: AccountId,
+        req: LeaseRequest,
+        limit: usize,
+    ) -> Result<Vec<LeasedPendingOp>>; // runnable ops only; the drainer's primitive
+    async fn claim_pending_op(
+        &self,
+        account: AccountId,
+        op: PendingOpId,
+        req: LeaseRequest,
+    ) -> Result<PendingOpClaim>; // Leased(..) | Refused(ClaimRejection)
+
+    async fn record_hand_over(&self, lease: &OpLease) -> Result<()>; // before the point of no return
+    async fn renew_pending_op_lease(&self, lease: &OpLease, ttl: Duration) -> Result<()>;
+    async fn mark_pending_op(
+        &self,
+        lease: &OpLease,
+        outcome: PendingOutcome,
+    ) -> Result<()>;
+    async fn retry_pending_op_now(&self, account: AccountId, op: PendingOpId)
+    -> Result<Option<OpRejection>>;
+    async fn confirm_pending_op(
+        &self,
+        account: AccountId,
+        op: PendingOpId,
+        confirmation: Confirmation, // Delivered | NotDelivered
+    ) -> Result<Option<OpRejection>>;
+}
+```
+
+The provider-neutral sync data shapes (`SyncScope`, `SyncState`, `SyncUpdate`,
+`PendingOp`, `PendingOutcome`) live in `engine-core`; the lease, batch, and
+fencing vocabulary lives in `engine-store`, beside the trait that issues it. The
+trait is **encryption-agnostic** — at-rest encryption is a `store-sqlite`
+construction detail (plain SQLite over OS file encryption by default, SQLCipher
+opt-in), so the same contract holds either way. A small `StoreRead` companion
+(lease-free object/key inspection, plus `account_scopes` to enumerate an account's
+claimed scopes, `scope_objects` to batch-read a scope's objects, and `list_mail` to read
+a mailbox list — a window, a conversation, or named messages — without reading the mail
+around it) backs the contract suite and the read path.
+
+Supporting types (abbreviated):
+
+- `SyncScope` — enum over `JmapType { account, ty }`, `ImapMailboxList { account }` (the IMAP folder-list container), `ImapMailbox { account, mailbox }`, `DavCollectionList { account }` (the CalDAV/CardDAV collection-list container), `DavCollection { account, collection }`.
+- `SyncLease` / `OpLease` — opaque, store-issued; expose fencing token, bound identity, and expiry.
+- `Keyed` — one accessor (`provider_key`) for anything a sync carries, whole object or partial, so a carrier can key what it holds without knowing which it is.
+- `SyncObject: Keyed` — what a sync pass reports changes to. Names the object's partial form (`Patch`) and how it is persisted (`to_payload`, which mail overrides to write a `MailContent`). `ApplyBatch<'a, T>` and `apply_sync_update` are generic over it.
+- `DerivedWrite` — precomputed FTS rows, structured-filter rows (scalar index rows
+  plus the address/participant/membership junctions), and bounded
+  `event_occurrence` rows, plus their tombstones; the store writes them, never
+  computes them. The full-text and structured rows are projected by pure
+  `engine-core` functions (`engine_core::search_index::{project_message, project_event}`,
+  carried in via `DerivedWrite::push_mail`/`push_event`); occurrence rows come from
+  `engine_recurrence::expand`, and each carries the `tzdata_version` it was expanded
+  under (so a tzdata bump can find and re-expand exactly the affected rows). Junction
+  and scalar rows **replace** per object on replay (idempotent), and
+  `DerivedWrite::removed` is applied **before** the upserts, so a re-expansion batch
+  (`{ removed: [event], occurrences: [fresh] }`) clears an event's stale occurrences
+  and writes the fresh ones in one transaction. A small
+  `StoreRead::index_row_counts` inspection backs the shared contract's structured-row
+  parity case.
+- `LeaseRequest { owner: WorkerId, ttl: Duration }`.
+- `PendingOp { idempotency_key, depends_on: Vec<PendingOpId>, resource_key: ResourceKey, payload }`.
+- `PendingOutcome` — `Succeeded { provider_key }` | `Failed { class, retry_after }` | `NeedsConfirmation { .. }`.
+
+## Error classification
+
+Store errors map onto the provider taxonomy in `providers.md`:
+
+- `StaleLease` — token superseded; **not** retryable as-is. Re-claim, recompute,
+  reapply.
+- `ScopeHeld` — a live lease exists; retryable after backoff.
+- `Conflict` — optimistic write conflict surfaced from the store (e.g. snapshot
+  vs concurrent delta); recompute.
+- `NotRunnable` — an op was asked to resolve but its dependencies regressed.
+
+## Required tests
+
+Lock these as failing tests before implementing the store:
+
+- A write under a superseded lease is rejected with `StaleLease`; the winning
+  writer's data is intact.
+- `mark_pending_op` under an expired `OpLease` is rejected after the op was
+  re-claimed.
+- `mark_pending_op` records `Failed` and `NeedsConfirmation` outcomes distinctly,
+  and a lease naming an op with no row is rejected as `StaleLease` (not silently
+  applied); an unknown op id reads back no state.
+- `claim_pending_ops` never returns an op with unsatisfied `depends_on`, nor two
+  ops sharing a `resource_key`, and returns at most `limit` runnable ops.
+- Re-enqueue with a duplicate `idempotency_key` returns the original id and
+  creates no second op.
+- Replaying an identical `ApplyBatch` after simulated crash leaves identical
+  state (idempotent).
+- A snapshot `SyncUpdate` tombstones exactly the local rows absent from its id
+  set, and nothing else.
+- A `PendingReconciliation` whose op changed state between planning and apply is
+  skipped, and the incoming object is stored without loss; one whose op is still
+  in its expected state resolves the op to `Succeeded` in the apply transaction.
+- A `release_sync_scope` under a superseded lease is a no-op and does not free a
+  scope a newer lease holds.
+- `forget_scope` drops the scope's objects, derived rows and cursor and frees it, leaving
+  every other scope alone; under a superseded lease it is rejected as `StaleLease`.
+- `abandon_sync_leases` frees held leases without clearing cursors, and fences out
+  the abandoned worker by bumping the token.
+- `recover_interrupted_ops` takes an interrupted send that recorded its hand-over to
+  `NeedsConfirmation`, where no claim reaches it however long ago its lease lapsed, one that
+  did not back to `Pending`, due at once, and an interrupted edit back to `Pending` with the
+  attempt counted; it fences the dead workers (all but the right of the attempt that handed
+  over to report), leaves an op nobody held untouched, and changes nothing on a second call.
+- The hand-over record is written under the current lease only; a dead send with no record
+  is retried and one with a record awaits confirmation on every path (both claims, the
+  host's verbs, the queue read); a definitive refusal clears the record; a confirmation ends
+  the old attempt's right to report; a renewed lease keeps a slow attempt its own and lapses
+  once renewal stops; a send that settled `Failed` stays listed with its payload until it is
+  sent again or withdrawn, and a transient failure never settles one
+  (`contract/outbox_cases/hand_over.rs`). SQLite adds the restart, the upgrade of a store
+  with a send in flight, and two stores on one file (`outbox_ops/restart_tests.rs`).
+- Container-before-member apply ordering holds, including under snapshot
+  tombstoning. (The store enforces per-scope snapshot tombstoning and keeps
+  scopes independent; the cross-scope *apply order* itself is an orchestrator
+  invariant, locked in `engine-sync` rather than in the store.)
+
+### A store says where its schema stands
+
+`StoreRead::schema_status` is part of the contract, not one backend's extra: `SchemaStatus`
+carries the version the data is at, the version the build expects, and — when opening upgraded it
+— the version it moved *from*. A future `store-postgres` answers the same question, and a host
+asking it never branches on which backend it is talking to. A backend with no persistent schema
+(the in-memory reference store) reports `version == expected` and never migrates.
+
+`migrated_from` is captured **at open**, because that is the only moment the previous version
+exists; re-reading afterwards would report the current version as though nothing had moved. It is
+`None` for a fresh store as well as an already-current one, so a host that logs the pair says
+nothing on an ordinary launch and prints `7 → 9` exactly when that is the answer to a support
+question. A store found *ahead* of the build is refused at open rather than reported, since
+reading it could misinterpret a shape this build does not know.
+
+### A migration that moves data pins its SQL to its own version
+
+No step needs this today — `Migration` is DDL only — but the rule is why. A step's data move runs
+against the schema **as of that step**, and the live write path moves on, so a backfill must write
+its own SQL rather than borrow `derived_ops`. Sharing the live upsert means a later migration
+silently breaks an earlier one's backfill: adding columns in one step broke the backfill written
+two steps earlier, against a store that had none of them. The migration tests catch it because
+they build each step against the schema as of the step before.

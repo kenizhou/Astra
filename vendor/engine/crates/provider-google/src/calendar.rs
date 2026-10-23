@@ -1,0 +1,282 @@
+//! The calendar [`Provider`] implementation: a Google client bound to one calendar for
+//! events, with the calendar list synced at the account level.
+//!
+//! Like [`GmailProvider`](crate::GmailProvider) is account-global for mail, a
+//! [`GoogleCalendarProvider`] is **bound to one calendar**: its
+//! [`event_scope`](Provider::event_scope) names that calendar
+//! ([`SyncScope::GoogleCalendar`]) and syncs its `events.list`, while the calendar list
+//! syncs under the per-account [`SyncScope::GoogleCalendarList`]. The cross-calendar
+//! fan-out is the orchestrator's job. Unlike Graph, the time window is **optional**, and
+//! Google is IANA-native (no display-zone request header).
+
+use std::collections::BTreeSet;
+
+use async_trait::async_trait;
+use engine_core::{
+    calendar::{Calendar, Event},
+    error::FailureClass,
+    ids::{AccountId, CalendarId},
+    sync::{SyncScope, SyncState, SyncUpdate},
+};
+use engine_provider::{
+    CalendarUserAddresses, CalendarWrites, Capabilities, ConnectionInfo, EventDeletion, EventDraft,
+    EventEdit, EventRsvp, EventWriteReceipt, OverrideSurvival, PageToken, Provider, ProviderError,
+    ProviderResult, RsvpControls, ScopeSync, SyncKind, WriteGuard,
+};
+
+/// What a Google RSVP can and cannot control.
+///
+/// Both surrounding controls are native — a per-attendee `comment`, and `sendUpdates` to
+/// decide whether the organizer is emailed — and the answer rides the same guarded
+/// `events.patch` as any other edit, so it keeps the enforced `If-Match`. Declared once,
+/// and used both to advertise and to enforce, so the two can never disagree.
+const GOOGLE_RSVP: RsvpControls = RsvpControls {
+    comment: true,
+    suppress_notification: true,
+    guard: WriteGuard::Enforced,
+};
+
+/// What a Google series edit costs the user.
+///
+/// The only transport that **overwrites an override's own fields**: renaming the series
+/// renames the occurrence the user had renamed. Moving the series' time also destroys every
+/// override; changing the rule does not. Measured, and re-measured by
+/// `tests/live_calendar_survival.rs` against the real account.
+const GOOGLE_OVERRIDE_SURVIVAL: OverrideSurvival = OverrideSurvival {
+    survives_time_change: false,
+    survives_rule_change: true,
+    clobbers_own_fields: true,
+};
+
+use crate::{
+    cal_fetch::{self, CalendarWindow, EventsPage},
+    cal_override, cal_write,
+    transport::GoogleClient,
+};
+
+/// The calendar list is re-discovered as a snapshot each pass (`calendarList.list`), so it
+/// carries no provider cursor of its own — like Gmail's label list.
+const CALENDAR_LIST_CURSOR: &str = "google-calendars";
+
+/// A Google Calendar read/sync provider bound to one calendar.
+///
+/// Construct one with [`GoogleCalendarProvider::new`] from a connected [`GoogleClient`]
+/// and the calendar to bind; optionally set a snapshot date [`window`](CalendarWindow)
+/// with [`with_window`](Self::with_window) (Google's window is optional, unlike Graph's).
+pub struct GoogleCalendarProvider {
+    client: GoogleClient,
+    calendar: CalendarId,
+    window: Option<CalendarWindow>,
+    capabilities: Capabilities,
+}
+
+impl core::fmt::Debug for GoogleCalendarProvider {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("GoogleCalendarProvider")
+            .field("calendar", &self.calendar.key().as_str())
+            .field("window", &self.window)
+            .finish_non_exhaustive()
+    }
+}
+
+impl GoogleCalendarProvider {
+    /// Binds a connected client to one calendar for event read/sync and writes.
+    ///
+    /// Google *enforces* the lost-update guard — a stale `If-Match` ETag is a `412` on a
+    /// write — so, like Graph and unlike JMAP, it advertises [`WriteGuard::Enforced`].
+    ///
+    /// It also advertises [`Capabilities::calendar_scheduling`]: Google Calendar mails the
+    /// invitations, replies and cancellations a write implies. `sendUpdates` chooses whom
+    /// it tells, not whether the server is the one telling them, so — as on Graph — the
+    /// caller never assembles an iMIP message itself. Nothing to discover: it is a property
+    /// of the service.
+    #[must_use]
+    pub fn new(client: GoogleClient, calendar: CalendarId) -> Self {
+        Self {
+            client,
+            calendar,
+            window: None,
+            capabilities: Capabilities::none()
+                .with_calendars()
+                .with_calendar_writes(WriteGuard::Enforced, GOOGLE_OVERRIDE_SURVIVAL)
+                .with_calendar_rsvp(GOOGLE_RSVP)
+                .with_calendar_scheduling(),
+        }
+    }
+
+    /// The bound calendar's id as a path segment.
+    fn calendar_id(&self) -> &str {
+        self.calendar.key().as_str()
+    }
+
+    /// Windows the initial (snapshot) event enumeration to `[start, end)` via
+    /// `timeMin`/`timeMax`. A delta ignores it (the `syncToken` encodes the scope).
+    #[must_use]
+    pub fn with_window(mut self, window: CalendarWindow) -> Self {
+        self.window = Some(window);
+        self
+    }
+}
+
+#[async_trait]
+impl Provider for GoogleCalendarProvider {
+    fn connection_info(&self) -> ConnectionInfo {
+        ConnectionInfo {
+            http_version: self.client.http_version(),
+            tls_version: self.client.tls_version(),
+            ..ConnectionInfo::new(self.capabilities)
+        }
+    }
+
+    fn calendar_scope(&self, account: &AccountId) -> SyncScope {
+        SyncScope::GoogleCalendarList {
+            account: account.clone(),
+        }
+    }
+
+    fn event_scope(&self, account: &AccountId) -> SyncScope {
+        SyncScope::GoogleCalendar {
+            account: account.clone(),
+            calendar: self.calendar.clone(),
+        }
+    }
+
+    async fn sync_calendars(
+        &self,
+        _account: &AccountId,
+        _cursor: Option<&SyncState>,
+    ) -> ProviderResult<ScopeSync<Calendar>> {
+        // `calendarList.list` is a full snapshot every pass, so every calendar is present.
+        let calendars = cal_fetch::calendars(&self.client).await?;
+        let present = calendars.iter().map(|c| c.id.key().clone()).collect();
+        Ok(ScopeSync::new(
+            SyncUpdate::snapshot(calendars, present),
+            SyncState::new(CALENDAR_LIST_CURSOR),
+        ))
+    }
+
+    async fn sync_events(
+        &self,
+        _account: &AccountId,
+        cursor: Option<&SyncState>,
+    ) -> ProviderResult<ScopeSync<Event>> {
+        // Drain every `events.list` page into one update. A snapshot reconciles (its
+        // `present` set tombstones absent rows); a delta carries explicit removals.
+        let mut cursor = cursor;
+        let mut page_token: Option<PageToken> = None;
+        let mut changed = Vec::new();
+        let mut removed = Vec::new();
+        let mut present = BTreeSet::new();
+        let mut overrides = Vec::new();
+        let mut kind: Option<SyncKind> = None;
+        let next_cursor = loop {
+            let page = match cal_fetch::events_page(
+                &self.client,
+                &self.calendar,
+                cursor,
+                page_token.as_ref(),
+                self.window,
+            )
+            .await
+            {
+                Ok(page) => page,
+                // Google expired the stored syncToken (`410`): drop it and restart as a
+                // full snapshot. Only before the first page is committed (`page_token`
+                // still `None`) — after that the mode is fixed, exactly like Gmail.
+                Err(err)
+                    if cursor.is_some()
+                        && page_token.is_none()
+                        && err.failure_class() == FailureClass::NeedsResync =>
+                {
+                    cursor = None;
+                    continue;
+                }
+                Err(err) => return Err(err.into()),
+            };
+            let EventsPage {
+                page,
+                overrides: page_overrides,
+            } = page;
+            kind.get_or_insert(page.kind);
+            changed.extend(page.changed);
+            removed.extend(page.removed);
+            present.extend(page.present);
+            overrides.extend(page_overrides);
+            if page.next_page.is_none() {
+                break page.next_cursor;
+            }
+            page_token = page.next_page;
+        };
+        // Only now: an override names its master by id, and the master may have been on any
+        // page of this pass — or, on a delta, on none of them.
+        cal_override::fold_into(&mut changed, overrides);
+        let update = match kind.unwrap_or(SyncKind::Delta) {
+            SyncKind::Snapshot => SyncUpdate::snapshot(changed, present),
+            SyncKind::Delta => SyncUpdate::delta(changed, removed),
+        };
+        Ok(ScopeSync::new(update, next_cursor))
+    }
+}
+impl engine_provider::MailboxWrites for GoogleCalendarProvider {}
+
+#[async_trait]
+impl CalendarWrites for GoogleCalendarProvider {
+    async fn create_event(
+        &self,
+        _account: &AccountId,
+        draft: &EventDraft,
+    ) -> ProviderResult<EventWriteReceipt> {
+        // A draft naming a different calendar is refused rather than silently written to
+        // the bound one — this provider is calendar-bound, like `GraphCalendarProvider`.
+        if draft.calendar != self.calendar {
+            return Err(ProviderError::invalid_state(format!(
+                "draft targets calendar {:?}, but this provider is bound to {:?}",
+                draft.calendar.key().as_str(),
+                self.calendar_id()
+            )));
+        }
+        cal_write::create_event(&self.client, self.calendar_id(), draft).await
+    }
+
+    async fn patch_event(
+        &self,
+        _account: &AccountId,
+        base: &Event,
+        edit: &EventEdit,
+    ) -> ProviderResult<EventWriteReceipt> {
+        cal_write::patch_event(&self.client, self.calendar_id(), base, edit).await
+    }
+
+    async fn rsvp_event(
+        &self,
+        _account: &AccountId,
+        base: &Event,
+        rsvp: &EventRsvp,
+    ) -> ProviderResult<EventWriteReceipt> {
+        GOOGLE_RSVP.accept(rsvp)?;
+        cal_write::rsvp_event(&self.client, self.calendar_id(), base, rsvp).await
+    }
+
+    async fn delete_event(
+        &self,
+        _account: &AccountId,
+        _base: Option<&Event>,
+        deletion: &EventDeletion,
+    ) -> ProviderResult<()> {
+        cal_write::delete_event(&self.client, self.calendar_id(), deletion).await
+    }
+
+    /// The account's primary calendar id, which is the address Google organises and answers
+    /// as for every calendar the account holds (`cal_fetch`).
+    async fn calendar_user_addresses(
+        &self,
+        _account: &AccountId,
+    ) -> ProviderResult<CalendarUserAddresses> {
+        let address = crate::cal_fetch::primary_calendar_address(&self.client).await?;
+        Ok(CalendarUserAddresses::Known(vec![address]))
+    }
+}
+
+#[cfg(test)]
+#[path = "calendar_provider_tests.rs"]
+mod tests;

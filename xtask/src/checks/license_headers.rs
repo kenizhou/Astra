@@ -7,7 +7,7 @@
 pub(crate) const HEADER: &str = "// SPDX-License-Identifier: GPL-3.0-only";
 
 /// The vendored third-party trees whose own licences apply instead.
-const VENDORED_PREFIXES: &[&str] = &["crates/astra-crypto-smime/vendor/"];
+const VENDORED_PREFIXES: &[&str] = &["crates/astra-crypto-smime/vendor/", super::VENDORED_ROOT];
 
 pub(crate) fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
     let mut bad = Vec::new();
@@ -39,6 +39,13 @@ mod tests {
             "a.rs",
             "// SPDX-License-Identifier: GPL-3.0-only\nfn a() {}\n",
         )]);
+        assert!(super::check(&root).is_ok());
+    }
+
+    #[test]
+    fn the_vendored_engine_tree_is_exempt() {
+        let root = fixture(&[("vendor/engine/crates/engine-core/src/lib.rs", "fn a() {}
+")]);
         assert!(super::check(&root).is_ok());
     }
 

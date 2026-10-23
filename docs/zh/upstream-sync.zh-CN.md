@@ -39,6 +39,41 @@ Astra 如何跟踪其四个参考项目。规则手册（AGENTS.md）链接到�
 
 ## 引擎更新
 
-引擎在工作区 Cargo.toml 中按修订版本以 git 固定。上游更新
-通过提升该锁定版本、适配核心，并遵循与任何其他移植相同的
-PR 流程到来。
+引擎以完整上游树 vendored 于 `vendor/engine/`（钉在锁定表记录的版本
+上，MPL-2.0），因此 Astra 对引擎的修改以 main 上的普通 commit 落地，
+上游变化以可审阅的合并到来，取代手工重新钉定。循环：
+
+- **`vendor-sync` 是原样分支。** 它始终持有上游在上次同步版本上的
+  原样树；`main` 在其上叠加 Astra 的树内修改。本仓库**之外**的常驻
+  worktree（`D:/Projects/mailclient/Astra-vendor-sync`，gate 永不走
+  查）是每晚脚本的工作场所。
+- **每晚（22:00 任务）。** `scripts/dev/upstream-sync.sh` 拉取上游，
+  从 `vendor-sync` 最近一条 `vendor: upstream <rev>` 提交信息读出
+  当前引入版本（绝不只取 `last_ported`，因此同步 PR 挂几晚未合并既
+  不会重发旧 digest 也不会跳空版本），相等即空转。否则把新版本
+  `git archive` 进 worktree，提交 `vendor: upstream <rev> <date>`，
+  推送，并开（或更新）`vendor-sync -> main` 的 PR，正文带版本区间的
+  分类 digest：docs only、tests only、ci-docker、dependencies
+  （`Cargo.toml`、`Cargo.lock`）、behaviour、security。dependencies
+  桶显式点名 rusqlite/libsqlite3-sys：两家存储共享一个 libsqlite3-sys，
+  上游 bump rusqlite 可能在同一次构建中打坏 Astra。
+- **同步 PR 一律用 merge commit 合并，绝不 squash。** squash 意味着分
+  支尖端永远不是 main 的祖先，此后每次同步都会重新全量 diff，冲突显
+  形机制随之失效。（备选 —— 每次 squash 后在 `vendor-sync` 上
+  `git merge -s ours main` —— 已记录但非规则。）
+- **冲突在 PR 中显形，绝不静默。** 当上游改动触及 Astra 在树内修改过
+  的行时，同步 PR 的合并会显示冲突。runbook：`git checkout vendor-sync
+  && git merge main`，在 `vendor/engine` 的冲突中保留 Astra 的修改，
+  推送，PR 随之更新。`git diff vendor-sync main -- vendor/engine` 永
+  远给出全部树内修改的清单，因此静默偏离上游在结构上不可能。
+- **合并时推进 `last_ported`。** 锁定表的引擎行继续作为溯源记录。
+- **引擎自身电池不属于 `cargo test --workspace`。** vendored 树是被
+  排除于成员之外的嵌套 workspace，其测试只显式运行：`cd vendor/engine
+  && cargo test --workspace`（live-server 测试无环境变量时自动跳过）。
+  同步 PR 的审查清单运行它、Astra 电池、xtask gate 与 live harness。
+- **构建目录。** 本仓库在检出之间共享一个构建目录，新鲜度按工作区相
+  对路径判定。任何 `vendor/` 与其他检出分叉的 worktree（首推
+  vendor-sync worktree）必须把 `CARGO_BUILD_BUILD_DIR` 设为自己的目
+  录，否则构建可能吃到陈旧引擎产物。
+- security 分类的同步一律扣留审阅，绝不自动合并，与 22:00 契约对每个
+  参考项目的规则一致。

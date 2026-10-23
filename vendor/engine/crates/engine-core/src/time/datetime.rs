@@ -1,0 +1,472 @@
+//! Wall-clock and UTC date-times.
+
+use core::{fmt, str::FromStr};
+
+use serde::{Deserialize, Serialize};
+use time::{Date, Month, PrimitiveDateTime, Time};
+
+use super::{
+    TimeError, format_wall_clock, format_wall_clock_fixed, parse_wall_clock, split_numeric_offset,
+};
+
+/// Builds a [`PrimitiveDateTime`] from individual components, validating each.
+fn from_components(
+    year: i32,
+    month: u8,
+    day: u8,
+    hour: u8,
+    minute: u8,
+    second: u8,
+) -> Result<PrimitiveDateTime, TimeError> {
+    let month = Month::try_from(month).map_err(|_| TimeError::OutOfRange)?;
+    let date = Date::from_calendar_date(year, month, day).map_err(|_| TimeError::OutOfRange)?;
+    let time = Time::from_hms(hour, minute, second).map_err(|_| TimeError::OutOfRange)?;
+    Ok(PrimitiveDateTime::new(date, time))
+}
+
+/// A wall-clock date-time with **no** zone or offset (JSCalendar `LocalDateTime`,
+/// RFC 8984 §1.4.5; the local part of an iCalendar `DATE-TIME`).
+///
+/// This is the spine time type. The zone to associate with it comes from a
+/// separate `timeZone` property; with no zone it is *floating* — the same
+/// wall-clock time in every zone, not a fixed instant. Resolving it to an
+/// instant (which needs tzdata) is done at query/display time elsewhere. The
+/// canonical form is `YYYY-MM-DDThh:mm:ss`, with optional non-zero fractional
+/// seconds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct LocalDateTime(PrimitiveDateTime);
+
+impl LocalDateTime {
+    /// Creates a wall-clock date-time from its components (whole seconds).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TimeError::OutOfRange`] if the components do not form a real
+    /// date-time.
+    pub fn new(
+        year: i32,
+        month: u8,
+        day: u8,
+        hour: u8,
+        minute: u8,
+        second: u8,
+    ) -> Result<Self, TimeError> {
+        from_components(year, month, day, hour, minute, second).map(Self)
+    }
+
+    /// The underlying `time` value, for wall-clock arithmetic within the time
+    /// module (e.g. deriving a [`super::Duration`] from `DTSTART`/`DTEND`).
+    pub(crate) fn as_primitive(self) -> PrimitiveDateTime {
+        self.0
+    }
+
+    /// Returns the year.
+    #[must_use]
+    pub fn year(self) -> i32 {
+        self.0.year()
+    }
+
+    /// Returns the month, 1–12.
+    #[must_use]
+    pub fn month(self) -> u8 {
+        u8::from(self.0.month())
+    }
+
+    /// Returns the day of the month, 1–31.
+    #[must_use]
+    pub fn day(self) -> u8 {
+        self.0.day()
+    }
+
+    /// Returns the hour, 0–23.
+    #[must_use]
+    pub fn hour(self) -> u8 {
+        self.0.hour()
+    }
+
+    /// Returns the minute, 0–59.
+    #[must_use]
+    pub fn minute(self) -> u8 {
+        self.0.minute()
+    }
+
+    /// Returns the second, 0–59.
+    #[must_use]
+    pub fn second(self) -> u8 {
+        self.0.second()
+    }
+
+    /// Returns the sub-second component in nanoseconds, 0..1_000_000_000.
+    #[must_use]
+    pub fn nanosecond(self) -> u32 {
+        self.0.nanosecond()
+    }
+}
+
+impl fmt::Display for LocalDateTime {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&format_wall_clock(self.0))
+    }
+}
+
+impl FromStr for LocalDateTime {
+    type Err = TimeError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        parse_wall_clock(s).map(Self)
+    }
+}
+
+impl TryFrom<String> for LocalDateTime {
+    type Error = TimeError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        value.parse()
+    }
+}
+
+impl From<LocalDateTime> for String {
+    fn from(value: LocalDateTime) -> Self {
+        value.to_string()
+    }
+}
+
+/// A true UTC instant (JSCalendar `UTCDateTime`, RFC 8984 §1.4.4).
+///
+/// Used only for **metadata** timestamps — `created`, `updated`, `DTSTAMP`,
+/// an absolute alert trigger, an acknowledgement — never for an event's
+/// scheduled start (which is wall-clock; see [`LocalDateTime`] and
+/// [`super::CalendarDateTime`]). The canonical form is `YYYY-MM-DDThh:mm:ssZ`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct UtcDateTime(PrimitiveDateTime);
+
+impl UtcDateTime {
+    /// Creates a UTC instant from its components (whole seconds).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TimeError::OutOfRange`] if the components do not form a real
+    /// date-time.
+    pub fn new(
+        year: i32,
+        month: u8,
+        day: u8,
+        hour: u8,
+        minute: u8,
+        second: u8,
+    ) -> Result<Self, TimeError> {
+        from_components(year, month, day, hour, minute, second).map(Self)
+    }
+
+    /// Returns the year.
+    #[must_use]
+    pub fn year(self) -> i32 {
+        self.0.year()
+    }
+
+    /// Returns the month, 1–12.
+    #[must_use]
+    pub fn month(self) -> u8 {
+        u8::from(self.0.month())
+    }
+
+    /// Returns the day of the month, 1–31.
+    #[must_use]
+    pub fn day(self) -> u8 {
+        self.0.day()
+    }
+
+    /// Returns the hour, 0–23.
+    #[must_use]
+    pub fn hour(self) -> u8 {
+        self.0.hour()
+    }
+
+    /// Returns the minute, 0–59.
+    #[must_use]
+    pub fn minute(self) -> u8 {
+        self.0.minute()
+    }
+
+    /// Returns the second, 0–59.
+    #[must_use]
+    pub fn second(self) -> u8 {
+        self.0.second()
+    }
+
+    /// Returns the sub-second component in nanoseconds, 0..1_000_000_000.
+    #[must_use]
+    pub fn nanosecond(self) -> u32 {
+        self.0.nanosecond()
+    }
+
+    /// Parses an RFC 3339 `date-time` — the JMAP/JSCalendar `Date` type (RFC 8620
+    /// §1.4) — accepting either a `Z` UTC designator or a numeric `±hh:mm` offset,
+    /// and normalizing the result to a true UTC instant.
+    ///
+    /// [`FromStr`](Self::from_str) is deliberately strict about the `Z`-only
+    /// `UTCDate` form used for genuine metadata instants. This method handles the
+    /// fuller `Date` grammar that servers legitimately emit for header-derived
+    /// values such as a message's `Date` (JMAP `sentAt`), which carries the
+    /// sender's local offset.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TimeError`] if the input is not a wall-clock date-time followed
+    /// by `Z` or a valid numeric offset.
+    pub fn parse_rfc3339(s: &str) -> Result<Self, TimeError> {
+        if let Some(body) = s.strip_suffix('Z') {
+            return parse_wall_clock(body).map(Self);
+        }
+        let (body, offset) = split_numeric_offset(s)?;
+        // local = UTC + offset, so UTC = local − offset.
+        parse_wall_clock(body)?
+            .checked_sub(offset)
+            .map(Self)
+            .ok_or(TimeError::OutOfRange)
+    }
+
+    /// Returns this instant advanced by `span`, or `None` on overflow.
+    ///
+    /// Infrastructural spans — lease TTLs, retry backoff, confirmation timeouts —
+    /// are elapsed wall-clock [`core::time::Duration`]s, distinct from the
+    /// calendar [`super::Duration`] used for event lengths. The store and sync
+    /// layers use this to derive a lease expiry from an injected clock.
+    #[must_use]
+    pub fn checked_add(self, span: core::time::Duration) -> Option<Self> {
+        let secs = i64::try_from(span.as_secs()).ok()?;
+        let nanos = i32::try_from(span.subsec_nanos()).ok()?;
+        self.0
+            .checked_add(time::Duration::new(secs, nanos))
+            .map(Self)
+    }
+
+    /// Returns this instant moved back by `span`, or `None` on overflow. The inverse of
+    /// [`checked_add`](Self::checked_add): a lease's claim time is its expiry less its TTL.
+    #[must_use]
+    pub fn checked_sub(self, span: core::time::Duration) -> Option<Self> {
+        let secs = i64::try_from(span.as_secs()).ok()?;
+        let nanos = i32::try_from(span.subsec_nanos()).ok()?;
+        self.0
+            .checked_sub(time::Duration::new(secs, nanos))
+            .map(Self)
+    }
+}
+
+impl UtcDateTime {
+    /// This instant as fixed-width text, `YYYY-MM-DDThh:mm:ss.nnnnnnnnnZ`, which parses back
+    /// through [`FromStr`].
+    ///
+    /// Every digit is always present, nine fraction digits included, so two instants compare as
+    /// text exactly as they compare as instants. For a store that orders and filters on text:
+    /// SQLite has no date-time type and compares `TEXT` byte by byte. Everything else uses the
+    /// canonical form [`Display`](fmt::Display) writes, which drops a zero fraction and trailing
+    /// zeros (RFC 8984 §1.4.4) and therefore does **not** sort as text within one second.
+    #[must_use]
+    pub fn to_sortable_string(self) -> String {
+        format!("{}Z", format_wall_clock_fixed(self.0))
+    }
+}
+
+impl fmt::Display for UtcDateTime {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}Z", format_wall_clock(self.0))
+    }
+}
+
+impl FromStr for UtcDateTime {
+    type Err = TimeError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let body = s.strip_suffix('Z').ok_or_else(|| TimeError::Malformed {
+            expected: "UTC date-time ending in Z",
+            found: s.to_owned(),
+        })?;
+        parse_wall_clock(body).map(Self)
+    }
+}
+
+impl TryFrom<String> for UtcDateTime {
+    type Error = TimeError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        value.parse()
+    }
+}
+
+impl From<UtcDateTime> for String {
+    fn from(value: UtcDateTime) -> Self {
+        value.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_sortable_form_sorts_as_text_in_time_order_and_parses_back() {
+        // In time order. The canonical form sorts the second, third and fourth before the first
+        // as text (`.` before `Z`, `.12` after `.123`); the fixed-width one may not.
+        let ordered: Vec<UtcDateTime> = [
+            "0000-01-01T00:00:00Z",
+            "2026-10-06T10:00:00Z",
+            "2026-10-06T10:00:00.1Z",
+            "2026-10-06T10:00:00.12Z",
+            "2026-10-06T10:00:00.123Z",
+            "2026-10-06T10:00:01Z",
+            "9999-12-31T23:59:59.999999999Z",
+        ]
+        .iter()
+        .map(|text| text.parse().unwrap())
+        .collect();
+        let texts: Vec<String> = ordered.iter().map(|t| t.to_sortable_string()).collect();
+        let mut sorted = texts.clone();
+        sorted.sort();
+        assert_eq!(sorted, texts);
+        assert!(texts.iter().all(|text| text.len() == texts[0].len()));
+        for (instant, text) in ordered.iter().zip(&texts) {
+            assert_eq!(&text.parse::<UtcDateTime>().unwrap(), instant);
+        }
+        assert_eq!(texts[2], "2026-10-06T10:00:00.100000000Z");
+    }
+
+    #[test]
+    fn local_date_time_roundtrips() {
+        let dt = LocalDateTime::new(2006, 1, 2, 15, 4, 5).unwrap();
+        assert_eq!(dt.to_string(), "2006-01-02T15:04:05");
+        assert_eq!("2006-01-02T15:04:05".parse::<LocalDateTime>().unwrap(), dt);
+        assert_eq!(dt.year(), 2006);
+        assert_eq!(dt.hour(), 15);
+        assert_eq!(dt.nanosecond(), 0);
+    }
+
+    #[test]
+    fn local_date_time_keeps_fractional_seconds() {
+        let dt: LocalDateTime = "2006-01-02T15:04:05.003".parse().unwrap();
+        assert_eq!(dt.nanosecond(), 3_000_000);
+        assert_eq!(dt.to_string(), "2006-01-02T15:04:05.003");
+    }
+
+    #[test]
+    fn utc_date_time_requires_and_renders_z() {
+        let dt: UtcDateTime = "2010-10-10T10:10:10Z".parse().unwrap();
+        assert_eq!(dt.to_string(), "2010-10-10T10:10:10Z");
+        // The same wall clock without `Z` is not a valid UTC instant.
+        assert!("2010-10-10T10:10:10".parse::<UtcDateTime>().is_err());
+    }
+
+    #[test]
+    fn utc_date_time_normalizes_zero_fraction() {
+        // RFC 8984 §1.4.4: `.000` is invalid input; we normalize it away.
+        let dt: UtcDateTime = "2010-10-10T10:10:10.000Z".parse().unwrap();
+        assert_eq!(dt.to_string(), "2010-10-10T10:10:10Z");
+    }
+
+    #[test]
+    fn rfc3339_parses_offsets_and_normalizes_to_utc() {
+        // `Z` behaves exactly like the strict parser.
+        assert_eq!(
+            UtcDateTime::parse_rfc3339("2026-07-05T12:13:58Z").unwrap(),
+            "2026-07-05T12:13:58Z".parse().unwrap()
+        );
+        // A positive offset is subtracted; `+00:00` equals `Z`.
+        assert_eq!(
+            UtcDateTime::parse_rfc3339("2026-07-05T14:13:58+02:00")
+                .unwrap()
+                .to_string(),
+            "2026-07-05T12:13:58Z"
+        );
+        assert_eq!(
+            UtcDateTime::parse_rfc3339("2026-07-05T12:13:58+00:00")
+                .unwrap()
+                .to_string(),
+            "2026-07-05T12:13:58Z"
+        );
+        // A negative offset is added, rolling across the day boundary.
+        assert_eq!(
+            UtcDateTime::parse_rfc3339("2026-07-05T23:00:00-05:00")
+                .unwrap()
+                .to_string(),
+            "2026-07-06T04:00:00Z"
+        );
+        // A positive offset can roll back into the previous day.
+        assert_eq!(
+            UtcDateTime::parse_rfc3339("2026-07-05T00:30:00+02:00")
+                .unwrap()
+                .to_string(),
+            "2026-07-04T22:30:00Z"
+        );
+        // Fractional seconds survive the offset normalization.
+        assert_eq!(
+            UtcDateTime::parse_rfc3339("2026-07-05T14:13:58.5+02:00")
+                .unwrap()
+                .to_string(),
+            "2026-07-05T12:13:58.5Z"
+        );
+    }
+
+    #[test]
+    fn rfc3339_rejects_malformed_and_overflowing_input() {
+        assert!(UtcDateTime::parse_rfc3339("").is_err());
+        assert!(UtcDateTime::parse_rfc3339("not-a-date").is_err());
+        // A bare wall clock (no `Z`, no offset) is not a valid instant.
+        assert!(UtcDateTime::parse_rfc3339("2026-07-05T14:13:58").is_err());
+        // A malformed body with a valid offset still fails.
+        assert!(UtcDateTime::parse_rfc3339("2026-13-05T14:13:58+02:00").is_err());
+        // Normalizing past the representable range saturates to an error.
+        assert_eq!(
+            UtcDateTime::parse_rfc3339("9999-12-31T23:00:00-23:00"),
+            Err(TimeError::OutOfRange)
+        );
+        // FromStr stays strict: an offset is not a valid `UTCDate`.
+        assert!("2026-07-05T14:13:58+02:00".parse::<UtcDateTime>().is_err());
+    }
+
+    #[test]
+    fn invalid_components_rejected() {
+        assert_eq!(
+            LocalDateTime::new(2021, 2, 29, 0, 0, 0),
+            Err(TimeError::OutOfRange)
+        );
+        assert_eq!(
+            LocalDateTime::new(2021, 1, 1, 24, 0, 0),
+            Err(TimeError::OutOfRange)
+        );
+    }
+
+    #[test]
+    fn instants_order_chronologically() {
+        let a: UtcDateTime = "2021-01-01T00:00:00Z".parse().unwrap();
+        let b: UtcDateTime = "2021-01-01T00:00:01Z".parse().unwrap();
+        assert!(a < b);
+        let j = serde_json::to_string(&a).unwrap();
+        assert_eq!(j, "\"2021-01-01T00:00:00Z\"");
+        assert_eq!(serde_json::from_str::<UtcDateTime>(&j).unwrap(), a);
+    }
+
+    #[test]
+    fn checked_add_advances_and_saturates_on_overflow() {
+        let t: UtcDateTime = "2021-01-01T00:00:00Z".parse().unwrap();
+        assert_eq!(
+            t.checked_add(core::time::Duration::from_secs(61))
+                .unwrap()
+                .to_string(),
+            "2021-01-01T00:01:01Z"
+        );
+        // Sub-second spans advance the nanosecond component.
+        assert_eq!(
+            t.checked_add(core::time::Duration::from_millis(250))
+                .unwrap()
+                .to_string(),
+            "2021-01-01T00:00:00.25Z"
+        );
+        // A span too large to represent returns None rather than wrapping.
+        assert!(
+            t.checked_add(core::time::Duration::from_secs(u64::MAX))
+                .is_none()
+        );
+    }
+}

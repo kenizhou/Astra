@@ -1,0 +1,53 @@
+//! Scope-keyed contract cases: claim, apply (delta and snapshot), reconcile,
+//! maintenance, and release.
+
+mod apply;
+mod forget;
+mod lease;
+mod mail;
+mod occurrences;
+mod read;
+mod state_change;
+mod threading;
+
+pub(super) use self::{
+    apply::{
+        container_and_member_scopes_are_independent, reconciliation_resolves_matching_op,
+        reconciliation_skips_regressed_op, replay_is_idempotent, snapshot_tombstones_only_absent,
+        streaming_page_keeps_cursor,
+    },
+    forget::{
+        forget_scope_drops_objects_rows_and_cursor, forget_scope_under_a_stale_lease_is_rejected,
+    },
+    lease::{
+        abandon_sync_leases_preserves_cursor_and_fences_old_worker, maintenance_is_lease_gated,
+        release_with_stale_token_is_noop, scope_lease_is_exclusive_until_released,
+        stale_lease_is_rejected,
+    },
+    mail::{
+        a_resent_object_keeps_the_columns_no_provider_supplies,
+        list_mail_by_keys_resolves_named_messages, list_mail_merges_accounts_into_one_order,
+        list_mail_on_threads_gathers_only_the_named_threads,
+        list_mail_orders_by_date_and_excludes_tombstones,
+    },
+    occurrences::{
+        scope_occurrences_keep_overrides_and_drop_with_the_event,
+        scope_occurrences_reads_the_overlapping_window,
+    },
+    read::{
+        account_scopes_enumerates_an_accounts_scopes,
+        schema_status_reports_a_store_this_build_can_use, scope_objects_batch_reads_live_objects,
+        structured_index_rows_replace_and_clear,
+    },
+    state_change::{
+        state_change_carrying_filing_moves_the_message,
+        state_change_for_an_unknown_message_writes_nothing,
+        state_change_keeps_the_tokens_it_did_not_carry,
+        state_change_moves_flags_and_leaves_the_rest,
+    },
+    threading::{
+        a_bare_message_threads_alone_and_stays, a_provider_thread_is_never_joined_or_moved,
+        a_reply_joins_its_original_across_scopes, a_smaller_owned_id_rekeys_every_member,
+        one_page_that_shares_an_id_is_one_thread, ungrouped_graphed_mail_is_visible_to_the_store,
+    },
+};
