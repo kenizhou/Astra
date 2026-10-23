@@ -86,3 +86,19 @@ as reviewable merges instead of a manual re-pin. The loop:
   own directory, or a build can be handed stale engine artifacts.
 - Security-classified syncs are always held for review and never
   auto-merged, matching the 22:00 contract's rule for every reference.
+
+### The 22:00 wiring
+
+A Windows Task Scheduler job runs the driver nightly, logging OUTSIDE the
+repository (`D:/Projects/mailclient/logs/vendor-sync.log`):
+
+```bash
+schtasks /Create /F /TN "Astra\vendor-upstream-sync" /SC DAILY /ST 22:00 \
+  /TR "\"C:\Program Files\Git\bin\bash.exe\" -lc 'D:/Projects/mailclient/Astra/scripts/dev/upstream-sync.sh >> D:/Projects/mailclient/logs/vendor-sync.log 2>&1'"
+```
+
+`upstream-sync.sh --dry-run` prints the current and new revisions with the
+classified digest and changes nothing; it is the way to watch a sync before
+letting it land. Any failure (a locked file, the network, `gh` auth, a
+failed pristine proof) exits non-zero into the log and is a morning-review
+item, never a silent skip.
