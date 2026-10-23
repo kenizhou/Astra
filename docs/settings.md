@@ -185,6 +185,29 @@ calendar and contacts domains), so the cleared account's diary and
 people views render empty rather than haunting the engine with rows no
 leg will ever refresh.
 
+### The crypto method's save
+
+The Encryption (built-in) switch on the Accounts page writes the
+account's `[crypto] method` (`none | openpgp | smime`) through the same
+seam, under the same ordering contract as the dav save: merge, re-dial,
+persist, swap in. **The re-dial runs before the persist** because the
+method takes effect through the account's connections, not at some later
+read: the merged config dials with the new method's MIME wrapper
+installed (or none once cleared), and only a dial that answered is
+written to the secure store. The app then installs the re-dialled mail
+providers in place, keeping the account's calendar leg. A busy account
+(a dispatch still holding it across an engine call) is probed before the
+host's store moves and the save refuses with nothing host-side changed.
+
+**Fail-closed where no seam can hang.** The engine's wrap seam hangs on
+IMAP accounts today, so a method set on an account without IMAP/SMTP
+submission settings (a Graph/Google/JMAP account, or IMAP without SMTP)
+is refused outright (`encryption needs an IMAP/SMTP account`): the write
+would otherwise stand while sends went out plainly. Clearing a method on
+such an account needs no seam and re-dials nothing. A failed write lands
+on the account's row as `crypto_error`; everything that stood keeps
+standing.
+
 ### Remove account
 
 **Destructive, confirmed, and naming what goes.** The confirmation names

@@ -57,6 +57,13 @@ outbox, a durable queue the engine owns, and goes out when it can.
   class parks the op and everything else settles it. The app asks the queue whether
   the message is still there rather than re-reading the error, so there is one
   rule, in the one place that owns it.
+- **A crypto send is this same queue.** With an account's encryption method set,
+  the engine's drain wraps the message through the account's installed MIME
+  wrapper before any socket dials (the wire variant the same ciphertext minus the
+  `Bcc` header, the Sent copy filed by the engine). A recipient the trust gate
+  cannot encrypt to settles the op `Failed` with the gate's reason on the row,
+  and Send again retries the whole wrap once the keys are fixed: no separate
+  outbox, no separate rules.
 - **A queued send is on screen the moment it queues, offline included.** The queue
   lives in the store, not on a server, so being offline is no reason not to show
   it, and offline is the ordinary reason a send queues in the first place. Every
