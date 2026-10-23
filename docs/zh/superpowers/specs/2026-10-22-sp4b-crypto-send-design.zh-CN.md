@@ -58,6 +58,12 @@ crate：store 是其唯一新增依赖，core 早已引用它）：不签不加�
 
 ## D3：Astra 侧加密发件箱与其提交器
 
+> **2026-10-23 被取代**，由
+> `2026-10-23-sp4b-crypto-send-engine-seam-design.md`：闸门已移入
+> vendored 引擎的 MIME-wrap 接缝，下述绕行已拆除（crypto outbox、
+> Astra 传输与"第二台发送引擎"的已知缺口全部退役）。保留为历史记
+> 录；引擎接缝规格现在是契约。
+
 提交时（astra-app 的 `submit_*` 臂，在闸门接缝处），当账户的加密方式
 为 `openpgp` 或 `smime`：Astra 用 `engine_rfc5322::assemble_message` 组
 装 MIME，应用闸门，把包装后的字节排入 `crypto_outbox`（crypto.sqlite
