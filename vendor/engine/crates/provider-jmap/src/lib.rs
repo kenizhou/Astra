@@ -49,6 +49,7 @@ mod drafts_blobs;
 mod error;
 mod executor;
 mod fetch;
+mod fetch_scope;
 mod identity;
 mod json;
 mod mail;
@@ -60,11 +61,13 @@ mod provider_calendar;
 mod report;
 mod request;
 mod session;
+mod session_limits;
 mod session_urls;
 mod submit;
 mod submit_body;
 mod sync_ops;
 mod transport;
+mod walk;
 mod watch;
 
 use core::fmt;
@@ -460,3 +463,6 @@ mod tests;
 #[cfg(test)]
 #[path = "redirect_tests.rs"]
 mod redirect_tests;
+
+#[cfg(test)]
+mod write_outcome_tests;

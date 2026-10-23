@@ -21,7 +21,12 @@ use engine_provider::{
 };
 use serde_json::{Map, Value, json};
 
-use crate::{error::GoogleError, json::opt_str, transport::GoogleClient};
+use crate::{
+    cal_invite::{draft_attendees, merge_attendees},
+    error::{GoogleError, unread_answer},
+    json::opt_str,
+    transport::GoogleClient,
+};
 
 /// The Google Calendar v3 events collection for a calendar.
 fn events_path(calendar: &str) -> String {
@@ -40,12 +45,13 @@ pub(crate) async fn create_event(
     let body = build_create(draft)?;
     let created = client
         .post(
-            &client.url(&events_path(calendar)),
+            &client.url(&format!("{}?sendUpdates=all", events_path(calendar))),
             "application/json",
             serde_json::to_vec(&body).map_err(GoogleError::from)?,
         )
-        .await?
-        .ok_or_else(|| ProviderError::permanent("create event returned no body"))?;
+        .await
+        .map_err(GoogleError::into_write_error)?
+        .ok_or_else(|| unread_answer("create event returned no body"))?;
     receipt(&created, draft.uid.clone())
 }
 
@@ -87,20 +93,24 @@ pub(crate) async fn patch_event(
         }
     };
     let body = build_patch(base, &edit.patch)?;
-    let updated = client
+    let answer = client
         .patch(
-            &client.url(&format!("{}/{id}", events_path(calendar))),
+            &client.url(&format!("{}/{id}?sendUpdates=all", events_path(calendar))),
             "application/json",
             guard,
             serde_json::to_vec(&body).map_err(GoogleError::from)?,
         )
-        .await?;
+        .await;
     // An instance patch answers with the *occurrence*, whose id is not the series'. The
     // receipt names what the caller asked about — the event they hold — so the echo is read
-    // only for a series edit.
-    match (updated, &edit.target) {
-        (Some(event), PatchTarget::Series) => receipt(&event, base.uid.clone()),
-        _ => Ok(EventWriteReceipt::new(
+    // only for a series edit, where it carries the new revision.
+    let updated = match &edit.target {
+        PatchTarget::Series => answer.map_err(GoogleError::into_write_error)?,
+        PatchTarget::Instance(_) => GoogleError::optional_answer(answer).map(|_| None)?,
+    };
+    match updated {
+        Some(event) => receipt(&event, base.uid.clone()),
+        None => Ok(EventWriteReceipt::new(
             base.id.clone(),
             base.uid.clone(),
             RevisionTokens::none(),
@@ -155,8 +165,8 @@ pub(crate) async fn rsvp_event(
                 .map(ETag::as_str),
             serde_json::to_vec(&build_rsvp(rsvp)).map_err(GoogleError::from)?,
         )
-        .await?;
-    match updated {
+        .await;
+    match GoogleError::optional_answer(updated)? {
         Some(event) => receipt(&event, base.uid.clone()),
         None => Ok(EventWriteReceipt::new(
             base.id.clone(),
@@ -224,7 +234,7 @@ pub(crate) async fn delete_event(
     };
     match client
         .delete(
-            &client.url(&format!("{}/{id}", events_path(calendar))),
+            &client.url(&format!("{}/{id}?sendUpdates=all", events_path(calendar))),
             guard,
         )
         .await
@@ -233,7 +243,7 @@ pub(crate) async fn delete_event(
         | Err(GoogleError::Status {
             status: 404 | 410, ..
         }) => Ok(()),
-        Err(other) => Err(other.into()),
+        Err(other) => Err(other.into_write_error()),
     }
 }
 
@@ -300,6 +310,9 @@ fn build_create(draft: &EventDraft) -> ProviderResult<Value> {
             json!([format!("RRULE:{}", rrule_value(recurrence, &draft.start)?)]),
         );
     }
+    if let Some(attendees) = draft_attendees(draft)? {
+        body.insert("attendees".to_owned(), attendees);
+    }
     Ok(Value::Object(body))
 }
 
@@ -360,6 +373,9 @@ fn build_patch(base: &Event, patch: &EventPatch) -> ProviderResult<Value> {
             RecurrenceEdit::Clear => json!([]),
         };
         body.insert("recurrence".to_owned(), value);
+    }
+    if let Some(edit) = patch.invitee_edit() {
+        body.insert("attendees".to_owned(), merge_attendees(base, edit)?);
     }
     Ok(Value::Object(body))
 }
@@ -427,10 +443,9 @@ fn receipt(
     event: &Value,
     fallback_uid: engine_core::ids::Uid,
 ) -> ProviderResult<EventWriteReceipt> {
-    let id = opt_str(event, "id")
-        .ok_or_else(|| ProviderError::permanent("write response had no event id"))?;
+    let id = opt_str(event, "id").ok_or_else(|| unread_answer("write response had no event id"))?;
     let event_id = EventId::try_from(id)
-        .map_err(|e| ProviderError::permanent(format!("bad created event id: {e}")))?;
+        .map_err(|e| unread_answer(&format!("bad created event id: {e}")).with_source(e))?;
     let uid = opt_str(event, "iCalUID")
         .and_then(|u| engine_core::ids::Uid::new(u).ok())
         .unwrap_or(fallback_uid);
@@ -444,6 +459,10 @@ fn receipt(
 #[cfg(test)]
 #[path = "cal_write_tests.rs"]
 mod cal_write_tests;
+
+#[cfg(test)]
+#[path = "cal_invite_tests.rs"]
+mod cal_invite_tests;
 
 #[cfg(test)]
 #[path = "cal_recurrence_tests.rs"]

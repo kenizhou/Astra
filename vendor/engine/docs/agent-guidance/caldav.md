@@ -11,7 +11,7 @@ recurrence subset, iTIP/iMIP), and `stalwart-harness.md` (the fixture).
 
 The **IMAP/SMTP mail half** of step 5 is the other slice (`imap-smtp.md`).
 **CalDAV writes** (the neutral create/patch/delete verbs, rendered as a conditional
-`PUT`/`DELETE` with `If-Match`/`If-None-Match`) are **implemented** (see "CalDAV writes")
+`PUT`/`DELETE`) are **implemented** (see "CalDAV writes")
 and outbox-driven by `engine_sync::create_calendar_event`/`patch_calendar_event`/
 `delete_calendar_event`. **iTIP/iMIP**
 inbound parsing + the RSVP write primitive are **implemented** (see "iMIP
@@ -182,6 +182,11 @@ are split escape-aware so the writer and the parser agree.
   **that refusal lives in `adopt_origin`, not in `redirect_href`**: a walk starts at a bare
   well-known path, which names no scheme, so on the first hop only the connection knows it
   is being asked to give up TLS. A refusal fails the walk rather than continuing over it.
+  A host may also confine the credential with a `CredentialHosts` policy
+  (`CalDavConfig::with_credential_hosts`, the same on `CardDavConfig`): the configured base URL
+  and every origin a hop moves to must be a host it permits, or the connect fails before anything
+  is sent there. Which hosts qualify is the host's decision; for an OAuth token it is the token
+  issuer's resources, which this adapter knows nothing of.
   CalDAV emits no `Authenticated` step —
   credentials ride on every `PROPFIND`, so there is no discrete authentication
   exchange to observe — and no `TlsEstablished`, because an HTTP adapter learns its TLS
@@ -283,30 +288,34 @@ are split escape-aware so the writer and the parser agree.
   §3.2), `Unconditional` → no conditional header. `IfAbsent` is what makes **storing an
   inbound invitation** safe: on the very common account shape of IMAP mail plus a CalDAV
   calendar that does no scheduling, an invitation arrives as an iMIP message and nothing
-  puts it on the calendar but the host — and it must go in through this verb, not
-  `create_event`, because an `EventDraft` carries neither `ORGANIZER` nor `ATTENDEE` and
-  would store a plain appointment with nothing to answer on afterwards. The guard matters
+  puts it on the calendar but the host. It must go in through this verb because the
+  received raw document preserves its `ORGANIZER`, `ATTENDEE`, `SEQUENCE` and extensions.
+  `EventDraft::meeting` is the separate path for an organiser-authored invitation. The guard matters
   because the concurrent writer is usually the *server*: an auto-scheduling one deposits
   its own copy the moment the organizer writes, and an unconditional `PUT` would erase it
   along with whatever the server had recorded about delivery. A `412` is the same
   `Conflict` as any other precondition failure — re-read and decide, never a blind retry.
   Live on both servers (`tests/common/imip.rs`).
-- **Optimistic concurrency rides on the `ETag`, and CalDAV can actually promise it.** It
+- **Optimistic concurrency uses the strongest scheduling revision available.** It
   advertises `Capabilities::calendar_writes(WriteGuard::Enforced)` — the *other* calendar
   transport cannot (`jmap.md`), which is why the guard is a capability a host reads rather
   than an assumption it makes. A create sends `If-None-Match: *` (never overwrite an
-  existing resource at the href); a patch, a document replace, or a guarded delete sends
-  `If-Match: "<etag>"` (apply only while the server copy is unchanged), taken from
-  `base.revisions` — **the event as the caller read it**, so a guard cannot be
+  existing resource at the href). A scheduling resource with an RFC 6638 schedule tag sends
+  `If-Schedule-Tag-Match`; other patches, document replacements and guarded deletes send
+  `If-Match: "<etag>"`. The value comes from `base.revisions`, **the event as the caller read
+  it**, so a guard cannot be
   hand-assembled stale. A failed precondition is `412` → `FailureClass::Conflict`, recovered
   by refetch and re-apply, **never a blind retry** (`error.rs`). `PUT` and `DELETE` are
   **idempotent HTTP methods** (RFC 7231 §4.2.2), and the precondition makes a retry
   self-correcting: a retried create `412`s if the first landed, a retried patch `412`s once
   the ETag moved, and a retried delete sees the resource already gone. So a lost-response
-  retry is **safe** — there is no ambiguous `NeedsConfirmation` case as there is for SMTP.
-  A reply that never comes within the `reply` bound is the same case and is retried under
-  the same precondition, a write whose server schedules iTIP from it included
-  (`deadlines.md`).
+  retry would be **safe**, but nothing makes one: a write whose request may have reached the
+  server and whose reply was lost, or never came within the `reply` bound, may have been
+  applied, and is `needs_confirmation` (`CalDavError::Unconfirmed`, `providers.md`), as is a
+  gateway's `502`/`504`. The classification is in `DavClient::send_write`, the one place a
+  write meets the network, and in `into_write_etag`. A write's status is its whole answer:
+  the new `ETag` rides in a header, so a body lost after the status leaves the reply as the
+  status says.
 - **`DELETE` is idempotent: already-gone is success.** A `DELETE` whose resource is
   **already absent** (`404`/`410`) resolves as `Ok` (RFC 7231 §4.3.5), not a `Permanent`
   error — so re-running a delete whose response was lost (the first one landed) succeeds
@@ -320,22 +329,33 @@ are split escape-aware so the writer and the parser agree.
   - **Create** → `build_event_ical`, a **minimal** RFC 5545 builder (`UID`, `DTSTAMP`,
     `DTSTART`/`DTEND` **in the draft's own form** — zoned, floating or all-day, never
     flattened to UTC — `SUMMARY`, optional `DESCRIPTION`, optional `LOCATION`; TEXT escaped
-    per §3.3.11), locked by a round-trip test through the parser (which asserts the `LOCATION`
+    per §3.3.11). A meeting also emits `ORGANIZER` and one `ATTENDEE` per invitee, with
+    `ROLE`, `CUTYPE=INDIVIDUAL`, `PARTSTAT=NEEDS-ACTION` and `RSVP=TRUE`. Parameter text is
+    encoded per RFC 6868 and every content line is folded per RFC 5545. Stored calendar data
+    has no `METHOD`; that belongs only on an iTIP message under RFC 5546 and RFC 6047. The
+    builder is locked by a round-trip test through the parser (which asserts the `LOCATION`
     lands back in the projection's `locations`, the same field the read path fills). A create
     is the one write that sets a location from nothing; an edit reshapes it through the
-    patcher's `LOCATION` path below. It emits at most **seven properties**. Using it to
+    patcher's `LOCATION` path below. Using it to
     *update* an existing event would be data loss: every property it does not emit — the
     `RRULE`, the attendees, the alarms — would be deleted from the user's calendar by a
     `PUT` that reports success. Nothing can: `patch_event` is the only update path, and it
     refuses outright if the base carries no stored `raw_ical` to patch.
   - **Patch** → `patch_event_ical`, the **structural patcher** (`ical::patch`). It takes the
     stored `RawIcal` and the neutral `EventPatch`
-    (`SUMMARY`/`DESCRIPTION`/`LOCATION`/`DTSTART`/`DTEND`) and rewrites **only** the content
+    (`SUMMARY`/`DESCRIPTION`/`LOCATION`/`DTSTART`/`DTEND`/invitees) and rewrites **only** the content
     lines that changed, plus the `DTSTAMP`/`LAST-MODIFIED`/`SEQUENCE` bookkeeping RFC 5545
     requires of a revision. Every other byte — the original line folding, the document's line
     terminators, properties this crate has never heard of — is preserved verbatim, asserted
     structurally rather than by eyeball (`patch_tests.rs`: strike the patched properties from
     both documents and the remainder must be byte-equal).
+    Invitee edits are series-only and preserve untouched `ATTENDEE` parameters, including
+    response state and scheduling status. The organiser cannot be edited through the roster.
+  - **The organiser must be a calendar user address of the authenticated principal.** RFC 6638
+    defines those addresses through `calendar-user-address-set`, which
+    `CalendarWrites::calendar_user_addresses` reads. A server schedules only for an organiser in
+    that set and says nothing about one outside it, so a caller checks the organiser against the
+    set before writing a meeting. The server remains the final enforcement point.
   - This machinery is **CalDAV's alone**, and that is the point: a JMAP `update` is already a
     JSON-pointer patch the *server* merges, so it has no use for line folding,
     `DTEND`-vs-`DURATION` exclusion or `SEQUENCE` bookkeeping. Hoisting the patcher would
@@ -581,6 +601,14 @@ what a client would assume:
   bootstrap so the suite is re-runnable (`stalwart-harness.md`).
 
 ## Known limitations (documented, not bugs)
+
+- **A bearer token is only ever sent as `Bearer`, never as a Basic password**, whatever the
+  server's challenge offers. A sabre/dav server using its IMAP auth backend relays the Basic
+  password to the mail server, and one such deployment accepted an OAuth access token that way
+  only shortly after the same token had logged in over IMAP `OAUTHBEARER`: an artefact of the mail
+  server's auth cache, not support for OAuth. A DAV server that challenges with `Basic` alone has
+  said it does not take a token, and whether a host may receive one at all is the host's decision
+  under the OAuth profile, not the transport's.
 
 - **Stalwart rate-limits its DAV endpoint, and a refusal there now reaches the caller.** It
   answers `429` with a `Retry-After` — 31 seconds, observed — and since the engine stopped

@@ -23,7 +23,7 @@ tests driven through a fake executor.
 | ------- | ------------- | -------- |
 | `mailbox_get.json` | `Mailbox/get` result | Mailbox normalization: roles (`inbox`/`sent`/`trash`) and the roleless custom `Archive`/`Projects`. |
 | `email_get.json` | `Email/get` result (all 9 seed emails) | Email normalization: the COPY as one multi-membership object, the duplicate-`Message-ID` pair as two distinct objects, missing `Message-ID`, keywords, the move. |
-| `mailbox_snapshot_response.json` | `[Mailbox/get]` response | Container snapshot orchestration. |
+| `mailbox_snapshot_response.json` | `[Mailbox/query, Mailbox/get]` response | A one-page queried snapshot. |
 | `email_snapshot_response.json` | `[Email/query, Email/get(#ids)]` response | Member snapshot via result back-reference. |
 | `email_changes_response.json` | `[Email/changes, Email/get(#created), Email/get(#updated)]` response | Empty-delta orchestration (the changes→get back-reference path). |
 | `submit_context_response.json` | `[Mailbox/get, Identity/get]` response | Resolving the Drafts/Sent mailboxes + submission identity before a send. |
@@ -37,6 +37,8 @@ tests driven through a fake executor.
 | `calendarevent_get_rule_parts.json` | `CalendarEvent/get` result for a `BYSETPOS` series PUT over CalDAV | That a real server really sends `bySetPosition`, so the rule parts deciding *which dates* a series generates are read rather than dropped. Its own capture rather than a seventh seed event, because the file above is asserted on wholesale as "all 6". |
 | `calendar_snapshot_response.json` | `[Calendar/get]` response | Calendar container snapshot orchestration. |
 | `event_snapshot_response.json` | `[CalendarEvent/query, CalendarEvent/get(#ids)]` response | Event member snapshot orchestration. |
+| `participant_identity_get_response.json` | `[ParticipantIdentity/get]` response | The addresses the calendar account schedules as, read as its calendar user addresses. |
+| `participant_identity_organiser_get_response.json` | `[ParticipantIdentity/get]` response | Meeting creation resolves the organiser's account identity by calendar address before writing participants. |
 
 ## Re-capturing
 
