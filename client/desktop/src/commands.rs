@@ -431,11 +431,7 @@ pub(crate) async fn add_account(
     config_toml: String,
 ) -> Result<AddedAccount, CommandError> {
     let dial = |config: &astra_account::AccountConfig, id: &AccountId| {
-        let connections = ImapConnections::new();
-        let providers = state
-            .runtime
-            .block_on(|| astra_account::connect_mail_providers(&connections, config, id));
-        providers.map(|providers| (providers, connections))
+        crate::crypto_wrapper::add_account_dial(&state.crypto_store, &state.runtime, config, id)
     };
     add_account_with(&state, &config_toml, dial)
 }
@@ -462,6 +458,7 @@ pub(crate) async fn imap_test_connection(
                 &config
                     .account_id()
                     .map_err(|err| astra_account::AccountError::Mailbox(err.to_string()))?,
+                None, // a connection test sends nothing: no wrapper to install
             )
             .await
             .map(|_| ())

@@ -204,11 +204,16 @@ async fn a_send_with_no_connection_to_file_on_still_delivers_and_says_so() {
         "221 bye\r\n",
     ]));
 
+    let draft = sent_draft();
+    let sub = crate::wrap::prepare_submission(&draft, None)
+        .await
+        .expect("the draft prepares");
     let receipt = account
         .provider(mailbox("INBOX"))
         .submit_over(
             smtp,
-            &sent_draft(),
+            &sub,
+            &draft,
             None,
             &engine_provider::HandOver::new(&engine_provider::Unrecorded),
         )

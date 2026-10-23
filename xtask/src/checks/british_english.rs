@@ -30,7 +30,9 @@ pub(crate) fn check(root: &std::path::Path) -> Result<(), Vec<String>> {
     for f in super::walk_files(root, &["md"]) {
         let r = super::rel(root, &f);
         // The vendored engine's own docs spell their own way.
-        if r.starts_with("docs/zh/") || r.starts_with(super::VENDORED_ROOT) || super::is_zh_mirror(&f)
+        if r.starts_with("docs/zh/")
+            || r.starts_with(super::VENDORED_ROOT)
+            || super::is_zh_mirror(&f)
         {
             continue;
         }
@@ -83,8 +85,11 @@ mod tests {
 
     #[test]
     fn the_vendored_engine_tree_is_exempt() {
-        let root = fixture(&[("vendor/engine/docs/guide.md", "the color of the behavior
-")]);
+        let root = fixture(&[(
+            "vendor/engine/docs/guide.md",
+            "the color of the behavior
+",
+        )]);
         assert!(super::check(&root).is_ok());
     }
 

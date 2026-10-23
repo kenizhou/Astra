@@ -67,6 +67,14 @@ Astra 如何跟踪其四个参考项目。规则手册（AGENTS.md）链接到�
   推送，PR 随之更新。`git diff vendor-sync main -- vendor/engine` 永
   远给出全部树内修改的清单，因此静默偏离上游在结构上不可能。
 - **合并时推进 `last_ported`。** 锁定表的引擎行继续作为溯源记录。
+- **首个树内 delta 是 MIME-wrap 接缝**（ECS 规格，2026-10-23 落
+  地）：`engine-provider` 的 `MimeWrapper` trait 与 serde 默认化的
+  `Draft::sign`/`Draft::encrypt` 标记、provider-imap 的 `wrap` 模块
+  （包装器在拨号前被咨询、Sent 副本修复重新包装），以及让被拒 op 的
+  行说明原因的 `PendingOutcome::Failed` detail。
+  `git diff vendor-sync main -- vendor/engine` 会列出它；每个同步 PR
+  的审查都应预期这些文件存在差异，并把上游对它们的任何触碰当作需要
+  审慎解决的冲突。
 - **引擎自身电池不属于 `cargo test --workspace`。** vendored 树是被
   排除于成员之外的嵌套 workspace，其测试只显式运行：`cd vendor/engine
   && cargo test --workspace`（live-server 测试无环境变量时自动跳过）。

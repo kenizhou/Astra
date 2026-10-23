@@ -185,6 +185,7 @@ fn account_infos(host: &Host) -> Vec<astra_app::AccountInfo> {
         Arc::clone(&host.dials),
         host.store.clone(),
         Arc::clone(&host.refusals),
+        crate::commands_fakes::crypto_store(),
     );
     host.runtime
         .block_on(move || async move { ops.account_infos().await })
@@ -302,6 +303,7 @@ fn the_sign_in_completes_the_rotation_lands_and_the_next_boot_dials_the_advanced
             super::super::stored::dial_stored(
                 &dials,
                 &store,
+                &crate::commands_fakes::crypto_store(),
                 super::google_boot::unused_graph_dial(),
                 dial,
                 &refusals,
@@ -378,6 +380,7 @@ fn a_dead_grant_s_classification_reaches_the_accounts_row_and_a_re_sign_in_clear
             super::super::stored::dial_stored(
                 &dials,
                 &store,
+                &crate::commands_fakes::crypto_store(),
                 super::google_boot::unused_graph_dial(),
                 dial,
                 &refusals,

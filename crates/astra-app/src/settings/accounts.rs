@@ -136,14 +136,23 @@ pub trait HostAccountOps<P>: Send + Sync {
     async fn remove_account(&self, account: &AccountId) -> Result<(), String>;
 
     /// Writes the account's crypto method into its stored config (`none`
-    /// drops the section). No re-dial: the send path reads the method at
-    /// submit time.
+    /// drops the section), re-dialling the account so the new method's MIME
+    /// wrapper (or its absence) is what the next send drains against, and
+    /// answering the re-dialled mail providers for the app to install in
+    /// place. `Ok(None)` answers a write whose account needed no re-dial.
     ///
     /// # Errors
     ///
-    /// The sentence the settings surface shows when the persist failed;
-    /// nothing changed stored.
-    async fn store_crypto_method(&self, account: &AccountId, method: &str) -> Result<(), String>;
+    /// The sentence the settings surface shows when the write or the re-dial
+    /// failed; nothing changed stored. A method set on an account with no
+    /// IMAP/SMTP submission settings is refused (fail-closed: the engine's
+    /// wrap seam only hangs on IMAP accounts today, so the write would
+    /// otherwise stand while sends went out plainly).
+    async fn store_crypto_method(
+        &self,
+        account: &AccountId,
+        method: &str,
+    ) -> Result<Option<Vec<P>>, String>;
 }
 
 impl<P: Provider> App<P> {
@@ -361,9 +370,10 @@ impl<P: Provider> App<P> {
 
 impl<P: Provider> App<P> {
     /// The crypto-method write: the method word validates against the gate's
-    /// known methods first, then the seam persists it host-side. No re-dial
-    /// (the send path reads the method at submit time); a failure lands on
-    /// the account's row as `crypto_error`.
+    /// known methods first, then the seam persists it host-side, re-dialling
+    /// the account so the new method's MIME wrapper (or its absence) takes
+    /// effect with the next send; the re-dialled mail providers reinstall in
+    /// place. A failure lands on the account's row as `crypto_error`.
     pub(crate) async fn set_crypto_method(&self, account: AccountId, method: String) {
         let known = matches!(method.as_str(), "none" | "openpgp" | "smime");
         if !known {
@@ -384,8 +394,20 @@ impl<P: Provider> App<P> {
             self.rebuild_settings().await;
             return;
         }
+        if self.account_mid_flight(&account).await {
+            self.answer_crypto_failure(&account, MID_FLIGHT).await;
+            return;
+        }
         match ops.store_crypto_method(&account, &method).await {
-            Ok(()) => {
+            Ok(mail_providers) => {
+                if let Some(mail_providers) = mail_providers {
+                    if let Err(sentence) =
+                        self.install_mail_providers(&account, mail_providers).await
+                    {
+                        self.answer_crypto_failure(&account, &sentence).await;
+                        return;
+                    }
+                }
                 self.settings_state
                     .lock()
                     .expect("settings mutex poisoned")
@@ -398,6 +420,38 @@ impl<P: Provider> App<P> {
             }
         }
         self.rebuild_settings().await;
+    }
+
+    /// Installs re-dialled `mail_providers` on `account`, keeping the
+    /// account's calendar leg: the re-dial answers the mail half only, so
+    /// the swap retains whatever provider advertises calendars. `Err` is the
+    /// busy sentence the row shows; whatever stood, stands.
+    async fn install_mail_providers(
+        &self,
+        account: &AccountId,
+        mail_providers: Vec<P>,
+    ) -> Result<(), String> {
+        let mut accounts = self.accounts.write().await;
+        let Some(at) = accounts.iter().position(|held| held.id == *account) else {
+            return Ok(());
+        };
+        // The same gate as the dav swap: a strong count above one under the
+        // write lock is a dispatch still holding the old account across an
+        // engine call, and the swap would tear its provider out mid-read.
+        if Arc::strong_count(&accounts[at]) > 1 {
+            return Err(MID_FLIGHT.to_owned());
+        }
+        let held = accounts.remove(at);
+        let mut owned =
+            Arc::try_unwrap(held).expect("the strong count of one unwraps under the write lock");
+        owned
+            .providers
+            .retain(|provider| provider.connection_info().capabilities.calendars());
+        let mut providers = mail_providers;
+        providers.append(&mut owned.providers);
+        owned.providers = providers;
+        accounts.insert(at, Arc::new(owned));
+        Ok(())
     }
 
     /// Records the crypto-method write's failure sentence on the account's

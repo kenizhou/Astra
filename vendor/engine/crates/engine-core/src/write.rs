@@ -269,6 +269,12 @@ pub enum PendingOutcome {
         class: FailureClass,
         /// How long to wait before retrying, if retryable.
         retry_after: Option<Duration>,
+        /// The provider's own words on the refusal, for the row the host
+        /// shows (empty when it gave none — e.g. an interrupted attempt the
+        /// recovery recorded). Defaulted so an outcome serialized before the
+        /// detail was carried still decodes.
+        #[serde(default)]
+        detail: String,
     },
     /// The outcome is genuinely ambiguous (e.g. a post-DATA SMTP failure that may
     /// or may not have delivered). The op must **not** be blindly retried; it is
@@ -356,6 +362,7 @@ mod tests {
         let failed = PendingOutcome::Failed {
             class: FailureClass::RateLimited,
             retry_after: Some("PT30S".parse().unwrap()),
+            detail: String::new(),
         };
         let ambiguous = PendingOutcome::NeedsConfirmation {
             detail: "post-DATA timeout".into(),

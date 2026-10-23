@@ -121,6 +121,7 @@ mod transport_starttls;
 mod unseen;
 mod utf7;
 mod watch;
+mod wrap;
 
 #[cfg(test)]
 mod integration;

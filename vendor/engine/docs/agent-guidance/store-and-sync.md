@@ -773,6 +773,10 @@ one event never race on either provider.
   base. Re-sending bytes built from the copy the server has moved past would silently revert
   somebody else's edit with a write the server happily accepts. (The drainer that will do
   that recovery is issue #60; today a `Conflict` is recorded and surfaced to the caller.)
+  A submission's payload is the `Draft` the same way: it carries the serde-defaulted
+  `sign`/`encrypt` flags rather than wrapped bytes, so a retry re-assembles and re-wraps
+  against the account's **current** MIME wrapper (`providers.md`), and a payload serialized
+  before the flags existed decodes as a plain send.
 
 - **A write does not update the store; a *reconcile* does** (issue #65). The drivers are
   deliberately pure: they record the op, call the provider, record the outcome. They never
@@ -849,8 +853,12 @@ one event never race on either provider.
 
 - **The queue is readable, and withdrawable.** `StoreRead::list_pending_ops(account)` returns
   every row that has not settled, and every send that settled `Failed`
-  (`engine_store::stays_listed`), in enqueue order, with its kind, payload, attempts, backoff
-  and last failure class. This is what makes the outbox a queue rather than a set of ids a
+  (`engine_store::stays_listed`), in enqueue order, with its kind, payload, attempts, backoff,
+  last failure class, and the provider's own detail for that failure — a refused op's row says
+  *why* in the provider's words (a MIME wrapper's refusal crosses the same way, so a crypto
+  gate's reason is what the failed row shows), and a parked retry keeps it too, so a host can
+  say why something is still queued, not only that it is. This is what makes the outbox a
+  queue rather than a set of ids a
   caller had to remember: `pending_op_state` answers about one op the caller already holds
   the id of, which a host that has restarted does not. A failed send stays because it is a
   message that has not gone: it leaves the queue only when the host sends it again

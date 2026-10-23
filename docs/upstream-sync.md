@@ -73,6 +73,14 @@ as reviewable merges instead of a manual re-pin. The loop:
   construction.
 - **On merge, advance `last_ported`.** The lock table's engine row stays
   the provenance record.
+- **The first in-tree delta is the MIME-wrap seam** (the ECS spec, landed
+  2026-10-23): `engine-provider`'s `MimeWrapper` trait and the
+  serde-defaulted `Draft::sign`/`Draft::encrypt` flags, provider-imap's
+  `wrap` module (the wrapper consulted pre-dial, the Sent-copy repair
+  re-wrapping), and a `PendingOutcome::Failed` detail so a refused op's
+  row says why. `git diff vendor-sync main -- vendor/engine` lists it;
+  every sync PR review should expect these files to differ and treat any
+  upstream touch to them as a conflict to resolve deliberately.
 - **The engine's own battery is not part of `cargo test --workspace`.**
   The vendored tree is a nested workspace excluded from membership, so its
   tests run only explicitly: `cd vendor/engine && cargo test --workspace`

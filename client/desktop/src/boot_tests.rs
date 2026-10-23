@@ -333,8 +333,15 @@ fn boot_dials(
     let refusals = std::sync::Arc::new(crate::oauth::grant_refusals::GrantRefusals::new());
     let dials = std::sync::Arc::clone(dials);
     runtime.block_on(move || async move {
-        super::stored::dial_stored(&dials, &store, dial, google_boot::unused_dial(), &refusals)
-            .await
+        super::stored::dial_stored(
+            &dials,
+            &store,
+            &crate::commands_fakes::crypto_store(),
+            dial,
+            google_boot::unused_dial(),
+            &refusals,
+        )
+        .await
     })
 }
 

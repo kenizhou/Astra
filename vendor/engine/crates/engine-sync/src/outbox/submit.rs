@@ -121,6 +121,7 @@ where
         Err(err) => PendingOutcome::Failed {
             class: err.class(),
             retry_after: err.retry_after(),
+            detail: err.detail().to_owned(),
         },
     };
     match store.mark_pending_op(&leased.lease, outcome).await {

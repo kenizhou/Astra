@@ -58,10 +58,18 @@ pub(crate) fn assemble_state(
     // completion that rewrites it.
     let refusals = Arc::new(crate::oauth::grant_refusals::GrantRefusals::new());
 
+    // The crypto store opens BEFORE the dial: every IMAP account's dial
+    // installs the MIME wrapper its `[crypto]` method asks for, so the store
+    // the wrapper reads must stand first (ECS; the send path lives in the
+    // engine now, and the wrapper is installed at connect time).
+    let crypto_store = Arc::new(astra_crypto_store::CryptoStore::open(
+        &data_dir.join(CRYPTO_STORE_FILE),
+    )?);
     let accounts = runtime.block_on(|| {
         dial_stored(
             &connections,
             &credentials,
+            &crypto_store,
             crate::oauth::graph_add::production_dial(),
             crate::oauth::google_add::production_google_dial(),
             &refusals,
@@ -120,7 +128,10 @@ pub(crate) fn assemble_state(
         astra_app::boot(
             &engine_path,
             accounts,
-            Some(Box::new(DialConnector::new(Arc::clone(&connections)))),
+            Some(Box::new(DialConnector::new(
+                Arc::clone(&connections),
+                Arc::clone(&crypto_store),
+            ))),
             observer,
             spawn,
             ai_pass,
@@ -134,25 +145,17 @@ pub(crate) fn assemble_state(
     // state hands anything to a command, so every settings dispatch from
     // the first finds it standing. The store reads the standing grant
     // refusals beside the configs, so the rows the snapshot renders carry
-    // what the boot dial learned.
+    // what the boot dial learned. The crypto store rides along: the
+    // crypto-method write re-dials with the new method's wrapper built
+    // from it.
     core.install_account_ops(Arc::new(HostAccountStore::new(
         Arc::clone(&connections),
         Arc::clone(&credentials),
         Arc::clone(&refusals),
+        Arc::clone(&crypto_store),
     )));
-    // The built-in crypto send path: the crypto store beside the AI store,
-    // and the dial table's resolver for each account's method and endpoints.
-    // Installed before the first dispatch, so every crypto send from the
-    // first finds it standing.
-    let crypto_store = Arc::new(astra_crypto_store::CryptoStore::open(
-        &data_dir.join(CRYPTO_STORE_FILE),
-    )?);
-    core.install_crypto_send(
-        crypto_store,
-        Arc::new(crate::crypto_send::HostCryptoResolver::new(Arc::clone(
-            &connections,
-        ))),
-    );
+    // The crypto store opened before the dial (above) rides the state: the
+    // account-add flow and the headless dial build wrappers from it too.
     // Prime the settings snapshot: nothing republishes it until a settings
     // intent lands, so without this the first pull after a launch answers
     // the empty default, grant states and account rows included.
@@ -207,6 +210,7 @@ pub(crate) fn assemble_state(
         plugins,
         llm,
         connections,
+        crypto_store,
         photo_root: engine_path
             .with_file_name(format!("{ENGINE_STORE_FILE}.blobs"))
             .join("contact-photos"),
@@ -222,8 +226,9 @@ pub(crate) fn assemble_state(
 /// CLI opens, so both writers land in one ledger.
 const AI_STORE_FILE: &str = "ai.sqlite";
 
-/// The crypto store's file name, under the data directory: key material,
-/// trust decisions, and the crypto outbox.
+/// The crypto store's file name, under the data directory: key material and
+/// trust decisions. Opened before the account dial so every IMAP dial can
+/// install the MIME wrapper its method asks for.
 const CRYPTO_STORE_FILE: &str = "crypto.sqlite";
 
 /// The hard cap on one plugin's gate or transform call (the plan's ~5min):

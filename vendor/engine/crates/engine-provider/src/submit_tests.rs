@@ -235,3 +235,40 @@ async fn a_receipt_reports_no_kept_keywords_until_an_adapter_says_so() {
         BTreeSet::from([keyword("project-x")])
     );
 }
+
+#[test]
+fn a_payload_without_crypto_flags_still_deserializes_as_plain() {
+    // An op queued by a build that predates crypto support must decode at
+    // drain: the flags default to plain-sending.
+    let json = r#"{
+        "message_id": "old@host",
+        "from": {"email": "alice@test.local"},
+        "to": [{"email": "bob@test.local"}],
+        "subject": "hi",
+        "text_body": "body"
+    }"#;
+    let restored: Draft = serde_json::from_str(json).unwrap();
+    assert!(!restored.sign);
+    assert!(!restored.encrypt);
+}
+
+#[test]
+fn the_crypto_flags_round_trip_and_build() {
+    let draft = Draft::new(
+        mid("crypto@host"),
+        EmailAddress::new("alice@test.local"),
+        vec![EmailAddress::new("bob@test.local")],
+        "hi",
+        "body",
+    )
+    .with_crypto(true, true);
+    assert!(draft.sign && draft.encrypt);
+    let json = serde_json::to_string(&draft).unwrap();
+    assert!(json.contains("\"sign\":true"));
+    assert!(json.contains("\"encrypt\":true"));
+    let restored: Draft = serde_json::from_str(&json).unwrap();
+    assert_eq!(restored, draft);
+    // And with_crypto(false, _) clears again.
+    let plain = draft.with_crypto(false, true);
+    assert!(!plain.sign && plain.encrypt);
+}

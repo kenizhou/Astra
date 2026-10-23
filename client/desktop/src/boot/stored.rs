@@ -13,107 +13,20 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use engine_api::{AccountId, EmailAddress};
-
-use astra_app::MailboxConnector;
 
 use crate::{dial_table::AccountDials, HostAccount, HostProvider};
 
-/// Binds a folder of a registered account on demand: the host's
-/// implementation of the app's [`MailboxConnector`] seam, over the dial
-/// table.
-pub(crate) struct DialConnector {
-    /// The registered accounts.
-    dials: Arc<AccountDials>,
-}
+// The on-demand folder binder (the app's MailboxConnector seam) lives in a
+// sibling file, the same split the file cap forced here.
+mod connector;
 
-impl DialConnector {
-    /// The binder over one dial table.
-    pub(super) fn new(dials: Arc<AccountDials>) -> Self {
-        Self { dials }
-    }
-}
+pub(crate) use connector::DialConnector;
 
-#[async_trait]
-impl MailboxConnector<HostProvider> for DialConnector {
-    async fn connect_folder(&self, account: &AccountId, mailbox_key: &str) -> Option<HostProvider> {
-        let (config, connections) = self.dials.of(account.as_str())?;
-        if let Some(jmap) = config.jmap.as_ref() {
-            // One provider serves the whole JMAP account: the binder
-            // reconnects that account-wide provider, whatever the
-            // mailbox key names, and never mints a per-folder one. The
-            // key is deliberately unread; a grant account dials over a
-            // source minted here whose sink is none on purpose (a late
-            // bind only reads, and the boot's sink-backed source owns
-            // the rotations, exactly the graph arm's rule).
-            let tls = astra_account::account_tls(&config).ok()?;
-            let provider = match jmap.oauth.as_ref() {
-                Some(_) => {
-                    let source = astra_account::jmap_token_source(
-                        jmap,
-                        account.clone(),
-                        None,
-                        astra_account::CredentialOrigin::Stored,
-                    )
-                    .ok()?;
-                    Box::new(
-                        astra_account::dial_jmap_oauth_account(&config, &tls, &source)
-                            .await
-                            .ok()?,
-                    ) as HostProvider
-                }
-                None => Box::new(astra_account::dial_jmap_account(&config, &tls).await.ok()?)
-                    as HostProvider,
-            };
-            return Some(provider);
-        }
-        if let Some(graph) = config.graph.as_ref() {
-            // A Graph account binds folders over its stored grant: a
-            // source minted from the document through the same seam the
-            // completion uses. The sink is none here on purpose: a late
-            // bind only reads, and the boot's sink-backed source owns
-            // the rotations, so this source never writes a document.
-            let source = crate::oauth::graph_add::production_source()(
-                graph.provider_config(),
-                account.clone(),
-                graph.refresh_token.expose().to_owned(),
-                None,
-            )
-            .ok()?;
-            return astra_account::connect_graph_folder(
-                source,
-                mailbox_key,
-                None,
-                &astra_account::account_tls(&config).ok()?,
-            )
-            .map(|provider| provider as HostProvider)
-            .ok();
-        }
-        if let Some(google) = config.google.as_ref() {
-            // A Google account binds folders over its stored grant: a
-            // source minted from the document through the same
-            // constructor the completion uses. The sink is none here on
-            // purpose: a late bind only reads, and the boot's
-            // sink-backed source owns the rotations, so this source never
-            // writes a document. Gmail is account-global, so any mailbox
-            // key binds the one provider.
-            let source = astra_account::google_token_source(
-                google,
-                account.clone(),
-                None,
-                astra_account::CredentialOrigin::FreshSignIn,
-            )
-            .ok()?;
-            let tls = astra_account::account_tls(&config).ok()?;
-            let provider = astra_account::connect_google_folder(source, None, &tls) as HostProvider;
-            return Some(provider);
-        }
-        astra_account::connect_imap_mailbox(&connections, &config, mailbox_key)
-            .await
-            .ok()
-    }
-}
+/// The crypto store as every dial half holds it: the wrapper each IMAP
+/// connect installs reads the one the boot opened.
+pub(super) type SharedCryptoStore = Arc<astra_crypto_store::CryptoStore>;
+
 
 /// Dials every registered account, mail half first and dav legs beside
 /// it. A mail dial that fails skips the account with a warning: one stale
@@ -128,6 +41,7 @@ impl MailboxConnector<HostProvider> for DialConnector {
 pub(crate) async fn dial_stored(
     dials: &Arc<AccountDials>,
     credentials: &Arc<dyn crate::credential_store::AccountCredentialStore>,
+    crypto_store: &SharedCryptoStore,
     graph_dial: crate::oauth::graph_add::GraphDial,
     google_dial: crate::oauth::google_add::GoogleDial,
     refusals: &Arc<crate::oauth::grant_refusals::GrantRefusals>,
@@ -144,6 +58,13 @@ pub(crate) async fn dial_stored(
                 continue;
             }
         };
+        // A legacy config the fail-closed settings write now refuses: warn,
+        // never fail the boot.
+        if config.crypto.is_some() && (config.imap.is_none() || config.smtp.is_none()) {
+            log::warn!(
+                "boot: an account carries a crypto method but has no IMAP/SMTP submission settings; its sends go out plainly until the method is cleared"
+            );
+        }
         if config.imap.is_none() && config.graph.is_some() {
             match dial_graph_stored(
                 dials,
@@ -232,7 +153,11 @@ pub(crate) async fn dial_stored(
             .as_ref()
             .map(|imap| imap.username.clone())
             .unwrap_or_default();
-        match astra_account::connect_mail_providers(&connections, &config, &account_id).await {
+        let wrapper =
+            crate::crypto_wrapper::mime_wrapper_for_config(crypto_store, &config, &account_id);
+        match astra_account::connect_mail_providers(&connections, &config, &account_id, wrapper)
+            .await
+        {
             Ok(providers) => {
                 let account = HostAccount {
                     id: account_id,

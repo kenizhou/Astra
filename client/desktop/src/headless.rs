@@ -202,6 +202,8 @@ fn imap_test_dial(
                 &astra_account::ImapConnections::new(),
                 config,
                 &id,
+                // A connection probe sends nothing: no wrapper to install.
+                None,
             )
             .await
             .map(|_| ())
@@ -224,11 +226,7 @@ fn add_dial(
     astra_account::AccountError,
 > + '_ {
     |config: &astra_account::AccountConfig, id: &AccountId| {
-        let connections = astra_account::ImapConnections::new();
-        let providers = state
-            .runtime
-            .block_on(|| astra_account::connect_mail_providers(&connections, config, id));
-        providers.map(|providers| (providers, connections))
+        crate::crypto_wrapper::add_account_dial(&state.crypto_store, &state.runtime, config, id)
     }
 }
 

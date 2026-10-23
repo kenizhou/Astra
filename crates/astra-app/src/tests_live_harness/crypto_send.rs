@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! The gated crypto send proof against the live harness: the whole SP4b
-//! chain end to end. astra1's account carries the `openpgp` method, so its
-//! submit assembles, gates, and travels the Astra-side crypto outbox
-//! instead of the engine's queue; the delivered message on the harness
-//! proves the protected subject (`...` in the clear), the Sent copy is
-//! filed by the bypass's own IMAP append, and the recipient's copy
-//! decrypts back to the composer's words with astra2's key. A second send
-//! to a recipient with no key is blocked by the trust gate with the held
-//! row standing, and nothing ever reaches the server.
+//! The gated crypto send proof against the live harness: the whole chain end
+//! to end, now through the engine's MIME-wrap seam (ECS). astra1's account
+//! dials with the store-bound wrapper installed, so its submit rides the
+//! engine's own outbox: the wrapper wraps inside the drain, the delivered
+//! message proves the protected subject (`...` in the clear), the Sent copy
+//! is filed by the ENGINE's own Sent placement, and the recipient's copy
+//! decrypts back to the composer's words with astra2's key. A second send to
+//! a recipient with no key is refused by the wrapper pre-dial, so the engine
+//! op settles FAILED with the trust words and nothing reaches the server;
+//! once the key exists, the queue's own Send Now re-wraps and the send gets
+//! as far as the transport (which refuses the unknown local user: the proof
+//! the retry re-ran the wrap).
 //!
 //! The harness dials mirror the other send proofs: the same accepted
 //! self-signed certificate for IMAP and SMTP alike (Stalwart presents the
@@ -22,15 +25,16 @@ use astra_crypto_store::{CryptoStore, SqliteKeyStore};
 use astra_viewmodel::FolderRole;
 use engine_api::{AccountId, EmailAddress, Engine};
 
-use crate::crypto::{CryptoFlags, CryptoTransport, CryptoTransportResolver};
+use crate::crypto::CryptoFlags;
 use crate::tests_live_harness::CountingObserver;
 use crate::{Account, App, AppObserver, Intent};
 
 use super::{
-    dial_with_accepted_certificate, harness, inbox_key,
+    account as harness_config, dial_with_accepted_certificate, harness, inbox_key,
     proof::{self, document},
     row_by_subject,
 };
+use astra_account::{connect_mail_providers, CertificateException, ImapConnections};
 
 /// The subject the proof sends: unique among the harness fixtures.
 const SUBJECT: &str = "Harness crypto send proof";
@@ -38,108 +42,55 @@ const SUBJECT: &str = "Harness crypto send proof";
 /// The words the encrypted body carries; the decrypt asserts them back.
 const WORDS: &str = "Sealed by the built-in gate through the harness outbox.";
 
-/// The harness resolver: the accepted configs (cert exceptions included),
-/// with the sender's `[crypto] method` set, answering the app's port.
-struct HarnessCryptoResolver {
-    sender: astra_account::AccountConfig,
-    recipient: astra_account::AccountConfig,
+/// The sender dial, with the store-bound MIME wrapper installed at connect
+/// time: the boot's own ordering (the crypto store opens before the dial).
+async fn dial_wrapped(
+    host: &str,
+    port: &str,
+    user: &str,
+    password: &str,
+    wrapper: Arc<dyn engine_api::MimeWrapper>,
+) -> (AccountId, Vec<Box<dyn engine_api::Provider>>) {
+    let config = harness_config(host, port, user, password, Vec::new());
+    let account_id = config.account_id().expect("the account id");
+    let connections = ImapConnections::new();
+    let Err(error) = connect_mail_providers(&connections, &config, &account_id, None).await else {
+        panic!("the harness certificate was trusted without an accepted exception");
+    };
+    let astra_account::AccountError::CertificateRejected { rejected, .. } = error else {
+        panic!("the self-signed certificate was not offered as a rejection: {error}");
+    };
+    let accepted = CertificateException::new(rejected.server_name(), rejected.certificate());
+    let config = harness_config(host, port, user, password, vec![accepted]);
+    let providers = connect_mail_providers(&connections, &config, &account_id, Some(wrapper))
+        .await
+        .expect("the dial with the accepted certificate");
+    (account_id, providers)
 }
 
-#[async_trait::async_trait]
-impl CryptoTransportResolver for HarnessCryptoResolver {
-    async fn crypto_method(&self, account: &AccountId) -> CryptoMethod {
-        let config = [Some(&self.sender), Some(&self.recipient)]
-            .into_iter()
-            .flatten()
-            .find(|config| config.account_id().ok().as_ref() == Some(account));
-        config.map_or(CryptoMethod::None, |config| {
-            config.crypto.as_ref().map_or(CryptoMethod::None, |crypto| {
-                CryptoMethod::from_db_str(&crypto.method)
-            })
-        })
-    }
-
-    async fn crypto_transport(&self, account: &AccountId) -> Option<CryptoTransport> {
-        let config = [Some(&self.sender), Some(&self.recipient)]
-            .into_iter()
-            .flatten()
-            .find(|config| config.account_id().ok().as_ref() == Some(account))?;
-        let method = config.crypto.as_ref().map_or(CryptoMethod::None, |crypto| {
-            CryptoMethod::from_db_str(&crypto.method)
-        });
-        if method == CryptoMethod::None {
-            return None;
-        }
-        let imap = config.imap.as_ref()?;
-        let smtp = config.smtp.as_ref()?;
-        let password = imap.password.as_ref()?.expose().to_owned();
-        let connector = astra_account::account_tls(config).ok()?.connector();
-        let security_of = |security| match security {
-            astra_account::ConnectionSecurity::ImplicitTls => {
-                astra_crypto_store::TransportSecurity::ImplicitTls
-            }
-            astra_account::ConnectionSecurity::StartTls => {
-                astra_crypto_store::TransportSecurity::StartTls
-            }
-        };
-        Some(CryptoTransport {
-            method,
-            account_email: imap.username.clone(),
-            smtp: astra_crypto_store::SmtpDial {
-                addr: smtp.addr.clone(),
-                server_name: smtp.server_name.clone(),
-                security: security_of(smtp.security),
-                username: imap.username.clone(),
-                password: password.clone(),
-            },
-            imap: astra_crypto_store::ImapDial {
-                addr: imap.addr.clone(),
-                server_name: imap.server_name.clone(),
-                security: security_of(imap.security),
-                username: imap.username.clone(),
-                password,
-            },
-            connector,
-        })
-    }
-}
-
-/// The gated run: an encrypted send travels the crypto outbox and is
-/// delivered sealed, the Sent copy is filed, and a missing-key recipient
-/// is blocked with the held row standing.
+/// The gated run: an encrypted send rides the engine's outbox wrapped and is
+/// delivered sealed, the Sent copy is filed by the engine, a missing-key
+/// recipient fails the op pre-dial, and Send Now re-wraps once the key exists.
 #[tokio::test]
-async fn the_crypto_send_travels_the_outbox_and_decrypts_for_the_recipient() {
+async fn the_crypto_send_rides_the_engine_queue_and_decrypts_for_the_recipient() {
     let Some((host, port, user, password)) = harness() else {
         eprintln!("skipping live harness test: ASTRA_LIVE_HARNESS is not 1");
         return;
     };
 
-    // Dial both sides through the certificate acceptance walk, keeping the
-    // accepted configs for the resolver and the verification fetch.
-    let (sender, sender_providers, sender_config, _) =
-        dial_with_accepted_certificate(&host, &port, &user, &password).await;
-    let (recipient, recipient_providers, recipient_config, _) =
-        dial_with_accepted_certificate(&host, &port, proof::RECIPIENT, &password).await;
-
-    // The sender's method is openpgp; the recipient config stands for the
-    // resolver's method lookup only (no crypto of its own this run).
-    let mut sender_crypto_config = sender_config.clone();
-    sender_crypto_config.crypto = Some(astra_account::CryptoAccount {
-        method: "openpgp".to_owned(),
-    });
-    let resolver = HarnessCryptoResolver {
-        sender: sender_crypto_config,
-        recipient: recipient_config.clone(),
-    };
-
-    // The crypto store: the sender's own key (default signer) and the
-    // recipient's public cert with an explicit verified decision.
+    // The crypto store first (the boot's ordering): the sender's own key
+    // (default signer) and the recipient's public cert with an explicit
+    // verified decision. The account id is the config-derived one, so the
+    // store row keys match the dial.
+    let sender_id = harness_config(&host, &port, &user, &password, Vec::new())
+        .account_id()
+        .expect("the sender's account id");
     let store = Arc::new(CryptoStore::open_in_memory().expect("the in-memory store opens"));
     store
-        .register_account(sender.as_str(), "astra1@example.test")
+        .register_account(sender_id.as_str(), "astra1@example.test")
         .unwrap();
     let backend = astra_crypto_openpgp::OpenpgpBackend::new(
-        Arc::new(SqliteKeyStore::new(store.clone(), sender.as_str())),
+        Arc::new(SqliteKeyStore::new(store.clone(), sender_id.as_str())),
         CryptoPolicy::default(),
     );
     let own = backend
@@ -153,7 +104,7 @@ async fn the_crypto_send_travels_the_outbox_and_decrypts_for_the_recipient() {
         .expect("generate the sender's key");
     astra_crypto_store::set_default_signing_key(
         &store,
-        sender.as_str(),
+        sender_id.as_str(),
         "openpgp",
         own.fingerprint.as_str(),
     )
@@ -167,7 +118,7 @@ async fn the_crypto_send_travels_the_outbox_and_decrypts_for_the_recipient() {
         &store,
         &astra_crypto_store::CryptoKeyRecord {
             row: astra_crypto_store::CryptoKeyRow {
-                account_id: sender.as_str().to_owned(),
+                account_id: sender_id.as_str().to_owned(),
                 standard: "openpgp".to_owned(),
                 key_type: "cert".to_owned(),
                 email: Some(proof::RECIPIENT.to_owned()),
@@ -186,7 +137,7 @@ async fn the_crypto_send_travels_the_outbox_and_decrypts_for_the_recipient() {
     .unwrap();
     astra_crypto_store::put_trust_decision(
         &store,
-        sender.as_str(),
+        sender_id.as_str(),
         proof::RECIPIENT,
         "openpgp",
         &recipient_fp,
@@ -195,7 +146,22 @@ async fn the_crypto_send_travels_the_outbox_and_decrypts_for_the_recipient() {
     )
     .unwrap();
 
-    // The app over the product's own dial, with the crypto support installed.
+    // The wrapper, built by the store's factory exactly as the host builds it
+    // at dial time, installed at connect.
+    let wrapper = astra_crypto_store::mime_wrapper_for(
+        &store,
+        sender_id.as_str(),
+        "astra1@example.test",
+        CryptoMethod::Openpgp,
+    )
+    .expect("a crypto method installs a wrapper");
+    let (sender, sender_providers) = dial_wrapped(&host, &port, &user, &password, wrapper).await;
+    assert_eq!(sender, sender_id, "the dial answers the config-derived id");
+    let (recipient, recipient_providers, _, _) =
+        dial_with_accepted_certificate(&host, &port, proof::RECIPIENT, &password).await;
+
+    // The app over the product's own dial; no Astra-side crypto installation
+    // exists anymore: the engine's queue owns the send.
     let engine = Arc::new(Engine::open_in_memory().expect("the engine store"));
     let observer: Arc<dyn AppObserver> = Arc::new(CountingObserver::default());
     let app = App::new(
@@ -214,8 +180,7 @@ async fn the_crypto_send_travels_the_outbox_and_decrypts_for_the_recipient() {
         ],
         None,
         observer,
-    )
-    .with_crypto_send(store.clone(), Arc::new(resolver));
+    );
 
     // A known state: sweep any earlier run's proof mail first.
     app.dispatch(Intent::RefreshMail).await.unwrap();
@@ -224,8 +189,8 @@ async fn the_crypto_send_travels_the_outbox_and_decrypts_for_the_recipient() {
     app.dispatch(Intent::RefreshMail).await.unwrap();
     app.dispatch(Intent::RefreshMail).await.unwrap();
 
-    // The send: the composer's gesture. The crypto branch assembles, gates,
-    // queues, and drains inside the dispatch.
+    // The send: the composer's gesture. The flags stamp onto the engine's
+    // draft; the wrapper wraps inside the engine's drain.
     app.dispatch(Intent::SubmitRichMail {
         from: sender.clone(),
         to: proof::RECIPIENT.to_owned(),
@@ -245,10 +210,9 @@ async fn the_crypto_send_travels_the_outbox_and_decrypts_for_the_recipient() {
         app.sending()
     );
     assert!(
-        astra_crypto_store::list_crypto_outbox(&store)
-            .expect("the outbox reads")
-            .is_empty(),
-        "the crypto outbox settled the row"
+        app.sending().held.is_empty(),
+        "the engine path holds no Astra-side gate row: {:?}",
+        app.sending()
     );
 
     // The delivery: one refresh and the recipient's INBOX holds the mail.
@@ -267,7 +231,7 @@ async fn the_crypto_send_travels_the_outbox_and_decrypts_for_the_recipient() {
         "the delivered sealed mail is from the sender"
     );
 
-    // The Sent copy: filed by the bypass's own IMAP append, placeholder
+    // The Sent copy: filed by the ENGINE's own Sent placement, placeholder
     // subject and all.
     let sent = crate::FolderRef::from_parts(
         sender.as_str(),
@@ -388,8 +352,9 @@ async fn the_crypto_send_travels_the_outbox_and_decrypts_for_the_recipient() {
         "the composer's words survive: {inner}"
     );
 
-    // The blocked half: a recipient with no key is refused by the trust
-    // gate, the held row stands naming them, and nothing goes out.
+    // The refused half: a recipient with no key is refused by the wrapper
+    // pre-dial, so the ENGINE's op settles Failed (permanent) carrying the
+    // trust words: no held row, and nothing reaches the server.
     app.dispatch(Intent::SubmitRichMail {
         from: sender.clone(),
         to: "ghost@example.test".to_owned(),
@@ -402,28 +367,118 @@ async fn the_crypto_send_travels_the_outbox_and_decrypts_for_the_recipient() {
     })
     .await
     .unwrap();
-    let held = app.sending().held;
-    assert_eq!(held.len(), 1, "the held row stands");
-    assert!(
-        held[0].reason.contains("ghost@example.test"),
-        "the row names the keyless recipient: {}",
-        held[0].reason
+    let rows = app.sending().rows;
+    let failed_rows: Vec<_> = rows
+        .iter()
+        .filter(|row| row.state == astra_viewmodel::QueuedState::Failed)
+        .collect();
+    assert_eq!(
+        failed_rows.len(),
+        1,
+        "the engine's failed row stands: {rows:?}"
     );
     assert!(
-        astra_crypto_store::list_crypto_outbox(&store)
-            .expect("the outbox reads")
-            .is_empty(),
-        "nothing was ever queued for the blocked send"
+        app.sending().held.is_empty(),
+        "a trust refusal is the engine's failed op, never a held row"
+    );
+    let op = engine
+        .outbox(&sender)
+        .await
+        .expect("the engine outbox reads")
+        .into_iter()
+        .find(|op| op.state == engine_api::PendingOpState::Failed)
+        .expect("the failed op is recorded");
+    let detail = op.detail.clone().unwrap_or_default();
+    assert!(
+        detail.contains("not every recipient can be encrypted to"),
+        "the op carries the gate's reason: {detail}"
+    );
+    assert!(
+        detail.contains("ghost@example.test"),
+        "the op names the keyless recipient: {detail}"
     );
 
-    // The cleanup: the held row withdraws, and the proof mail leaves both
-    // accounts through the engine's own delete path.
-    let hold_id = held[0].hold.clone();
-    app.dispatch(Intent::Outbox(crate::OutboxIntent::WithdrawHeld {
-        hold: hold_id,
+    // The retry half: the user fixes the keys (ghost's cert lands with a
+    // verified decision), the queue's own Send Now re-runs the whole wrap :
+    // and the send now gets as far as the transport, which refuses the
+    // unknown local user. The op's detail changing from the gate's words to
+    // SMTP's is the proof the retry re-wrapped.
+    let ghost_cert = astra_crypto_openpgp::engine::generate("Ghost <ghost@example.test>")
+        .expect("generate ghost's key");
+    let ghost_fp = astra_crypto_openpgp::keymap::fingerprint_of(&ghost_cert)
+        .as_str()
+        .to_owned();
+    astra_crypto_store::upsert_crypto_key(
+        &store,
+        &astra_crypto_store::CryptoKeyRecord {
+            row: astra_crypto_store::CryptoKeyRow {
+                account_id: sender.as_str().to_owned(),
+                standard: "openpgp".to_owned(),
+                key_type: "cert".to_owned(),
+                email: Some("ghost@example.test".to_owned()),
+                fingerprint: ghost_fp.clone(),
+                origin: "contact".to_owned(),
+                ..Default::default()
+            },
+            public_data: hex::encode(
+                astra_crypto_openpgp::keymap::cert_to_public_blob(&ghost_cert)
+                    .expect("ghost's public blob"),
+            ),
+            private_data: None,
+            policy_json: None,
+        },
+    )
+    .unwrap();
+    astra_crypto_store::put_trust_decision(
+        &store,
+        sender.as_str(),
+        "ghost@example.test",
+        "openpgp",
+        &ghost_fp,
+        "verified",
+        None,
+    )
+    .unwrap();
+    app.dispatch(Intent::Outbox(crate::OutboxIntent::SendNow {
+        queued: crate::reference::QueuedRef::from_parts(
+            failed_rows[0].queued.account.as_str(),
+            failed_rows[0].queued.op,
+        )
+        .expect("the row's key routes"),
     }))
     .await
     .unwrap();
+    let op = engine
+        .outbox(&sender)
+        .await
+        .expect("the engine outbox reads")
+        .into_iter()
+        .find(|op| op.state == engine_api::PendingOpState::Failed)
+        .expect("the retried op is recorded");
+    let retried = op.detail.clone().unwrap_or_default();
+    assert!(
+        !retried.contains("not every recipient can be encrypted to"),
+        "the retry cleared the gate: {retried}"
+    );
+    assert!(
+        retried.contains("SMTP"),
+        "the retry re-wrapped and reached the transport, which refused the unknown user: {retried}"
+    );
+
+    // The cleanup: the failed op withdraws, and the proof mail leaves both
+    // accounts through the engine's own delete path.
+    let rows = app.sending().rows;
+    if let Some(row) = rows.first() {
+        app.dispatch(Intent::Outbox(crate::OutboxIntent::Cancel {
+            queued: crate::reference::QueuedRef::from_parts(
+                row.queued.account.as_str(),
+                row.queued.op,
+            )
+            .expect("the row's key routes"),
+        }))
+        .await
+        .unwrap();
+    }
     proof::delete_subject_mail(&app, &sender, &["..."]).await;
     proof::delete_subject_mail(&app, &recipient, &["..."]).await;
     app.dispatch(Intent::RefreshMail).await.unwrap();

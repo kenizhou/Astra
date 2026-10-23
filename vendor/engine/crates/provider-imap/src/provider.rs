@@ -48,6 +48,9 @@ pub struct ImapProvider<S> {
     /// The resolved SMTP transport, or `None` when submission is unconfigured.
     /// `pub(crate)` so [`crate::filing`] (which owns the submission dispatch) reads it.
     pub(crate) smtp: Option<Arc<SmtpSender>>,
+    /// The host-installed MIME wrapper submissions consult when a draft asks for
+    /// crypto; `pub(crate)` for the same reason as `smtp`.
+    pub(crate) mime_wrapper: Option<Arc<dyn engine_provider::MimeWrapper>>,
     /// The sync-depth window floor: when set, a snapshot fetches only mail delivered
     /// on or after this date (`ImapConfig::with_since`). `None` syncs the whole mailbox.
     since: Option<time::Date>,
@@ -74,6 +77,7 @@ impl<S> ImapProvider<S> {
         pool: Arc<ImapPool<S>>,
         mailbox: MailboxId,
         smtp: Option<Arc<SmtpSender>>,
+        mime_wrapper: Option<Arc<dyn engine_provider::MimeWrapper>>,
         since: Option<time::Date>,
         connection_info: ConnectionInfo,
     ) -> Self {
@@ -81,6 +85,7 @@ impl<S> ImapProvider<S> {
             pool,
             mailbox,
             smtp,
+            mime_wrapper,
             since,
             connection_info,
         }

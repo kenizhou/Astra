@@ -266,6 +266,21 @@ Run the first deterministic IMAP/SMTP/CalDAV tests against Stalwart. Add externa
   A server acts on a request only once it has all of it, which is what makes the last piece,
   not the first, the line. A request with no body (none submits today) commits before it is
   sent.
+- **A host can wrap the assembled MIME before it leaves, per account** (`MimeWrapper`,
+  `engine-provider/src/mime_wrap.rs`): one neutral trait, installed on the account's config,
+  consulted only when the draft's serde-defaulted `sign`/`encrypt` flags ask, given the
+  **filed** assembly (with `Bcc`) and returning both variants — the wire one the same
+  ciphertext minus the `Bcc` header. A refusal is a `ProviderError` raised **before any
+  dial**, so a gated send never reaches the server. Where the seam can hang is exactly the
+  set of adapters that assemble MIME at submission:
+
+  | Adapter | Submits | Seam |
+  |---|---|---|
+  | IMAP/SMTP | assembled RFC 5322 bytes to `DATA` | **implemented** (`wrap.rs`: pre-dial, `refile` re-wraps) |
+  | Graph | the same bytes, base64 in `sendMail` | applicable, not yet wired |
+  | Gmail | the same bytes, `raw` upload | applicable, not yet wired |
+  | JMAP | an `Email/set` object — the server renders the MIME | not applicable: there are no bytes to wrap |
+
 - SMTP per-recipient acceptance/rejection before DATA must be represented.
 - Sent folder placement must reconcile by generated Message-ID.
 - Mail mutations (mark-read/flag, move, delete) are one provider-neutral method, `edit_mail(account, &MailEdit) -> MailEditReceipt`, gated by the `mail_writes` capability (distinct from read `mail`, like `calendar_writes` vs `calendars`). `MailEdit` mirrors the three independent mail axes (`modeling.md`): `SetKeywords{add,remove}` (the `$seen`/`$flagged` state), `MoveTo{destination}` (membership — and the mechanism behind a Trash "delete"), and `Delete` (permanent). It is outbox-driven by `engine_sync::edit_mail`, exactly like the calendar writes. JMAP maps all three to one `Email/set` (keywords/mailboxIds patch or `destroy`); IMAP maps them to `UID STORE`, `UID MOVE`, and `UID STORE \Deleted` + `UID EXPUNGE`. A stale target (an IMAP UID under a changed `UIDVALIDITY`) is a `Conflict` → re-sync then retry. (Shape + capability + trait method **implemented** in `engine-provider`; the IMAP adapter implements it — `imap-smtp.md` — as does the JMAP adapter, folding all three edits onto one `Email/set` — `jmap.md`.)

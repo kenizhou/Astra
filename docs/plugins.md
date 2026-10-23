@@ -218,24 +218,28 @@ app's own. What stands after SP4b:
   OpenPGP Autocrypt-Gossip inside the encrypted part, `EncryptOp.sign_with`
   composition (never clear-sign-then-encrypt), and the W9 password arm
   (SKESK symmetric, `PasswordConflict`/`PasswordRequired`).
-- **The Astra-side outbox** (spec D3): the pinned engine's submit takes
-  only `Draft`, so a crypto send assembles with the engine's own
-  `engine_rfc5322` (byte-identical output), wraps once (the filed variant,
-  with `Bcc`), and queues in `crypto_outbox`. The wire variant is the same
-  ciphertext minus the `Bcc` header. The bypass transport is small and
-  explicit: EHLO, `AUTH PLAIN`, `MAIL FROM`, `RCPT TO`, dot-stuffed `DATA`,
-  `RSET` on error, over the account's dialled settings and the host-built
-  TLS connector; the Sent copy files by IMAP `APPEND` (special-use `\Sent`
-  discovery). A mid-DATA loss lands `unconfirmed`; only the user's answer
-  re-sends. Crypto rows ride the existing sending snapshot under a high-bit
-  op namespace with the same verbs routed.
+- **The engine's MIME-wrap seam** (the ECS spec, superseding SP4b's D3):
+  the vendored engine carries a provider-neutral `MimeWrapper` trait, and
+  the store-bound wrapper (`astra-crypto-store::wrap`) is installed at
+  dial time on every IMAP account whose method stands. A crypto send
+  rides the **engine's own outbox**: the drain assembles the filed
+  variant (with `Bcc`) and hands it to the wrapper once, the wire variant
+  is the same ciphertext minus the `Bcc` header, and the Sent copy is
+  filed by the engine's own placement. A trust refusal settles the op
+  `Failed` before any socket dials, with the gate's reason on the row;
+  the queue's own Send Now retries the whole wrap once the keys are
+  fixed. One sending engine, one outbox, one drain: the SP4b Astra-side
+  crypto outbox and its bypass transport are retired (the `crypto_outbox`
+  table dropped, unreleased).
 - **The switch**: each account's `[crypto] method` in its stored config
   (`none | openpgp | smime`), echoed on the settings row and editable from
-  the Accounts page. `none` is the zero-cost default: the engine's queue
-  keeps every send. The composer's sign/encrypt flags ride the submit
-  intents, defaulting to both on under a method. A method without IMAP/SMTP
-  submission settings holds with the typed unavailable answer, never a
-  silent drop.
+  the Accounts page. `none` is the zero-cost default: every send goes out
+  plainly, flags inert. The composer's sign/encrypt flags stamp onto the
+  engine's `Draft` at submit, defaulting to both on. The write re-dials
+  the account BEFORE it persists, so the new method takes effect with the
+  next send, and refuses fail-closed on an account without IMAP/SMTP
+  submission settings (Graph/Google/JMAP today: no seam to hang the
+  wrapper on, and a standing method would silently send plaintext).
 
 Later slices: SP4c is the receive half (decrypt/verify through the reading
 pipeline, encrypted drafts at rest, the result rows and the security

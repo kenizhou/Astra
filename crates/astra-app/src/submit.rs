@@ -214,14 +214,13 @@ impl<P: Provider> App<P> {
         draft: Draft,
         crypto: CryptoFlags,
     ) {
-        // The built-in crypto branch: with a method configured the send
-        // assembles, gates, and queues in the Astra-side crypto outbox; the
-        // engine's queue never sees it. Every other account takes the
-        // engine path below untouched.
+        // The crypto flags stamp onto the engine's draft: the account's
+        // installed MIME wrapper wraps: or refuses: inside the engine's own
+        // outbox, and a plain account's send is untouched (no wrapper, the
+        // flags inert). Stamped after the gate, so what the gate vetted is
+        // exactly what the wrapper wraps.
         let (sign, encrypt) = crypto.resolved();
-        if self.crypto_submit_maybe(from, &draft, sign, encrypt).await {
-            return;
-        }
+        let draft = draft.with_crypto(sign, encrypt);
         let at = self.account_ordinal(from).await;
         log::info!("send[a{at}]: submitting a message");
         match self.engine.submit_mail(provider, from, &draft).await {

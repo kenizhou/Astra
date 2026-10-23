@@ -545,6 +545,20 @@ credential.
   attachment bodies are base64 encoded, and non-ASCII attachment filenames use
   RFC 5987-style `filename*` / `name*` parameters. (Long encoded-words are not yet
   folded into 75-octet runs — a later refinement.)
+- **The MIME-wrap seam (`MimeWrapper`, `wrap.rs`).** A host can install one
+  `engine_provider::MimeWrapper` per account (`ImapConfig::with_mime_wrapper`,
+  the `with_connect_observer` precedent) and ask for it per message with the
+  serde-defaulted `Draft::sign` / `Draft::encrypt` flags. When both line up,
+  submission preparation (`wrap::prepare_submission`, shared by `submit` and
+  `refile`) assembles the **filed** variant — the one with the `Bcc` header — and
+  hands it to the wrapper once; the wrapper returns both variants, the wire one
+  the same ciphertext minus the `Bcc` header. Preparation runs **before any
+  transport dials** and always before `HandOver::commit`, so a refusal — a
+  `ProviderError::permanent`, for a gate the user must resolve — settles the op
+  without a byte reaching the server, and the outbox's retry re-runs the whole
+  wrap. The Sent-copy repair (`refile`) re-wraps through the same helper: an
+  `Unfiled` wrapped send never re-files plaintext. With no wrapper installed, or
+  neither flag set, assembly is byte-for-byte the pre-seam one.
 - **Keywords on the Sent copy.** A draft's `sent_copy_keywords` ride the Sent `APPEND` as
   flags, and only where the folder's `PERMANENTFLAGS` carries `\*` (RFC 9051 §7.1):
   without it the server answers `OK` and keeps no new keyword, the same silent success
