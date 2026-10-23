@@ -14,9 +14,11 @@
 // app start resume opens the stored draft into the strip, a landed compose
 // request opens a pop-out window hydrated from it, the AI documents panel
 // rides above the status bar's corner when the rail's toggle opens it, the
-// send-result toast says when a queued send has gone out, the settings
-// screen rides above the shell when the title bar's gear opens it, and the
-// account setup flow rides above everything when it is open.
+// send-result toast says when a queued send has gone out, the offline
+// banner rides over the shell's top while every dialled account stands in
+// outage, the settings screen rides above the shell when the title bar's
+// gear opens it, and the account setup flow rides above everything when it
+// is open.
 
 import { Group, Panel } from 'react-resizable-panels';
 
@@ -39,6 +41,7 @@ import { CommandRibbon } from '@/components/ribbon/CommandRibbon';
 import { PaneDivider, PaneDividerHorizontal } from './paneDivider';
 import { FolderPaneDrawer } from './FolderPaneDrawer';
 import { MessageList } from './MessageList';
+import { OfflineBanner } from './OfflineBanner';
 import { ReadingPane } from './ReadingPane';
 import { StatusBar } from './StatusBar';
 import { TitleBar } from './TitleBar';
@@ -257,6 +260,7 @@ export function AppShell() {
         </div>
       </div>
       <StatusBar />
+      <OfflineBanner />
       <AiPanel />
       <SendResultToast />
       <SettingsScreen />

@@ -78,6 +78,14 @@ fn set_clock_and_set_quote_style_carry_their_flag() {
 }
 
 #[test]
+fn set_notifications_enabled_carries_its_flag() {
+    round_trips(
+        &Intent::Settings(SettingsIntent::SetNotificationsEnabled { enabled: false }),
+        r#"{"settings":{"set_notifications_enabled":{"enabled":false}}}"#,
+    );
+}
+
+#[test]
 fn set_zone_carries_the_zone_verbatim() {
     // The type carries the string; the core validates the id on dispatch,
     // never here, so a host's typo reaches the core as-is to be refused typed

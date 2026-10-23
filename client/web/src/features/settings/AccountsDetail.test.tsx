@@ -130,6 +130,148 @@ describe('the account page', () => {
   });
 });
 
+describe('the per-account sync section', () => {
+  it('opens on the account page, stating how far back mail syncs', () => {
+    render(<AccountsDetail />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open ada@example.test' }));
+
+    expect(screen.getByLabelText('How far back mail syncs')).toBeTruthy();
+    expect(screen.getByLabelText('Offline message bodies')).toBeTruthy();
+    expect(screen.getByLabelText('Check for new mail')).toBeTruthy();
+  });
+
+  it('reflects the standing effective values, never the click that started the write', () => {
+    useSettingsStore.getState().applySnapshot(
+      snapshot([
+        row({
+          sync: { depth_months: 12, body_cap: 'off', poll_minutes: 90 },
+        }),
+      ]),
+    );
+    render(<AccountsDetail />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open ada@example.test' }));
+
+    expect((screen.getByLabelText('How far back mail syncs') as HTMLSelectElement).value).toBe(
+      '12',
+    );
+    expect((screen.getByLabelText('Offline message bodies') as HTMLSelectElement).value).toBe(
+      'off',
+    );
+    expect((screen.getByLabelText('Check for new mail') as HTMLSelectElement).value).toBe('90');
+
+    // A change dispatches and the control keeps the standing truth until the
+    // republished snapshot lands.
+    fireEvent.change(screen.getByLabelText('How far back mail syncs'), { target: { value: '3' } });
+    expect((screen.getByLabelText('How far back mail syncs') as HTMLSelectElement).value).toBe(
+      '12',
+    );
+  });
+
+  it('answers the product defaults when the row carries no sync block', () => {
+    render(<AccountsDetail />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open ada@example.test' }));
+
+    expect((screen.getByLabelText('How far back mail syncs') as HTMLSelectElement).value).toBe('3');
+    expect((screen.getByLabelText('Offline message bodies') as HTMLSelectElement).value).toBe(
+      'default',
+    );
+    expect((screen.getByLabelText('Check for new mail') as HTMLSelectElement).value).toBe('30');
+  });
+
+  it('writes the depth alone, crossing no key for the cap or the cadence', () => {
+    render(<AccountsDetail />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open ada@example.test' }));
+
+    fireEvent.change(screen.getByLabelText('How far back mail syncs'), { target: { value: '12' } });
+
+    expect(ipc.dispatch).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
+      '{"settings":{"set_sync_settings":{"account":"work","depth_months":12}}}',
+    );
+  });
+
+  it('writes the whole mailbox as a zero depth', () => {
+    render(<AccountsDetail />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open ada@example.test' }));
+
+    fireEvent.change(screen.getByLabelText('How far back mail syncs'), { target: { value: '0' } });
+
+    expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
+      '{"settings":{"set_sync_settings":{"account":"work","depth_months":0}}}',
+    );
+  });
+
+  it('writes the body cap in every state, the words honest to the per-message rule', () => {
+    render(<AccountsDetail />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open ada@example.test' }));
+
+    const cap = screen.getByLabelText('Offline message bodies');
+    fireEvent.change(cap, { target: { value: 'off' } });
+    expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
+      '{"settings":{"set_sync_settings":{"account":"work","body_cap":"off"}}}',
+    );
+
+    fireEvent.change(cap, { target: { value: 'everything' } });
+    expect(JSON.stringify(ipc.dispatch.mock.calls[1]?.[0])).toBe(
+      '{"settings":{"set_sync_settings":{"account":"work","body_cap":"everything"}}}',
+    );
+
+    fireEvent.change(cap, { target: { value: 'default' } });
+    expect(JSON.stringify(ipc.dispatch.mock.calls[2]?.[0])).toBe(
+      '{"settings":{"set_sync_settings":{"account":"work","body_cap":{"bytes":{"octets":268435456}}}}}',
+    );
+  });
+
+  it('writes a custom per-message figure stated in mebibytes', () => {
+    render(<AccountsDetail />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open ada@example.test' }));
+
+    fireEvent.change(screen.getByLabelText('Offline message bodies'), {
+      target: { value: 'custom' },
+    });
+    expect(ipc.dispatch).not.toHaveBeenCalled();
+
+    const figure = screen.getByLabelText('Maximum per message (MiB)');
+    fireEvent.change(figure, { target: { value: '5' } });
+    fireEvent.blur(figure);
+
+    expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
+      '{"settings":{"set_sync_settings":{"account":"work","body_cap":{"bytes":{"octets":5242880}}}}}',
+    );
+  });
+
+  it('seeds the custom figure from a standing custom cap', () => {
+    useSettingsStore.getState().applySnapshot(
+      snapshot([
+        row({
+          sync: { depth_months: 3, body_cap: { bytes: { octets: 1048576 } }, poll_minutes: 30 },
+        }),
+      ]),
+    );
+    render(<AccountsDetail />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open ada@example.test' }));
+
+    expect((screen.getByLabelText('Offline message bodies') as HTMLSelectElement).value).toBe(
+      'custom',
+    );
+    expect((screen.getByLabelText('Maximum per message (MiB)') as HTMLInputElement).value).toBe(
+      '1',
+    );
+  });
+
+  it('writes the cadence in minutes', () => {
+    render(<AccountsDetail />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open ada@example.test' }));
+
+    fireEvent.change(screen.getByLabelText('Check for new mail'), { target: { value: '90' } });
+
+    expect(ipc.dispatch).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
+      '{"settings":{"set_sync_settings":{"account":"work","poll_minutes":90}}}',
+    );
+  });
+});
+
 describe('the remove confirmation', () => {
   it('names the address and the destructive act behind it', () => {
     render(<AccountsDetail />);

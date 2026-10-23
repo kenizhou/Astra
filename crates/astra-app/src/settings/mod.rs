@@ -140,6 +140,10 @@ impl<P: Provider> App<P> {
                 self.set_setting(|prefs| prefs.plugins_enabled = enabled)
                     .await;
             }
+            SettingsIntent::SetNotificationsEnabled { enabled } => {
+                self.set_setting(|prefs| prefs.notifications_enabled = enabled)
+                    .await;
+            }
             SettingsIntent::SetZone { zone } => self.set_zone(zone).await,
             SettingsIntent::SetFirstDayOfWeek { weekday } => {
                 self.set_setting(|prefs| prefs.first_day_of_week = weekday)

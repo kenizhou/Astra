@@ -23,7 +23,7 @@ first**.
 | 5 | **Leaving search restores the view it was opened from**: the same account and folder, unsearched. Escape in the field, blanking the query, and Exit search all clear, and nothing else moves. | Search is a mode over the list, not a destination. |
 | 6 | **Clearing the query resets the scope** to the default, in the app and in the field's dropdown, as one action. | A narrowing the user can no longer see is a narrowing they will not think of: the next search would silently be smaller than it looks. |
 | 7 | The scope is **session state, never persisted**, and a narrowing with no live query **is refused outright**: nothing is re-run, nothing stored. | It is a filter on one search, not a preference, and there is nothing to narrow without a query. Tighter than mail-calendar's core, which stores the scope whatever the list is doing. |
-| 8 | **A search states how far back it looked**, on the results surface. The horizon is the **narrowest** synced window among the accounts the scope covered, in whole months, carried as `depth_months`: a plain count, never words on the wire. A scope that searched **no** account folds to zero and claims no horizon at all. | Search reads the local store and nothing else, so it finds only what sync depth kept. Unqualified, an empty result claims *"there is no such message"* when it means *"not in the last three months"*; only the second is something the user can fix. One three-month account makes the whole answer three months old at best, so the narrowest wins. |
+| 8 | **A search states how far back it looked**, on the results surface, and the note is the route to the depth: opening it lands on the settings' accounts section, where each account's depth is set. The horizon is the **narrowest** synced window among the accounts the scope covered, in whole months, carried as `depth_months`: a plain count, never words on the wire. A scope that searched **no** account folds to zero and claims no horizon at all, so no note stands to be opened. | Search reads the local store and nothing else, so it finds only what sync depth kept. Unqualified, an empty result claims *"there is no such message"* when it means *"not in the last three months"*; only the second is something the user can fix, and the note says where. One three-month account makes the whole answer three months old at best, so the narrowest wins. |
 | 9 | **Results follow the list's grouping.** With conversations on, a match is shown as the conversation it belongs to: the row carries the **whole** thread, is labelled by the newest message that **matched**, and sorts on that message (rule 1, measured against the query). A conversation nobody's query touched is never listed. | Search is a mode over the list, not a second kind of list: a row that stands for its whole thread in the mailbox has to stand for its whole thread here. Labelling and sorting on the match keeps the answer legible: a row summarised by an unrelated later reply reads as the wrong result. |
 | 10 | **What is on screen answers the query as it now stands.** A search overtaken while it ran is discarded, never published; and the field is quiet for **500 ms** before the app is asked at all. Escape and Exit search act at once, being navigation rather than a query; a field blanked by backspace crosses on the same 500 ms pause as a typed query. | Searches run concurrently and finish out of order, by wide margins: a two-letter prefix matches half the mailbox and takes longer than the finished query. Published unconditionally, the screen goes to whichever finished last, which is reliably the broadest and least useful one, and nothing corrects it until an unrelated rebuild lands. |
 
@@ -125,18 +125,18 @@ contract from this document, not from this paragraph.
 | 5 Exit restores the view | yes: Escape, blank, Exit search |
 | 6 Clear resets the scope | yes |
 | 7 Session state, no queryless narrowing | yes |
-| 8 Horizon stated | yes, the depth note; no route to a depth setting (Known gaps) |
+| 8 Horizon stated | yes, the depth note, and it opens the settings on the accounts section where each account's depth is set |
 | 9 Grouping obeyed | yes |
 | 10 Debounced, superseded discarded | yes, at 500 ms, not mail-calendar's 250 ms |
 
 ## Known gaps
 
-- **The horizon has no route to a sync-depth setting.** Mail-calendar's rule 8
-  carries "with a route to the sync-depth setting"; Astra Mail ships no
-  settings surface, so the depth note states the horizon and offers nothing
-  beside it. The depth itself is the product default (three months) for every
-  account today, read through one seam (`sync_depth_months`) that a per-account
-  setting will read when it ships.
+- **The depth note's link opens the accounts section, not the specific
+  account's depth control.** The note opens the settings on the accounts
+  section, and each account's own page there carries its depth; the settings
+  screen offers no deeper link into one account's page. The per-account depth
+  itself ships (settings.md), and it and the horizon read one value, so the
+  note and the setting it reaches can never disagree.
 - **The horizon is a month count, never an unbounded shape.** Mail-calendar's
   core sends `AllTime` or a month count; Astra's state carries
   `depth_months: u32`, a plain count, and no search ever looked at all time:

@@ -75,6 +75,11 @@ pub enum SettingsIntent {
         /// On or off.
         enabled: bool,
     },
+    /// Set whether new mail raises OS notifications.
+    SetNotificationsEnabled {
+        /// On or off.
+        enabled: bool,
+    },
     /// Set the calendar's display zone.
     SetZone {
         /// The IANA id, carried verbatim; the core validates it on dispatch.

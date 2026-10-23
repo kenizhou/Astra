@@ -22,11 +22,11 @@ row that renders nothing invites a support answer nobody can give.
 
 | # | Category | What lives in it |
 |---|---|---|
-| 1 | **General** | Appearance (Follow host, Light, Dark) · Clock (24-hour on, 12-hour off) |
+| 1 | **General** | Appearance (Follow host, Light, Dark) · Clock (24-hour on, 12-hour off) · New mail notifications (on by default) |
 | 2 | **Calendar** | Display zone · First day of the week · Horizon · Default calendar |
 | 3 | **Reading** | Conversation grouping (flat or threaded) |
 | 4 | **Composing** | Quote style (the quoted original below or above the reply) · Default send account (the app-level account the new-message button and the mailto entry open from) · Signatures (rich text, per-account new mail and reply slots, per signatures.md) |
-| 5 | **Accounts** | Every configured account, each opening its own page |
+| 5 | **Accounts** | Every configured account, each opening its own page: the dav editor, the crypto method, and the account's own sync settings |
 | 6 | **Advanced** | AI assistant access (the MCP server): the on/off toggle, the per-account allowlist, the client-config snippet |
 | 7 | **About** | The version and the attributions, from the core, not the web's guess |
 
@@ -116,14 +116,20 @@ change moves the product with no restart and no code path of its own.
 ## What the host chrome consumes
 
 - **The theme follows the host by default and keeps following it
-  live.** Light and Dark are an explicit override; Follow host returns
-  to tracking the desktop's own preference as it changes. The title
-  bar's quick cycle and the General picker are two controls over the one
-  persisted mode, so neither can strand the other.
+  live.** Light and Dark are an explicit override; Follow host returns to
+  tracking the desktop's own preference as it changes. The title bar's quick
+  cycle and the General picker are two controls over the one persisted mode,
+  so neither can strand the other.
 - **The clock** drives how every timestamp the web view renders is
   spelled, 12-hour by default: one field, read wherever a time is
   formatted, so the mail list and the diary cannot disagree about what
   ten past noon looks like.
+- **The new-mail notifications switch** lives in General, on by default.
+  Its category is a recorded judgement: the switch governs how arriving
+  mail announces itself to the desktop, an app-level behaviour, not how a
+  message renders, so General holds it rather than Reading. The host's
+  delivery bridge reads the persisted flag at every delivery, so a person
+  who wants no announcements gets none whatever the window state.
 
 ## The accounts page
 
@@ -147,6 +153,30 @@ installs anything.
   `dav_password_set`, a boolean that answers whether a password is
   stored. The editor's password field therefore starts blank and says
   blank keeps; a typed password replaces the stored one verbatim.
+
+### The per-account sync settings
+
+The account's page carries its own sync section: how far back the account
+syncs, the offline body cap, and the poll cadence. Each control writes
+through the one `set_sync_settings` intent, stating only the field it
+changed: an omitted field crosses no key at all, so an edit of the depth
+leaves the cap and the cadence standing. The row carries the effective
+triple the pass runs with, the product defaults where the account sets
+none (a three-month depth, a 256 MiB per-message cap, and a 30-minute
+cadence), and every control reflects that block rather than local
+optimism.
+
+- **The depth** is months of history, zero the whole mailbox, and it is
+  the same value the search depth note reads, so the list and the search
+  can never disagree about how far back mail goes. Narrowing it narrows
+  what syncs from now on and prunes nothing already stored.
+- **The cap** states the per-message rule the engine enforces: the figure
+  bounds each message body, never the account's offline total. The states
+  are off (metadata only, nothing warms), the 256 MiB default, everything,
+  and a custom figure stated in mebibytes; a message over the figure keeps
+  its list row and loads its body on open.
+- **The cadence** is the poll's own rhythm, 15 to 120 minutes, clamped
+  into its bounds on write; a faster manual refresh is the refresh button.
 
 ### The dav editor's save
 
@@ -292,7 +322,7 @@ never the history.
 
 | Surface | Ships |
 |---|---|
-| Desktop | The settings modal from the title strip's gear: the categories above, each control persisting before it answers; the accounts page with the dav editor and the confirmed removal; the Advanced page with the AI assistant access panel (host-side toggle, allowlist, client-config snippet; off and empty at every boot); the theme and clock applying across the chrome; the zone, first day, horizon, default calendar, grouping, and quote style consumed by the diary, the create dialog, the list, and the composer |
+| Desktop | The settings modal from the title strip's gear: the categories above, each control persisting before it answers; the accounts page with the dav editor, the crypto method, the per-account sync section, and the confirmed removal; the General page's notifications switch the delivery bridge reads; the Advanced page with the AI assistant access panel (host-side toggle, allowlist, client-config snippet; off and empty at every boot); the theme and clock applying across the chrome; the zone, first day, horizon, default calendar, grouping, and quote style consumed by the diary, the create dialog, the list, and the composer; the per-account sync settings consumed by the pass window, the warm-body cap, the poll cadence, and the search depth |
 
 The live proofs: the gated harness suite drives the seam end to end over
 a scratch config document that mirrors the host store's merge rule and
@@ -312,13 +342,13 @@ seeded artefact is withdrawn at the end.
 ## Known gaps
 
 - **The categories that do not ship, by name**: the Allodia account,
-  Signatures, Notifications, Privacy, and Diagnostics are absent, and
-  so are the entries inside shipped categories that mail-calendar
-  carries: the app language and the default mail app (General), swipe
-  actions (Reading), the default send account (Composing), and the
-  reset local database (Advanced, whose MCP panel does ship). Each
-  arrives with the slice that implements it, in the slot the taxonomy
-  gives it.
+  Notifications (its new-mail switch ships in General; the category
+  mail-calendar gives it stays absent), Privacy, and Diagnostics are
+  absent, and so are the entries inside shipped categories that
+  mail-calendar carries: the app language and the default mail app
+  (General), swipe actions (Reading), and the reset local database
+  (Advanced, whose MCP panel does ship). Each arrives with the slice
+  that implements it, in the slot the taxonomy gives it.
 - **The client-config snippet names a relay the bundle does not yet
   stage.** The snippet derives the relay binary beside the app, but the
   desktop bundle carries no `astra-mcp-relay` beside the executable

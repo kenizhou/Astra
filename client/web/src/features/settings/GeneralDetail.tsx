@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The General detail: the theme picker (follow host, Light, Dark), the
-// clock picker (24 or 12 hour), and the device-local appearance choices
-// (accent skin, texture, contrast, font size, density). The pickers
-// dispatch their intents and reflect the persisted block, never local
-// optimism, and the persist failure's sentence renders under the controls
-// it belongs to. The appearance choices are different: the persisted
-// settings block has no fields for them, so they write localStorage and
-// the document-root attributes through the appearance store and stay on
-// this device.
+// clock picker (24 or 12 hour), the new-mail notifications switch, and the
+// device-local appearance choices (accent skin, texture, contrast, font
+// size, density). The pickers dispatch their intents and reflect the
+// persisted block, never local optimism, and the persist failure's sentence
+// renders under the controls it belongs to. The appearance choices are
+// different: the persisted settings block has no fields for them, so they
+// write localStorage and the document-root attributes through the
+// appearance store and stay on this device. The notifications switch lives
+// here rather than in Reading: it governs how arriving mail announces
+// itself to the desktop, an app-level behaviour, not how a message renders.
 
 import { dispatch, intents } from '@/services/ipc';
 import { SKINS, useAppearanceStore, type ContrastMode, type DensityMode, type FontSizeStep, type ReadingPosition, type TextureMode } from '@/services/appearance';
@@ -202,6 +204,16 @@ export function GeneralDetail() {
         ]}
         onChange={(id) => void dispatch(intents.setClock(id === '24'))}
       />
+      <label className="flex items-center gap-2 text-xs text-foreground">
+        <input
+          type="checkbox"
+          checked={settings.notifications_enabled ?? true}
+          onChange={(event) =>
+            void dispatch(intents.setNotificationsEnabled(event.target.checked))
+          }
+        />
+        New mail notifications
+      </label>
       {error === 'persist_failed' && (
         <p role="alert" className="text-xs text-[var(--warning)]">
           {PERSIST_SENTENCE}

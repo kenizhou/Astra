@@ -83,6 +83,11 @@ async fn every_total_set_arm_persists_and_republishes_the_block() {
         },
     )
     .await;
+    lands(
+        &app,
+        SettingsIntent::SetNotificationsEnabled { enabled: false },
+    )
+    .await;
 
     let snapshot = app.settings();
     assert_eq!(snapshot.settings.theme, ThemeMode::Dark);
@@ -91,6 +96,7 @@ async fn every_total_set_arm_persists_and_republishes_the_block() {
     assert_eq!(snapshot.settings.first_day_of_week, WeekdayWire::Su);
     assert_eq!(snapshot.settings.horizon_days, 31);
     assert!(!snapshot.settings.quote_below);
+    assert!(!snapshot.settings.notifications_enabled);
     assert_eq!(
         snapshot
             .settings
@@ -109,6 +115,7 @@ async fn every_total_set_arm_persists_and_republishes_the_block() {
     assert_eq!(persisted.first_day_of_week, WeekdayWire::Su);
     assert_eq!(persisted.horizon_days, 31);
     assert!(!persisted.quote_below);
+    assert!(!persisted.notifications_enabled);
     assert_eq!(
         persisted
             .default_calendar

@@ -165,6 +165,7 @@ export type SettingsIntentBody =
   | { set_theme: { mode: ThemeMode } }
   | { set_clock: { twenty_four: boolean } }
   | { set_plugins_enabled: { enabled: boolean } }
+  | { set_notifications_enabled: { enabled: boolean } }
   | { set_zone: { zone: string } }
   | { set_first_day_of_week: { weekday: WeekdayWire } }
   | { set_horizon: { days: number } }
@@ -215,6 +216,10 @@ export const settingsIntents = {
   /** Set whether plugins run at all (the admin policy switch). */
   setPluginsEnabled: (enabled: boolean) => ({
     settings: { set_plugins_enabled: { enabled } },
+  }),
+  /** Set whether new mail raises OS notifications. */
+  setNotificationsEnabled: (enabled: boolean) => ({
+    settings: { set_notifications_enabled: { enabled } },
   }),
   /** Set the calendar's display zone; the core refuses an id it cannot resolve. */
   setZone: (zone: string) => ({ settings: { set_zone: { zone } } }),

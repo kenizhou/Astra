@@ -4,7 +4,7 @@
 // badges only where mail is unread, and selection and expansion crossing back
 // as intents. Each expanded account's group closes with its Outbox row, which
 // badges the sends still owed and leads the list's queue view.
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const ipc = vi.hoisted(() => ({
@@ -268,6 +268,58 @@ describe('the per-account refusal badge', () => {
     render(<FolderPane />);
 
     expect(screen.queryByRole('button', { name: 'Reconnect work@example.net' })).toBeNull();
+  });
+});
+
+describe('the per-account outage badge', () => {
+  it('badges an account in outage, its tooltip naming the account reconnect', () => {
+    useUiStore.getState().applySyncProgress({
+      accounts: [],
+      delivery: { offline_banner: false, outages: ['work'] },
+    });
+    render(<FolderPane />);
+
+    const work = screen.getByRole('region', { name: 'work@example.net' });
+    const badge = work.querySelector('[data-outage-badge]');
+    expect(badge).not.toBeNull();
+    expect(badge?.getAttribute('title')).toBe('work@example.net is offline and reconnecting');
+  });
+
+  it('leaves with the snapshot that clears the account', () => {
+    useUiStore.getState().applySyncProgress({
+      accounts: [],
+      delivery: { offline_banner: false, outages: ['work'] },
+    });
+    render(<FolderPane />);
+    expect(
+      screen.getByRole('region', { name: 'work@example.net' }).querySelector('[data-outage-badge]'),
+    ).not.toBeNull();
+
+    act(() => {
+      useUiStore.getState().applySyncProgress({
+        accounts: [],
+        delivery: { offline_banner: false, outages: [] },
+      });
+    });
+    expect(
+      screen.getByRole('region', { name: 'work@example.net' }).querySelector('[data-outage-badge]'),
+    ).toBeNull();
+  });
+
+  it('draws no badge for an account not in outage', () => {
+    useUiStore.getState().applySyncProgress({
+      accounts: [],
+      delivery: { offline_banner: false, outages: ['home'] },
+    });
+    render(<FolderPane />);
+
+    expect(
+      screen.getByRole('region', { name: 'work@example.net' }).querySelector('[data-outage-badge]'),
+    ).toBeNull();
+    // The outaged account carries it: only its own rows badge.
+    expect(
+      screen.getByRole('region', { name: 'Home' }).querySelector('[data-outage-badge]'),
+    ).not.toBeNull();
   });
 });
 
