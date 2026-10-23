@@ -27,7 +27,13 @@ fn fold() -> (SyncProgress, Arc<Mutex<Vec<Surface>>>) {
     let observer = RecordingObserver {
         surfaces: Arc::clone(&surfaces),
     };
-    (SyncProgress::new(Arc::new(observer)), surfaces)
+    (
+        SyncProgress::new(
+            Arc::new(observer),
+            Arc::new(crate::notifications::NewMailQueue::new()),
+        ),
+        surfaces,
+    )
 }
 
 fn account() -> AccountId {

@@ -16,7 +16,6 @@ use astra_viewmodel::{MailboxListSnapshot, MessageRowView, SearchScope, SearchSt
 use engine_api::{AccountId, MailListRow, Mailbox, MailboxRole, Provider, ThreadId};
 
 use crate::{
-    accounts::NEW_ACCOUNT_SYNC_DEPTH_MONTHS,
     list_rows::{self, SearchMessage},
     snapshot::account_folder_rows,
     Account, App, Scope,
@@ -148,7 +147,7 @@ impl<P: Provider> App<P> {
         let (from, to, text) = split_query(query);
         let dsl = engine_query(from.as_deref(), to.as_deref(), &text);
         let covered = searched(scope, live, ids, trees);
-        let depth_months = depth(covered.iter().map(|(account, _)| *account));
+        let depth_months = self.depth(covered.iter().map(|(account, _)| *account));
         if dsl.trim().is_empty() {
             // A query of nothing but malformed prefixes names nobody: the
             // honest answer is no rows, never the whole mailbox an empty
@@ -235,6 +234,26 @@ impl<P: Provider> App<P> {
                     matched: false,
                 }),
         );
+    }
+
+    /// How far back the searched accounts hold mail, in whole months: the
+    /// narrowest of their sync depths, since one shallow account makes the
+    /// whole answer that old at best. Zero when the scope searched no
+    /// account at all: there is no corpus to describe, and an answer that
+    /// ran nowhere claims no horizon either.
+    fn depth<'a>(&self, searched: impl IntoIterator<Item = &'a AccountId>) -> u32 {
+        searched
+            .into_iter()
+            .map(|account| self.sync_depth_months(account))
+            .reduce(u32::min)
+            .unwrap_or(0)
+    }
+
+    /// One account's synced window, in whole months: the depth the pass
+    /// window runs under, read from the same preference.
+    fn sync_depth_months(&self, account: &AccountId) -> u32 {
+        let pane = self.pane.lock().expect("preferences mutex poisoned");
+        u32::from(pane.sync_settings(account).depth_months)
     }
 }
 
@@ -464,25 +483,6 @@ pub(crate) fn role_key(tree: &[Mailbox], role: &MailboxRole) -> Option<String> {
     tree.iter()
         .find(|mailbox| mailbox.role.as_ref() == Some(role))
         .map(|mailbox| mailbox.id.key().as_str().to_owned())
-}
-
-/// How far back the searched accounts hold mail, in whole months: the
-/// narrowest of their sync depths, since one shallow account makes the whole
-/// answer that old at best. Zero when the scope searched no account at all:
-/// there is no corpus to describe, and an answer that ran nowhere claims no
-/// horizon either.
-fn depth<'a>(searched: impl IntoIterator<Item = &'a AccountId>) -> u32 {
-    searched
-        .into_iter()
-        .map(|_| sync_depth_months())
-        .reduce(u32::min)
-        .unwrap_or(0)
-}
-
-/// One account's synced window, in whole months: the product's default depth
-/// today, the seam a per-account depth setting will read from.
-fn sync_depth_months() -> u32 {
-    u32::from(NEW_ACCOUNT_SYNC_DEPTH_MONTHS)
 }
 
 #[cfg(test)]

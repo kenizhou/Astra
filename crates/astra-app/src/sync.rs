@@ -9,7 +9,7 @@ use std::time::Instant;
 use engine_api::{AccountId, CalendarDate, Provider, StreamTuning, SyncWindow};
 use futures::future::join_all;
 
-use crate::{accounts::NEW_ACCOUNT_SYNC_DEPTH_MONTHS, sync_account::sync_account_providers, App};
+use crate::{outage::PassOutcome, sync_account::sync_account_providers, App};
 
 /// Objects a streamed pass asks the provider for per network round trip.
 pub(crate) const STREAM_FETCH_BATCH: usize = 200;
@@ -32,19 +32,8 @@ impl<P: Provider> App<P> {
         let accounts = self.account_handles().await;
         log::info!("refresh_mail: syncing {} account(s)", accounts.len());
         let sync_start = Instant::now();
-        join_all(accounts.iter().enumerate().map(|(at, account)| {
-            let tuning = self.sync_tuning();
-            async move {
-                sync_account_providers(
-                    &self.engine,
-                    account,
-                    self.connector.as_deref(),
-                    tuning,
-                    &self.sync_progress,
-                    at,
-                )
-                .await;
-            }
+        join_all(accounts.iter().enumerate().map(|(at, account)| async move {
+            self.run_account_pass(account, at).await;
         }))
         .await;
         // The pass committed new state, so the cached load is stale from here on.
@@ -71,28 +60,60 @@ impl<P: Provider> App<P> {
         let Some(account) = self.account_handle(id).await else {
             return;
         };
-        let tuning = self.sync_tuning();
         let at = self.account_ordinal(id).await;
-        sync_account_providers(
+        self.run_account_pass(&account, at).await;
+        self.invalidate_list_cache();
+    }
+
+    /// One account's whole pass, delivery end to end: the notification queue
+    /// arms against the store as it stands, the sync runs, the pass's
+    /// outcome folds into the outage state, and the account's missing
+    /// bodies warm under its own cap before the pass gives the account back.
+    /// The single seam the manual refresh, the account-add first sync, and
+    /// the host's background loop all drive, so every landing is the same
+    /// landing.
+    async fn run_account_pass(&self, account: &std::sync::Arc<crate::Account<P>>, at: usize) {
+        if account.providers.is_empty() {
+            log::info!("sync[a{at}]: skipped; no live mail providers");
+            return;
+        }
+        let tuning = self.sync_tuning_for(&account.id);
+        self.new_mail
+            .arm(&self.engine, &account.id, &account.identity)
+            .await;
+        let report = sync_account_providers(
             &self.engine,
-            &account,
+            account,
             self.connector.as_deref(),
             tuning,
             &self.sync_progress,
             at,
         )
         .await;
-        self.invalidate_list_cache();
+        self.outages.record(&account.id, PassOutcome::of(&report));
+        let cap = self
+            .pane
+            .lock()
+            .expect("preferences mutex poisoned")
+            .sync_settings(&account.id)
+            .body_cap;
+        if let Some(provider) = account.providers.first() {
+            self.warm_account_bodies(&account.id, provider, cap).await;
+        }
     }
 
-    /// The tuning every pass runs with: the fetch and chunk sizes above, bounded by the
-    /// product default sync-depth window.
-    // A method rather than an associated function: the depth is per-account in the
-    // engine's contract, and this is where a per-account choice will be read from.
-    #[allow(clippy::unused_self)]
-    pub(crate) fn sync_tuning(&self) -> StreamTuning {
-        StreamTuning::new(STREAM_FETCH_BATCH, STREAM_CHUNK_SIZE)
-            .within(sync_window(NEW_ACCOUNT_SYNC_DEPTH_MONTHS))
+    /// The tuning one account's pass runs with: the fetch and chunk sizes
+    /// above, bounded by the account's own sync-depth window, which the
+    /// per-account setting widens or narrows and the product default holds
+    /// for an account that has set none.
+    pub(crate) fn sync_tuning_for(&self, account: &AccountId) -> StreamTuning {
+        let months = self
+            .pane
+            .lock()
+            .expect("preferences mutex poisoned")
+            .sync_settings(account)
+            .depth_months;
+        StreamTuning::new(STREAM_FETCH_BATCH, STREAM_CHUNK_SIZE).within(sync_window(months))
     }
 
     /// Puts back what the previous run left unfinished in the outbox.

@@ -43,14 +43,23 @@ pub(crate) struct SyncProgress {
     cell: Surfaced<SyncProgressSnapshot>,
     /// Every account's folded position, keyed by id so the snapshot's order is stable.
     accounts: Mutex<BTreeMap<AccountId, FoldedAccount>>,
+    /// The new-mail queue every commit also feeds, shared with the app: one
+    /// observer drives both folds, so a pass's commits cannot reach one and
+    /// miss the other.
+    new_mail: std::sync::Arc<crate::notifications::NewMailQueue>,
 }
 
 impl SyncProgress {
-    /// An unpublished fold over no accounts, signalling `surface` on `observer`.
-    pub(crate) fn new(observer: std::sync::Arc<dyn AppObserver>) -> Self {
+    /// An unpublished fold over no accounts, signalling `surface` on
+    /// `observer`, feeding `new_mail` with every commit.
+    pub(crate) fn new(
+        observer: std::sync::Arc<dyn AppObserver>,
+        new_mail: std::sync::Arc<crate::notifications::NewMailQueue>,
+    ) -> Self {
         Self {
             cell: Surfaced::new(Surface::SyncProgress, observer),
             accounts: Mutex::new(BTreeMap::new()),
+            new_mail,
         }
     }
 
@@ -99,10 +108,12 @@ impl SyncProgress {
 }
 
 impl SyncObserver for SyncProgress {
-    /// Deliberately empty: the SP1 fold is folder-level, and a commit carries no
-    /// folder position this snapshot reports. The engine requires the method; leaving
-    /// it a no-op is the honest statement that commits do not move this surface yet.
-    fn committed(&self, _commit: &SyncCommit<'_>) {}
+    /// Forwards to the new-mail queue: this fold itself stays folder-level
+    /// (a commit carries no folder position this snapshot reports), and the
+    /// queue owns the whole message-level policy around a commit.
+    fn committed(&self, commit: &SyncCommit<'_>) {
+        self.new_mail.committed(commit);
+    }
 
     /// Starts the account's pass: its fold resets to zero of `folders`, so a second
     /// pass of the same account restarts its position rather than resuming the last.

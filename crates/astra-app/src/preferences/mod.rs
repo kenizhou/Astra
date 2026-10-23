@@ -1,24 +1,30 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Persisted app preferences: the list's view mode and expansion, the last
-//! selection, the settings block, the signature assignments, and the plugin
-//! policy switch. Host app preferences, not synced data, so they live in a
-//! small TOML file beside the engine store rather than in the store itself.
+//! selection, the settings block, the per-account sync settings, the
+//! signature assignments, and the plugin policy switch. Host app
+//! preferences, not synced data, so they live in a small TOML file beside
+//! the engine store rather than in the store itself.
 //!
 //! The expansion map is stored **inverted**: the file holds what is
 //! collapsed, so an untouched account or folder opens showing what is inside
 //! it; read through the accessors, never the set directly.
 //!
-//! [`PreferencesState`] is the runtime's in-memory copy plus the path it
-//! writes through: a toggle changes the copy, then persists with a
-//! read-modify-write against what is on disk right now, so a concurrent write
-//! to an unrelated preference is not clobbered.
+//! The runtime's in-memory copy and the path it writes through live in
+//! [`state`], split from this document half so neither grows past the file
+//! cap; a toggle there changes the copy, then persists with a
+//! read-modify-write against what is on disk right now, so a concurrent
+//! write to an unrelated preference is not clobbered.
+
+mod state;
+
+pub(crate) use state::PreferencesState;
 
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
 };
 
-use astra_viewmodel::{FolderRow, ThemeMode, WeekdayWire};
+use astra_viewmodel::{SyncBodyCap, ThemeMode, WeekdayWire};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -29,6 +35,22 @@ use crate::{
 
 /// The preferences file's name, in the app data directory beside the engine store.
 const FILE_NAME: &str = "preferences.toml";
+
+/// The per-message body cap an account warms and keeps when the user has set
+/// none. A message larger than this is pathological mail, not a setting the
+/// person made, so the default warms effectively everything a mailbox holds
+/// while still bounding the one number that could grow without end.
+pub(crate) const DEFAULT_BODY_CAP_OCTETS: u64 = 256 * 1024 * 1024;
+
+/// The shortest cadence the background loop may poll at; a faster manual
+/// refresh is the refresh button.
+pub(crate) const POLL_MIN_MINUTES: u16 = 15;
+
+/// The longest cadence the poll may wait between passes.
+pub(crate) const POLL_MAX_MINUTES: u16 = 120;
+
+/// The cadence an account polls at when the user has set none.
+pub(crate) const DEFAULT_POLL_MINUTES: u16 = 30;
 
 /// App-level preferences persisted across launches.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,6 +122,11 @@ pub struct Preferences {
     /// Whether plugins run at all (the admin policy switch); on by default.
     #[serde(default = "default_true")]
     pub plugins_enabled: bool,
+    /// Each account's own sync settings, by account id; the file holds only
+    /// the fields the user set, and an absent row or field falls back to the
+    /// product defaults.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub sync: BTreeMap<engine_api::AccountId, AccountSyncSettings>,
 }
 
 /// The shipped defaults, which the serde field defaults and a first launch
@@ -122,6 +149,7 @@ impl Default for Preferences {
             default_send_account: None,
             signatures: BTreeMap::new(),
             plugins_enabled: true,
+            sync: BTreeMap::new(),
         }
     }
 }
@@ -146,6 +174,23 @@ pub(crate) const HORIZON_MAX_DAYS: u32 = 365;
 /// The composer default and the policy switch share the on-by-default answer.
 fn default_true() -> bool {
     true
+}
+
+/// One account's own sync settings as the document persists them: every
+/// field optional, so an edit of one leaves the others standing and an
+/// absent row or field is the product default rather than a stored zero.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountSyncSettings {
+    /// How many months of history the account syncs; zero is the whole
+    /// mailbox.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub depth_months: Option<u16>,
+    /// The body cap state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body_cap: Option<SyncBodyCap>,
+    /// The polling cadence, in minutes; clamped into its bounds on write.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub poll_minutes: Option<u16>,
 }
 
 impl Preferences {
@@ -221,11 +266,51 @@ impl Preferences {
         self.selected_account = account;
     }
 
+    /// Merges one account's sync settings: each named field writes (the
+    /// cadence clamped into its bounds), each absent field keeps what stood,
+    /// and a field written back to the product default stores as unset, so
+    /// the default and unset are one state and a row left with nothing set
+    /// comes out of the file, the same discipline the expansion maps follow.
+    pub fn set_sync_settings(
+        &mut self,
+        account: &engine_api::AccountId,
+        depth_months: Option<u16>,
+        body_cap: Option<SyncBodyCap>,
+        poll_minutes: Option<u16>,
+    ) {
+        let clamped_poll =
+            poll_minutes.map(|minutes| minutes.clamp(POLL_MIN_MINUTES, POLL_MAX_MINUTES));
+        let mut row = self
+            .sync
+            .get(account)
+            .cloned()
+            .unwrap_or(AccountSyncSettings::default());
+        if let Some(depth_months) = depth_months {
+            row.depth_months = (depth_months != crate::accounts::NEW_ACCOUNT_SYNC_DEPTH_MONTHS)
+                .then_some(depth_months);
+        }
+        if let Some(body_cap) = body_cap {
+            row.body_cap = match body_cap {
+                SyncBodyCap::Bytes { octets } if octets == DEFAULT_BODY_CAP_OCTETS => None,
+                other => Some(other),
+            };
+        }
+        if let Some(poll_minutes) = clamped_poll {
+            row.poll_minutes = (poll_minutes != DEFAULT_POLL_MINUTES).then_some(poll_minutes);
+        }
+        if row == AccountSyncSettings::default() {
+            self.sync.remove(account);
+        } else {
+            self.sync.insert(account.clone(), row);
+        }
+    }
+
     /// Drops every expansion this account holds, its selected folder when the
-    /// selection pointed inside it, and its own selected view: used when the
-    /// account is removed, so a later re-add opens showing its folders rather
-    /// than inheriting a shut tree nobody remembers shutting. Returns whether
-    /// anything was stored for it.
+    /// selection pointed inside it, its own selected view, and its own rows
+    /// in the per-account maps (the signatures, the sync settings): used when
+    /// the account is removed, so a later re-add opens showing its folders
+    /// rather than inheriting a shut tree nobody remembers shutting. Returns
+    /// whether anything was stored for it.
     pub fn remove_account(&mut self, account: &str) -> bool {
         let tree = self.collapsed_accounts.remove(account);
         let folders = self.collapsed_folders.remove(account).is_some();
@@ -244,7 +329,11 @@ impl Preferences {
             .default_send_account
             .take_if(|held| held.as_str() == account)
             .is_some();
-        tree || folders || selected || viewed || signatures || send_default
+        let sync = engine_api::AccountId::try_from(account)
+            .ok()
+            .and_then(|id| self.sync.remove(&id))
+            .is_some();
+        tree || folders || selected || viewed || signatures || send_default || sync
     }
 }
 
@@ -284,217 +373,6 @@ pub fn save_preferences(path: impl AsRef<Path>, prefs: &Preferences) -> std::io:
     std::fs::write(path, body)
 }
 
-/// The runtime's loaded preferences, and the path they write through.
-///
-/// Held in memory and consulted on every snapshot rebuild, so it cannot be a file read;
-/// the persisted copy is written only when the user actually changes something.
-pub(crate) struct PreferencesState {
-    pub(crate) prefs: Preferences,
-    path: Option<PathBuf>,
-    last_save_failed: bool,
-}
-
-impl PreferencesState {
-    /// Loads the persisted state (every tree open when the file is absent or
-    /// unreadable); unpersisted when `path` is `None` (the tests, an in-memory build).
-    pub(crate) fn new(path: Option<PathBuf>) -> Self {
-        let prefs = path
-            .as_ref()
-            .map_or_else(Preferences::default, load_preferences);
-        Self {
-            prefs,
-            path,
-            last_save_failed: false,
-        }
-    }
-
-    /// The persisted mailbox-list grouping.
-    pub(crate) fn view_mode(&self) -> ViewMode {
-        self.prefs.view_mode
-    }
-
-    /// Whether `account`'s folder tree is open; `true` for an account nobody has shut.
-    pub(crate) fn account_expanded(&self, account: &str) -> bool {
-        self.prefs.account_expanded(account)
-    }
-
-    /// Records whether `account`'s tree is open and persists it. Returns whether
-    /// anything changed, so a client re-asserting the state it already has costs no
-    /// disk write and no snapshot rebuild.
-    pub(crate) fn set_account_expanded(&mut self, account: &str, expanded: bool) -> bool {
-        if self.prefs.account_expanded(account) == expanded {
-            return false;
-        }
-        self.prefs.set_account_expanded(account, expanded);
-        self.persist();
-        true
-    }
-
-    /// Records whether one folder's own sub-folders are showing, and persists.
-    /// Returns whether anything changed, for the reason
-    /// [`set_account_expanded`](Self::set_account_expanded) does.
-    pub(crate) fn set_folder_expanded(
-        &mut self,
-        account: &str,
-        folder: &str,
-        expanded: bool,
-    ) -> bool {
-        if self.prefs.folder_expanded(account, folder) == expanded {
-            return false;
-        }
-        self.prefs.set_folder_expanded(account, folder, expanded);
-        self.persist();
-        true
-    }
-
-    /// The persisted selected folder, or `None` outside a folder view.
-    pub(crate) fn selected_folder(&self) -> Option<FolderRef> {
-        self.prefs.selected_folder.clone()
-    }
-
-    /// The persisted account whose own view was showing, or `None` beside a
-    /// folder selection or the unified view.
-    pub(crate) fn selected_account(&self) -> Option<engine_api::AccountId> {
-        self.prefs.selected_account()
-    }
-
-    /// Records the selected scope, folder, account, or unified view, as one
-    /// write and persists it: the pair moves together, so neither half of the
-    /// choice can land on disk without the other.
-    pub(crate) fn set_selected_scope(
-        &mut self,
-        folder: Option<FolderRef>,
-        account: Option<engine_api::AccountId>,
-    ) {
-        self.prefs.set_selected_folder(folder);
-        self.prefs.set_selected_account(account);
-        self.persist();
-    }
-
-    /// Writes one settings field and persists the document: the shared tail
-    /// of every total settings arm. Returns whether the persist failed, so
-    /// the arm can answer the failure on the snapshot; the in-memory copy
-    /// moved either way, which is the honest state of a host that is running
-    /// the new setting while the disk holds the old one.
-    pub(crate) fn set_setting(&mut self, write: impl FnOnce(&mut Preferences)) -> bool {
-        write(&mut self.prefs);
-        self.persist();
-        self.last_save_failed
-    }
-
-    /// Drops every account-scoped entry the account holds (its expansion
-    /// map, and the selected folder when the selection pointed inside it)
-    /// and persists. Returns whether anything was stored for it.
-    pub(crate) fn remove_account(&mut self, account: &str) -> bool {
-        let removed = self.prefs.remove_account(account);
-        if removed {
-            self.persist();
-        }
-        removed
-    }
-
-    /// Whether the newest persist failed. A write that lands clears it, so
-    /// the flag states the newest write the way the snapshot's error channel
-    /// does.
-    pub(crate) fn last_save_failed(&self) -> bool {
-        self.last_save_failed
-    }
-
-    /// The IANA id the calendar lays its days out in, from the persisted
-    /// preference.
-    pub(crate) fn zone(&self) -> String {
-        self.prefs.zone.clone()
-    }
-
-    /// The day the week starts on, from the persisted preference.
-    pub(crate) fn first_day_of_week(&self) -> WeekdayWire {
-        self.prefs.first_day_of_week
-    }
-
-    /// The cold window's length in days, clamped into the bounds the horizon
-    /// setting enforces so a hand-edited file cannot ask the rebuild for a
-    /// window the product would itself refuse.
-    pub(crate) fn horizon_days(&self) -> u16 {
-        self.prefs
-            .horizon_days
-            .clamp(HORIZON_MIN_DAYS, HORIZON_MAX_DAYS) as u16
-    }
-
-    /// The persisted settings block, projected for the settings snapshot:
-    /// every field the screen renders, named beside the value it holds now.
-    pub(crate) fn settings_block(&self) -> astra_viewmodel::SettingsBlock {
-        let prefs = &self.prefs;
-        astra_viewmodel::SettingsBlock {
-            theme: prefs.theme,
-            twenty_four_clock: prefs.twenty_four_clock,
-            zone: prefs.zone.clone(),
-            first_day_of_week: prefs.first_day_of_week,
-            horizon_days: prefs.horizon_days,
-            quote_below: prefs.quote_below,
-            view_mode: prefs.view_mode,
-            plugins_enabled: prefs.plugins_enabled,
-            default_calendar: prefs.default_calendar.as_ref().map(|pin| {
-                astra_viewmodel::DefaultCalendar {
-                    account: pin.account.clone(),
-                    key: pin.key.clone(),
-                }
-            }),
-            default_send_account: prefs.default_send_account.clone(),
-        }
-    }
-
-    /// Stamps the persisted expansion over one account's sorted rows, which
-    /// [`sorted_folder_rows`] leaves open everywhere: the group header from the account
-    /// map, each folder's own chevron from the folder map. A folder that holds no
-    /// folders is never expanded; there is no tree to open, so a client drawing a
-    /// chevron from this cannot draw one that does nothing.
-    pub(crate) fn stamp(&self, account: &str, rows: &mut [FolderRow]) {
-        for row in rows {
-            row.expanded =
-                row.has_children && self.prefs.folder_expanded(account, row.key.as_str());
-        }
-    }
-
-    /// Writes the state back, read-modify-write against what is on disk right now, so
-    /// a concurrent write to an unrelated preference is not clobbered by our in-memory
-    /// copy. A no-op without a path. Records whether a write was attempted and
-    /// failed, the fact the snapshot's error channel answers from.
-    fn persist(&mut self) {
-        let Some(path) = &self.path else {
-            return;
-        };
-        let mut on_disk = load_preferences(path);
-        on_disk.view_mode = self.prefs.view_mode;
-        on_disk
-            .collapsed_accounts
-            .clone_from(&self.prefs.collapsed_accounts);
-        on_disk
-            .collapsed_folders
-            .clone_from(&self.prefs.collapsed_folders);
-        on_disk
-            .selected_folder
-            .clone_from(&self.prefs.selected_folder);
-        on_disk
-            .selected_account
-            .clone_from(&self.prefs.selected_account);
-        on_disk.theme = self.prefs.theme;
-        on_disk.twenty_four_clock = self.prefs.twenty_four_clock;
-        on_disk.zone.clone_from(&self.prefs.zone);
-        on_disk.first_day_of_week = self.prefs.first_day_of_week;
-        on_disk.horizon_days = self.prefs.horizon_days;
-        on_disk.quote_below = self.prefs.quote_below;
-        on_disk
-            .default_calendar
-            .clone_from(&self.prefs.default_calendar);
-        on_disk
-            .default_send_account
-            .clone_from(&self.prefs.default_send_account);
-        on_disk.plugins_enabled = self.prefs.plugins_enabled;
-        on_disk.signatures.clone_from(&self.prefs.signatures);
-        self.last_save_failed = save_preferences(path, &on_disk).is_err();
-    }
-}
-
 #[cfg(test)]
-#[path = "preferences_tests.rs"]
+#[path = "../preferences_tests.rs"]
 mod tests;

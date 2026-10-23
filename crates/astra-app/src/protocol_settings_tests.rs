@@ -273,3 +273,35 @@ fn the_settings_surface_crosses_as_its_word() {
         Surface::Settings
     );
 }
+
+#[test]
+fn set_sync_settings_crosses_only_the_named_fields() {
+    use super::SyncBodyCap;
+    round_trips(
+        &Intent::Settings(SettingsIntent::SetSyncSettings {
+            account: account("work"),
+            depth_months: Some(12),
+            body_cap: None,
+            poll_minutes: Some(90),
+        }),
+        r#"{"settings":{"set_sync_settings":{"account":"work","depth_months":12,"poll_minutes":90}}}"#,
+    );
+    round_trips(
+        &Intent::Settings(SettingsIntent::SetSyncSettings {
+            account: account("work"),
+            depth_months: None,
+            body_cap: Some(SyncBodyCap::Bytes { octets: 1024 }),
+            poll_minutes: None,
+        }),
+        r#"{"settings":{"set_sync_settings":{"account":"work","body_cap":{"bytes":{"octets":1024}}}}}"#,
+    );
+    round_trips(
+        &Intent::Settings(SettingsIntent::SetSyncSettings {
+            account: account("work"),
+            depth_months: None,
+            body_cap: Some(SyncBodyCap::Off),
+            poll_minutes: None,
+        }),
+        r#"{"settings":{"set_sync_settings":{"account":"work","body_cap":"off"}}}"#,
+    );
+}

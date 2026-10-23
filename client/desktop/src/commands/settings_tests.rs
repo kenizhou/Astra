@@ -55,6 +55,7 @@ fn the_settings_pull_round_trips_the_published_snapshot() {
             crypto_method: "none".to_owned(),
             crypto_error: None,
             signatures: None,
+            sync: None,
         }],
         about: AboutBlock {
             version: "0.1.0".to_owned(),

@@ -117,4 +117,3 @@ impl MailboxConnector<HostProvider> for DialConnector {
             .ok()
     }
 }
-

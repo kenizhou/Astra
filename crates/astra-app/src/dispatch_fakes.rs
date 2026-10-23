@@ -86,6 +86,9 @@ pub(super) struct FakeProvider {
     /// to decode. A message without one fails its source fetch. Behind a mutex because
     /// a draft the provider stores registers its source as it goes out.
     pub(super) sources: Mutex<HashMap<String, Vec<u8>>>,
+    /// How many source fetches the provider has served, so a warm pass can
+    /// prove it asked for nothing the store already held.
+    pub(super) fetches: Arc<AtomicUsize>,
     /// How many email sync passes this provider has served.
     pub(super) syncs: Arc<AtomicUsize>,
     /// Every `edit_mail` this provider was asked to apply, in order.
@@ -156,6 +159,7 @@ impl FakeProvider {
             messages: Arc::new(Mutex::new(messages)),
             updates: Arc::new(Mutex::new(Vec::new())),
             sources: Mutex::new(sources.into_iter().collect()),
+            fetches: Arc::new(AtomicUsize::new(0)),
             syncs: Arc::new(AtomicUsize::new(0)),
             edits: Arc::new(Mutex::new(Vec::new())),
             draft_puts: Arc::new(Mutex::new(Vec::new())),
@@ -319,6 +323,7 @@ impl Provider for FakeProvider {
         _account: &AccountId,
         message: &Message,
     ) -> ProviderResult<RawMime> {
+        self.fetches.fetch_add(1, Ordering::SeqCst);
         self.sources
             .lock()
             .unwrap()

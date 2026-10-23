@@ -5,6 +5,8 @@
 
 use std::path::PathBuf;
 
+use astra_viewmodel::SyncBodyCap;
+
 use crate::{
     load_preferences, preferences_path,
     reference::{CalendarRef, FolderRef},
@@ -242,4 +244,74 @@ fn clearing_the_selected_folder_leaves_no_entry_behind() {
     prefs.set_selected_folder(None);
 
     assert!(prefs.selected_folder.is_none());
+}
+
+#[test]
+fn the_sync_settings_round_trip_through_the_file() {
+    let dir = scratch("sync-round-trip");
+    let path = preferences_path(&dir);
+    let account = engine_api::AccountId::try_from("acct-1").unwrap();
+
+    let mut prefs = Preferences::default();
+    prefs.set_sync_settings(
+        &account,
+        Some(12),
+        Some(SyncBodyCap::Bytes { octets: 1024 }),
+        Some(90),
+    );
+    save_preferences(&path, &prefs).unwrap();
+
+    let back = load_preferences(&path);
+    assert_eq!(back, prefs);
+    let row = back.sync.get(&account).expect("the row persisted");
+    assert_eq!(row.depth_months, Some(12));
+    assert_eq!(row.body_cap, Some(SyncBodyCap::Bytes { octets: 1024 }));
+    assert_eq!(row.poll_minutes, Some(90));
+}
+
+#[test]
+fn the_sync_cadence_clamps_on_write() {
+    let account = engine_api::AccountId::try_from("acct-1").unwrap();
+    let mut prefs = Preferences::default();
+
+    prefs.set_sync_settings(&account, None, None, Some(5));
+    assert_eq!(
+        prefs.sync[&account].poll_minutes,
+        Some(crate::preferences::POLL_MIN_MINUTES)
+    );
+    prefs.set_sync_settings(&account, None, None, Some(999));
+    assert_eq!(
+        prefs.sync[&account].poll_minutes,
+        Some(crate::preferences::POLL_MAX_MINUTES)
+    );
+}
+
+#[test]
+fn an_all_default_sync_row_comes_out_of_the_file() {
+    let account = engine_api::AccountId::try_from("acct-1").unwrap();
+    let mut prefs = Preferences::default();
+    prefs.set_sync_settings(&account, Some(12), None, None);
+    assert!(prefs.sync.contains_key(&account));
+
+    // A later edit that writes the depth back to its default is the unset:
+    // the default and absent are one state, and the all-default row comes
+    // out of the file, the same discipline the expansion maps follow.
+    prefs.set_sync_settings(
+        &account,
+        Some(crate::accounts::NEW_ACCOUNT_SYNC_DEPTH_MONTHS),
+        None,
+        None,
+    );
+    assert!(prefs.sync.is_empty());
+}
+
+#[test]
+fn removing_an_account_drops_its_sync_row() {
+    let account = engine_api::AccountId::try_from("acct-1").unwrap();
+    let mut prefs = Preferences::default();
+    prefs.set_sync_settings(&account, Some(12), None, None);
+    assert!(prefs.sync.contains_key(&account));
+
+    assert!(prefs.remove_account("acct-1"));
+    assert!(prefs.sync.is_empty(), "the account's row goes with it");
 }

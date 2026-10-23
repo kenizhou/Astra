@@ -53,7 +53,9 @@ fn still_listed(listed: &[Mailbox], scope: &SyncScope) -> bool {
 /// in the same pass, so every folder the account lists is synced by every pass.
 ///
 /// The pass reports its lifecycle into `progress`, the shared sync-progress fold, so
-/// the host's progress surface moves with the pass instead of polling.
+/// the host's progress surface moves with the pass instead of polling. The pass's
+/// whole report is the return, so the caller folds its outcome into the delivery
+/// state (the outage classification) rather than re-reading what the engine answered.
 pub(crate) async fn sync_account_providers<P: Provider>(
     engine: &Engine,
     account: &Account<P>,
@@ -61,13 +63,18 @@ pub(crate) async fn sync_account_providers<P: Provider>(
     tuning: StreamTuning,
     progress: &SyncProgress,
     acct: usize,
-) {
+) -> MailSyncReport {
     // `acct` is the account's stable position in the pane (not its id, which carries
     // the address) so the interleaved timing of concurrent accounts stays attributable
     // without logging identity.
     if account.providers.is_empty() {
         log::info!("sync[a{acct}]: skipped; no live mail providers");
-        return;
+        return MailSyncReport {
+            account_steps: Ok(()),
+            mailboxes: None,
+            folders: Vec::new(),
+            elapsed: std::time::Duration::ZERO,
+        };
     }
 
     let mut report = engine
@@ -93,6 +100,7 @@ pub(crate) async fn sync_account_providers<P: Provider>(
         .await;
     }
     log_pass(acct, &report, listed.as_deref());
+    report
 }
 
 /// Syncs the folders in `listed` that `account` has no provider bound to, and folds
