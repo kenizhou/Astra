@@ -11,7 +11,8 @@
       "account": "work",
       "key": "cal-1"
     },
-    "plugins_enabled": true
+    "plugins_enabled": true,
+    "notifications_enabled": true
   },
   "accounts": [
     {

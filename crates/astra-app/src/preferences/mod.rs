@@ -50,9 +50,13 @@ pub(crate) const POLL_MIN_MINUTES: u16 = 15;
 pub(crate) const POLL_MAX_MINUTES: u16 = 120;
 
 /// The cadence an account polls at when the user has set none.
-pub(crate) const DEFAULT_POLL_MINUTES: u16 = 30;
+pub const DEFAULT_POLL_MINUTES: u16 = 30;
 
 /// App-level preferences persisted across launches.
+///
+/// The independent toggles are deliberately plain bools, each answering its
+/// own question on the settings screen.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Preferences {
     /// The persisted mailbox-list grouping (flat vs threaded). Defaults to
@@ -122,6 +126,12 @@ pub struct Preferences {
     /// Whether plugins run at all (the admin policy switch); on by default.
     #[serde(default = "default_true")]
     pub plugins_enabled: bool,
+    /// Whether new mail raises OS notifications; on by default. The
+    /// notification switch the settings screen carries and the host's
+    /// delivery loop reads, so a person who wants no announcements gets
+    /// none whatever the window state.
+    #[serde(default = "default_true")]
+    pub notifications_enabled: bool,
     /// Each account's own sync settings, by account id; the file holds only
     /// the fields the user set, and an absent row or field falls back to the
     /// product defaults.
@@ -149,6 +159,7 @@ impl Default for Preferences {
             default_send_account: None,
             signatures: BTreeMap::new(),
             plugins_enabled: true,
+            notifications_enabled: true,
             sync: BTreeMap::new(),
         }
     }

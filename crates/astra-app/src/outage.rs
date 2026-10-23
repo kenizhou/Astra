@@ -16,6 +16,7 @@
 
 use std::{collections::BTreeMap, sync::Mutex};
 
+use astra_viewmodel::DeliveryState;
 use engine_api::{AccountId, FailureClass, MailSyncReport, SyncError};
 
 use crate::App;
@@ -92,6 +93,10 @@ pub(crate) struct Outages {
     streaks: Mutex<BTreeMap<AccountId, u32>>,
 }
 
+/// The outage state shared between the app and the progress fold that
+/// projects it: one state, one projection.
+pub(crate) type OutagesShared = std::sync::Arc<Outages>;
+
 impl Outages {
     /// A state with nothing dialled.
     pub(crate) fn new() -> Self {
@@ -134,14 +139,34 @@ impl Outages {
         let streaks = self.streaks.lock().expect("outage mutex poisoned");
         !streaks.is_empty() && streaks.values().all(|streak| *streak >= OUTAGE_AFTER)
     }
+
+    /// The delivery state the sync-progress snapshot carries: the banner
+    /// answer beside the accounts in outage, in account order, so the
+    /// progress pull and the outage badge rows read one projection.
+    pub(crate) fn delivery(&self) -> DeliveryState {
+        let streaks = self.streaks.lock().expect("outage mutex poisoned");
+        DeliveryState {
+            offline_banner: !streaks.is_empty()
+                && streaks.values().all(|streak| *streak >= OUTAGE_AFTER),
+            outages: streaks
+                .iter()
+                .filter(|(_, streak)| **streak >= OUTAGE_AFTER)
+                .map(|(account, _)| account.clone())
+                .collect(),
+        }
+    }
 }
 
 impl<P> App<P> {
     /// Records one account's pass outcome into the outage state: the typed
     /// call the background loop makes for its own outcomes (a watch error,
-    /// a reconnect) beside the ones the pass paths record for it.
+    /// a reconnect) beside the ones the pass paths record for it. A move
+    /// in the state the surfaces read republishes the sync-progress
+    /// snapshot, so the offline banner and the outage badges land on the
+    /// channel the progress bar already crosses.
     pub fn record_pass_outcome(&self, account: &AccountId, outcome: PassOutcome) {
         self.outages.record(account, outcome);
+        self.sync_progress.republish();
     }
 
     /// Whether one account is in outage: the badge a pane row carries.

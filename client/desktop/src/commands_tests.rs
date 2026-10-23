@@ -144,6 +144,7 @@ fn the_pull_commands_return_what_the_app_published() {
             state: astra_viewmodel::AccountSyncState::Syncing,
             detail: Some("folders 1 of 4".to_owned()),
         }],
+        delivery: astra_viewmodel::DeliveryState::default(),
     };
     let state = state(
         "pulls",

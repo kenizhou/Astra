@@ -31,6 +31,7 @@ fn fold() -> (SyncProgress, Arc<Mutex<Vec<Surface>>>) {
         SyncProgress::new(
             Arc::new(observer),
             Arc::new(crate::notifications::NewMailQueue::new()),
+            crate::outage::OutagesShared::default(),
         ),
         surfaces,
     )

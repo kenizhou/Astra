@@ -24,13 +24,14 @@ mod mcp_host;
 pub(crate) use mcp_host::host;
 
 use std::{
+    collections::VecDeque,
     path::PathBuf,
     sync::{Arc, Mutex},
 };
 
 use astra_app::{
     AttachmentContent, AttachmentReadError, AvatarView, Chip, ComposeIntent, ContactDraftInput,
-    DraftResume, DraftsIntent, Intent, OutboxIntent,
+    DraftResume, DraftsIntent, Intent, NewMailBatch, OutboxIntent, PassOutcome,
 };
 use astra_viewmodel::{
     CalendarSnapshot, ComposeKind, ComposeRequestSnapshot, DraftSaveState, DraftStatusSnapshot,
@@ -158,6 +159,15 @@ pub(crate) struct FakeApp {
     pub(crate) avatar_into: Mutex<Vec<String>>,
     /// The settings snapshot the pull answers with.
     pub(crate) settings: Mutex<SettingsSnapshot>,
+    /// The batches the delivery drain answers with, in order; an empty
+    /// queue answers the empty batch.
+    pub(crate) batches: Mutex<VecDeque<NewMailBatch>>,
+    /// The sizes of the batches the delivery drain has taken.
+    pub(crate) drained: Mutex<Vec<usize>>,
+    /// The pass outcomes the delivery loop recorded, with their accounts.
+    pub(crate) outcomes: Mutex<Vec<(String, PassOutcome)>>,
+    /// The accounts whose first pass the delivery loop waited on.
+    pub(crate) first_waits: Mutex<Vec<String>>,
 }
 
 impl FakeApp {
@@ -209,6 +219,10 @@ impl FakeApp {
             avatar: Mutex::new(AvatarView::default()),
             avatar_into: Mutex::new(Vec::new()),
             settings: Mutex::new(SettingsSnapshot::default()),
+            batches: Mutex::new(VecDeque::new()),
+            drained: Mutex::new(Vec::new()),
+            outcomes: Mutex::new(Vec::new()),
+            first_waits: Mutex::new(Vec::new()),
         })
     }
 

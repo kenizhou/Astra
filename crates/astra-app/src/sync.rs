@@ -4,12 +4,19 @@
 //! in `sync_account`; the outbox drain a pass ends with lives in `outbox`; the fan-out
 //! here is what [`Intent::RefreshMail`](crate::Intent::RefreshMail) drives.
 
-use std::time::Instant;
+use std::{sync::Arc, time::Instant};
 
 use engine_api::{AccountId, CalendarDate, Provider, StreamTuning, SyncWindow};
 use futures::future::join_all;
 
 use crate::{outage::PassOutcome, sync_account::sync_account_providers, App};
+
+/// One account's first-pass settle state: whether a pass has settled in
+/// this process, and the bell the joining driver waits on.
+pub(crate) struct FirstPass {
+    done: bool,
+    notify: Arc<tokio::sync::Notify>,
+}
 
 /// Objects a streamed pass asks the provider for per network round trip.
 pub(crate) const STREAM_FETCH_BATCH: usize = 200;
@@ -75,6 +82,7 @@ impl<P: Provider> App<P> {
     async fn run_account_pass(&self, account: &std::sync::Arc<crate::Account<P>>, at: usize) {
         if account.providers.is_empty() {
             log::info!("sync[a{at}]: skipped; no live mail providers");
+            self.settle_first_pass(&account.id);
             return;
         }
         let tuning = self.sync_tuning_for(&account.id);
@@ -91,7 +99,7 @@ impl<P: Provider> App<P> {
         )
         .await;
         let outcome = PassOutcome::of(&report);
-        self.outages.record(&account.id, outcome);
+        self.record_pass_outcome(&account.id, outcome);
         if outcome == PassOutcome::Success {
             self.new_mail.import_done(&account.id);
         }
@@ -104,6 +112,56 @@ impl<P: Provider> App<P> {
         if let Some(provider) = account.providers.first() {
             self.warm_account_bodies(&account.id, provider, cap).await;
         }
+        self.settle_first_pass(&account.id);
+    }
+
+    /// Resolves once the account's first pass in this process has settled,
+    /// or at once when the app holds no such account: the join the host's
+    /// delivery driver opens its watch after, so the engine's prescribed
+    /// loop (sync once before trusting the watch) holds without the driver
+    /// duplicating the pass the boot or the add already spawned. An account
+    /// the app does not hold never runs a pass, so waiting on it would
+    /// strand the driver for the life of the process.
+    pub async fn wait_first_pass(&self, id: &AccountId) {
+        if self.account_handle(id).await.is_none() {
+            return;
+        }
+        let notify = {
+            let mut passes = self.first_passes.lock().expect("first-pass mutex poisoned");
+            let entry = passes.entry(id.clone()).or_insert_with(|| FirstPass {
+                done: false,
+                notify: Arc::new(tokio::sync::Notify::new()),
+            });
+            if entry.done {
+                return;
+            }
+            Arc::clone(&entry.notify)
+        };
+        // The bell is armed before the second look, so a pass settling
+        // between the two cannot strand the waiter.
+        let wait = std::pin::pin!(notify.notified());
+        if self
+            .first_passes
+            .lock()
+            .expect("first-pass mutex poisoned")
+            .get(id)
+            .is_some_and(|entry| entry.done)
+        {
+            return;
+        }
+        wait.await;
+    }
+
+    /// Marks the account's first pass settled and wakes every driver
+    /// waiting on it.
+    fn settle_first_pass(&self, id: &AccountId) {
+        let mut passes = self.first_passes.lock().expect("first-pass mutex poisoned");
+        let entry = passes.entry(id.clone()).or_insert_with(|| FirstPass {
+            done: false,
+            notify: Arc::new(tokio::sync::Notify::new()),
+        });
+        entry.done = true;
+        entry.notify.notify_waiters();
     }
 
     /// The tuning one account's pass runs with: the fetch and chunk sizes
@@ -170,3 +228,7 @@ fn cutoff(today: time::Date, months: i32) -> Option<time::Date> {
     let day = today.day().min(month.length(year));
     time::Date::from_calendar_date(year, month, day).ok()
 }
+
+#[cfg(test)]
+#[path = "sync_tests.rs"]
+mod tests;

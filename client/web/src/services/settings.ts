@@ -40,6 +40,8 @@ export interface SettingsBlock {
   default_send_account?: string;
   /** Whether plugins run at all (the admin policy switch); on by default. */
   plugins_enabled?: boolean;
+  /** Whether new mail raises OS notifications; on by default. */
+  notifications_enabled?: boolean;
 }
 
 /** One account's signature assignment: what its new mail and its replies

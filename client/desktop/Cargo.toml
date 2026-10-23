@@ -58,6 +58,10 @@ toml.workspace = true
 astra-mcp = { path = "../../crates/astra-mcp" }
 # The engine facade: the `Provider` trait the host's boxed provider type names.
 engine-api.workspace = true
+# The provider failure the delivery loop classifies (a retryable watch
+# drop counts the outage streak; a permanent one never does), the same
+# plumbing the boot dial tests name ConnectionInfo through.
+engine-provider.workspace = true
 # The OS secure store the account credentials live in (Credential Manager,
 # keychain, secret service), behind the credential-store port.
 keyring.workspace = true
@@ -110,10 +114,6 @@ astra-composer = { path = "../../crates/astra-composer" }
 astra-plugin-echo = { path = "../../plugins/echo" }
 # The install tests sign their fixture bundles for real.
 ring.workspace = true
-# The provider-side plumbing the boot dial tests name: ConnectionInfo for
-# the stand-in providers' connection answers, which engine-api re-exports
-# the traits of but not the type itself.
-engine-provider.workspace = true
 # Reading the LLM ledger rows back in the client tests, through the test's
 # own connection into the file-backed store the client records into.
 rusqlite = { workspace = true, features = ["fallible_uint"] }

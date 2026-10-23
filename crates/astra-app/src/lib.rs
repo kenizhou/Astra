@@ -98,6 +98,7 @@ mod settings_fakes;
 pub mod evals;
 
 use std::{
+    collections::BTreeMap,
     path::PathBuf,
     sync::{atomic::AtomicU64, Arc, Mutex},
     time::Duration,
@@ -161,7 +162,9 @@ pub use mail_writes::MailWriteError;
 pub use notifications::{NewMailBatch, NewMailNotice};
 pub use outage::PassOutcome;
 pub use people::avatar::AvatarView;
-pub use preferences::{load_preferences, preferences_path, save_preferences, Preferences};
+pub use preferences::{
+    load_preferences, preferences_path, save_preferences, Preferences, DEFAULT_POLL_MINUTES,
+};
 pub use protocol::{
     AppObserver, CalendarIntent, ComposeIntent, ComposerBlob, CompositionId, ContactDraftInput,
     ContactNameInput, ContactPatchInput, DavSectionInput, DraftsIntent, EventDrag, EventEdge,
@@ -289,8 +292,12 @@ pub struct App<P> {
     /// The new-mail notification queue the pass commits feed and the host
     /// bridge drains. See `notifications`.
     new_mail: Arc<notifications::NewMailQueue>,
-    /// The outage state over pass outcomes. See `outage`.
-    outages: outage::Outages,
+    /// The outage state over pass outcomes, shared with the progress fold
+    /// that projects it onto the snapshot the surfaces pull. See `outage`.
+    outages: outage::OutagesShared,
+    /// Each account's first-pass settle state: the join the host's delivery
+    /// drivers open their watches after. See `sync`.
+    first_passes: Mutex<BTreeMap<engine_api::AccountId, sync::FirstPass>>,
     /// The loaded preferences and the path they write through: the view mode, the
     /// expansion map, and the selected folder.
     pane: Mutex<PreferencesState>,
@@ -376,8 +383,12 @@ impl<P: Provider> App<P> {
         observer: Arc<dyn AppObserver>,
     ) -> Self {
         let new_mail = Arc::new(notifications::NewMailQueue::new());
-        let sync_progress =
-            sync_progress::SyncProgress::new(Arc::clone(&observer), Arc::clone(&new_mail));
+        let outages = Arc::new(outage::Outages::new());
+        let sync_progress = sync_progress::SyncProgress::new(
+            Arc::clone(&observer),
+            Arc::clone(&new_mail),
+            Arc::clone(&outages),
+        );
         Self {
             engine,
             accounts: RwLock::new(accounts.into_iter().map(Arc::new).collect()),
@@ -404,7 +415,8 @@ impl<P: Provider> App<P> {
             open_reading: Mutex::new(None),
             sync_progress,
             new_mail,
-            outages: outage::Outages::new(),
+            outages,
+            first_passes: Mutex::new(BTreeMap::new()),
             pane: Mutex::new(PreferencesState::new(None)),
             visible_limit: Mutex::new(PAGE),
             generation: AtomicU64::new(0),

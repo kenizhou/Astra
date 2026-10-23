@@ -109,6 +109,47 @@ impl ImapConnections {
         *self.account.lock().expect("imap account mutex poisoned") = Some(Arc::clone(&account));
         Ok(account)
     }
+
+    /// Opens the account's standing INBOX watch, the delivery loop's
+    /// latency channel, when the server offers `IDLE` and the pool has the
+    /// headroom for a watch that leaves syncing a connection to sync with.
+    /// Every other answer is [`WatchFace::Poll`]: a server without the
+    /// capability and a pool at its watch ceiling are facts, not failures,
+    /// and the account's cadence carries its delivery.
+    ///
+    /// The watch sends nothing, so no MIME wrapper is installed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AccountError`] when the account's connection fails, or the
+    /// engine's classified failure for a watch that refused outside the
+    /// poll answers above.
+    pub async fn watch_inbox(
+        &self,
+        config: &AccountConfig,
+        keepalive: std::time::Duration,
+    ) -> Result<crate::watch::WatchFace, AccountError> {
+        let imap = self.current_or_connect(config, None).await?;
+        let inbox = mailbox_id("INBOX")?;
+        if !imap
+            .provider(inbox.clone())
+            .connection_info()
+            .capabilities
+            .idle()
+        {
+            return Ok(crate::watch::WatchFace::Poll);
+        }
+        if imap.watch_headroom() == 0 {
+            return Ok(crate::watch::WatchFace::Poll);
+        }
+        match imap.watch(inbox, keepalive).await {
+            Ok(watcher) => Ok(crate::watch::WatchFace::Watch(Box::new(watcher))),
+            Err(err) if err.class() == engine_api::FailureClass::InvalidState => {
+                Ok(crate::watch::WatchFace::Poll)
+            }
+            Err(err) => Err(AccountError::Watch(err)),
+        }
+    }
 }
 
 /// Logs in over the account's TLS policy, reading a refusal as the first login's.

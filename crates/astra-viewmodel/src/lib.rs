@@ -46,5 +46,7 @@ pub use settings::{
     AccountSyncSettings, DavSectionRow, DefaultCalendar, GrantState, SettingsBlock, SettingsError,
     SettingsSnapshot, SyncBodyCap, ThemeMode, WeekdayWire,
 };
-pub use sync_progress::{AccountSyncProgress, AccountSyncState, SyncProgressSnapshot};
+pub use sync_progress::{
+    AccountSyncProgress, AccountSyncState, DeliveryState, SyncProgressSnapshot,
+};
 pub use view::MailboxListSnapshot;

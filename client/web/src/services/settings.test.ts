@@ -30,6 +30,7 @@ describe('the settings snapshot wire', () => {
       quote_below: false,
       view_mode: 'threaded',
       plugins_enabled: true,
+      notifications_enabled: true,
       default_calendar: { account: 'work', key: 'cal-1' },
     });
     expect(snapshot.accounts).toEqual([

@@ -195,6 +195,7 @@ impl PreferencesState {
             quote_below: prefs.quote_below,
             view_mode: prefs.view_mode,
             plugins_enabled: prefs.plugins_enabled,
+            notifications_enabled: prefs.notifications_enabled,
             default_calendar: prefs.default_calendar.as_ref().map(|pin| {
                 astra_viewmodel::DefaultCalendar {
                     account: pin.account.clone(),
@@ -254,6 +255,7 @@ impl PreferencesState {
             .default_send_account
             .clone_from(&self.prefs.default_send_account);
         on_disk.plugins_enabled = self.prefs.plugins_enabled;
+        on_disk.notifications_enabled = self.prefs.notifications_enabled;
         on_disk.signatures.clone_from(&self.prefs.signatures);
         on_disk.sync.clone_from(&self.prefs.sync);
         self.last_save_failed = save_preferences(path, &on_disk).is_err();

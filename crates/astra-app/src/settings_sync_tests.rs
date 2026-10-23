@@ -255,3 +255,27 @@ async fn the_search_depth_note_reads_the_same_setting() {
     let state = app.mailbox_list().search.expect("the search publishes");
     assert_eq!(state.depth_months, 12, "the note reads the setting");
 }
+
+#[tokio::test]
+async fn the_notification_switch_defaults_on_and_projects_from_the_file() {
+    // The host's delivery loop reads the switch off the settings snapshot,
+    // so the projection is the contract: on for a file that names nothing,
+    // off for a file that says so, and the off state survives a relaunch.
+    let (app, path) = app("notifications");
+    app.dispatch(Intent::Settings(SettingsIntent::Refresh))
+        .await
+        .unwrap();
+    assert!(
+        app.settings().settings.notifications_enabled,
+        "the switch defaults on"
+    );
+
+    let mut off = crate::preferences::load_preferences(&path);
+    off.notifications_enabled = false;
+    crate::preferences::save_preferences(&path, &off).unwrap();
+    let relaunched = relaunched(path).await;
+    assert!(
+        !relaunched.settings().settings.notifications_enabled,
+        "a stored off state projects off"
+    );
+}

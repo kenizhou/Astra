@@ -4,7 +4,7 @@
 
 use engine_api::AccountId;
 
-use crate::{AccountSyncProgress, AccountSyncState, SyncProgressSnapshot};
+use crate::{AccountSyncProgress, AccountSyncState, DeliveryState, SyncProgressSnapshot};
 
 #[test]
 fn the_wire_shape_is_snake_case_and_skips_an_absent_detail() {
@@ -14,6 +14,7 @@ fn the_wire_shape_is_snake_case_and_skips_an_absent_detail() {
             state: AccountSyncState::Syncing,
             detail: Some("folders 3 of 10".to_owned()),
         }],
+        delivery: DeliveryState::default(),
     };
 
     let wire = serde_json::to_value(&snapshot).expect("the snapshot serialises");
@@ -26,12 +27,51 @@ fn the_wire_shape_is_snake_case_and_skips_an_absent_detail() {
                     "state": "syncing",
                     "detail": "folders 3 of 10"
                 }
-            ]
+            ],
+            "delivery": { "offline_banner": false }
         }),
     );
 
     let back: SyncProgressSnapshot = serde_json::from_value(wire).expect("the snapshot reads back");
     assert_eq!(back, snapshot);
+}
+
+#[test]
+fn the_delivery_state_carries_the_banner_and_the_outage_accounts() {
+    // The banner and the badge rows ride the snapshot the progress bar
+    // already crosses, so the words they spell are pinned here the way the
+    // progress words above are.
+    let delivery = DeliveryState {
+        offline_banner: true,
+        outages: vec![
+            AccountId::try_from("user@example.test").expect("an account id"),
+            AccountId::try_from("work@example.test").expect("an account id"),
+        ],
+    };
+    let wire = serde_json::to_value(&delivery).expect("the state serialises");
+    assert_eq!(
+        wire,
+        serde_json::json!({
+            "offline_banner": true,
+            "outages": ["user@example.test", "work@example.test"]
+        }),
+    );
+    let back: DeliveryState = serde_json::from_value(wire).expect("the state reads back");
+    assert_eq!(back, delivery);
+
+    // A snapshot from a build before the field reads back healthy: no
+    // delivery key, no outage.
+    let legacy = serde_json::json!({
+        "accounts": [
+            {
+                "account": "user@example.test",
+                "state": "idle"
+            }
+        ]
+    });
+    let back: SyncProgressSnapshot =
+        serde_json::from_value(legacy).expect("a snapshot without the delivery key reads");
+    assert_eq!(back.delivery, DeliveryState::default());
 }
 
 #[test]
@@ -42,6 +82,7 @@ fn an_entry_without_a_detail_omits_the_field_on_the_wire() {
             state: AccountSyncState::Idle,
             detail: None,
         }],
+        delivery: DeliveryState::default(),
     };
 
     let wire = serde_json::to_value(&snapshot).expect("the snapshot serialises");

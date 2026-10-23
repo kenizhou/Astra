@@ -68,6 +68,11 @@ pub enum SettingsError {
 /// The persisted settings the screen renders: the preferences document's
 /// settings fields projected as one block, every setting a surface can
 /// change named beside the value it holds now.
+///
+/// The independent toggles are deliberately plain bools: each answers its
+/// own question on the screen, and folding them into a state machine would
+/// invent a union no setting writer recognises.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SettingsBlock {
     /// The theme: follow the host, or an explicit light or dark override.
@@ -96,10 +101,21 @@ pub struct SettingsBlock {
     /// Whether plugins run at all (the admin policy switch). On by default.
     #[serde(default = "default_plugins_enabled")]
     pub plugins_enabled: bool,
+    /// Whether new mail raises OS notifications. On by default; the
+    /// notification switch the settings screen carries. Absent on a
+    /// snapshot from a build before the field reads back on.
+    #[serde(default = "default_notifications_enabled")]
+    pub notifications_enabled: bool,
 }
 
 /// The switch's default: plugins run unless the preference says otherwise.
 fn default_plugins_enabled() -> bool {
+    true
+}
+
+/// The notifications switch's default: new mail is announced unless the
+/// preference says otherwise.
+fn default_notifications_enabled() -> bool {
     true
 }
 
