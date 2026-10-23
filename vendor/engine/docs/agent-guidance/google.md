@@ -244,6 +244,12 @@ identity — the Gmail message `id` is identity. `internalDate` (epoch-millis) �
   correlated with a local copy by `Message-ID`**, so anything matching the two has to use
   the key `put_draft` returned. `tests/live_drafts.rs` pins the rewrite itself, and
   identifies drafts by subject for exactly this reason.
+- ⚠️ **`drafts.create` refuses an empty `To` group.** `To: undisclosed-recipients:;`, the
+  header a Bcc-only *send* carries, answers `400 invalidArgument` "Invalid To header", so a
+  draft saved before anyone is addressed failed on every autosave (observed through a host).
+  A stored draft therefore names only the recipients it has: `assemble_draft_message` writes
+  no `To` header when there are none, and every adapter that stores MIME drafts uses it.
+  `tests/live_drafts.rs` saves one with no recipients.
 - **A whole-account snapshot is expensive enough to fail a live run.** Gmail meters a
   "Total Query Cost" of 6000 units per minute per user, and a `sync_email` snapshot
   fetches every message; a few in quick succession answer `403 rateLimitExceeded`, which
@@ -318,6 +324,16 @@ read/sync **and** writes guarded by `If-Match` (`WriteGuard::Enforced`).
   returns `412` (the deleted event is left cancelled with a new ETag, failing the stale
   `If-Match`), so the live test does not assert re-delete idempotency — the `404`/`410`
   path is proven offline.
+  A meeting create adds the complete `attendees` array with each new response set to
+  `needsAction`. A roster edit rebuilds that array from the preserved raw event, retaining
+  response status, additional guests and unknown fields. It refuses an event marked
+  `attendeesOmitted`, because replacing a partial list would remove unseen guests. The
+  organiser and one occurrence cannot be edited through the roster. Create, ordinary patch
+  and delete all send `sendUpdates=all` as a query parameter so invitation changes are
+  delivered. More than 200 guests remains a valid request, but Google does not propagate
+  response status to guests above that threshold. Google derives the organiser from the target
+  calendar; callers use the synced `Calendar::owner`, and the write does not attempt an
+  organiser override the API cannot express.
 - **Both scheduling capabilities are constants here** (issue #105).
   `Capabilities::calendar_scheduling` is `true` — the service sends the iTIP
   `REQUEST`/`REPLY`/`CANCEL` a write implies, with no opt-out a client can reach (the

@@ -35,6 +35,7 @@
 
 mod affiliation;
 mod cal_fetch;
+mod cal_invite;
 mod cal_normalize;
 mod cal_override;
 mod cal_recur;
@@ -70,6 +71,8 @@ mod contact_fixture_tests;
 mod contact_tests;
 #[cfg(test)]
 mod test_support;
+#[cfg(test)]
+mod write_outcome_tests;
 
 pub use cal_fetch::CalendarWindow;
 pub use calendar::GraphCalendarProvider;

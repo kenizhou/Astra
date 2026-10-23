@@ -99,12 +99,17 @@ impl CardDavProvider {
             .connect_observer
             .as_deref()
             .unwrap_or(&IgnoreConnectSteps);
+        crate::credential_hosts::refuse_unpermitted_base(
+            config.credential_hosts.as_ref(),
+            &config.base_url,
+        )?;
         let client = DavClient::new(
             &config.base_url,
             config.credentials,
             &config.tls,
             &config.retry,
-        )?;
+        )?
+        .with_credential_hosts(config.credential_hosts);
         Self::with_executor(
             Box::new(client),
             &config.discovery_path,
@@ -390,7 +395,9 @@ impl ContactsProvider for CardDavProvider {
         match result {
             Ok(response) if (200..300).contains(&response.status) => Ok(()),
             Ok(response) if matches!(response.status, 404 | 410) => Ok(()),
-            Ok(response) => Err(CalDavError::status(response.status, response.body).into()),
+            Ok(response) => Err(CalDavError::status(response.status, response.body)
+                .after_write()
+                .into()),
             Err(error) => Err(error.into()),
         }
     }

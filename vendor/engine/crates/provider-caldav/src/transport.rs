@@ -8,13 +8,18 @@
 //! XML body, and — like the JMAP transport — **does not auto-follow redirects**,
 //! so discovery can resolve the RFC 6764 well-known `307` itself.
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use engine_http::{Exchange, ObservedConnection, RetryConfig, send_retrying};
 use engine_provider::{HttpVersion, TlsVersion};
 use engine_tls::TlsClientConfig;
 use reqwest::{Client, Method, redirect::Policy};
 
-use crate::error::CalDavError;
+use crate::{
+    credential_hosts::{self, CredentialHosts},
+    error::CalDavError,
+};
 
 /// How a host authenticates to the CalDAV server.
 #[derive(Clone)]
@@ -85,6 +90,9 @@ pub(crate) enum Precondition {
     /// `If-Match: <etag>` — the resource must still carry this entity tag (a
     /// guarded update or delete).
     IfMatch(String),
+    /// `If-Schedule-Tag-Match: <tag>` preserves attendee replies while an organiser
+    /// updates a scheduled object (RFC 6638 §3.2.10).
+    IfScheduleTagMatch(String),
     /// No conditional header (an unconditional write).
     None,
 }
@@ -204,6 +212,8 @@ pub(crate) struct DavClient {
     /// during `connect`, read once per request afterwards.
     base: std::sync::RwLock<reqwest::Url>,
     credentials: Credentials,
+    /// The host's say over which origins the credential may move to ([`CredentialHosts`]).
+    credential_hosts: Option<Arc<dyn CredentialHosts>>,
     /// The HTTP and TLS versions most recently observed — the post-connect facts
     /// `ConnectionInfo` reports. Every response funnels through
     /// [`DavClient::collect`], and the discovery `PROPFIND` that
@@ -252,6 +262,7 @@ impl DavClient {
             client,
             base: std::sync::RwLock::new(base),
             credentials,
+            credential_hosts: None,
             connection: ObservedConnection::default(),
             retry: retry.clone().labelled("caldav"),
         })
@@ -259,6 +270,16 @@ impl DavClient {
 }
 
 impl DavClient {
+    /// Lets `policy` refuse an origin discovery would move the credential to.
+    #[must_use]
+    pub(crate) fn with_credential_hosts(
+        mut self,
+        policy: Option<Arc<dyn CredentialHosts>>,
+    ) -> Self {
+        self.credential_hosts = policy;
+        self
+    }
+
     /// The connection's current origin. Cloned rather than borrowed so no request is
     /// built while the lock is held.
     fn base(&self) -> reqwest::Url {
@@ -269,7 +290,14 @@ impl DavClient {
     /// the `Location`/`ETag` headers — and recording the negotiated HTTP and TLS
     /// versions on the way through. The one funnel every read and write response passes,
     /// so no path can forget to observe them.
-    async fn collect(&self, response: engine_http::Sent) -> Result<HttpResponse, CalDavError> {
+    ///
+    /// On a `write` the status is the server's whole answer, so a body lost after it leaves
+    /// the reply as the status says rather than failing it.
+    async fn collect(
+        &self,
+        response: engine_http::Sent,
+        write: bool,
+    ) -> Result<HttpResponse, CalDavError> {
         self.connection.record(&response);
         let status = response.status().as_u16();
         let header = |name: reqwest::header::HeaderName| {
@@ -285,7 +313,11 @@ impl DavClient {
         // Read before the body consumes the reply: this is the funnel's own note of what
         // the server said about when, and it is the last place it exists.
         let retry_after = response.stated_wait();
-        let body = response.text().await?;
+        let body = match response.text().await {
+            Ok(body) => body,
+            Err(_) if write => String::new(),
+            Err(err) => return Err(err.into()),
+        };
         Ok(HttpResponse {
             status,
             body,
@@ -361,6 +393,9 @@ impl DavExecutor for DavClient {
         if base.scheme() == "https" && next.scheme() != "https" {
             return false;
         }
+        if !credential_hosts::permitted(self.credential_hosts.as_ref(), next.as_str()) {
+            return false;
+        }
         // The origin alone: a redirect names one resource, and every later href is
         // resolved from the connection root, not from that resource's directory.
         if let Ok(origin) = reqwest::Url::parse(&next.origin().ascii_serialization()) {
@@ -385,13 +420,13 @@ impl DavExecutor for DavClient {
             )
             .body(body);
         let response = send_retrying(request, &self.retry, Exchange::Ordinary).await?;
-        self.collect(response).await
+        self.collect(response, false).await
     }
 
     async fn send_options(&self, href: &str) -> Result<HttpResponse, CalDavError> {
         let request = self.request(DavMethod::Options, href)?;
         let response = send_retrying(request, &self.retry, Exchange::Ordinary).await?;
-        self.collect(response).await
+        self.collect(response, false).await
     }
 
     async fn get_bytes(&self, href: &str) -> Result<Vec<u8>, CalDavError> {
@@ -421,14 +456,17 @@ impl DavExecutor for DavClient {
             // a replace/delete only while the entity tag is unchanged.
             Precondition::IfNoneMatch => builder.header(reqwest::header::IF_NONE_MATCH, "*"),
             Precondition::IfMatch(etag) => builder.header(reqwest::header::IF_MATCH, etag),
+            Precondition::IfScheduleTagMatch(tag) => builder.header("If-Schedule-Tag-Match", tag),
             Precondition::None => builder,
         };
         // A write is ordinary, a scheduling one included: an iTIP message a `PUT` sends is the
         // server's to send, and the precondition the write carries is what keeps a replay
         // from sending it twice (`docs/agent-guidance/deadlines.md`).
         let request = builder.body(request.body);
-        let response = send_retrying(request, &self.retry, Exchange::Ordinary).await?;
-        self.collect(response).await
+        let response = send_retrying(request, &self.retry, Exchange::Ordinary)
+            .await
+            .map_err(|err| CalDavError::from(err).after_write())?;
+        self.collect(response, true).await
     }
 }
 
