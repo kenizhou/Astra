@@ -105,6 +105,7 @@ fn extraction_lands_sourced_entries_over_the_live_account() {
             subject: KNOWLEDGE_SUBJECT.to_owned(),
             document: document(KNOWLEDGE_WORDS),
             blobs: Vec::new(),
+            crypto: astra_app::CryptoFlags::default(),
         })
         .await
         .expect("the proof send");

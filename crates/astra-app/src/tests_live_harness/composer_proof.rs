@@ -372,6 +372,7 @@ async fn send_and_read_back(
         subject: subject.to_owned(),
         document,
         blobs: Vec::new(),
+        crypto: crate::crypto::CryptoFlags::default(),
     })
     .await
     .unwrap();

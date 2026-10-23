@@ -13,6 +13,9 @@ const UPSTREAM_EXEMPT_PREFIXES: &[&str] = &[
     "crates/astra-crypto-core/",
     "crates/astra-crypto-openpgp/",
     "crates/astra-crypto-smime/",
+    // The SP4b store is likewise a kylins port (sqlx -> rusqlite being the
+    // only sanctioned rewrite), kept diffable against its source.
+    "crates/astra-crypto-store/",
 ];
 
 /// True for package manager lockfiles, which are generated output.

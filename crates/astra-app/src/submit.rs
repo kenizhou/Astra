@@ -30,6 +30,7 @@ use engine_api::{
 
 use crate::{
     compose_request::carry,
+    crypto::CryptoFlags,
     drafts::{mint_message_id, parse_addresses},
     gate::{GateComposition, GateVerdict},
     protocol::ComposerBlob,
@@ -70,6 +71,7 @@ impl<P: Provider> App<P> {
         subject: String,
         document: ComposerDocument,
         blobs: Vec<ComposerBlob>,
+        crypto: CryptoFlags,
     ) {
         let Some(handle) = self.account_handle(&from).await else {
             log::warn!("send: the account to send from is no longer configured");
@@ -91,7 +93,7 @@ impl<P: Provider> App<P> {
             log::warn!("send: the message could not be built for sending");
             return;
         };
-        self.gate_and_submit(&from, provider, draft).await;
+        self.gate_and_submit(&from, provider, draft, crypto).await;
     }
 
     /// Sends the composer's document as a reply: the same path as the plain
@@ -112,6 +114,7 @@ impl<P: Provider> App<P> {
         subject: String,
         document: ComposerDocument,
         blobs: Vec<ComposerBlob>,
+        crypto: CryptoFlags,
     ) {
         let Some(handle) = self.account_handle(&from).await else {
             log::warn!("send: the account to send from is no longer configured");
@@ -128,7 +131,7 @@ impl<P: Provider> App<P> {
             return;
         };
         let draft = draft.in_reply_to(in_reply_to, references);
-        self.gate_and_submit(&from, provider, draft).await;
+        self.gate_and_submit(&from, provider, draft, crypto).await;
     }
 
     /// Sends the composer's document as a forward: the same path as the plain
@@ -149,6 +152,7 @@ impl<P: Provider> App<P> {
         subject: String,
         document: ComposerDocument,
         blobs: Vec<ComposerBlob>,
+        crypto: CryptoFlags,
     ) {
         let Some(handle) = self.account_handle(&from).await else {
             log::warn!("send: the account to send from is no longer configured");
@@ -195,7 +199,7 @@ impl<P: Provider> App<P> {
             return;
         };
         let draft = draft.with_references(original_chain(&original));
-        self.gate_and_submit(&from, provider, draft).await;
+        self.gate_and_submit(&from, provider, draft, crypto).await;
     }
 
     /// Submits `draft` through the account's durable outbox and drains the
@@ -203,7 +207,21 @@ impl<P: Provider> App<P> {
     /// due happens in this gesture rather than at the next refresh, the
     /// queue holds whatever the attempt came to, and the sending snapshot
     /// the rebuild publishes is what tells the user.
-    pub(crate) async fn submit_and_drain(&self, from: &AccountId, provider: &P, draft: Draft) {
+    pub(crate) async fn submit_and_drain(
+        &self,
+        from: &AccountId,
+        provider: &P,
+        draft: Draft,
+        crypto: CryptoFlags,
+    ) {
+        // The built-in crypto branch: with a method configured the send
+        // assembles, gates, and queues in the Astra-side crypto outbox; the
+        // engine's queue never sees it. Every other account takes the
+        // engine path below untouched.
+        let (sign, encrypt) = crypto.resolved();
+        if self.crypto_submit_maybe(from, &draft, sign, encrypt).await {
+            return;
+        }
         let at = self.account_ordinal(from).await;
         log::info!("send[a{at}]: submitting a message");
         match self.engine.submit_mail(provider, from, &draft).await {
@@ -226,9 +244,15 @@ impl<P: Provider> App<P> {
     /// first second), and only an allow queues. With neither port installed
     /// this is exactly [`App::submit_and_drain`], which is the zero-cost
     /// default.
-    pub(crate) async fn gate_and_submit(&self, from: &AccountId, provider: &P, mut draft: Draft) {
+    pub(crate) async fn gate_and_submit(
+        &self,
+        from: &AccountId,
+        provider: &P,
+        mut draft: Draft,
+        crypto: CryptoFlags,
+    ) {
         if self.send_gate.is_none() && self.compose_transform.is_none() {
-            self.submit_and_drain(from, provider, draft).await;
+            self.submit_and_drain(from, provider, draft, crypto).await;
             return;
         }
         let at = self.account_ordinal(from).await;
@@ -243,6 +267,7 @@ impl<P: Provider> App<P> {
                     self.hold_send(
                         from.clone(),
                         draft,
+                        crypto,
                         failure.plugin,
                         failure.reason,
                         astra_viewmodel::HeldState::Blocked,
@@ -253,7 +278,7 @@ impl<P: Provider> App<P> {
             }
         }
         let Some(gate) = self.send_gate.clone() else {
-            self.submit_and_drain(from, provider, draft).await;
+            self.submit_and_drain(from, provider, draft, crypto).await;
             return;
         };
         let composition = gate_composition_of(from, &draft);
@@ -261,6 +286,7 @@ impl<P: Provider> App<P> {
             .hold_send(
                 from.clone(),
                 draft,
+                crypto,
                 String::new(),
                 String::new(),
                 astra_viewmodel::HeldState::Checking,
@@ -269,7 +295,7 @@ impl<P: Provider> App<P> {
         match gate.check(&composition).await {
             GateVerdict::Allow => {
                 if let Some(entry) = self.take_hold(&hold).await {
-                    self.submit_and_drain(&entry.from.clone(), provider, entry.draft)
+                    self.submit_and_drain(&entry.from.clone(), provider, entry.draft, crypto)
                         .await;
                 }
             }

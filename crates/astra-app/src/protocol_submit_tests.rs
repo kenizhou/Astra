@@ -57,6 +57,7 @@ fn submit_rich_reply_carries_the_threading_header_beside_the_document() {
             subject: "Re: Quarterly report".to_owned(),
             document: document("Agreed"),
             blobs: Vec::new(),
+            crypto: crate::crypto::CryptoFlags::default(),
         },
         concat!(
             r#"{"submit_rich_reply":{"from":"work","to":"ada@example.test","#,
@@ -65,7 +66,7 @@ fn submit_rich_reply_carries_the_threading_header_beside_the_document() {
             r#""document":{"blocks":[{"Paragraph":{"content":"#,
             r#"[{"Text":{"text":"Agreed","bold":false,"italic":false,"underline":false,"#,
             r#""font_size":null,"color":null,"highlight":null,"link":null}}]}}],"#,
-            r#""attachments":[]},"blobs":[]}}"#
+            r#""attachments":[]},"blobs":[],"crypto":{}}}"#
         ),
     );
     // A reply with host-resolved attachment bytes carries them beside the
@@ -82,6 +83,7 @@ fn submit_rich_reply_carries_the_threading_header_beside_the_document() {
                 DraftBlobHandle::new("blob-1").unwrap(),
                 vec![1, 2, 3],
             )],
+            crypto: crate::crypto::CryptoFlags::default(),
         },
         concat!(
             r#"{"submit_rich_reply":{"from":"work","to":"ada@example.test","#,
@@ -89,7 +91,7 @@ fn submit_rich_reply_carries_the_threading_header_beside_the_document() {
             r#""subject":"","document":{"blocks":[{"Paragraph":{"content":"#,
             r#"[{"Text":{"text":"With a file","bold":false,"italic":false,"underline":false,"#,
             r#""font_size":null,"color":null,"highlight":null,"link":null}}]}}],"#,
-            r#""attachments":[]},"blobs":[{"handle":"blob-1","bytes":[1,2,3]}]}}"#
+            r#""attachments":[]},"blobs":[{"handle":"blob-1","bytes":[1,2,3]}],"crypto":{}}}"#
         ),
     );
 }
@@ -103,6 +105,7 @@ fn submit_rich_forward_carries_no_threading_header() {
             subject: "Fwd: Quarterly report".to_owned(),
             document: document("Look at this"),
             blobs: Vec::new(),
+            crypto: crate::crypto::CryptoFlags::default(),
         },
         concat!(
             r#"{"submit_rich_forward":{"from":"work","to":"bob@example.test","#,
@@ -110,7 +113,7 @@ fn submit_rich_forward_carries_no_threading_header() {
             r#""document":{"blocks":[{"Paragraph":{"content":"#,
             r#"[{"Text":{"text":"Look at this","bold":false,"italic":false,"underline":false,"#,
             r#""font_size":null,"color":null,"highlight":null,"link":null}}]}}],"#,
-            r#""attachments":[]},"blobs":[]}}"#
+            r#""attachments":[]},"blobs":[],"crypto":{}}}"#
         ),
     );
 }
@@ -122,7 +125,7 @@ fn a_blank_threading_header_is_refused_on_the_wire() {
     let blank = concat!(
         r#"{"submit_rich_reply":{"from":"work","to":"ada@example.test","#,
         r#""cc":"","in_reply_to":"","subject":"Re:","#,
-        r#""document":{"blocks":[],"attachments":[]},"blobs":[]}}"#
+        r#""document":{"blocks":[],"attachments":[]},"blobs":[],"crypto":{}}}"#
     );
     assert!(serde_json::from_str::<Intent>(blank).is_err());
     assert_eq!(

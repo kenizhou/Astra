@@ -161,6 +161,50 @@ sha256(内容)) 对的 sha256，签名自身不参与，发布者密钥参与）
 的块，默认开）即管理策略开关：关则启动不启用任何插件、`enable` 被拒、
 闸门/解码器/调用端面视同没有任何插件在服务。
 
+## Track B：内置加密
+
+消息加密是产品功能而非插件：S/MIME 与 OpenPGP 内置于应用核心
+（2026-10-20 决定），因此没有任何插件会看到它不需要的明文，发送闸门的
+信任模型属于应用自身。SP4b 之后的状态：
+
+- **存储**（`crates/astra-crypto-store`）：AI 存储旁的一个
+  `crypto.sqlite`，kylins schema 的最终形态（`crypto_keys` 含
+  harvested/intermediate、仅追加的 `trust_decisions`、`collected_keys`、
+  `contact_pinned_keys`、`crl_cache`、`message_crypto_results`、
+  `send_as_aliases`）。软私钥在 OS 钥匙串中的主密钥下以 AAD 绑定的
+  AES-256-GCM 封装静存。`SqliteKeyStore` 桥实现核心的 `KeyStore`（按账
+  户绑定、`standard|fingerprint` 的 KeyId、OpenPGP 子钥回退、令牌句
+  柄、可取回性过滤）；信任决策与收件人解析阶梯（NoKey 带已收集提示、
+  过期先行、自有密钥即 Ready、verified/personal/unverified 即 Ready 模
+  型、Rejected、Undecided、AcceptedOtherEmail、钉选优先）镜像 kylins 的
+  `resolve_recipient_status_at`。
+- **发送闸门**（`crates/astra-crypto-core::apply`）：kylins
+  `apply_crypto` 语义逐字。直通、`NoSigningKey`、失败关闭的信任闸（每
+  个收件人必须解析为 Ready；无明文回退、拒绝时不产生密文）、钉选感知
+  的选择使闸门与加密使用同一密钥、仅 S/MIME 的对照已存锚点的链闸、默
+  认开启且读错安全默认开的受保护头主题隐藏、仅 PGP 且在加密部分内的
+  Autocrypt-Gossip、`EncryptOp.sign_with` 组合（绝不先明文签名再加密），
+  以及 W9 密码臂（SKESK 对称，`PasswordConflict`/`PasswordRequired`）。
+- **Astra 侧发件箱**（规格 D3）：钉定引擎的提交只接受 `Draft`，因此加
+  密发送用引擎自己的 `engine_rfc5322` 组装（输出逐字节一致），包装一
+  次（归档变体，带 `Bcc`），排入 `crypto_outbox`。线上变体是同一密文
+  减去 `Bcc` 头。绕行传输刻意小而明确：EHLO、`AUTH PLAIN`、
+  `MAIL FROM`、`RCPT TO`、带转义的 DATA、出错时 RSET，走账户已拨号的
+  设置与宿主构建的 TLS 连接器；Sent 副本以 IMAP `APPEND` 归档（按
+  special-use `\Sent` 发现）。DATA 中途断连落为 `unconfirmed`；只有用户
+  的作答会重发。加密行项以高位 op 命名空间并入既有发送快照，动词同
+  样路由。
+- **开关**：每个账户在其存储配置中的 `[crypto] method`
+  （`none | openpgp | smime`），随设置行回显并可在账户页编辑。`none`
+  是零开销默认：引擎队列保留每一封发送。编写器的 sign/encrypt 标记随
+  提交 intent 下发，在启用方法时默认同开。方法存在而无 IMAP/SMTP 提交
+  设置的账户得到类型化的不可用回答并扣留，绝不静默丢弃。
+
+后续切片：SP4c 是接收半（经阅读流水线的解密/验签、静存加密草稿、结果
+行与安全横幅、CRL 拉取、Autocrypt 消费半）；SP4d 是令牌注册表
+（cryptoki、openpgp-card）与原生安全 UI。无已注册 provider 的令牌密钥
+如今即得到类型化失败（`TokenNotPresent`），绝不回退软件密钥。
+
 ## 已记录的已知缺口
 
 - 在 `before_send` 处理器激活前已入队的 op 不做追溯过闸；drain 内的逐

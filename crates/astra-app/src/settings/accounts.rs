@@ -69,6 +69,8 @@ pub struct AccountInfo {
     /// credential never crosses this seam; the echo answers whether one is
     /// stored.
     pub dav: Option<astra_viewmodel::DavSectionRow>,
+    /// The stored crypto method's echo (`none` / `openpgp` / `smime`).
+    pub crypto_method: String,
 }
 
 /// The dialled legs a stored dav section re-dials into: the shapes the app
@@ -132,6 +134,16 @@ pub trait HostAccountOps<P>: Send + Sync {
     /// The sentence the settings surface shows when the stored config could
     /// not be removed; the account keeps everything it had.
     async fn remove_account(&self, account: &AccountId) -> Result<(), String>;
+
+    /// Writes the account's crypto method into its stored config (`none`
+    /// drops the section). No re-dial: the send path reads the method at
+    /// submit time.
+    ///
+    /// # Errors
+    ///
+    /// The sentence the settings surface shows when the persist failed;
+    /// nothing changed stored.
+    async fn store_crypto_method(&self, account: &AccountId, method: &str) -> Result<(), String>;
 }
 
 impl<P: Provider> App<P> {
@@ -344,5 +356,58 @@ impl<P: Provider> App<P> {
                 );
             }
         }
+    }
+}
+
+impl<P: Provider> App<P> {
+    /// The crypto-method write: the method word validates against the gate's
+    /// known methods first, then the seam persists it host-side. No re-dial
+    /// (the send path reads the method at submit time); a failure lands on
+    /// the account's row as `crypto_error`.
+    pub(crate) async fn set_crypto_method(&self, account: AccountId, method: String) {
+        let known = matches!(method.as_str(), "none" | "openpgp" | "smime");
+        if !known {
+            self.answer_crypto_failure(&account, "the method must be none, openpgp, or smime")
+                .await;
+            return;
+        }
+        let Some(ops) = self.account_ops() else {
+            self.answer_crypto_failure(
+                &account,
+                "this build has no host account store to save through",
+            )
+            .await;
+            return;
+        };
+        if self.account_handle(&account).await.is_none() {
+            log::warn!("settings: the account whose crypto method was saved is not running");
+            self.rebuild_settings().await;
+            return;
+        }
+        match ops.store_crypto_method(&account, &method).await {
+            Ok(()) => {
+                self.settings_state
+                    .lock()
+                    .expect("settings mutex poisoned")
+                    .crypto_errors
+                    .remove(&account);
+            }
+            Err(sentence) => {
+                self.answer_crypto_failure(&account, &sentence).await;
+                return;
+            }
+        }
+        self.rebuild_settings().await;
+    }
+
+    /// Records the crypto-method write's failure sentence on the account's
+    /// row and republishes.
+    async fn answer_crypto_failure(&self, account: &AccountId, sentence: &str) {
+        self.settings_state
+            .lock()
+            .expect("settings mutex poisoned")
+            .crypto_errors
+            .insert(account.clone(), sentence.to_owned());
+        self.rebuild_settings().await;
     }
 }

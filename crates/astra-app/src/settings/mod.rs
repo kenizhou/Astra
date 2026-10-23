@@ -76,6 +76,9 @@ pub(crate) struct SettingsState {
     /// change could not rewrite their stored occurrences, shown on the
     /// account's row. Absent for an account whose re-expansion landed.
     pub(crate) refresh_errors: BTreeMap<AccountId, String>,
+    /// The per-account crypto-method write failures, shown on the
+    /// account's row. Absent for an account whose last write landed.
+    pub(crate) crypto_errors: BTreeMap<AccountId, String>,
     /// Why the newest settings write was refused or failed, when it was.
     /// `None` is the state of every write that landed.
     pub(crate) error: Option<SettingsError>,
@@ -155,6 +158,9 @@ impl<P: Provider> App<P> {
             }
             SettingsIntent::SetDav { account, section } => {
                 self.set_dav(account, section).await;
+            }
+            SettingsIntent::SetCryptoMethod { account, method } => {
+                self.set_crypto_method(account, method).await;
             }
             SettingsIntent::RemoveAccount { account } => {
                 self.remove_account(account).await;
@@ -297,6 +303,12 @@ impl<P: Provider> App<P> {
             .expect("settings mutex poisoned")
             .refresh_errors
             .clone();
+        let crypto_errors = self
+            .settings_state
+            .lock()
+            .expect("settings mutex poisoned")
+            .crypto_errors
+            .clone();
         let accounts = {
             // The signature assignment each row echoes, projected from the
             // persisted document's own shape into the wire's.
@@ -336,6 +348,9 @@ impl<P: Provider> App<P> {
                     dav_error: dav_errors.get(&handle.id).cloned(),
                     refresh_error: refresh_errors.get(&handle.id).cloned(),
                     grant: info.and_then(|info| info.grant),
+                    crypto_method: info
+                        .map_or_else(|| "none".to_string(), |info| info.crypto_method.clone()),
+                    crypto_error: crypto_errors.get(&handle.id).cloned(),
                     signatures: signatures.get(&handle.id).cloned(),
                 });
             }
@@ -361,6 +376,8 @@ impl<P: Provider> App<P> {
                         dav_error: dav_errors.get(&info.id).cloned(),
                         refresh_error: refresh_errors.get(&info.id).cloned(),
                         grant: Some(grant),
+                        crypto_method: info.crypto_method.clone(),
+                        crypto_error: crypto_errors.get(&info.id).cloned(),
                         signatures: signatures.get(&info.id).cloned(),
                     });
                 }

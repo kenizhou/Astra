@@ -18,6 +18,10 @@ thiserror = "1"
 secrecy = "0.10"
 zeroize = "1"
 subtle = "2"
+# base64 for the MIME wrappers' transport encoding; log for the gate's
+# fail-safe warnings.
+base64 = "0.23"
+log = "0.4"
 
 [dev-dependencies]
 serde_json = "1"

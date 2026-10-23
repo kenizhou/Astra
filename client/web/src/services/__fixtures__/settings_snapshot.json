@@ -28,7 +28,8 @@
         "dav_password_set": true
       },
       "dav_error": "the re-dial could not reach the origin",
-      "refresh_error": "the diary could not be re-expanded under the new zone; set the zone again to retry"
+      "refresh_error": "the diary could not be re-expanded under the new zone; set the zone again to retry",
+      "crypto_method": "none"
     }
   ],
   "about": {

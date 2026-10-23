@@ -160,8 +160,9 @@ impl<P: Provider> App<P> {
                 subject,
                 document,
                 blobs,
+                crypto,
             } => {
-                self.submit_rich_mail(from, to, cc, bcc, subject, document, blobs)
+                self.submit_rich_mail(from, to, cc, bcc, subject, document, blobs, crypto)
                     .await;
             }
             Intent::SubmitRichReply {
@@ -172,8 +173,9 @@ impl<P: Provider> App<P> {
                 subject,
                 document,
                 blobs,
+                crypto,
             } => {
-                self.submit_rich_reply(from, to, cc, in_reply_to, subject, document, blobs)
+                self.submit_rich_reply(from, to, cc, in_reply_to, subject, document, blobs, crypto)
                     .await;
             }
             Intent::SubmitRichForward {
@@ -182,8 +184,9 @@ impl<P: Provider> App<P> {
                 subject,
                 document,
                 blobs,
+                crypto,
             } => {
-                self.submit_rich_forward(from, to, subject, document, blobs)
+                self.submit_rich_forward(from, to, subject, document, blobs, crypto)
                     .await;
             }
             // The outbox family: the same discard-and-resync discipline the

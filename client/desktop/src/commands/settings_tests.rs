@@ -52,6 +52,8 @@ fn the_settings_pull_round_trips_the_published_snapshot() {
             dav_error: None,
             refresh_error: None,
             grant: None,
+            crypto_method: "none".to_owned(),
+            crypto_error: None,
             signatures: None,
         }],
         about: AboutBlock {

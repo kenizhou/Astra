@@ -13,7 +13,9 @@ use provider_imap::{CredentialSource, Credentials, ImapConfig};
 use serde::{Deserialize, Serialize};
 
 use crate::oauth_accounts::{GoogleAccount, GraphAccount};
-use crate::{dav::DavAccount, jmap::JmapAccount, AccountError, CertificateException};
+use crate::{
+    crypto::CryptoAccount, dav::DavAccount, jmap::JmapAccount, AccountError, CertificateException,
+};
 
 /// A secret string (password/token) that redacts itself in `Debug`, so a config
 /// holding it can still derive `Debug` without leaking the secret into logs.
@@ -98,6 +100,10 @@ pub struct AccountConfig {
     /// Absent for every account stored before this section existed.
     #[serde(default)]
     pub jmap: Option<JmapAccount>,
+    /// The account's built-in crypto section: the method the send gate
+    /// dispatches on (`openpgp` / `smime`; anything else reads as no crypto).
+    #[serde(default)]
+    pub crypto: Option<CryptoAccount>,
     /// Server certificates this account's owner accepted although they did not verify.
     /// Empty for every account that never met one, which is nearly all of them.
     #[serde(default, rename = "certificate_exception")]
@@ -263,6 +269,12 @@ impl AccountConfig {
         }
         if let Some(jmap) = &self.jmap {
             root.insert("jmap".into(), jmap.to_table().into());
+        }
+        if let Some(crypto) = &self.crypto {
+            root.insert(
+                "crypto".into(),
+                toml::Table::from_iter([("method".into(), crypto.method.clone().into())]).into(),
+            );
         }
         if !self.certificate_exceptions.is_empty() {
             let exceptions: Vec<toml::Value> = self

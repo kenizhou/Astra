@@ -20,7 +20,10 @@ use std::collections::HashMap;
 use astra_viewmodel::{queued_row, HeldSend, HeldState, SendingSnapshot};
 use engine_api::{AccountId, Confirmation, Draft, OpRejection, PendingOpKind, Provider};
 
-use crate::{drafts::now_instant, reference::QueuedRef, App, OutboxIntent};
+use crate::{
+    crypto::CryptoFlags, crypto_outbox::CryptoVerb, drafts::now_instant, reference::QueuedRef, App,
+    OutboxIntent,
+};
 
 /// One send the plugin gate is holding: the row the snapshot publishes plus
 /// the built draft a retry or a Send Anyway resumes. The draft, never a
@@ -40,6 +43,9 @@ pub(crate) struct HeldEntry {
     pub(crate) state: HeldState,
     /// The built draft, transformed if a transform ran.
     pub(crate) draft: Draft,
+    /// The composer's crypto toggles, carried so a retry or a Send Anyway
+    /// resumes with the same ones.
+    pub(crate) crypto: CryptoFlags,
 }
 
 /// The sending state beside the queue itself: what the app adds that the store
@@ -72,15 +78,37 @@ impl<P: Provider> App<P> {
     pub(crate) async fn dispatch_outbox(&self, intent: OutboxIntent) {
         match intent {
             OutboxIntent::Show => self.rebuild_sending().await,
-            OutboxIntent::Cancel { queued } => self.cancel_queued_send(&queued).await,
-            OutboxIntent::SendNow { queued } => self.send_queued_now(&queued).await,
+            OutboxIntent::Cancel { queued } => {
+                if App::<P>::crypto_row_of(queued.op).is_some() {
+                    self.crypto_verb(queued.op, CryptoVerb::Withdraw).await;
+                } else {
+                    self.cancel_queued_send(&queued).await;
+                }
+            }
+            OutboxIntent::SendNow { queued } => {
+                if App::<P>::crypto_row_of(queued.op).is_some() {
+                    self.crypto_verb(queued.op, CryptoVerb::SendNow).await;
+                } else {
+                    self.send_queued_now(&queued).await;
+                }
+            }
             OutboxIntent::ConfirmSent { queued } => {
-                self.confirm_queued_send(&queued, Confirmation::Delivered)
-                    .await;
+                if App::<P>::crypto_row_of(queued.op).is_some() {
+                    self.crypto_verb(queued.op, CryptoVerb::ConfirmDelivered)
+                        .await;
+                } else {
+                    self.confirm_queued_send(&queued, Confirmation::Delivered)
+                        .await;
+                }
             }
             OutboxIntent::ConfirmNotSent { queued } => {
-                self.confirm_queued_send(&queued, Confirmation::NotDelivered)
-                    .await;
+                if App::<P>::crypto_row_of(queued.op).is_some() {
+                    self.crypto_verb(queued.op, CryptoVerb::ConfirmNotDelivered)
+                        .await;
+                } else {
+                    self.confirm_queued_send(&queued, Confirmation::NotDelivered)
+                        .await;
+                }
             }
             OutboxIntent::AnswerGate { hold, send_anyway } => {
                 self.answer_gate(&hold, send_anyway).await;
@@ -98,6 +126,7 @@ impl<P: Provider> App<P> {
         &self,
         from: AccountId,
         draft: Draft,
+        crypto: CryptoFlags,
         plugin: String,
         reason: String,
         state: HeldState,
@@ -111,6 +140,7 @@ impl<P: Provider> App<P> {
                 subject: draft.subject.clone(),
                 from,
                 draft,
+                crypto,
                 plugin,
                 reason,
                 state,
@@ -191,7 +221,9 @@ impl<P: Provider> App<P> {
         };
         log::info!("outbox: the user said Send Anyway; queueing without re-gating");
         let from = entry.from.clone();
-        self.submit_and_drain(&from, provider, entry.draft).await;
+        let crypto = entry.crypto;
+        self.submit_and_drain(&from, provider, entry.draft, crypto)
+            .await;
     }
 
     /// Re-runs the gate over a held send: the hold drops and the submit seam
@@ -211,7 +243,9 @@ impl<P: Provider> App<P> {
         };
         log::info!("outbox: re-gating a held send");
         let from = entry.from.clone();
-        self.gate_and_submit(&from, provider, entry.draft).await;
+        let crypto = entry.crypto;
+        self.gate_and_submit(&from, provider, entry.draft, crypto)
+            .await;
     }
 
     /// Drops a held send. The draft behind it stays in Drafts; nothing is
@@ -334,6 +368,9 @@ impl<P: Provider> App<P> {
                 }
             }
         }
+        // The crypto queue's rows ride the same panel (no second outbox
+        // UI), under the crypto op namespace.
+        rows.extend(self.crypto_outbox_rows());
         let held = self
             .outbox
             .lock()

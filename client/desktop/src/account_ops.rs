@@ -230,6 +230,10 @@ impl HostAccountOps<HostProvider> for HostAccountStore {
                 address,
                 grant: self.refusals.of(&id),
                 dav: config.dav.as_ref().map(dav_echo),
+                crypto_method: config
+                    .crypto
+                    .as_ref()
+                    .map_or_else(|| "none".to_owned(), |crypto| crypto.method.clone()),
             });
         }
         infos
@@ -258,6 +262,26 @@ impl HostAccountOps<HostProvider> for HostAccountStore {
         // The account's row goes, so the refusal state it carried goes with
         // it: a later re-add of the same account starts clean.
         self.refusals.clear(account.as_str());
+        Ok(())
+    }
+
+    async fn store_crypto_method(&self, account: &AccountId, method: &str) -> Result<(), String> {
+        let id = account.as_str().to_owned();
+        let (mut config, _connections) = self
+            .dials
+            .of(&id)
+            .ok_or_else(|| NOT_REGISTERED.to_owned())?;
+        config.crypto = match method {
+            "none" => None,
+            other => Some(astra_account::CryptoAccount {
+                method: other.to_owned(),
+            }),
+        };
+        let document = config.to_toml().map_err(|err| err.to_string())?;
+        self.credentials
+            .persist(&id, &document)
+            .map_err(|err| err.to_string())?;
+        self.dials.replace_config(&id, config);
         Ok(())
     }
 }

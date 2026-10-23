@@ -95,6 +95,7 @@ async fn the_send_path_delivers_the_pinned_mail_and_cleans_up_after_itself() {
         subject: SUBJECT.to_owned(),
         document: document(WORDS),
         blobs: Vec::new(),
+        crypto: crate::crypto::CryptoFlags::default(),
     })
     .await
     .unwrap();
@@ -243,6 +244,7 @@ async fn an_attachment_round_trips_through_the_send_and_the_byte_read() {
         subject: ATTACHMENT_SUBJECT.to_owned(),
         document,
         blobs: vec![blob],
+        crypto: crate::crypto::CryptoFlags::default(),
     })
     .await
     .unwrap();

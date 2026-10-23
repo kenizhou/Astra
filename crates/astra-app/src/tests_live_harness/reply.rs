@@ -78,6 +78,7 @@ async fn the_reply_threads_under_the_original_and_cleans_up_after_itself() {
         subject: SUBJECT.to_owned(),
         document: document(WORDS),
         blobs: Vec::new(),
+        crypto: crate::crypto::CryptoFlags::default(),
     })
     .await
     .unwrap();
@@ -188,6 +189,7 @@ async fn the_reply_threads_under_the_original_and_cleans_up_after_itself() {
             attachments: Vec::new(),
         },
         blobs: Vec::new(),
+        crypto: crate::crypto::CryptoFlags::default(),
     })
     .await
     .unwrap();

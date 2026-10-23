@@ -23,6 +23,8 @@ mod boot;
 mod calendar;
 mod compose_open;
 mod compose_request;
+mod crypto;
+mod crypto_outbox;
 mod decode;
 mod dispatch;
 mod drafts;
@@ -147,6 +149,7 @@ pub use calendar::{
     BRIEF_INVITATION_SCAN_LIMIT, MEETING_BRIEF_PROMPT_VERSION,
 };
 pub use compose_request::OpenDraftError;
+pub use crypto::{CryptoFlags, CryptoTransport, CryptoTransportResolver};
 pub use decode::{DecodeOutcome, MessageDecoder};
 pub use dispatch::AppError;
 pub use drafts::{DraftResume, DRAFT_AUTOSAVE_IDLE};
@@ -335,6 +338,10 @@ pub struct App<P> {
     /// The plugin message decoder: every reading open's raw source passes it
     /// before the render. `None` (the default) renders the store's own read.
     pub(crate) decoder: Option<Arc<dyn crate::decode::MessageDecoder>>,
+    /// The built-in crypto send path: installed by the host with the shared
+    /// crypto store and its dial-table resolver. `None` (the default) and
+    /// every send rides the engine's queue untouched.
+    pub(crate) crypto_send: std::sync::Mutex<Option<crypto::CryptoSendSupport>>,
 }
 
 impl<P> core::fmt::Debug for App<P> {
@@ -401,6 +408,7 @@ impl<P: Provider> App<P> {
             send_gate: None,
             compose_transform: None,
             decoder: None,
+            crypto_send: std::sync::Mutex::new(None),
         }
     }
 
