@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The composer's attachment surface: the Attach button over the webview's
 // own multi-select input (the bytes never round-trip through the host), the
-// document's attachment rows with their remove controls, and the inline-or-
-// file ask a dropped picture gets. The rows render whatever the document
-// holds, so a forward's pre-attached originals stand here too.
+// document's attachment rows with their remove controls, the inline-or-
+// file ask a dropped picture gets, and the OS share hand-off's pending
+// rows, named by the file and marked pending (their bytes stage when the
+// read seam ships; the path never renders). The rows render whatever the
+// document holds, so a forward's pre-attached originals stand here too.
 
 import { useRef } from 'react';
 
@@ -29,6 +31,7 @@ function formatSize(size: number | null): string {
 export function ComposerAttachments() {
   const attachments = useComposerStore((s) => s.editor.attachments);
   const pendingImages = useComposerStore((s) => s.pendingImages);
+  const pendingShares = useComposerStore((s) => s.pendingShares);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const onPick = (event: React.ChangeEvent<HTMLInputElement>): void => {
@@ -79,6 +82,25 @@ export function ComposerAttachments() {
             aria-label={`Remove ${row.file_name}`}
             onClick={() => useComposerStore.getState().removeAttachment(row.id)}
             className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-muted-text transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <CloseIcon size={12} />
+          </button>
+        </div>
+      ))}
+      {pendingShares.map((file) => (
+        <div
+          key={`pending-${file.name}`}
+          className="flex items-baseline gap-2 border-t border-border-subtle py-1 text-xs"
+        >
+          <span className="min-w-0 truncate text-foreground">{file.name}</span>
+          <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] leading-none text-muted-text">
+            pending
+          </span>
+          <button
+            type="button"
+            aria-label={`Remove pending ${file.name}`}
+            onClick={() => useComposerStore.getState().removeShare(file.name)}
+            className="ml-auto flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-muted-text transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <CloseIcon size={12} />
           </button>

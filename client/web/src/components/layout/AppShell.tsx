@@ -39,6 +39,7 @@ import { useReadingStore } from '@/stores/readingStore';
 import { useUiStore } from '@/stores/uiStore';
 import { CommandRibbon } from '@/components/ribbon/CommandRibbon';
 import { PaneDivider, PaneDividerHorizontal } from './paneDivider';
+import { DefaultMailOffer } from './DefaultMailOffer';
 import { FolderPaneDrawer } from './FolderPaneDrawer';
 import { MessageList } from './MessageList';
 import { OfflineBanner } from './OfflineBanner';
@@ -261,6 +262,7 @@ export function AppShell() {
       </div>
       <StatusBar />
       <OfflineBanner />
+      <DefaultMailOffer />
       <AiPanel />
       <SendResultToast />
       <SettingsScreen />

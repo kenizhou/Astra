@@ -12,7 +12,11 @@
       "key": "cal-1"
     },
     "plugins_enabled": true,
-    "notifications_enabled": true
+    "notifications_enabled": true,
+    "debug_enabled": true,
+    "analytics_consented": true,
+    "language": "fr-FR",
+    "zone_offered": true
   },
   "accounts": [
     {
@@ -50,5 +54,6 @@
       "web"
     ]
   },
-  "error": "persist_failed"
+  "error": "persist_failed",
+  "device_zone_offer": "Asia/Shanghai"
 }

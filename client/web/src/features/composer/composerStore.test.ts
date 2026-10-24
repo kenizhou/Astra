@@ -491,3 +491,4 @@ describe('the composer attachments', () => {
     expect(useComposerStore.getState().editor.attachments).toHaveLength(0);
   });
 });
+

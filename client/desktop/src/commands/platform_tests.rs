@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Tests for the default-mail registration verb: the idempotence (the
-//! first ask registers, the second finds it standing and writes
-//! nothing), the refused registration's typed outcome, the landed
-//! registration's product event, and the outcome's wire shape.
+//! Tests for the default-mail registration verb and its offer latch: the
+//! idempotence (the first ask registers, the second finds it standing and
+//! writes nothing), the refused registration's typed outcome, the landed
+//! registration's product event, the outcome's wire shape, and the
+//! ask-once latch file the asking surface reads and marks.
 
 use std::sync::{Arc, Mutex};
 
-use super::{register_default_mail_with, DefaultMailHost, RegisterDefaultMailOutcome};
+use super::{
+    default_mail_asked_at, mark_default_mail_asked_at, register_default_mail_with, DefaultMailHost,
+    RegisterDefaultMailOutcome,
+};
 use crate::commands_fakes::{state, FakeApp, FakeStore};
 
 /// The seam's fake: a standing flag the registration raises, with the
@@ -131,4 +135,36 @@ fn the_outcome_crosses_the_wire_as_the_snake_case_tag() {
         wire,
         serde_json::json!({"failed": {"reason": "the platform refused the write"}})
     );
+}
+
+/// One scratch directory under the target dir, named per test.
+fn scratch(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("astra-mail-latch-{name}"));
+    let _ = std::fs::remove_dir_all(&dir);
+    dir
+}
+
+#[test]
+fn the_latch_reads_unset_until_the_ask_marks_it() {
+    let dir = scratch("unset-then-marked");
+
+    assert!(
+        !default_mail_asked_at(&dir),
+        "an untouched data dir has never been asked"
+    );
+
+    mark_default_mail_asked_at(&dir).expect("the mark writes");
+    assert!(
+        default_mail_asked_at(&dir),
+        "the marked data dir answers asked"
+    );
+}
+
+#[test]
+fn the_mark_is_idempotent_and_recreates_its_directory() {
+    let dir = scratch("idempotent-mark").join("nested");
+
+    mark_default_mail_asked_at(&dir).expect("the first mark makes its directory");
+    mark_default_mail_asked_at(&dir).expect("the second mark is idempotent");
+    assert!(default_mail_asked_at(&dir));
 }

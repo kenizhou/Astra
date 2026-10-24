@@ -151,6 +151,8 @@ pub fn run() {
             commands::diagnostics::log_tail,
             commands::diagnostics::log_export,
             commands::platform::register_default_mail,
+            commands::platform::default_mail_asked,
+            commands::platform::default_mail_mark_asked,
             commands::mcp::mcp_status,
             commands::mcp::mcp_set_enabled,
             commands::mcp::mcp_set_allowed,

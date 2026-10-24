@@ -3,8 +3,9 @@
 // window. The URL's params pick the root: the app shell, the composer
 // window's own root over the composition it names, the reading window's
 // root over the message it names, the print surface over the same message,
-// with the mailto prefill, the transfer's resume account, and the folder
-// the message was opened from riding the URL beside them.
+// with the mailto prefill, the share hand-off's pending set, the
+// transfer's resume account, and the folder the message was opened from
+// riding the URL beside them.
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
@@ -13,6 +14,7 @@ import {
   readComposerParam,
   readPrefillParam,
   readResumeParam,
+  readShareParam,
 } from './features/composer/composeWindow';
 import { MessageWindow } from './features/reader/MessageWindow';
 import { PrintWindow } from './features/reader/PrintWindow';
@@ -22,6 +24,7 @@ import './styles/globals.css';
 const composition = readComposerParam(window.location.search);
 const resumeAccount = readResumeParam(window.location.search);
 const prefill = readPrefillParam(window.location.search);
+const shares = readShareParam(window.location.search);
 const messageWindow = readMessageWindowParams(window.location.search);
 
 createRoot(document.getElementById('root')!).render(
@@ -35,7 +38,12 @@ createRoot(document.getElementById('root')!).render(
     ) : composition === null ? (
       <App />
     ) : (
-      <ComposerWindow composition={composition} resumeAccount={resumeAccount} prefill={prefill} />
+      <ComposerWindow
+        composition={composition}
+        resumeAccount={resumeAccount}
+        prefill={prefill}
+        shares={shares}
+      />
     )}
   </StrictMode>,
 );

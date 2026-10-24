@@ -16,13 +16,40 @@
 //! A child of [`super`], under the same split the other command
 //! halves made for the line cap.
 
+use std::path::{Path, PathBuf};
+
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{Manager, State};
 
 use crate::AppState;
 
 /// The mailto scheme the default-mail registration claims.
 const MAILTO: &str = "mailto";
+
+/// The ask-once latch's file name, under the app data directory: its
+/// standing is the ask's own record, read by the asking surface before
+/// it asks and marked by either answer.
+const ASKED_FILE: &str = "default-mail-asked";
+
+/// The app data directory the latch lives in, as the shell resolves it.
+fn data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map_err(|err| format!("the app data directory could not be resolved: {err}"))
+}
+
+/// Whether the default-mail offer has ever been asked: the latch file's
+/// standing under `dir`.
+pub(crate) fn default_mail_asked_at(dir: &Path) -> bool {
+    dir.join(ASKED_FILE).is_file()
+}
+
+/// Marks the default-mail offer asked, creating `dir` when it does not
+/// stand; a second mark is idempotent.
+pub(crate) fn mark_default_mail_asked_at(dir: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    std::fs::write(dir.join(ASKED_FILE), b"")
+}
 
 /// The host leg's seam: the OS's default-handler registration, so the
 /// command's tests drive it without a registry.
@@ -109,8 +136,8 @@ pub(crate) fn register_default_mail_with(
 
 /// Registers the app as the OS's default mail handler: the settings
 /// surface's own ask on the offer's acceptance. The registration
-/// writes the OS's registry, so the `async` marker keeps the handler
-/// off the main thread.
+/// writes the OS's registry, so the `async` marker keeps the handler off
+/// the main thread.
 // Tauri's command macro hands `State` by value; the wrapper reads through it.
 #[allow(clippy::needless_pass_by_value)]
 #[tauri::command(async)]
@@ -119,6 +146,32 @@ pub(crate) fn register_default_mail(
     app: tauri::AppHandle,
 ) -> RegisterDefaultMailOutcome {
     register_default_mail_with(&state, &DeepLinkHost::new(&app))
+}
+
+/// Answers whether the default-mail offer has ever been asked, the
+/// latch's read.
+///
+/// # Errors
+///
+/// Returns the resolution's sentence when the app data directory cannot
+/// be resolved.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command(async)]
+pub(crate) fn default_mail_asked(app: tauri::AppHandle) -> Result<bool, String> {
+    Ok(default_mail_asked_at(&data_dir(&app)?))
+}
+
+/// Marks the default-mail offer asked, the once-latch's write: either
+/// answer to the ask spends it.
+///
+/// # Errors
+///
+/// Returns the resolution's or the write's sentence when either refuses.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command(async)]
+pub(crate) fn default_mail_mark_asked(app: tauri::AppHandle) -> Result<(), String> {
+    let dir = data_dir(&app)?;
+    mark_default_mail_asked_at(&dir).map_err(|err| err.to_string())
 }
 
 #[cfg(test)]

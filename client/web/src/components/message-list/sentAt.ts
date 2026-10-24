@@ -2,23 +2,11 @@
 // The list's sent-at stamp. The wire instant is UTC and truncated to the
 // whole second, so the label derives from the UTC parts alone: hours and
 // minutes within the current UTC day, day and month within the current UTC
-// year, the year added only when it differs.
+// year, the year added only when it differs. The month and weekday words
+// follow the language the settings block carries; the Today, Yesterday,
+// and Earlier copy is the list's own and stays with the copy catalogue.
 
-/** The month abbreviations the label uses, in UTC order. */
-const MONTHS = [
-  'Jan',
-  'Feb',
-  'Mar',
-  'Apr',
-  'May',
-  'Jun',
-  'Jul',
-  'Aug',
-  'Sep',
-  'Oct',
-  'Nov',
-  'Dec',
-] as const;
+import { shortMonthName, weekdayName } from '@/features/settings/language';
 
 /** Formats one row's sent_at stamp for the list; empty when unknown. The
  * day's clock label honours the 24-hour setting so the list and the reading
@@ -31,7 +19,7 @@ export function formatSentAt(sentAt: string, now: Date, twentyFour = true): stri
     return '';
   }
   const two = (value: number): string => String(value).padStart(2, '0');
-  const month = MONTHS[stamp.getUTCMonth()] ?? '';
+  const month = shortMonthName(stamp.getUTCMonth());
   if (stamp.getUTCFullYear() === now.getUTCFullYear()) {
     if (stamp.getUTCMonth() === now.getUTCMonth() && stamp.getUTCDate() === now.getUTCDate()) {
       const hour = stamp.getUTCHours();
@@ -46,17 +34,6 @@ export function formatSentAt(sentAt: string, now: Date, twentyFour = true): stri
   }
   return `${stamp.getUTCDate()} ${month} ${stamp.getUTCFullYear()}`;
 }
-
-/** The weekday names the group headers use, in UTC order. */
-const WEEKDAYS = [
-  'Sunday',
-  'Monday',
-  'Tuesday',
-  'Wednesday',
-  'Thursday',
-  'Friday',
-  'Saturday',
-] as const;
 
 const DAY_MS = 86_400_000;
 
@@ -83,9 +60,9 @@ export function sentDayLabel(sentAt: string, now: Date): string {
     return 'Yesterday';
   }
   if (start >= todayStart - 6 * DAY_MS) {
-    return WEEKDAYS[stamp.getUTCDay()] ?? 'Earlier';
+    return weekdayName(stamp.getUTCDay());
   }
-  const month = MONTHS[stamp.getUTCMonth()] ?? '';
+  const month = shortMonthName(stamp.getUTCMonth());
   if (stamp.getUTCFullYear() === now.getUTCFullYear()) {
     return `${stamp.getUTCDate()} ${month}`;
   }

@@ -300,3 +300,27 @@ describe('the window lifetime', () => {
     expect(screen.getByText('0 words · 0 characters')).toBeTruthy();
   });
 });
+
+// The share window: a URL carrying the pending share set opens a blank
+// composition seeded with the files, no request asked for or spent.
+describe('the share window hydration', () => {
+  it('opens a blank composition seeded with the URL share set', async () => {
+    render(
+      <ComposerWindow
+        composition="compose-47"
+        shares={[{ name: 'notes.txt', path: 'C:\\Users\\ada\\notes.txt' }]}
+      />,
+    );
+
+    await settle();
+
+    expect(ipc.takeComposeRequest).not.toHaveBeenCalled();
+    const state = useComposerStore.getState();
+    expect(state.open).toBe(true);
+    expect(state.composition).toBe('compose-47');
+    expect(state.request).toBeNull();
+    expect(state.pendingShares).toEqual([
+      { name: 'notes.txt', path: 'C:\\Users\\ada\\notes.txt' },
+    ]);
+  });
+});

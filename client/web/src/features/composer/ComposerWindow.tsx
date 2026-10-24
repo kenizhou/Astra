@@ -31,6 +31,7 @@ import { ComposerPane } from './Composer';
 import { ComposerTitleBar } from './ComposerTitleBar';
 import { defaultSendAccount } from './composeWindow';
 import { useComposerStore, type MailtoOpen } from './composerStore';
+import type { SharedFile } from './shareOpen';
 import { fromLabelFor } from './useComposeRequest';
 
 // One hydration per window, StrictMode safe: the double-mounted effect's
@@ -38,11 +39,13 @@ import { fromLabelFor } from './useComposeRequest';
 let hydratedFor: CompositionId | null = null;
 
 /** Opens the window's composition: the transfer's resumed draft, the
- *  URL's mailto prefill, the pending request's, or a blank one. */
+ *  URL's mailto prefill, the pending request's, the URL share set's, or a
+ *  blank one. */
 async function openComposerSession(
   composition: CompositionId,
   resumeAccount: string | null,
   prefill: MailtoOpen | null,
+  shares: SharedFile[] | null,
 ): Promise<void> {
   if (hydratedFor === composition) {
     return;
@@ -54,6 +57,9 @@ async function openComposerSession(
     const account = defaultSendAccount();
     if (account !== undefined) {
       useComposerStore.getState().newMessage(account, composition);
+      if (shares !== null) {
+        useComposerStore.getState().seedShares(shares);
+      }
     }
     return;
   }
@@ -94,6 +100,17 @@ async function openComposerSession(
         .newMessage({ id: prefill.from, label: fromLabelFor(prefill.from) }, composition, prefill);
       return;
     }
+    if (shares !== null) {
+      // A share window: a blank composition carrying the hand-off's files
+      // as the pending set, no request asked for or spent. The names seed
+      // the rows; the paths stay in the pending state alone.
+      const account = defaultSendAccount();
+      if (account !== undefined) {
+        useComposerStore.getState().newMessage(account, composition);
+        useComposerStore.getState().seedShares(shares);
+      }
+      return;
+    }
     const request = await takeComposeRequest();
     if (request !== null) {
       useComposeRequestStore.getState().dismiss();
@@ -118,19 +135,22 @@ interface ComposerWindowProps {
   resumeAccount?: string | null;
   /** The mailto prefill this window opens from, from the URL. */
   prefill?: MailtoOpen | null;
+  /** The pending share set this window opens with, from the URL. */
+  shares?: SharedFile[] | null;
 }
 
 export function ComposerWindow({
   composition,
   resumeAccount = null,
   prefill = null,
+  shares = null,
 }: ComposerWindowProps) {
   const open = useComposerStore((s) => s.open && s.composition !== null);
   const subject = useComposerStore((s) => s.subject);
 
   useEffect(() => {
-    void openComposerSession(composition, resumeAccount, prefill);
-  }, [composition, resumeAccount, prefill]);
+    void openComposerSession(composition, resumeAccount, prefill, shares);
+  }, [composition, resumeAccount, prefill, shares]);
 
   // The save hint's surface, the one live feed the window needs.
   useEffect(() => {

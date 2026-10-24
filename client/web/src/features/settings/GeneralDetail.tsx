@@ -10,10 +10,18 @@
 // appearance store and stay on this device. The notifications switch lives
 // here rather than in Reading: it governs how arriving mail announces
 // itself to the desktop, an app-level behaviour, not how a message renders.
+// The language picker and the default-mail re-assertion live here for the
+// same reason: app-level behaviours of the product itself, not data
+// choices.
+
+import { useState } from 'react';
 
 import { dispatch, intents } from '@/services/ipc';
+import { registerDefaultMail, type RegisterDefaultMailOutcome } from '@/services/platform';
+import { useAccountStore } from '@/stores/accountStore';
 import { SKINS, useAppearanceStore, type ContrastMode, type DensityMode, type FontSizeStep, type ReadingPosition, type TextureMode } from '@/services/appearance';
 
+import { DEFAULT_LANGUAGE, LANGUAGES } from './language';
 import { useSettingsStore } from './settingsStore';
 
 /** The theme choices, in the taxonomy's own order. */
@@ -171,10 +179,58 @@ function SkinSwatches() {
   );
 }
 
+/** The honesty sentence under the language picker: what follows the tag
+ *  today, no more. */
+export const LANGUAGE_SENTENCE = 'Dates and the first localised surfaces follow it today.';
+
+/** The default-mail button's label. */
+export const DEFAULT_MAIL_BUTTON = 'Make Astra Mail the default mail app';
+
+/** One registration outcome as the sentence the row shows. */
+function defaultMailSentence(outcome: RegisterDefaultMailOutcome): string {
+  if (outcome === 'registered') {
+    return 'Astra Mail is the default mail app.';
+  }
+  if (outcome === 'already_default') {
+    return 'Astra Mail already is the default mail app.';
+  }
+  return outcome.failed.reason;
+}
+
+/** The default-mail re-assertion row: changeable after the offer through
+ *  the same verb, its outcome surfaced beneath. */
+function DefaultMailRow() {
+  const [outcome, setOutcome] = useState<string | null>(null);
+  const reassert = (): void => {
+    void registerDefaultMail()
+      .then((result) => setOutcome(defaultMailSentence(result)))
+      .catch((err: unknown) =>
+        setOutcome(err instanceof Error ? err.message : 'The registration failed.'),
+      );
+  };
+  return (
+    <div className="flex flex-col gap-1">
+      <button
+        type="button"
+        onClick={reassert}
+        className="w-fit rounded-lg border border-border px-3 py-1.5 text-xs text-foreground transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        {DEFAULT_MAIL_BUTTON}
+      </button>
+      {outcome !== null && (
+        <p role="status" className="max-w-[420px] text-xs text-muted-foreground">
+          {outcome}
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** The General page of the settings screen. */
 export function GeneralDetail() {
   const settings = useSettingsStore((s) => s.settings);
   const error = useSettingsStore((s) => s.error);
+  const accounts = useAccountStore((s) => s.accounts);
   const contrast = useAppearanceStore((s) => s.contrast);
   const setContrast = useAppearanceStore((s) => s.setContrast);
   const fontSize = useAppearanceStore((s) => s.fontSize);
@@ -214,6 +270,16 @@ export function GeneralDetail() {
         />
         New mail notifications
       </label>
+      <div className="flex flex-col gap-1">
+        <Picker
+          label="Language"
+          value={settings.language ?? DEFAULT_LANGUAGE}
+          options={LANGUAGES}
+          onChange={(language) => void dispatch(intents.setLanguage(language))}
+        />
+        <p className="text-xs text-muted-foreground">{LANGUAGE_SENTENCE}</p>
+      </div>
+      {accounts.length > 0 && <DefaultMailRow />}
       {error === 'persist_failed' && (
         <p role="alert" className="text-xs text-[var(--warning)]">
           {PERSIST_SENTENCE}

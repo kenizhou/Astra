@@ -30,28 +30,15 @@ import { saveEml } from '@/services/attachments';
 import { dispatch, intents, type MessageRef } from '@/services/ipc';
 import { openMessageWindow, openPrintWindow } from '@/features/reader/readerWindows';
 import { Avatar } from '@/features/people/Avatar';
+import { shortMonthName } from '@/features/settings/language';
 import { useSettingsStore } from '@/features/settings/settingsStore';
 import { carriedAttachmentIds } from '@/stores/readingStore';
-
-/** The month abbreviations the stamp uses, in UTC order. */
-const MONTHS = [
-  'Jan',
-  'Feb',
-  'Mar',
-  'Apr',
-  'May',
-  'Jun',
-  'Jul',
-  'Aug',
-  'Sep',
-  'Oct',
-  'Nov',
-  'Dec',
-] as const;
 
 /**
  * Formats the open message's sent_at as `9 Oct 2026, 08:30`, or the 12-hour
  * form with its meridiem when the clock setting says so; empty when unknown.
+ * The month's short name follows the standing language, the shared word
+ * the list's own stamp spells.
  */
 export function formatReadingDate(sentAt: string, twentyFour = true): string {
   if (sentAt === '') {
@@ -62,7 +49,7 @@ export function formatReadingDate(sentAt: string, twentyFour = true): string {
     return '';
   }
   const two = (value: number): string => String(value).padStart(2, '0');
-  const month = MONTHS[stamp.getUTCMonth()] ?? '';
+  const month = shortMonthName(stamp.getUTCMonth());
   if (twentyFour) {
     return `${stamp.getUTCDate()} ${month} ${stamp.getUTCFullYear()}, ${two(stamp.getUTCHours())}:${two(stamp.getUTCMinutes())}`;
   }
