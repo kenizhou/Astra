@@ -14,8 +14,8 @@ use astra_ai::{AiDocumentKind, KnowledgeId};
 use astra_app::{
     Account, AttachmentContent, AttachmentReadError, AvatarView, BriefDocumentError, CardRef, Chip,
     CompositionId, ContactDraftInput, DigestView, DocumentError, DocumentView, DraftResume,
-    ExtractionSummary, Intent, KnowledgeView, MeetingBriefView, NewMailBatch, PassOutcome, Snippet,
-    SplitEntry, SummariseMessageError, TranslateLanguage,
+    EmlContent, EmlReadError, ExtractionSummary, Intent, KnowledgeView, MeetingBriefView,
+    NewMailBatch, PassOutcome, Snippet, SplitEntry, SummariseMessageError, TranslateLanguage,
 };
 use astra_viewmodel::{
     CalendarSnapshot, ComposeRequestSnapshot, DraftStatusSnapshot, MailboxListSnapshot, MailtoOpen,
@@ -81,6 +81,20 @@ pub(crate) trait AppPort: Send + Sync {
         key: &ProviderKey,
         id: u32,
     ) -> Result<Option<AttachmentContent>, AttachmentReadError>;
+
+    /// Reads one message's `.eml` export for the host's Save as .eml: the
+    /// engine's own source bytes (never a re-serialization) beside the file
+    /// name the dialog opens on, derived from the subject.
+    ///
+    /// # Errors
+    ///
+    /// Returns the core's own refusal: unresolved when the message cannot
+    /// be resolved, the fetch sentence when the engine's read refuses.
+    async fn eml_content(
+        &self,
+        account: &AccountId,
+        key: &ProviderKey,
+    ) -> Result<EmlContent, EmlReadError>;
 
     /// The published draft-status snapshot, for the host's pull: the composition
     /// whose save moved and how it ended, or `None` when no composition has a
