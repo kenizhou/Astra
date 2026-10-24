@@ -264,7 +264,7 @@ impl<P: Provider> App<P> {
     /// A message the server never threaded projects under its own provider key as the
     /// thread id (the list's grouping convention), so the store holds no thread for it
     /// and the index read finds nothing; that lone message is resolved by key instead.
-    async fn row_member_keys(&self, row: &RowRef) -> Vec<ProviderKey> {
+    pub(crate) async fn row_member_keys(&self, row: &RowRef) -> Vec<ProviderKey> {
         match row {
             RowRef::Message(message) => vec![message.key.clone()],
             RowRef::Thread(thread) => self.thread_member_keys(thread).await,
@@ -351,6 +351,14 @@ fn name_matches_role(name: &str, role: &MailboxRole) -> bool {
             "corbeille",
             "cestino",
             "papelera",
+        ],
+        MailboxRole::Junk => &[
+            "junk",
+            "junk mail",
+            "junk e-mail",
+            "spam",
+            "bulk mail",
+            "ongewenste e-mail",
         ],
         _ => return false,
     };

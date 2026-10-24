@@ -113,6 +113,19 @@ impl<P: Provider> App<P> {
                     log::warn!("move-to-folder: {err}");
                 }
             }
+            // The report writes: the engine's report files the message as part
+            // of the act, so the same discard-and-resync discipline the moves
+            // ride covers the filing too.
+            Intent::MarkJunk { row } => {
+                if let Err(err) = self.mark_junk(row).await {
+                    log::warn!("junk: {err}");
+                }
+            }
+            Intent::MarkNotJunk { row } => {
+                if let Err(err) = self.mark_not_junk(row).await {
+                    log::warn!("not-junk: {err}");
+                }
+            }
             // The reading pane: one open, one close, both publishing the surface.
             Intent::OpenMessage { message } => {
                 self.open_message(message).await;

@@ -41,6 +41,7 @@ mod protocol;
 mod query;
 mod reading;
 mod reference;
+mod report_writes;
 mod row_cache;
 mod sanitise;
 mod search;
@@ -177,6 +178,7 @@ pub use reference::{
     AddressBookRef, CalendarRef, CardRef, EventRef, FolderRef, MessageRef, QueuedRef, RowRef,
     ThreadRef,
 };
+pub use report_writes::ReportWriteError;
 pub use settings::{AccountInfo, DavLegs, HostAccountOps};
 pub use signatures::{seed_signature, swap_seeded, AccountSignatures};
 pub use surfaced::Surfaced;
