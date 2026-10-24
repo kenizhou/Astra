@@ -36,6 +36,8 @@ fn stub_state(name: &str, mode: &str) -> (crate::AppState, Arc<CollectingSink>) 
         oauth: crate::oauth::wiring::offline_surface(),
         refusals: Arc::new(crate::oauth::grant_refusals::GrantRefusals::new()),
         pending_mailto: std::sync::Mutex::new(None),
+        pending_share: std::sync::Mutex::new(None),
+        log_path: crate::logging::file_path(&scratch(name)),
         runtime: crate::runtime::build_runtime().expect("the test runtime builds"),
     };
     (app_state, sink)

@@ -40,8 +40,10 @@ impl<P: Provider> App<P> {
     /// A refusal keeps the standing zone. The zone and its picked marker
     /// move as one write, so a pick never lands without its marker and an
     /// acceptance never clears one: the acceptance is refused outright
-    /// while a pick stands, so the `false` it writes is the no-op it
-    /// reads. Returns whether the write happened.
+    /// while a pick stands, and the refusal is re-checked inside the
+    /// write itself, because the acceptance's own pre-check spans two
+    /// lock acquisitions and a pick landing between them must still win.
+    /// Returns whether the write happened.
     pub(crate) async fn set_zone(&self, zone: String, picked: bool) -> bool {
         let resolvable =
             engine_api::TimeZoneId::iana(&zone).is_ok_and(|id| engine_api::is_supported_zone(&id));
@@ -49,11 +51,30 @@ impl<P: Provider> App<P> {
             self.answer(Some(SettingsError::ZoneUnresolvable)).await;
             return false;
         }
-        self.set_setting(|prefs| {
-            prefs.zone = zone;
-            prefs.zone_picked = picked;
-        })
-        .await;
+        // The check and the act in one acquisition: an unpicked write
+        // (the offer's acceptance) re-reads the picked marker under the
+        // lock it writes through, so a pick that raced the acceptance's
+        // pre-check still stands after it.
+        let (refused, save_failed) = {
+            let mut pane = self.pane.lock().expect("preferences mutex poisoned");
+            if !picked && pane.prefs.zone_picked {
+                (true, false)
+            } else {
+                (
+                    false,
+                    pane.set_setting(|prefs| {
+                        prefs.zone = zone;
+                        prefs.zone_picked = picked;
+                    }),
+                )
+            }
+        };
+        if refused {
+            self.answer(Some(SettingsError::ZonePicked)).await;
+            return false;
+        }
+        self.answer(save_failed.then_some(SettingsError::PersistFailed))
+            .await;
         // The calendar resolves through the zone, so it republishes beside
         // the settings block: the same change is a change to both surfaces.
         // The re-expansion comes first, because a floating event's stored

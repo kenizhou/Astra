@@ -4,10 +4,13 @@
 //! [`run`] assembles the Tauri shell: the single-instance guard first, then the
 //! deep-link (mailto), opener, dialog, and notification plugins, over the frameless
 //! main window `tauri.conf.json` declares, with the IPC command surface registered
-//! and the boot hook that builds the managed state behind it. The app's async
-//! runtime lives in [`runtime`], the observer port and its rate limiter in
-//! `observer`, the credential store port in `credential_store`, the background
-//! LLM client in `ai`, and the exit hook that stops sync in `exit`.
+//! and the boot hook that builds the managed state behind it. The boot hook also
+//! installs the rotating file log (`logging`), restores the main window's
+//! remembered geometry (`window_state`), and holds the launch's share hand-off
+//! (`share`) beside the mailto link. The app's async runtime lives in [`runtime`],
+//! the observer port and its rate limiter in `observer`, the credential store port
+//! in `credential_store`, the background LLM client in `ai`, and the exit hook that
+//! stops sync in `exit`.
 
 pub mod runtime;
 
@@ -24,12 +27,16 @@ mod detection;
 mod dial_table;
 mod exit;
 mod headless;
+mod logging;
 mod mailto;
 mod mcp;
 mod notify;
 mod oauth;
 mod observer;
+mod platform;
 mod plugin;
+mod share;
+mod window_state;
 
 // The command-surface test fixtures: one compiled copy of the fake app, the
 // credential store, and the state builder, at the crate root so every command
@@ -82,8 +89,10 @@ pub fn run() {
             // A deep link that reached the already-running app arrives as
             // this argv on Windows; the hand-off makes the deep-link
             // plugin emit it, which is the only road an OAuth redirect
-            // takes back into a running instance.
+            // takes back into a running instance. Files in the same argv
+            // cross on the share channel, the mailto sibling road.
             oauth::wiring::forward_launch_arguments(app, &argv);
+            share::forward_files(app, &argv);
             let _ = app.emit("single-instance-args", argv);
         }))
         .plugin(tauri_plugin_deep_link::init())
@@ -93,7 +102,16 @@ pub fn run() {
         .register_uri_scheme_protocol("astra-plugin", |context, request| {
             plugin::scheme::handler(context.app_handle(), request)
         })
-        .on_page_load(mailto::on_page_load)
+        .on_page_load(|webview, payload| {
+            mailto::on_page_load(webview, payload);
+            share::on_page_load(webview, payload);
+            window_state::on_page_load(webview, payload);
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                window_state::save_close(window);
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             commands::dispatch,
             commands::mailbox_list,
@@ -130,6 +148,9 @@ pub fn run() {
             commands::people::people_avatar,
             commands::people::people_photo,
             commands::settings::settings,
+            commands::diagnostics::log_tail,
+            commands::diagnostics::log_export,
+            commands::platform::register_default_mail,
             commands::mcp::mcp_status,
             commands::mcp::mcp_set_enabled,
             commands::mcp::mcp_set_allowed,

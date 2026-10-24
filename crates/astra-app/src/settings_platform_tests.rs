@@ -262,6 +262,45 @@ async fn a_picked_zone_stands_and_the_offer_is_not_even_made() {
 }
 
 #[tokio::test]
+async fn an_unpicked_zone_write_refuses_to_move_a_picked_zone() {
+    let dir = scratch("write-recheck");
+    let path = dir.join("preferences.toml");
+    let app = app(Some(path.clone()));
+
+    // The pick stands first: the marker the offer defers to.
+    lands(
+        &app,
+        SettingsIntent::SetZone {
+            zone: "Europe/Amsterdam".to_owned(),
+        },
+    )
+    .await;
+    assert!(load_preferences(&path).zone_picked);
+
+    // The acceptance's write half, driven directly: its own pre-check
+    // spans two lock acquisitions, so the guarantee lives in the write.
+    // A pick that raced between the two locks still wins here, because
+    // the write itself re-checks the marker under the one acquisition it
+    // moves the zone in.
+    let landed = app.set_zone("Europe/Berlin".to_owned(), false).await;
+
+    assert!(!landed, "the write refuses against a picked zone");
+    let snapshot = app.settings();
+    assert_eq!(
+        snapshot.error,
+        Some(SettingsError::ZonePicked),
+        "the write-side refusal is typed, like the pre-check's"
+    );
+    assert_eq!(snapshot.settings.zone, "Europe/Amsterdam");
+    let persisted = load_preferences(&path);
+    assert_eq!(persisted.zone, "Europe/Amsterdam");
+    assert!(
+        persisted.zone_picked,
+        "the marker the pick set still stands"
+    );
+}
+
+#[tokio::test]
 async fn accepting_the_offer_writes_through_the_zone_picker_s_path() {
     let dir = scratch("accept-offer");
     let path = dir.join("preferences.toml");

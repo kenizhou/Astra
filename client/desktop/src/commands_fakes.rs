@@ -165,6 +165,10 @@ pub(crate) struct FakeApp {
     pub(crate) avatar_into: Mutex<Vec<String>>,
     /// The settings snapshot the pull answers with.
     pub(crate) settings: Mutex<SettingsSnapshot>,
+    /// The product events the recorder was asked to record, in order:
+    /// the consent gate is the real core's, so the fake answers the
+    /// asks, not the gate.
+    pub(crate) analytics: Mutex<Vec<astra_app::AnalyticsEvent>>,
     /// The batches the delivery drain answers with, in order; an empty
     /// queue answers the empty batch.
     pub(crate) batches: Mutex<VecDeque<NewMailBatch>>,
@@ -227,6 +231,7 @@ impl FakeApp {
             avatar: Mutex::new(AvatarView::default()),
             avatar_into: Mutex::new(Vec::new()),
             settings: Mutex::new(SettingsSnapshot::default()),
+            analytics: Mutex::new(Vec::new()),
             batches: Mutex::new(VecDeque::new()),
             drained: Mutex::new(Vec::new()),
             outcomes: Mutex::new(Vec::new()),
@@ -452,6 +457,8 @@ pub(crate) fn state(name: &str, app: Arc<FakeApp>, store: Arc<FakeStore>) -> App
         oauth: crate::oauth::wiring::offline_surface(),
         refusals: Arc::new(crate::oauth::grant_refusals::GrantRefusals::new()),
         pending_mailto: Mutex::new(None),
+        pending_share: Mutex::new(None),
+        log_path: crate::logging::file_path(&scratch(name)),
         runtime: crate::runtime::build_runtime().expect("the test runtime builds"),
     }
 }
