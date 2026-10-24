@@ -44,6 +44,10 @@ mod commands_fakes;
 #[cfg(test)]
 mod log_capture;
 
+// The capability manifests' shape test: the message window family's entry.
+#[cfg(test)]
+mod capabilities_tests;
+
 use tauri::{Emitter, Manager};
 
 pub(crate) use account_ops::HostAccountStore;
@@ -96,6 +100,7 @@ pub fn run() {
             commands::sync_progress,
             commands::reading,
             commands::attachments::save_attachment,
+            commands::eml::eml_save,
             commands::drafts::draft_status,
             commands::drafts::draft_resume,
             commands::sending::sending,

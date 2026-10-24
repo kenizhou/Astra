@@ -2,15 +2,21 @@
 // The reading header: the subject at the reading type scale (19px, weight
 // 640, tightened tracking; the A3 voice), then the sender block with the
 // avatar beside a semibold name over the bare address, and the full UTC
-// stamp right-aligned on that row. The pane's close button rides the
-// header's top-right corner. The avatar resolves through the people
-// command on the sender's address, the one resolution every surface
+// stamp right-aligned on that row. The pane's controls ride the header's
+// top-right corner: the reading zoom's three-step menu, the position
+// picker, and the overflow (the own window, print, and the .eml save, each
+// surfacing its outcome the way the attachment save does, beside the
+// placeholders for what has not shipped). The avatar resolves through the
+// people command on the sender's address, the one resolution every surface
 // shares. The stamp derives from the UTC parts the same way the list's
 // does, with the year always shown and the time of day appended in the
 // form the clock setting names.
 
+import { useState } from 'react';
+
 import {
   ForwardIcon,
+  JunkIcon,
   MoreIcon,
   PanelLeftIcon,
   ReplyAllIcon,
@@ -19,8 +25,10 @@ import {
 import { ContextMenu, placeholderItem, type ContextMenuItem } from '@/components/ui/ContextMenu';
 import { useContextMenu } from '@/components/ui/useContextMenu';
 import { useWindowStage } from '@/hooks/useWindowSize';
-import { useAppearanceStore, type ReadingPosition } from '@/services/appearance';
+import { useAppearanceStore, type ReadingPosition, type ReadingZoomStep } from '@/services/appearance';
+import { saveEml } from '@/services/attachments';
 import { dispatch, intents, type MessageRef } from '@/services/ipc';
+import { openMessageWindow, openPrintWindow } from '@/features/reader/readerWindows';
 import { Avatar } from '@/features/people/Avatar';
 import { useSettingsStore } from '@/features/settings/settingsStore';
 import { carriedAttachmentIds } from '@/stores/readingStore';
@@ -77,16 +85,45 @@ interface ReadingHeaderProps {
   message?: MessageRef;
   /** When set and a sender stands, the header offers an add-contact chip. */
   onAddContact?: () => void;
+  /** The folder the message was opened from, carried onto the own window. */
+  openedFromFolder?: { account: string; key: string } | null;
+  /** When set, the verb row offers Not spam: the message sits in the
+   *  account's junk folder and the account can report. */
+  notJunk?: boolean;
 }
 
-/** The overflow's items: everything the host cannot serve yet, named. */
-function overflowItems(): ContextMenuItem[] {
+/** The overflow's items: the three working verbs beside the named
+ *  placeholders, the save surfacing its outcome like the attachment save's. */
+function overflowItems(
+  message: MessageRef,
+  subject: string,
+  openedFromFolder: { account: string; key: string } | null | undefined,
+  onOutcome: (note: string) => void,
+): ContextMenuItem[] {
+  const saveEmlOne = (): void => {
+    void saveEml(message).then((outcome) => {
+      if (outcome === 'cancelled') {
+        return;
+      }
+      onOutcome('saved' in outcome ? `Saved to ${outcome.saved.path}` : outcome.failed.reason);
+    });
+  };
   return [
     placeholderItem('Recipients', 'Recipient details arrive with a future slice'),
     { separator: true },
-    placeholderItem('Print', 'Printing arrives with a future slice'),
+    {
+      label: 'Open in New Window',
+      onSelect: () =>
+        void openMessageWindow(
+          message,
+          subject === '' ? '(no subject)' : subject,
+          openedFromFolder?.key ?? null,
+        ),
+    },
+    { label: 'Print', onSelect: () => void openPrintWindow(message) },
+    { label: 'Save as .eml', onSelect: saveEmlOne },
+    { separator: true },
     placeholderItem('View source', 'Viewing the message source arrives with a future slice'),
-    placeholderItem('Save as .eml', 'Saving the message as .eml arrives with a future slice'),
   ];
 }
 
@@ -137,8 +174,47 @@ function PositionMenu() {
   );
 }
 
-/** The kylins-style verb row: one icon button per compose verb. */
-function VerbRow({ message }: { message: MessageRef }) {
+const ZOOM_STEPS: ReadonlyArray<{ id: ReadingZoomStep; label: string }> = [
+  { id: 'small', label: 'Smaller' },
+  { id: 'default', label: 'Default' },
+  { id: 'large', label: 'Larger' },
+];
+
+/** The reading zoom's three-step menu, persisted in the local appearance
+ *  store beside the font steps. */
+function ZoomMenu() {
+  const zoom = useAppearanceStore((s) => s.readingZoom);
+  const setZoom = useAppearanceStore((s) => s.setReadingZoom);
+  const menu = useContextMenu();
+
+  const items: ContextMenuItem[] = ZOOM_STEPS.map(({ id, label }) => ({
+    label,
+    checked: zoom === id,
+    onSelect: () => setZoom(id),
+  }));
+
+  return (
+    <>
+      <button
+        type="button"
+        aria-label="Reading zoom"
+        title="Reading zoom"
+        onClick={(event) => menu.open(event)}
+        className="inline-flex h-7 min-w-7 items-center justify-center rounded-md px-1.5 text-xs font-medium text-muted-text transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        Aa
+      </button>
+      {menu.state !== null && (
+        <ContextMenu x={menu.state.x} y={menu.state.y} items={items} onClose={menu.close} />
+      )}
+    </>
+  );
+}
+
+/** The kylins-style verb row: one icon button per compose verb, and Not spam
+ *  for a message the junk-folder context and the account's report
+ *  capability both stand behind. */
+function VerbRow({ message, notJunk }: { message: MessageRef; notJunk?: boolean }) {
   const verbs = [
     { label: 'Reply', icon: ReplyIcon, intent: () => intents.replyTo(message) },
     { label: 'Reply all', icon: ReplyAllIcon, intent: () => intents.replyAllTo(message) },
@@ -147,6 +223,9 @@ function VerbRow({ message }: { message: MessageRef }) {
       icon: ForwardIcon,
       intent: () => intents.forward(message, carriedAttachmentIds()),
     },
+    ...(notJunk
+      ? [{ label: 'Not spam', icon: JunkIcon, intent: () => intents.markNotJunk({ message }) }]
+      : []),
   ] as const;
   return (
     <div className="mt-3 flex items-center gap-1">
@@ -173,18 +252,22 @@ export function ReadingHeader({
   sentAt,
   message,
   onAddContact,
+  openedFromFolder,
+  notJunk,
 }: ReadingHeaderProps) {
   const twentyFour = useSettingsStore((s) => s.settings.twenty_four_clock);
   const hasSender = fromName !== '' || fromAddress !== '';
   const displayName = fromName === '' ? fromAddress : fromName;
   const date = formatReadingDate(sentAt, twentyFour);
   const overflow = useContextMenu();
+  const [note, setNote] = useState<string | null>(null);
   return (
     <div className="relative shrink-0 border-b border-[var(--hairline)] px-7 pb-3.5 pt-5">
-      <h2 className="truncate pr-8 text-[19px] font-[640] leading-[1.3] tracking-[-0.015em] text-foreground">
+      <h2 className="truncate pr-24 text-[19px] font-[640] leading-[1.3] tracking-[-0.015em] text-foreground">
         {subject === '' ? '(no subject)' : subject}
       </h2>
       <div className="absolute right-4 top-4 flex items-center gap-1">
+        <ZoomMenu />
         <PositionMenu />
         {message !== undefined && (
           <button
@@ -198,13 +281,18 @@ export function ReadingHeader({
           </button>
         )}
       </div>
-      {overflow.state !== null && (
+      {overflow.state !== null && message !== undefined && (
         <ContextMenu
           x={overflow.state.x}
           y={overflow.state.y}
-          items={overflowItems()}
+          items={overflowItems(message, subject, openedFromFolder, setNote)}
           onClose={overflow.close}
         />
+      )}
+      {note !== null && (
+        <p role="status" className="mt-2 truncate text-xs text-muted-foreground">
+          {note}
+        </p>
       )}
       {hasSender ? (
         <div className="mt-2.5 flex items-center gap-3">
@@ -233,7 +321,7 @@ export function ReadingHeader({
       ) : (
         date !== '' && <p className="mt-1 text-xs tabular-nums text-muted-text">{date}</p>
       )}
-      {message !== undefined && <VerbRow message={message} />}
+      {message !== undefined && <VerbRow message={message} notJunk={notJunk} />}
     </div>
   );
 }

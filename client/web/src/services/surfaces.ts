@@ -45,11 +45,18 @@ export interface AccountFolderRow {
   /** Whether this account's folder tree is open in the sidebar. */
   expanded: boolean;
   /**
-   * Whether the account's provider can change its folder tree: what decides
+   * Whether this account's provider can change its folder tree: what decides
    * whether the pane offers the folder edit verbs. Absent reads as false, so
    * an incapable account never shows the verbs.
    */
   can_edit_folders?: boolean;
+  /**
+   * Whether this account's provider can report its mail (the junk and
+   * not-junk verdicts): what decides whether the row menu offers Mark as
+   * spam and the verb row offers Not spam. Absent reads as false, the same
+   * rule `can_edit_folders` holds.
+   */
+  can_report_mail?: boolean;
   /** The account's sorted folder rows, ready for the sidebar. */
   folders: FolderRow[];
 }

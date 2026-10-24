@@ -8,8 +8,8 @@ use astra_ai::{AiDocumentKind, KnowledgeId};
 use astra_app::{
     App, AttachmentContent, AttachmentReadError, AvatarView, BriefDocumentError, CardRef, Chip,
     CompositionId, ContactDraftInput, DigestView, DocumentError, DocumentView, DraftResume,
-    ExtractionSummary, Intent, KnowledgeView, MeetingBriefView, NewMailBatch, PassOutcome, Snippet,
-    SplitEntry, SummariseMessageError, TranslateLanguage,
+    EmlContent, EmlReadError, ExtractionSummary, Intent, KnowledgeView, MeetingBriefView,
+    NewMailBatch, PassOutcome, Snippet, SplitEntry, SummariseMessageError, TranslateLanguage,
 };
 use astra_viewmodel::{
     CalendarSnapshot, ComposeRequestSnapshot, DraftStatusSnapshot, MailboxListSnapshot, MailtoOpen,
@@ -45,6 +45,14 @@ impl AppPort for App<HostProvider> {
         id: u32,
     ) -> Result<Option<AttachmentContent>, AttachmentReadError> {
         App::attachment_content(self, account, key, id).await
+    }
+
+    async fn eml_content(
+        &self,
+        account: &AccountId,
+        key: &ProviderKey,
+    ) -> Result<EmlContent, EmlReadError> {
+        App::eml_content(self, account, key).await
     }
 
     fn draft_status(&self) -> Option<DraftStatusSnapshot> {

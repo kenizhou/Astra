@@ -24,11 +24,13 @@ row that renders nothing invites a support answer nobody can give.
 |---|---|---|
 | 1 | **General** | Appearance (Follow host, Light, Dark) · Clock (24-hour on, 12-hour off) · New mail notifications (on by default) |
 | 2 | **Calendar** | Display zone · First day of the week · Horizon · Default calendar |
-| 3 | **Reading** | Conversation grouping (flat or threaded) |
+| 3 | **Reading** | Conversation grouping (flat or threaded) · Swipe actions (one pick per direction, held device-local) |
 | 4 | **Composing** | Quote style (the quoted original below or above the reply) · Default send account (the app-level account the new-message button and the mailto entry open from) · Signatures (rich text, per-account new mail and reply slots, per signatures.md) |
-| 5 | **Accounts** | Every configured account, each opening its own page: the dav editor, the crypto method, and the account's own sync settings |
-| 6 | **Advanced** | AI assistant access (the MCP server): the on/off toggle, the per-account allowlist, the client-config snippet |
-| 7 | **About** | The version and the attributions, from the core, not the web's guess |
+| 5 | **Shortcuts** | The static inventory of the shortcuts the shell wires, read-only |
+| 6 | **Accounts** | Every configured account, each opening its own page: the dav editor, the crypto method, and the account's own sync settings |
+| 7 | **Plugins** | Every discovered plugin with its lifecycle, granted permissions, and the enable/disable verb; activated plugins' declared settings sections below |
+| 8 | **Advanced** | AI assistant access (the MCP server): the on/off toggle, the per-account allowlist, the client-config snippet |
+| 9 | **About** | The version and the attributions, from the core, not the web's guess |
 
 **Every control that dispatches an intent reflects the persisted truth,
 never local optimism.** A change dispatches its intent and the control
@@ -346,7 +348,7 @@ seeded artefact is withdrawn at the end.
   mail-calendar gives it stays absent), Privacy, and Diagnostics are
   absent, and so are the entries inside shipped categories that
   mail-calendar carries: the app language and the default mail app
-  (General), swipe actions (Reading), and the reset local database
+  (General) and the reset local database
   (Advanced, whose MCP panel does ship). Each arrives with the slice
   that implements it, in the slot the taxonomy gives it.
 - **The client-config snippet names a relay the bundle does not yet

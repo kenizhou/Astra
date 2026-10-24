@@ -41,6 +41,7 @@ mod protocol;
 mod query;
 mod reading;
 mod reference;
+mod report_writes;
 mod row_cache;
 mod sanitise;
 mod search;
@@ -144,7 +145,7 @@ pub use ai_rules::{
     Category, MailContext, MatchResult, RulesError, CATEGORISE_PROMPT_VERSION, COLD_JUDGE_VERSION,
     MATCH_CONTEXT_BODY_CAP, RULES_MATCH_VERSION, RULES_PROMPT_VERSION,
 };
-pub use attachments::{AttachmentContent, AttachmentReadError};
+pub use attachments::{AttachmentContent, AttachmentReadError, EmlContent, EmlReadError};
 pub use boot::{boot, BootError, SpawnedTask};
 pub use calendar::{
     generate_meeting_brief, meeting_brief_prompt, BriefDocumentError, BriefMeeting,
@@ -177,6 +178,7 @@ pub use reference::{
     AddressBookRef, CalendarRef, CardRef, EventRef, FolderRef, MessageRef, QueuedRef, RowRef,
     ThreadRef,
 };
+pub use report_writes::ReportWriteError;
 pub use settings::{AccountInfo, DavLegs, HostAccountOps};
 pub use signatures::{seed_signature, swap_seeded, AccountSignatures};
 pub use surfaced::Surfaced;

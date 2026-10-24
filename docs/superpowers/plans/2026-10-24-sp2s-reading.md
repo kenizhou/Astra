@@ -17,7 +17,7 @@ not-spam return path); the protocol shapes; fakes' report legs.
 
 **Files:** client/desktop/src (the eml_save command over the engine
 source read and the SP2p save seam; the print command or the
-print-window approach you judge honest — document the choice);
+print-window approach you judge honest, documenting the choice);
 the message window's capability entry beside the composer's.
 
 - [ ] Tests first; commit `feat: land the reading host legs`.

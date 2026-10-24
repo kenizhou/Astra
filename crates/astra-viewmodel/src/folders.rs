@@ -119,6 +119,14 @@ pub struct AccountFolderRow {
     /// from before the field carries nothing rather than a lying `true`.
     #[serde(default, skip_serializing_if = "is_false")]
     pub can_edit_folders: bool,
+    /// Whether the account's provider can report its mail (the junk and
+    /// not-junk verdicts this slice surfaces): what decides whether the row
+    /// menu offers Mark as spam and the verb row offers Not spam at all.
+    /// Absent reads as `false`, the same honesty rule `can_edit_folders`
+    /// holds, so a snapshot from before the field carries nothing rather
+    /// than a lying `true`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub can_report_mail: bool,
     /// The account's sorted folder rows, ready for the sidebar.
     pub folders: Vec<FolderRow>,
 }

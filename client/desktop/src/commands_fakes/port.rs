@@ -9,8 +9,8 @@ use astra_ai::{AiDocumentKind, KnowledgeId};
 use astra_app::{
     AppError, AttachmentContent, AttachmentReadError, AvatarView, BriefDocumentError, CardRef,
     Chip, CompositionId, ContactDraftInput, DigestView, DocumentError, DocumentView, DraftResume,
-    ExtractionSummary, Intent, KnowledgeView, MeetingBriefView, NewMailBatch, PassOutcome, Snippet,
-    SplitEntry, SummariseMessageError, TranslateLanguage,
+    EmlContent, EmlReadError, ExtractionSummary, Intent, KnowledgeView, MeetingBriefView,
+    NewMailBatch, PassOutcome, Snippet, SplitEntry, SummariseMessageError, TranslateLanguage,
 };
 use astra_viewmodel::{
     CalendarSnapshot, ComposeKind, ComposeRequestSnapshot, DraftStatusSnapshot,
@@ -188,6 +188,18 @@ impl AppPort for FakeApp {
             id,
         ));
         self.attachment.lock().unwrap().clone()
+    }
+
+    async fn eml_content(
+        &self,
+        account: &AccountId,
+        key: &ProviderKey,
+    ) -> Result<EmlContent, EmlReadError> {
+        self.eml_into
+            .lock()
+            .unwrap()
+            .push((account.as_str().to_owned(), key.as_str().to_owned()));
+        self.eml.lock().unwrap().clone()
     }
 
     fn draft_status(&self) -> Option<DraftStatusSnapshot> {

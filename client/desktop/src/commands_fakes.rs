@@ -31,7 +31,8 @@ use std::{
 
 use astra_app::{
     AttachmentContent, AttachmentReadError, AvatarView, Chip, ComposeIntent, ContactDraftInput,
-    DraftResume, DraftsIntent, Intent, NewMailBatch, OutboxIntent, PassOutcome,
+    DraftResume, DraftsIntent, EmlContent, EmlReadError, Intent, NewMailBatch, OutboxIntent,
+    PassOutcome,
 };
 use astra_viewmodel::{
     CalendarSnapshot, ComposeKind, ComposeRequestSnapshot, DraftSaveState, DraftStatusSnapshot,
@@ -90,6 +91,11 @@ pub(crate) struct FakeApp {
     /// a test can assert the command hands the webview's ids through to the
     /// core.
     pub(crate) attachment_into: Mutex<Vec<(String, String, u32)>>,
+    /// The `.eml` read's answer; `Err` stands in for the typed refusal.
+    pub(crate) eml: Mutex<Result<EmlContent, EmlReadError>>,
+    /// The (account, key) pairs the `.eml` read was asked for, so a test
+    /// can assert the command hands the webview's ids through to the core.
+    pub(crate) eml_into: Mutex<Vec<(String, String)>>,
     /// The draft-status snapshot the pull answers with: what the fake's drafts
     /// dispatches last published.
     pub(crate) draft_status: Mutex<Option<DraftStatusSnapshot>>,
@@ -192,6 +198,8 @@ impl FakeApp {
             reading: Mutex::new(None),
             attachment: Mutex::new(Ok(None)),
             attachment_into: Mutex::new(Vec::new()),
+            eml: Mutex::new(Err(EmlReadError::Unresolved)),
+            eml_into: Mutex::new(Vec::new()),
             draft_status: Mutex::new(None),
             compose_request: Mutex::new(None),
             mailto_open: Mutex::new(None),

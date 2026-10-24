@@ -184,6 +184,24 @@ pub enum Intent {
         /// The destination folder, bound to its owning account.
         folder: FolderRef,
     },
+    /// Report one row as spam: the engine's outbox-mediated report with the
+    /// Junk verdict, which files the message into the account's Junk folder as
+    /// part of the report itself, so the app queues no second move beside it.
+    /// A message, or a whole conversation in the threaded list (one report per
+    /// member). Refused before anything is queued when the account's provider
+    /// cannot report mail.
+    MarkJunk {
+        /// The row to report, bound to its owning account.
+        row: RowRef,
+    },
+    /// Report one row as legitimate mail the account filed as junk: the same
+    /// engine report with the NotJunk verdict, which files the message back
+    /// into the account's Inbox as part of the report itself. The verb a
+    /// message sitting in Junk is offered.
+    MarkNotJunk {
+        /// The row to report, bound to its owning account.
+        row: RowRef,
+    },
     /// Read one message in the reading pane: fetch its body, sanitise the HTML,
     /// resolve the inline images, and publish the reading snapshot. Opening also
     /// marks the message read through the same write path [`Intent::MarkRead`]

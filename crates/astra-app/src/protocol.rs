@@ -129,6 +129,11 @@ mod search_tests;
 #[path = "protocol_folder_tests.rs"]
 mod folder_tests;
 
+// The report family's intents, split for the same reason.
+#[cfg(test)]
+#[path = "protocol_report_tests.rs"]
+mod report_tests;
+
 // The calendar family's intents and surface word, split for the same reason.
 #[cfg(test)]
 #[path = "protocol_calendar_tests.rs"]

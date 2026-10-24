@@ -40,6 +40,8 @@ vi.mock('@/features/composer/Composer', () => ({
 import { ReadingPane } from './ReadingPane';
 import { useAiChipsStore } from '@/stores/aiChipsStore';
 import { useComposerStore } from '@/features/composer/composerStore';
+import { useFolderStore } from '@/stores/folderStore';
+import { useAppearanceStore } from '@/services/appearance';
 import { usePeopleStore } from '@/features/people/peopleStore';
 import { useReadingStore } from '@/stores/readingStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -87,6 +89,8 @@ beforeEach(() => {
   useComposerStore.setState({ open: false, composition: null });
   usePeopleStore.setState({ pendingContactCreate: null });
   useUiStore.setState({ shellView: 'mail' });
+  useFolderStore.setState({ accounts: [], selected: null, outboxAccount: null, unified: false });
+  useAppearanceStore.setState({ readingZoom: 'default' });
 });
 
 afterEach(cleanup);
@@ -109,7 +113,7 @@ describe('the reading pane', () => {
     expect(screen.getByText('ada@example.test')).toBeTruthy();
     // The default clock setting is the core's own default: 12-hour.
     expect(screen.getByText('9 Oct 2026, 8:30 AM')).toBeTruthy();
-    expect(frameDoc()).toBe(sanitisedHtml);
+    expect(frameDoc()).toContain(sanitisedHtml);
     expect(frameDoc()).not.toContain(' src="http');
     expect(screen.getByText('2 remote images blocked.')).toBeTruthy();
     expect(screen.getByText('report.pdf')).toBeTruthy();
@@ -159,6 +163,77 @@ describe('the reading pane', () => {
     expect(screen.getByText('The launch is ready.')).toBeTruthy();
     expect(screen.queryByTitle('Message body')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Show remote images' })).toBeNull();
+  });
+
+  it('scales the plain body with the same steps the html body zooms by', () => {
+    useReadingStore
+      .getState()
+      .applySnapshot(snapshot({ html: undefined, remote_image_count: 0 }));
+    useAppearanceStore.setState({ readingZoom: 'large' });
+    render(<ReadingPane />);
+
+    const plain = screen.getByText('The launch is ready.').closest('pre');
+    expect(plain?.style.fontSize).toBe('20px');
+
+    act(() => {
+      useAppearanceStore.getState().setReadingZoom('small');
+    });
+    expect(plain?.style.fontSize).toBe('13px');
+  });
+
+  it('offers the not-spam verb when the open message came from the account junk folder', () => {
+    useFolderStore.setState({
+      accounts: [
+        {
+          account_id: 'work',
+          display_name: 'work',
+          address: 'me@work.example',
+          expanded: true,
+          can_report_mail: true,
+          folders: [
+            { key: 'junk', name: 'Junk', role: 'junk' as const, unread: 0, depth: 0, has_children: false, expanded: false },
+          ],
+        },
+      ],
+      selected: { account: 'work', key: 'junk' },
+    });
+    useReadingStore.getState().applySnapshot(snapshot());
+    render(<ReadingPane />);
+
+    expect(screen.getByRole('button', { name: 'Not spam' })).toBeTruthy();
+  });
+
+  it('offers no not-spam verb while another folder leads or the account cannot report', () => {
+    const accounts = [
+      {
+        account_id: 'work',
+        display_name: 'work',
+        address: 'me@work.example',
+        expanded: true,
+        folders: [
+          { key: 'junk', name: 'Junk', role: 'junk' as const, unread: 0, depth: 0, has_children: false, expanded: false },
+          { key: 'inbox', name: 'Inbox', role: 'inbox' as const, unread: 0, depth: 0, has_children: false, expanded: false },
+        ],
+      },
+    ];
+    useReadingStore.getState().applySnapshot(snapshot());
+    useFolderStore.setState({ accounts, selected: { account: 'work', key: 'inbox' } });
+    const { rerender } = render(<ReadingPane />);
+    expect(screen.queryByRole('button', { name: 'Not spam' })).toBeNull();
+
+    act(() => {
+      useFolderStore.setState({ selected: { account: 'work', key: 'junk' } });
+    });
+    rerender(<ReadingPane />);
+    expect(screen.queryByRole('button', { name: 'Not spam' })).toBeNull();
+
+    act(() => {
+      useFolderStore.setState({
+        accounts: [{ ...accounts[0]!, can_report_mail: true }],
+      });
+    });
+    rerender(<ReadingPane />);
+    expect(screen.getByRole('button', { name: 'Not spam' })).toBeTruthy();
   });
 
   it('notes a message with no text body at all', () => {

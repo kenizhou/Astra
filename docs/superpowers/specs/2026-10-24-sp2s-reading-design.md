@@ -16,11 +16,12 @@ pattern exactly: a URL-param-mounted root in the same bundle, a minted
 window id, the capability's window wildcard, the closing semantics (the
 window closes when its message closes). The window carries the whole
 reading view the pane renders (header, invitation card, AI surfaces,
-body, attachments, the reply strip) over its own snapshot pull; opening
-from the row menu moves nothing (the pane keeps its own open message
-until the person changes it); the pane and the window are two readers of
-one store, and a mark-read from either lands once. reading-window.md is
-created with the zh copy.
+body, attachments, the reply strip) over its own snapshot pull. The host
+holds ONE open reading state and no per-message body command exists, so
+the window opens its message through the same guarded open path and the
+pane FOLLOWS the window's open; a mark-read from either lands once, and
+the window closes when the open reading moves off its message.
+reading-window.md is created with the zh copy.
 
 ## D2: Save as .eml and print
 
@@ -48,16 +49,16 @@ same steps. reading-zoom.md is created with the zh copy.
 ## D4: spam reporting
 
 The row menu's Junk placeholder becomes real: a Mark-as-spam verb that
-reports the message to the provider through the engine's outbox-mediated
-report (the verdict Junk; the provider files or flags per its own
-machinery) and moves it to the Junk folder (a report and a move are two
-acts; the person expects both). The reading pane's verb row gains Not
-spam (the NotJunk verdict) for a message already in Junk, which files it
-back to the Inbox. The undo question: a report rides the outbox and the
-move is the ordinary move-to-folder both the row menu and the swipe
-already offer; the capability's evidence note (Convention for most
-providers) words the row honestly. reporting.md is created with the zh
-copy.
+reports the message through the engine's outbox-mediated report (the
+Junk verdict): one act that reports and files, the engine's contract on
+every family, the adapter or the server moving the message into the
+destination the app resolves, the Junk folder; no second move rides
+beside it. The reading pane's verb row gains Not spam (the NotJunk
+verdict) for a message already in Junk, which files it back to the
+Inbox. The undo question: a report rides the outbox and carries its own
+filing, so there is no separate move to undo; the capability's evidence
+note (Convention for most providers) words the row honestly.
+reporting.md is created with the zh copy.
 
 ## D5: swipe actions
 
@@ -72,8 +73,9 @@ its own axis.
 
 ## Known gaps recorded, not hidden
 
-- The own-window is one message at a time per window; a multi-message
-  window is not this slice.
+- One message window at a time: the host holds one open reading state,
+  so opening a second moves the first window to close; an independent
+  per-window reading state is a later host leg.
 - Print prints the sanitised reading view, never the raw source; a
   "print original" is not offered.
 - The zoom's steps are three, matching the app font steps; a free
@@ -92,6 +94,8 @@ never re-serialized) and the dialog outcomes; the print document's shape
 the reflow clamp; the report's verdict/filing/idempotency over fakes and
 the Not-spam return; the swipe's direction config, the undo, and the
 non-interference with scroll and drag; and the live proofs: a `.eml`
-exported over the harness matching the received source, a junk report
-landed on the real server (the keyword/filing observed), and a
-fixed-width body reflowing at two pane widths.
+exported over the harness matching the received source byte for byte, a
+junk report's filing observed on the real server in both directions
+(the keyword half unobservable through the app's IMAP verbs), and a
+fixed-width body surviving sanitisation live with the clamp held by the
+offline pins (no harness renders layout at two widths).

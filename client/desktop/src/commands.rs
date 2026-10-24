@@ -55,10 +55,10 @@ pub(crate) mod settings;
 pub(crate) mod mcp;
 pub(crate) mod plugin;
 
-// The jmap add command surface (the wizard's JMAP form's password leg)
-// and the attachments command surface (the reading pane's Save As), under
-// the same split.
+// The jmap add command surface (the wizard's JMAP form's password leg),
+// the attachments Save As, and the eml save, under the same split.
 pub(crate) mod attachments;
+pub(crate) mod eml;
 pub(crate) mod jmap;
 
 /// A command failure, serialised to the webview as its display string: a sentence a
