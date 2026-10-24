@@ -89,7 +89,7 @@ export function ComposerAttachments() {
       ))}
       {pendingShares.map((file) => (
         <div
-          key={`pending-${file.name}`}
+          key={`pending-${file.name}:${file.path}`}
           className="flex items-baseline gap-2 border-t border-border-subtle py-1 text-xs"
         >
           <span className="min-w-0 truncate text-foreground">{file.name}</span>
@@ -99,7 +99,7 @@ export function ComposerAttachments() {
           <button
             type="button"
             aria-label={`Remove pending ${file.name}`}
-            onClick={() => useComposerStore.getState().removeShare(file.name)}
+            onClick={() => useComposerStore.getState().removeShare(file)}
             className="ml-auto flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-muted-text transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <CloseIcon size={12} />

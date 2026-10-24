@@ -160,7 +160,7 @@ interface ComposerStoreState {
   /** Seeds the share hand-off's files as the composition's pending set. */
   seedShares: (files: SharedFile[]) => void;
   /** Drops one pending share by its name. */
-  removeShare: (name: string) => void;
+  removeShare: (share: { name: string; path: string }) => void;
   /** Takes one dropped batch: documents attach, pictures ask first. */
   dropFiles: (files: File[]) => void;
   /** Answers the dropped pictures' ask: inline content or a file row. */
@@ -351,9 +351,11 @@ export const useComposerStore = create<ComposerStoreState>((set, get) => ({
 
   seedShares: (files) => set({ pendingShares: files }),
 
-  removeShare: (name) =>
+  removeShare: (share) =>
     set((state) => ({
-      pendingShares: state.pendingShares.filter((file) => file.name !== name),
+      pendingShares: state.pendingShares.filter(
+        (file) => file.name !== share.name || file.path !== share.path,
+      ),
     })),
 
   dropFiles: (files) => {

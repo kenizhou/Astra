@@ -25,7 +25,7 @@ describe('the strings catalogue', () => {
 
   it('carries the next-launch wording for the debug toggle', () => {
     expect(stringsFor('en-GB').diagnostics.debugNote).toBe(
-      'takes effect the next time Astra starts',
+      'takes effect the next time Astra Mail starts',
     );
   });
 

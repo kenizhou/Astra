@@ -42,9 +42,22 @@ describe('the pending share set', () => {
     expect(state.pendingShares).toEqual([NOTES, PHOTO]);
     expect(state.editor.attachments).toHaveLength(0);
 
-    useComposerStore.getState().removeShare('notes.txt');
+    useComposerStore.getState().removeShare(NOTES);
     state = useComposerStore.getState();
     expect(state.pendingShares).toEqual([PHOTO]);
+  });
+
+  it('drops only the named row among two same-named shares from different paths', () => {
+    // A command-line hand-off can carry two files of one name from
+    // different directories: one row's removal spends one row.
+    const otherNotes = { name: 'notes.txt', path: 'C:\Elsewhere\notes.txt' };
+    useComposerStore.getState().newMessage({ id: 'work', label: 'Work' });
+    useComposerStore.getState().seedShares([NOTES, otherNotes]);
+
+    useComposerStore.getState().removeShare(NOTES);
+
+    const state = useComposerStore.getState();
+    expect(state.pendingShares).toEqual([otherNotes]);
   });
 
   it('refuses the send while a pending share stands, with the sentence', () => {
@@ -67,7 +80,7 @@ describe('the pending share set', () => {
     useComposerStore.getState().setField('to', 'ada@example.test');
     useComposerStore.getState().seedShares([NOTES]);
 
-    useComposerStore.getState().removeShare('notes.txt');
+    useComposerStore.getState().removeShare(NOTES);
     useComposerStore.getState().submit();
     await vi.waitFor(() =>
       expect(

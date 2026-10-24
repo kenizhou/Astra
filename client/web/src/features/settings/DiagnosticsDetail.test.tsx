@@ -179,7 +179,7 @@ describe('the debug toggle', () => {
     expect(
       (screen.getByRole('checkbox', { name: 'Debug logging' }) as HTMLInputElement).checked,
     ).toBe(true);
-    expect(screen.getByText('takes effect the next time Astra starts')).toBeTruthy();
+    expect(screen.getByText('takes effect the next time Astra Mail starts')).toBeTruthy();
   });
 
   it('names what the log never carries', () => {

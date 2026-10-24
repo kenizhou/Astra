@@ -62,7 +62,7 @@ export const ENGLISH: SettingsStrings = {
     exportedTo: (path) => `Exported to ${path}`,
     exportFailed: (reason) => reason,
     debugToggle: 'Debug logging',
-    debugNote: 'takes effect the next time Astra starts',
+    debugNote: 'takes effect the next time Astra Mail starts',
     privacyNote:
       'The log carries no message content, no credentials, and no file paths.',
   },
