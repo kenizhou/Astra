@@ -346,7 +346,7 @@ seeded artefact is withdrawn at the end.
   mail-calendar gives it stays absent), Privacy, and Diagnostics are
   absent, and so are the entries inside shipped categories that
   mail-calendar carries: the app language and the default mail app
-  (General), swipe actions (Reading), and the reset local database
+  (General) and the reset local database
   (Advanced, whose MCP panel does ship). Each arrives with the slice
   that implements it, in the slot the taxonomy gives it.
 - **The client-config snippet names a relay the bundle does not yet

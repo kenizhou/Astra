@@ -94,6 +94,18 @@
 //! copies withdrawn, the calendar read the session advertises (seeded over
 //! CalDAV, read back over JMAP), and the OAuth gate's fail-soft refusal.
 //!
+//! The gated reading proofs (`reading_proof`) pin the reading batch's three
+//! live contracts: a `.eml` export read back byte for byte against a fresh
+//! engine source read over a message whose folded headers and
+//! quoted-printable body ride the harness's own submission listener (the
+//! app's serialiser writes canonical shapes only, so the raw submission is
+//! the only way the received source carries the shapes byte honesty needs);
+//! a junk report through the app's own verb filing a note into the Junk
+//! folder and its correction filing it back, both filings observed through
+//! the app's folder views; and a fixed-width table body keeping its hard
+//! pixel width into the sanitised html the wrapper clamps. Every proof
+//! withdraws its own mail through the product's delete.
+//!
 //! The JMAP-detection test cannot dial `https://example.test/.well-known/jmap` (the
 //! harness domain resolves nowhere), so it rebases the probe onto the harness's plain
 //! HTTP JMAP origin (`127.0.0.1:2080`) through the detection crate's dev-harness
@@ -170,6 +182,8 @@ mod people_proof;
 mod proof;
 #[path = "tests_live_harness/reading.rs"]
 mod reading;
+#[path = "tests_live_harness/reading_proof.rs"]
+mod reading_proof;
 #[path = "tests_live_harness/reply.rs"]
 mod reply;
 #[path = "tests_live_harness/search.rs"]
