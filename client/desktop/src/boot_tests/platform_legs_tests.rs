@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use astra_app::{AnalyticsEvent, Intent, SettingsIntent};
+use astra_app::{Intent, SettingsIntent};
 
 use super::{QuietDraftSink, QuietObserver};
 
@@ -38,11 +38,12 @@ fn the_assembly_installs_the_analytics_ledger_behind_the_consent_gate() {
     let (state, data_dir) = assembled("analytics");
     let ledger = astra_ai::AiStore::open(&data_dir.join("ai.sqlite")).expect("the ledger opens");
 
-    // Without consent the recorder answers nothing: no row lands, and
-    // the flow never fails over the decline.
+    // Without consent the boot's own event records nothing: no row
+    // lands, and the flow never fails over the decline.
+    let accounts = state.connections.ids().len();
     state
         .app
-        .record_analytics(&AnalyticsEvent::of("app_open").with_count("accounts", 0));
+        .record_analytics(&crate::platform::app_open_event(accounts));
     assert!(
         ledger
             .recent_analytics_events(10)
@@ -51,8 +52,8 @@ fn the_assembly_installs_the_analytics_ledger_behind_the_consent_gate() {
         "no consent stands, so no row lands"
     );
 
-    // Consent lands through the settings intent, and the same call
-    // records: the gate reads the preference live.
+    // Consent lands through the settings intent, and the boot's own
+    // event records: the gate reads the preference live.
     state.runtime.block_on(|| {
         let app = Arc::clone(&state.app);
         async move {
@@ -65,14 +66,38 @@ fn the_assembly_installs_the_analytics_ledger_behind_the_consent_gate() {
     });
     state
         .app
-        .record_analytics(&AnalyticsEvent::of("app_open").with_count("accounts", 0));
+        .record_analytics(&crate::platform::app_open_event(accounts));
 
     let rows = ledger
         .recent_analytics_events(10)
         .expect("the ledger reads");
     assert_eq!(rows.len(), 1, "exactly the consented row lands");
     assert_eq!(rows[0].shape, "app_open");
-    assert_eq!(rows[0].counts.get("accounts").copied(), Some(0));
+    assert_eq!(
+        rows[0].counts.get("accounts").copied(),
+        Some(accounts as u64),
+        "the boot's own count rides the row"
+    );
+
+    // The one-click withdrawal is the same write turned off, and the
+    // next record answers nothing: the flow stops at the next call.
+    state.runtime.block_on(|| {
+        let app = Arc::clone(&state.app);
+        async move {
+            app.dispatch(Intent::Settings(SettingsIntent::SetAnalyticsConsented {
+                consented: false,
+            }))
+            .await
+            .expect("the withdrawal dispatch lands");
+        }
+    });
+    state
+        .app
+        .record_analytics(&crate::platform::app_open_event(accounts));
+    let after = ledger
+        .recent_analytics_events(10)
+        .expect("the ledger reads");
+    assert_eq!(after.len(), 1, "the withdrawn call lands no row: {after:?}");
 }
 
 #[test]
