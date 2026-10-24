@@ -76,8 +76,10 @@ impl core::fmt::Display for EmlReadError {
     }
 }
 
-/// The stem cap for a suggested `.eml` name: far under every filesystem's
-/// name limit once the suffix and a path's directories ride beside it.
+/// The stem cap for a suggested `.eml` name, in characters: far under
+/// every filesystem's name limit for ascii, and a stem of wider
+/// characters that overruns a byte-counted limit answers the typed
+/// failure rather than a corrupt write.
 const EML_STEM_CAP: usize = 80;
 
 impl<P: Provider> App<P> {
@@ -171,7 +173,9 @@ impl<P: Provider> App<P> {
 /// control characters) folds to a space, whitespace runs collapse to one,
 /// the stem sheds trailing dots and spaces and clamps at [`EML_STEM_CAP`]
 /// characters, and the `.eml` suffix lands. A subject that sanitises to
-/// nothing, and no subject at all, suggest `message.eml`.
+/// nothing, no subject at all, or one whose stem is a Windows reserved
+/// device name (`CON`, `NUL`, the COM and LPT ports, whose dotted forms the
+/// write would refuse) suggests `message.eml`.
 fn suggested_eml_name(subject: &str) -> String {
     let mut stem = String::new();
     let mut space = false;
@@ -190,11 +194,43 @@ fn suggested_eml_name(subject: &str) -> String {
     }
     let stem: String = stem.chars().take(EML_STEM_CAP).collect();
     let stem = stem.trim_end_matches(['.', ' ']);
-    if stem.is_empty() {
+    if stem.is_empty() || is_windows_reserved(stem) {
         "message.eml".to_owned()
     } else {
         format!("{stem}.eml")
     }
+}
+
+/// Whether `stem` is one of the device names Windows refuses as a file
+/// name whatever extension follows it, compared case-insensitively the
+/// way the platform does.
+fn is_windows_reserved(stem: &str) -> bool {
+    let upper = stem.to_ascii_uppercase();
+    matches!(
+        upper.as_str(),
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
+    )
 }
 
 #[cfg(test)]

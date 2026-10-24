@@ -299,6 +299,20 @@ fn the_suggested_name_falls_back_when_the_subject_sanitises_to_nothing() {
 }
 
 #[test]
+fn the_suggested_name_falls_back_for_a_windows_reserved_device_name() {
+    assert_eq!(
+        super::suggested_eml_name("con"),
+        "message.eml",
+        "the reserved device name the write would refuse falls back"
+    );
+    assert_eq!(
+        super::suggested_eml_name("Com1 status"),
+        "Com1 status.eml",
+        "a stem that only begins with one keeps its name"
+    );
+}
+
+#[test]
 fn the_suggested_name_clamps_a_long_subject_before_the_suffix() {
     let long = "q".repeat(300);
     let name = super::suggested_eml_name(&long);
