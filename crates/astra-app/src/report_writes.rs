@@ -67,8 +67,9 @@ impl<P: Provider> App<P> {
     /// report and a later not-junk correction of the same message stay two
     /// ops. The destination is the account's Junk folder for a junk verdict
     /// and its Inbox for a not-junk one, resolved by the shared move-target
-    /// resolver: the RFC 6154 role first, the conventional folder name
-    /// otherwise, exactly as a move resolves Trash.
+    /// resolver: the RFC 6154 role first and the conventional folder name
+    /// otherwise for the junk verdict; the Inbox resolves by its role,
+    /// which every family guarantees.
     async fn report_row(
         &self,
         row: RowRef,

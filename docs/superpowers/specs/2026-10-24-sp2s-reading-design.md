@@ -48,16 +48,16 @@ same steps. reading-zoom.md is created with the zh copy.
 ## D4: spam reporting
 
 The row menu's Junk placeholder becomes real: a Mark-as-spam verb that
-reports the message to the provider through the engine's outbox-mediated
-report (the verdict Junk; the provider files or flags per its own
-machinery) and moves it to the Junk folder (a report and a move are two
-acts; the person expects both). The reading pane's verb row gains Not
-spam (the NotJunk verdict) for a message already in Junk, which files it
-back to the Inbox. The undo question: a report rides the outbox and the
-move is the ordinary move-to-folder both the row menu and the swipe
-already offer; the capability's evidence note (Convention for most
-providers) words the row honestly. reporting.md is created with the zh
-copy.
+reports the message through the engine's outbox-mediated report (the
+Junk verdict): one act that reports and files, the engine's contract on
+every family, the adapter or the server moving the message into the
+destination the app resolves, the Junk folder; no second move rides
+beside it. The reading pane's verb row gains Not spam (the NotJunk
+verdict) for a message already in Junk, which files it back to the
+Inbox. The undo question: a report rides the outbox and carries its own
+filing, so there is no separate move to undo; the capability's evidence
+note (Convention for most providers) words the row honestly.
+reporting.md is created with the zh copy.
 
 ## D5: swipe actions
 
