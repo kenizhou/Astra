@@ -94,6 +94,8 @@ never re-serialized) and the dialog outcomes; the print document's shape
 the reflow clamp; the report's verdict/filing/idempotency over fakes and
 the Not-spam return; the swipe's direction config, the undo, and the
 non-interference with scroll and drag; and the live proofs: a `.eml`
-exported over the harness matching the received source, a junk report
-landed on the real server (the keyword/filing observed), and a
-fixed-width body reflowing at two pane widths.
+exported over the harness matching the received source byte for byte, a
+junk report's filing observed on the real server in both directions
+(the keyword half unobservable through the app's IMAP verbs), and a
+fixed-width body surviving sanitisation live with the clamp held by the
+offline pins (no harness renders layout at two widths).
