@@ -315,6 +315,16 @@ pub(crate) fn setup_host(app: &mut tauri::App) -> Result<(), Box<dyn std::error:
     // started by one, is held for the page-load drain, and the deep-link
     // and reading-pane roads are wired once the state they read stands.
     crate::mailto::hold_launch_link(app.handle(), &mut state);
+    // The background delivery: one loop per dialled account, beside the
+    // first-sync spawns the core's boot already made. Each loop joins its
+    // account's first pass before its first watch, so nothing duplicates
+    // the pass that just ran and no watch is trusted before a sync.
+    crate::delivery::spawn(
+        Arc::clone(&state.app),
+        Arc::clone(&state.connections),
+        Arc::new(crate::notify::NotifyBridge::windowed(app.handle().clone())),
+        &state.runtime,
+    );
     let accounts = state.connections.ids().len();
     let handle = app.handle().clone();
     app.manage(state);

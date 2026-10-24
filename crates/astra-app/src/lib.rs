@@ -19,6 +19,7 @@ mod ai_replies;
 mod ai_results;
 mod ai_rules;
 mod attachments;
+mod body_warm;
 mod boot;
 mod calendar;
 mod compose_open;
@@ -31,6 +32,8 @@ mod folder_writes;
 mod gate;
 mod list_rows;
 mod mail_writes;
+mod notifications;
+mod outage;
 mod outbox;
 mod people;
 mod preferences;
@@ -95,12 +98,13 @@ mod settings_fakes;
 pub mod evals;
 
 use std::{
+    collections::BTreeMap,
     path::PathBuf,
     sync::{atomic::AtomicU64, Arc, Mutex},
     time::Duration,
 };
 
-use engine_api::{AccountId, Engine, Provider};
+use engine_api::{Engine, Provider};
 use tokio::sync::RwLock;
 
 use crate::{
@@ -155,13 +159,18 @@ pub use drafts::{DraftResume, DRAFT_AUTOSAVE_IDLE};
 pub use folder_writes::FolderWriteError;
 pub use gate::{BeforeSendGate, ComposeTransform, GateComposition, GateVerdict, TransformFailure};
 pub use mail_writes::MailWriteError;
+pub use notifications::{NewMailBatch, NewMailNotice};
+pub use outage::PassOutcome;
 pub use people::avatar::AvatarView;
-pub use preferences::{load_preferences, preferences_path, save_preferences, Preferences};
+pub use preferences::{
+    load_preferences, preferences_path, save_preferences, Preferences, DEFAULT_POLL_MINUTES,
+};
 pub use protocol::{
     AppObserver, CalendarIntent, ComposeIntent, ComposerBlob, CompositionId, ContactDraftInput,
     ContactNameInput, ContactPatchInput, DavSectionInput, DraftsIntent, EventDrag, EventEdge,
     EventEdit, FolderIntent, Intent, OutboxIntent, PeopleIntent, RecurrenceChange, RepeatEnd,
-    RepeatRule, RsvpAnswer, SearchScope, SettingsIntent, Surface, ThemeMode, ViewMode, WeekdayWire,
+    RepeatRule, RsvpAnswer, SearchScope, SettingsIntent, Surface, SyncBodyCap, ThemeMode, ViewMode,
+    WeekdayWire,
 };
 pub use query::{MessageDetail, MessagePage, QueryAccount, QueryRow, MAX_PAGE};
 pub use reference::{
@@ -171,6 +180,8 @@ pub use reference::{
 pub use settings::{AccountInfo, DavLegs, HostAccountOps};
 pub use signatures::{seed_signature, swap_seeded, AccountSignatures};
 pub use surfaced::Surfaced;
+
+pub(crate) use window::Scope;
 
 /// The app runtime: owns one [`Engine`] shared across every configured [`Account`],
 /// holds the surface and selection state, and notifies an [`AppObserver`] when a
@@ -278,6 +289,15 @@ pub struct App<P> {
     /// per-account position through, published on change by the
     /// [`SyncObserver`](engine_api::SyncObserver) fold in `sync_progress`.
     sync_progress: sync_progress::SyncProgress,
+    /// The new-mail notification queue the pass commits feed and the host
+    /// bridge drains. See `notifications`.
+    new_mail: Arc<notifications::NewMailQueue>,
+    /// The outage state over pass outcomes, shared with the progress fold
+    /// that projects it onto the snapshot the surfaces pull. See `outage`.
+    outages: outage::OutagesShared,
+    /// Each account's first-pass settle state: the join the host's delivery
+    /// drivers open their watches after. See `sync`.
+    first_passes: Mutex<BTreeMap<engine_api::AccountId, sync::FirstPass>>,
     /// The loaded preferences and the path they write through: the view mode, the
     /// expansion map, and the selected folder.
     pane: Mutex<PreferencesState>,
@@ -362,7 +382,13 @@ impl<P: Provider> App<P> {
         connector: Option<Box<dyn MailboxConnector<P>>>,
         observer: Arc<dyn AppObserver>,
     ) -> Self {
-        let sync_progress = sync_progress::SyncProgress::new(Arc::clone(&observer));
+        let new_mail = Arc::new(notifications::NewMailQueue::new());
+        let outages = Arc::new(outage::Outages::new());
+        let sync_progress = sync_progress::SyncProgress::new(
+            Arc::clone(&observer),
+            Arc::clone(&new_mail),
+            Arc::clone(&outages),
+        );
         Self {
             engine,
             accounts: RwLock::new(accounts.into_iter().map(Arc::new).collect()),
@@ -388,6 +414,9 @@ impl<P: Provider> App<P> {
             autosave_idle: DRAFT_AUTOSAVE_IDLE,
             open_reading: Mutex::new(None),
             sync_progress,
+            new_mail,
+            outages,
+            first_passes: Mutex::new(BTreeMap::new()),
             pane: Mutex::new(PreferencesState::new(None)),
             visible_limit: Mutex::new(PAGE),
             generation: AtomicU64::new(0),
@@ -452,28 +481,6 @@ impl<P: Provider> App<P> {
     }
     // The plugin ports' builders (`with_send_gate`, `with_decoder`) live in
     // their own modules, beside the ports they install.
-}
-
-/// The mailbox list's scope. An account is always named alongside a folder, so the
-/// folder key, unique only within its account, can never be resolved against the wrong
-/// one, or against none: separately held, "no account but a folder" is a state the
-/// types would permit and nothing renders.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) enum Scope {
-    /// Every account, each one's Inbox in view.
-    #[default]
-    AllInboxes,
-    /// One account's whole mailbox.
-    Account(AccountId),
-    /// One folder of one account.
-    Folder(FolderRef),
-}
-
-impl Scope {
-    /// The scope for a host's account selection: an id, or the unified list for `None`.
-    pub(crate) fn for_account(account: Option<AccountId>) -> Self {
-        account.map_or(Self::AllInboxes, Self::Account)
-    }
 }
 
 /// A unique-per-intent idempotency key under `prefix`, from the wall clock

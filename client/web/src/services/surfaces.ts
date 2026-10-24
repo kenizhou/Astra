@@ -143,8 +143,23 @@ export interface AccountSyncProgress {
   detail?: string;
 }
 
+/**
+ * The delivery state the sync-progress snapshot carries beside the
+ * account positions: whether the offline banner shows and which accounts
+ * are in outage. Optional so a capture from a build before the field
+ * still parses; the core always writes it.
+ */
+export interface DeliveryState {
+  /** Whether the offline banner shows: every dialled account in outage. */
+  offline_banner: boolean;
+  /** The accounts in outage, wearing the badge on their pane rows. */
+  outages?: string[];
+}
+
 /** The sync-progress snapshot the status bar renders after every pull. */
 export interface SyncProgressSnapshot {
   /** One entry per account with a sync position to report. */
   accounts: AccountSyncProgress[];
+  /** The delivery state: the offline banner and the outage badges. */
+  delivery?: DeliveryState;
 }

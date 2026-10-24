@@ -35,6 +35,7 @@ import { useSendingStore } from '@/stores/sendingStore';
 import { useUiStore } from '@/stores/uiStore';
 import { buildFolderMenu } from './folderMenu';
 import { folderDrop, messageRefsOf, type FolderDropTarget } from './folderDrag';
+import { OutageBadge } from './OutageBadge';
 import { CONVERSATIONS_DRAG_TYPE, ROWS_DRAG_TYPE } from '@/components/message-list/MessageRow';
 import { NewFolderRow } from './NewFolderRow';
 import { RenameFolderRow } from './RenameFolderRow';
@@ -400,6 +401,7 @@ export function FolderTree({
         <span className="truncate text-[11px] uppercase tracking-wide text-muted-text">
           {account.display_name}
         </span>
+        <OutageBadge accountId={account.account_id} displayName={account.display_name} />
         <RefusalBadge accountId={account.account_id} displayName={account.display_name} />
         {collapsedUnread > 0 && (
           <span className="ml-auto shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-[11px] font-medium tabular-nums leading-none text-primary-foreground">

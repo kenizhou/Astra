@@ -140,6 +140,10 @@ impl<P: Provider> App<P> {
                 self.set_setting(|prefs| prefs.plugins_enabled = enabled)
                     .await;
             }
+            SettingsIntent::SetNotificationsEnabled { enabled } => {
+                self.set_setting(|prefs| prefs.notifications_enabled = enabled)
+                    .await;
+            }
             SettingsIntent::SetZone { zone } => self.set_zone(zone).await,
             SettingsIntent::SetFirstDayOfWeek { weekday } => {
                 self.set_setting(|prefs| prefs.first_day_of_week = weekday)
@@ -176,6 +180,17 @@ impl<P: Provider> App<P> {
             } => {
                 self.set_setting(|prefs| prefs.set_seeded_signature(&account, reply, signature))
                     .await;
+            }
+            SettingsIntent::SetSyncSettings {
+                account,
+                depth_months,
+                body_cap,
+                poll_minutes,
+            } => {
+                self.set_setting(move |prefs| {
+                    prefs.set_sync_settings(&account, depth_months, body_cap, poll_minutes);
+                })
+                .await;
             }
         }
     }
@@ -278,6 +293,16 @@ impl<P: Provider> App<P> {
         self.rebuild_settings().await;
     }
 
+    /// The account's own sync settings off the persisted preferences: the
+    /// effective triple the row renders and the pass runs with, one source
+    /// so the page and the pass can never disagree.
+    fn pane_sync_settings(&self, account: &AccountId) -> astra_viewmodel::AccountSyncSettings {
+        self.pane
+            .lock()
+            .expect("preferences mutex poisoned")
+            .sync_settings(account)
+    }
+
     /// Rebuilds the settings snapshot and publishes it on
     /// [`Surface::Settings`](crate::Surface::Settings): the persisted
     /// settings block, one row per configured account, and the about block.
@@ -352,6 +377,7 @@ impl<P: Provider> App<P> {
                         .map_or_else(|| "none".to_string(), |info| info.crypto_method.clone()),
                     crypto_error: crypto_errors.get(&handle.id).cloned(),
                     signatures: signatures.get(&handle.id).cloned(),
+                    sync: Some(self.pane_sync_settings(&handle.id)),
                 });
             }
             // The one exception to the join rule: an account whose grant the
@@ -379,6 +405,7 @@ impl<P: Provider> App<P> {
                         crypto_method: info.crypto_method.clone(),
                         crypto_error: crypto_errors.get(&info.id).cloned(),
                         signatures: signatures.get(&info.id).cloned(),
+                        sync: Some(self.pane_sync_settings(&info.id)),
                     });
                 }
             }
@@ -440,3 +467,7 @@ mod accounts_tests;
 #[cfg(test)]
 #[path = "../settings_composer_tests.rs"]
 mod composer_tests;
+
+#[cfg(test)]
+#[path = "../settings_sync_tests.rs"]
+mod sync_tests;

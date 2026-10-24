@@ -78,6 +78,14 @@ fn set_clock_and_set_quote_style_carry_their_flag() {
 }
 
 #[test]
+fn set_notifications_enabled_carries_its_flag() {
+    round_trips(
+        &Intent::Settings(SettingsIntent::SetNotificationsEnabled { enabled: false }),
+        r#"{"settings":{"set_notifications_enabled":{"enabled":false}}}"#,
+    );
+}
+
+#[test]
 fn set_zone_carries_the_zone_verbatim() {
     // The type carries the string; the core validates the id on dispatch,
     // never here, so a host's typo reaches the core as-is to be refused typed
@@ -271,5 +279,37 @@ fn the_settings_surface_crosses_as_its_word() {
     assert_eq!(
         serde_json::from_str::<Surface>(r#""settings""#).unwrap(),
         Surface::Settings
+    );
+}
+
+#[test]
+fn set_sync_settings_crosses_only_the_named_fields() {
+    use super::SyncBodyCap;
+    round_trips(
+        &Intent::Settings(SettingsIntent::SetSyncSettings {
+            account: account("work"),
+            depth_months: Some(12),
+            body_cap: None,
+            poll_minutes: Some(90),
+        }),
+        r#"{"settings":{"set_sync_settings":{"account":"work","depth_months":12,"poll_minutes":90}}}"#,
+    );
+    round_trips(
+        &Intent::Settings(SettingsIntent::SetSyncSettings {
+            account: account("work"),
+            depth_months: None,
+            body_cap: Some(SyncBodyCap::Bytes { octets: 1024 }),
+            poll_minutes: None,
+        }),
+        r#"{"settings":{"set_sync_settings":{"account":"work","body_cap":{"bytes":{"octets":1024}}}}}"#,
+    );
+    round_trips(
+        &Intent::Settings(SettingsIntent::SetSyncSettings {
+            account: account("work"),
+            depth_months: None,
+            body_cap: Some(SyncBodyCap::Off),
+            poll_minutes: None,
+        }),
+        r#"{"settings":{"set_sync_settings":{"account":"work","body_cap":"off"}}}"#,
     );
 }

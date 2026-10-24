@@ -9,8 +9,8 @@ use astra_composer::Signature;
 
 use crate::{
     AboutBlock, AccountKind, AccountLegs, AccountSettingsRow, AccountSignatures, DavSectionRow,
-    DefaultCalendar, GrantState, SettingsBlock, SettingsError, SettingsSnapshot, ThemeMode,
-    ViewMode, WeekdayWire,
+    DefaultCalendar, GrantState, SettingsBlock, SettingsError, SettingsSnapshot, SyncBodyCap,
+    ThemeMode, ViewMode, WeekdayWire,
 };
 
 /// A well-formed account id, the way every settings test names one.
@@ -40,6 +40,7 @@ fn the_snapshot_crosses_its_full_shape_and_reads_back() {
             }),
             default_send_account: Some(account("work")),
             plugins_enabled: true,
+            notifications_enabled: true,
         },
         accounts: vec![AccountSettingsRow {
             account: account("work"),
@@ -70,6 +71,7 @@ fn the_snapshot_crosses_its_full_shape_and_reads_back() {
                 }),
                 reply: None,
             }),
+            sync: None,
         }],
         about: AboutBlock {
             version: "0.1.0".to_owned(),
@@ -95,6 +97,7 @@ fn the_snapshot_crosses_its_full_shape_and_reads_back() {
                 "quote_below": false,
                 "view_mode": "threaded",
                 "plugins_enabled": true,
+                "notifications_enabled": true,
                 "default_calendar": { "account": "work", "key": "cal-1" },
                 "default_send_account": "work"
             },
@@ -229,6 +232,7 @@ fn the_grant_states_cross_both_ways_and_absent_means_healthy() {
         signatures: None,
         crypto_method: "none".to_owned(),
         crypto_error: None,
+        sync: None,
     };
     let wire = serde_json::to_value(&healthy).expect("the healthy row serialises");
     assert!(
@@ -278,6 +282,7 @@ fn a_row_s_dav_echo_never_carries_the_password_back() {
         signatures: None,
         crypto_method: "none".to_owned(),
         crypto_error: None,
+        sync: None,
     };
     let wire = serde_json::to_value(&row).expect("the row serialises");
     assert!(
@@ -315,6 +320,7 @@ fn an_unpinned_default_calendar_and_empty_attributions_cross_no_key() {
         default_calendar: None,
         default_send_account: None,
         plugins_enabled: true,
+        notifications_enabled: true,
     };
     let wire = serde_json::to_value(&block).expect("the block serialises");
     assert!(
@@ -348,4 +354,44 @@ fn the_shared_web_fixture_parses_as_the_snapshot() {
     let wire = serde_json::to_value(&back).expect("the snapshot serialises");
     let raw: serde_json::Value = serde_json::from_str(raw).expect("the fixture is JSON");
     assert_eq!(wire, raw, "the fixture round trips value for value");
+}
+
+#[test]
+fn the_sync_settings_cross_with_their_cap_words_and_absent_means_default() {
+    // The three cap words, pinned both ways: the surfaces branch on them,
+    // and a renamed one must never slip out silently.
+    for (cap, word) in [
+        (SyncBodyCap::Off, r#""off""#),
+        (SyncBodyCap::Everything, r#""everything""#),
+        (
+            SyncBodyCap::Bytes { octets: 1024 },
+            r#"{"bytes":{"octets":1024}}"#,
+        ),
+    ] {
+        assert_eq!(serde_json::to_string(&cap).unwrap(), word);
+        assert_eq!(serde_json::from_str::<SyncBodyCap>(word).unwrap(), cap);
+    }
+
+    // A row from a build before the field parses with no sync settings, and
+    // a row that carries them crosses them under the row's own key.
+    let pre_sync = serde_json::from_str::<AccountSettingsRow>(
+        r#"{"account":"work","address":"a@e.test","kind":"microsoft",
+            "legs":{"calendar":false,"contacts":false}}"#,
+    )
+    .expect("a pre-sync row parses");
+    assert!(
+        pre_sync.sync.is_none(),
+        "absent is the defaults, not a refusal"
+    );
+
+    let carried = serde_json::from_str::<AccountSettingsRow>(
+        r#"{"account":"work","address":"a@e.test","kind":"microsoft",
+            "legs":{"calendar":false,"contacts":false},
+            "sync":{"depth_months":12,"body_cap":"everything","poll_minutes":90}}"#,
+    )
+    .expect("the sync block parses");
+    let sync = carried.sync.expect("the settings crossed");
+    assert_eq!(sync.depth_months, 12);
+    assert_eq!(sync.body_cap, SyncBodyCap::Everything);
+    assert_eq!(sync.poll_minutes, 90);
 }

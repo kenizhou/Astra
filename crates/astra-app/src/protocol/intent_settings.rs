@@ -26,7 +26,7 @@ use crate::reference::CalendarRef;
 
 use super::ViewMode;
 
-pub use astra_viewmodel::{ThemeMode, WeekdayWire};
+pub use astra_viewmodel::{SyncBodyCap, ThemeMode, WeekdayWire};
 
 /// The dav editor's shape: what the accounts page's form holds for one
 /// account's dav section.
@@ -72,6 +72,11 @@ pub enum SettingsIntent {
     },
     /// Set whether plugins run at all (the admin policy switch).
     SetPluginsEnabled {
+        /// On or off.
+        enabled: bool,
+    },
+    /// Set whether new mail raises OS notifications.
+    SetNotificationsEnabled {
         /// On or off.
         enabled: bool,
     },
@@ -143,5 +148,25 @@ pub enum SettingsIntent {
         reply: bool,
         /// The signature to seed from, or `None` to clear the slot.
         signature: Option<Signature>,
+    },
+    /// Write one account's own sync settings: the fetch depth, the body
+    /// cap, and the polling cadence. Each field named is written and each
+    /// absent field keeps what stood, the same omission discipline the dav
+    /// editor's input follows; to return a field to the product default,
+    /// set the default's value, since a default and an explicit equal are
+    /// the same pass.
+    SetSyncSettings {
+        /// The account whose settings to write.
+        account: AccountId,
+        /// The fetch depth in months; zero is the whole mailbox.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        depth_months: Option<u16>,
+        /// The body cap state.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body_cap: Option<SyncBodyCap>,
+        /// The polling cadence in minutes, clamped into its 15 to 120
+        /// bounds on write.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        poll_minutes: Option<u16>,
     },
 }

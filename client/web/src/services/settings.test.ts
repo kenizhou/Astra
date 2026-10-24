@@ -30,6 +30,7 @@ describe('the settings snapshot wire', () => {
       quote_below: false,
       view_mode: 'threaded',
       plugins_enabled: true,
+      notifications_enabled: true,
       default_calendar: { account: 'work', key: 'cal-1' },
     });
     expect(snapshot.accounts).toEqual([
@@ -46,6 +47,12 @@ describe('the settings snapshot wire', () => {
         dav_error: 'the re-dial could not reach the origin',
         refresh_error:
           'the diary could not be re-expanded under the new zone; set the zone again to retry',
+        crypto_method: 'none',
+        sync: {
+          depth_months: 12,
+          body_cap: { bytes: { octets: 1024 } },
+          poll_minutes: 90,
+        },
       },
     ]);
     expect(snapshot.about).toEqual({
@@ -240,6 +247,34 @@ describe('the settings command wire', () => {
     );
     expect(JSON.stringify(intents.removeAccount('work'))).toBe(
       '{"settings":{"remove_account":{"account":"work"}}}',
+    );
+  });
+});
+
+// The per-account sync settings: the row carries the effective triple, and
+// the intent crosses only the fields the editor named, exactly as the Rust
+// arm's serde skips spell them.
+describe('the per-account sync settings wire', () => {
+  it('carries the effective triple on the account row', () => {
+    const snapshot = fixtureJson as SettingsSnapshot;
+    const row = snapshot.accounts?.[0];
+    expect(row?.sync).toEqual({
+      depth_months: 12,
+      body_cap: { bytes: { octets: 1024 } },
+      poll_minutes: 90,
+    });
+  });
+
+  it('crosses only the named fields of a sync settings write', () => {
+    expect(
+      JSON.stringify(settingsIntents.setSyncSettings('work', { depth_months: 12 })),
+    ).toBe('{"settings":{"set_sync_settings":{"account":"work","depth_months":12}}}');
+    expect(
+      JSON.stringify(
+        settingsIntents.setSyncSettings('work', { body_cap: 'off', poll_minutes: 90 }),
+      ),
+    ).toBe(
+      '{"settings":{"set_sync_settings":{"account":"work","body_cap":"off","poll_minutes":90}}}',
     );
   });
 });

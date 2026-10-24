@@ -27,7 +27,6 @@ pub(crate) use connector::DialConnector;
 /// connect installs reads the one the boot opened.
 pub(super) type SharedCryptoStore = Arc<astra_crypto_store::CryptoStore>;
 
-
 /// Dials every registered account, mail half first and dav legs beside
 /// it. A mail dial that fails skips the account with a warning: one stale
 /// password must not block the others, and the app opens with whatever

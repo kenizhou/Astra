@@ -68,6 +68,11 @@ pub enum SettingsError {
 /// The persisted settings the screen renders: the preferences document's
 /// settings fields projected as one block, every setting a surface can
 /// change named beside the value it holds now.
+///
+/// The independent toggles are deliberately plain bools: each answers its
+/// own question on the screen, and folding them into a state machine would
+/// invent a union no setting writer recognises.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SettingsBlock {
     /// The theme: follow the host, or an explicit light or dark override.
@@ -96,10 +101,21 @@ pub struct SettingsBlock {
     /// Whether plugins run at all (the admin policy switch). On by default.
     #[serde(default = "default_plugins_enabled")]
     pub plugins_enabled: bool,
+    /// Whether new mail raises OS notifications. On by default; the
+    /// notification switch the settings screen carries. Absent on a
+    /// snapshot from a build before the field reads back on.
+    #[serde(default = "default_notifications_enabled")]
+    pub notifications_enabled: bool,
 }
 
 /// The switch's default: plugins run unless the preference says otherwise.
 fn default_plugins_enabled() -> bool {
+    true
+}
+
+/// The notifications switch's default: new mail is announced unless the
+/// preference says otherwise.
+fn default_notifications_enabled() -> bool {
     true
 }
 
@@ -212,6 +228,12 @@ pub struct AccountSettingsRow {
     /// an account that seeds nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signatures: Option<AccountSignatures>,
+    /// The account's own sync settings: the fetch depth, the body cap, and
+    /// the cadence, the effective values the pass runs with. Absent crosses
+    /// no key, so a snapshot from a build before the field reads back with
+    /// the product defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync: Option<AccountSyncSettings>,
 }
 
 /// Why a Microsoft account's grant needs the person to act, as the
@@ -230,6 +252,38 @@ pub enum GrantState {
     /// about the account syncs, and the account never dialled. Never an
     /// outage word.
     SignInExpired,
+}
+
+/// How much of a message an account keeps a warm offline copy of. Crosses as
+/// a snake_case word, or a map for the byte figure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncBodyCap {
+    /// Metadata only: nothing warms, and a pass drops whatever an open
+    /// cached, so every body loads over the network.
+    Off,
+    /// Everything: any size warms and nothing is ever dropped.
+    Everything,
+    /// Messages up to this many octets warm and stay; larger ones keep their
+    /// list row and load their body on open.
+    Bytes {
+        /// The per-message ceiling, in octets.
+        octets: u64,
+    },
+}
+
+/// One account's own sync settings, as the settings row carries them: the
+/// effective depth, body cap, and cadence, the product defaults where the
+/// account sets none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountSyncSettings {
+    /// How many months of history the account syncs; zero is the whole
+    /// mailbox.
+    pub depth_months: u16,
+    /// The body cap state.
+    pub body_cap: SyncBodyCap,
+    /// The polling cadence, in minutes.
+    pub poll_minutes: u16,
 }
 
 /// An account's kind, as the row states it. Crosses as a snake_case word.

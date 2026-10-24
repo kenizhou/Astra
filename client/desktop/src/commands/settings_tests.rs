@@ -34,6 +34,7 @@ fn the_settings_pull_round_trips_the_published_snapshot() {
             default_calendar: None,
             default_send_account: None,
             plugins_enabled: true,
+            notifications_enabled: true,
         },
         accounts: vec![AccountSettingsRow {
             account: account(),
@@ -55,6 +56,7 @@ fn the_settings_pull_round_trips_the_published_snapshot() {
             crypto_method: "none".to_owned(),
             crypto_error: None,
             signatures: None,
+            sync: None,
         }],
         about: AboutBlock {
             version: "0.1.0".to_owned(),

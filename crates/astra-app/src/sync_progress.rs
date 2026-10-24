@@ -18,7 +18,7 @@ use std::{collections::BTreeMap, sync::Mutex};
 use astra_viewmodel::{AccountSyncProgress, AccountSyncState, SyncProgressSnapshot};
 use engine_api::{AccountId, MailboxId, SyncCommit, SyncObserver, SyncScope};
 
-use crate::{AppObserver, Surface, Surfaced};
+use crate::{outage::OutagesShared, AppObserver, Surface, Surfaced};
 
 /// One account's folded position, behind the snapshot's entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,20 +43,47 @@ pub(crate) struct SyncProgress {
     cell: Surfaced<SyncProgressSnapshot>,
     /// Every account's folded position, keyed by id so the snapshot's order is stable.
     accounts: Mutex<BTreeMap<AccountId, FoldedAccount>>,
+    /// The new-mail queue every commit also feeds, shared with the app: one
+    /// observer drives both folds, so a pass's commits cannot reach one and
+    /// miss the other.
+    new_mail: std::sync::Arc<crate::notifications::NewMailQueue>,
+    /// The outage state the composed snapshot carries, shared with the app:
+    /// the delivery fold reads it at projection time, so a pass outcome
+    /// recorded outside a pass moves the snapshot too.
+    outages: OutagesShared,
 }
 
 impl SyncProgress {
-    /// An unpublished fold over no accounts, signalling `surface` on `observer`.
-    pub(crate) fn new(observer: std::sync::Arc<dyn AppObserver>) -> Self {
+    /// An unpublished fold over no accounts, signalling `surface` on
+    /// `observer`, feeding `new_mail` with every commit, carrying `outages`
+    /// as the delivery state every projection reads.
+    pub(crate) fn new(
+        observer: std::sync::Arc<dyn AppObserver>,
+        new_mail: std::sync::Arc<crate::notifications::NewMailQueue>,
+        outages: OutagesShared,
+    ) -> Self {
         Self {
             cell: Surfaced::new(Surface::SyncProgress, observer),
             accounts: Mutex::new(BTreeMap::new()),
+            new_mail,
+            outages,
         }
     }
 
-    /// The current snapshot, for the host's pull.
+    /// The current snapshot, for the host's pull: the account positions and
+    /// the delivery state, one composed whole.
     pub(crate) fn snapshot(&self) -> SyncProgressSnapshot {
-        Self::project(&self.accounts.lock().expect("sync-progress mutex poisoned"))
+        self.composed(&self.accounts.lock().expect("sync-progress mutex poisoned"))
+    }
+
+    /// Republishes the composed snapshot when the delivery state moved it:
+    /// the call a pass outcome recorded outside a pass makes, so the
+    /// offline banner lands without a pass having to run.
+    pub(crate) fn republish(&self) {
+        let now = self.snapshot();
+        if now != self.cell.get() {
+            self.cell.publish(now);
+        }
     }
 
     /// Applies `change` to `account`'s fold and publishes when the snapshot moved.
@@ -65,7 +92,7 @@ impl SyncProgress {
     /// snapshot identical to the last one; the host's debounce coalesces the rest.
     fn fold(&self, account: &AccountId, change: impl FnOnce(&mut FoldedAccount)) {
         let mut accounts = self.accounts.lock().expect("sync-progress mutex poisoned");
-        let before = Self::project(&accounts);
+        let before = self.composed(&accounts);
         let entry = accounts
             .entry(account.clone())
             .or_insert_with(|| FoldedAccount {
@@ -74,15 +101,16 @@ impl SyncProgress {
                 folders_total: None,
             });
         change(entry);
-        let after = Self::project(&accounts);
+        let after = self.composed(&accounts);
         drop(accounts);
         if before != after {
             self.cell.publish(after);
         }
     }
 
-    /// Projects the fold into the snapshot a host pulls, in account order.
-    fn project(accounts: &BTreeMap<AccountId, FoldedAccount>) -> SyncProgressSnapshot {
+    /// Projects the fold beside the standing delivery state into the
+    /// snapshot a host pulls, in account order.
+    fn composed(&self, accounts: &BTreeMap<AccountId, FoldedAccount>) -> SyncProgressSnapshot {
         SyncProgressSnapshot {
             accounts: accounts
                 .iter()
@@ -94,15 +122,18 @@ impl SyncProgress {
                         .map(|total| format!("folders {} of {total}", folded.folders_done)),
                 })
                 .collect(),
+            delivery: self.outages.delivery(),
         }
     }
 }
 
 impl SyncObserver for SyncProgress {
-    /// Deliberately empty: the SP1 fold is folder-level, and a commit carries no
-    /// folder position this snapshot reports. The engine requires the method; leaving
-    /// it a no-op is the honest statement that commits do not move this surface yet.
-    fn committed(&self, _commit: &SyncCommit<'_>) {}
+    /// Forwards to the new-mail queue: this fold itself stays folder-level
+    /// (a commit carries no folder position this snapshot reports), and the
+    /// queue owns the whole message-level policy around a commit.
+    fn committed(&self, commit: &SyncCommit<'_>) {
+        self.new_mail.committed(commit);
+    }
 
     /// Starts the account's pass: its fold resets to zero of `folders`, so a second
     /// pass of the same account restarts its position rather than resuming the last.

@@ -21,7 +21,7 @@ pub use intent_compose::ComposeIntent;
 pub use intent_drafts::{CompositionId, DraftsIntent};
 pub use intent_outbox::OutboxIntent;
 pub use intent_people::{ContactDraftInput, ContactNameInput, ContactPatchInput, PeopleIntent};
-pub use intent_settings::{DavSectionInput, SettingsIntent, ThemeMode, WeekdayWire};
+pub use intent_settings::{DavSectionInput, SettingsIntent, SyncBodyCap, ThemeMode, WeekdayWire};
 
 use astra_composer::DraftBlobHandle;
 use serde::{Deserialize, Serialize};

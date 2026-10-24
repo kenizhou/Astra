@@ -9,8 +9,8 @@ use astra_ai::{AiDocumentKind, KnowledgeId};
 use astra_app::{
     AppError, AttachmentContent, AttachmentReadError, AvatarView, BriefDocumentError, CardRef,
     Chip, CompositionId, ContactDraftInput, DigestView, DocumentError, DocumentView, DraftResume,
-    ExtractionSummary, Intent, KnowledgeView, MeetingBriefView, Snippet, SplitEntry,
-    SummariseMessageError, TranslateLanguage,
+    ExtractionSummary, Intent, KnowledgeView, MeetingBriefView, NewMailBatch, PassOutcome, Snippet,
+    SplitEntry, SummariseMessageError, TranslateLanguage,
 };
 use astra_viewmodel::{
     CalendarSnapshot, ComposeKind, ComposeRequestSnapshot, DraftStatusSnapshot,
@@ -232,6 +232,29 @@ impl AppPort for FakeApp {
 
     async fn sync_added_account(&self, id: &AccountId) {
         self.synced.lock().unwrap().push(id.as_str().to_owned());
+    }
+
+    fn drain_new_mail(&self) -> NewMailBatch {
+        let batch = self.batches.lock().unwrap().pop_front().unwrap_or_default();
+        self.drained
+            .lock()
+            .unwrap()
+            .push(batch.messages.len() + batch.overflow);
+        batch
+    }
+
+    fn record_pass_outcome(&self, account: &AccountId, outcome: PassOutcome) {
+        self.outcomes
+            .lock()
+            .unwrap()
+            .push((account.as_str().to_owned(), outcome));
+    }
+
+    async fn wait_first_pass(&self, account: &AccountId) {
+        self.first_waits
+            .lock()
+            .unwrap()
+            .push(account.as_str().to_owned());
     }
 
     async fn draft_chips(&self, account: &AccountId, key: &ProviderKey) -> Vec<Chip> {

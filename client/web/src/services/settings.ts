@@ -40,6 +40,8 @@ export interface SettingsBlock {
   default_send_account?: string;
   /** Whether plugins run at all (the admin policy switch); on by default. */
   plugins_enabled?: boolean;
+  /** Whether new mail raises OS notifications; on by default. */
+  notifications_enabled?: boolean;
 }
 
 /** One account's signature assignment: what its new mail and its replies
@@ -47,6 +49,22 @@ export interface SettingsBlock {
 export interface AccountSignatures {
   new_mail?: Signature;
   reply?: Signature;
+}
+
+/**
+ * How much of a message an account keeps a warm offline copy of; crosses
+ * as a snake_case word, or a map for the byte figure.
+ */
+export type SyncBodyCap = 'off' | 'everything' | { bytes: { octets: number } };
+
+/** One account's own sync settings, the effective values the row carries. */
+export interface AccountSyncSettings {
+  /** Months of history the account syncs; zero is the whole mailbox. */
+  depth_months: number;
+  /** The body cap state. */
+  body_cap: SyncBodyCap;
+  /** The polling cadence, in minutes. */
+  poll_minutes: number;
 }
 
 /** An account's kind; crosses as a snake_case word. */
@@ -97,6 +115,8 @@ export interface AccountSettingsRow {
   crypto_error?: string;
   /** The account's signature assignment, when it holds one. */
   signatures?: AccountSignatures;
+  /** The account's own sync settings, the effective values; absent is the product defaults. */
+  sync?: AccountSyncSettings;
 }
 
 /** The About block: the version and the attributions. */
@@ -145,6 +165,7 @@ export type SettingsIntentBody =
   | { set_theme: { mode: ThemeMode } }
   | { set_clock: { twenty_four: boolean } }
   | { set_plugins_enabled: { enabled: boolean } }
+  | { set_notifications_enabled: { enabled: boolean } }
   | { set_zone: { zone: string } }
   | { set_first_day_of_week: { weekday: WeekdayWire } }
   | { set_horizon: { days: number } }
@@ -155,7 +176,15 @@ export type SettingsIntentBody =
   | { remove_account: { account: string } }
   | { set_send_account: { account: string | null } }
   | { set_signature: { account: string; reply: boolean; signature: Signature | null } }
-  | { set_crypto_method: { account: string; method: string } };
+  | { set_crypto_method: { account: string; method: string } }
+  | {
+      set_sync_settings: {
+        account: string;
+        depth_months?: number;
+        body_cap?: SyncBodyCap;
+        poll_minutes?: number;
+      };
+    };
 
 /**
  * The section constructor's omission discipline: a field the editor did
@@ -187,6 +216,10 @@ export const settingsIntents = {
   /** Set whether plugins run at all (the admin policy switch). */
   setPluginsEnabled: (enabled: boolean) => ({
     settings: { set_plugins_enabled: { enabled } },
+  }),
+  /** Set whether new mail raises OS notifications. */
+  setNotificationsEnabled: (enabled: boolean) => ({
+    settings: { set_notifications_enabled: { enabled } },
   }),
   /** Set the calendar's display zone; the core refuses an id it cannot resolve. */
   setZone: (zone: string) => ({ settings: { set_zone: { zone } } }),
@@ -228,6 +261,25 @@ export const settingsIntents = {
    *  built-in send gate's per-account switch. */
   setCryptoMethod: (account: string, method: string) => ({
     settings: { set_crypto_method: { account, method } },
+  }),
+  /**
+   * Write one account's own sync settings; each field stated is written and
+   * each omitted field crosses no key at all, exactly as the Rust arm's
+   * serde skips do, so an edit of the depth alone leaves the cap and the
+   * cadence standing.
+   */
+  setSyncSettings: (
+    account: string,
+    settings: { depth_months?: number; body_cap?: SyncBodyCap; poll_minutes?: number },
+  ) => ({
+    settings: {
+      set_sync_settings: {
+        account,
+        ...(settings.depth_months !== undefined && { depth_months: settings.depth_months }),
+        ...(settings.body_cap !== undefined && { body_cap: settings.body_cap }),
+        ...(settings.poll_minutes !== undefined && { poll_minutes: settings.poll_minutes }),
+      },
+    },
   }),
 };
 

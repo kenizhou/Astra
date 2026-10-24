@@ -70,6 +70,23 @@
 //! html), and a link round trips both ways (a good https target arriving as
 //! an anchor, a javascript: target in the sent wire degrading to plain
 //! text), each proof withdrawing both copies like every delivery proof.
+//! The gated delivery proofs (`delivery_proof`) pin the background loop's
+//! landings over the same wire: the recipient's INBOX watch, opened
+//! through the account layer's own `open_watch`, answers `Changed` for a
+//! mail submitted while the watch stands, the account's ordinary pass
+//! lands it, and the core's new-mail queue holds its notice; the poll
+//! arm's pass lands a delivered mail through the same seam beside the
+//! cadence the settings carry. The gated warm proof (`warm_proof`) runs
+//! the per-account body cap's states over the account's own passes: the
+//! off account as metadata alone, the byte cap's pass warming until the
+//! missing-body read empties, and the return to off dropping the cached
+//! sources with the reading pipeline still answering, the opened note put
+//! back to unread at the end. The gated outage proof (`outage_proof`)
+//! proves the classification over a real refused dial: a config pointing
+//! at a released loopback port (the shared harness is never stopped), two
+//! refused passes putting the only dialled account in outage with the
+//! banner answering, and the real dial's own successful pass clearing
+//! both.
 //!
 //! The gated JMAP tests (`jmap`) prove the password account end to end over
 //! the harness's plaintext JMAP origin: the dial's session snapshot, the
@@ -125,6 +142,8 @@ mod calendar_proof;
 mod composer_proof;
 #[path = "tests_live_harness/crypto_send.rs"]
 mod crypto_send;
+#[path = "tests_live_harness/delivery_proof.rs"]
+mod delivery_proof;
 #[path = "tests_live_harness/drafts.rs"]
 mod drafts;
 #[path = "tests_live_harness/folder_proof.rs"]
@@ -141,6 +160,8 @@ mod jmap;
 mod list;
 #[path = "tests_live_harness/move_to_folder.rs"]
 mod move_to_folder;
+#[path = "tests_live_harness/outage_proof.rs"]
+mod outage_proof;
 #[path = "tests_live_harness/people.rs"]
 mod people;
 #[path = "tests_live_harness/people_proof.rs"]
@@ -161,6 +182,8 @@ mod settings;
 mod settings_proof;
 #[path = "tests_live_harness/unified.rs"]
 mod unified;
+#[path = "tests_live_harness/warm_proof.rs"]
+mod warm_proof;
 
 /// The harness connection details from the environment, or `None` to skip.
 fn harness() -> Option<(String, String, String, String)> {

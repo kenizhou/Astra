@@ -27,6 +27,7 @@ mod setup;
 mod setup_choices;
 mod throttle;
 mod tls;
+mod watch;
 
 pub use autodetect::{recommend, MissReason, OauthRoutes, ServerSummary, SetupRecommendation};
 pub use config::{
@@ -62,6 +63,7 @@ pub use setup::{
 };
 pub use setup_choices::{Capability, SetupChoice};
 pub use tls::{account_tls, setup_trust_policy, CertificateException};
+pub use watch::{open_watch, Watch, WatchEvent, WatchFace};
 
 /// An error shaping an account's connection config or connecting its providers.
 #[derive(Debug, thiserror::Error)]
@@ -119,6 +121,12 @@ pub enum AccountError {
     /// The IMAP connection or login failed.
     #[error("imap: {0}")]
     Imap(#[from] provider_imap::ImapError),
+    /// A standing watch could not be opened or was lost: the engine's push
+    /// channel failed outside the refuses it maps to [`Self::Poll`]
+    /// (no `IDLE`, no headroom, no event source), so the caller reads the
+    /// failure's own class and reconnects or parks on its cadence.
+    #[error("watch: {0}")]
+    Watch(#[from] engine_provider::ProviderError),
     /// The server presented a certificate that did not verify, and this is the certificate
     /// it presented.
     ///

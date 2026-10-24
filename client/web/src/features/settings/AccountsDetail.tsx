@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The Accounts detail: one row per configured account (the address, the
 // kind, the dialled legs), each row opening its own page: the address and
-// what it is used for, the dav section editor, and Remove account behind a
-// confirmation that names the address and the destructive act it takes.
-// The removal's own failure sentence renders when it lands.
+// what it is used for, the dav section editor, the account's own sync
+// settings, and Remove account behind a confirmation that names the address
+// and the destructive act it takes. The removal's own failure sentence
+// renders when it lands.
 
 import { useState } from 'react';
 
 import { dispatch, intents } from '@/services/ipc';
 import type { AccountKind } from '@/services/ipc';
 
+import { AccountSyncEditor } from './AccountSyncEditor';
 import { DavEditor } from './DavEditor';
 import { ExpiredSignInRow, ReconnectBanner } from './GrantRefusals';
 import { useSettingsStore } from './settingsStore';
@@ -158,6 +160,10 @@ export function AccountsDetail() {
           </p>
         )}
       </div>
+      {/* The account's own sync settings: how far back mail syncs, the
+          per-message body cap, and the poll cadence, keyed by the account so
+          the custom figure's editor never carries between pages. */}
+      <AccountSyncEditor key={`sync:${row.account}`} row={row} />
       <div className="mt-2 flex flex-col gap-2 border-t border-border pt-3">
         {removing ? (
           <div

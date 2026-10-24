@@ -19,7 +19,12 @@ export const usePluginStore = create<PluginStoreState>((set) => ({
   rows: [],
 
   refresh: async () => {
-    set({ rows: await pluginList() });
+    try {
+      set({ rows: await pluginList() });
+    } catch (err) {
+      // A refused pull leaves the standing rows; the next mount retries.
+      console.error('plugins: the registry pull failed', err);
+    }
   },
 }));
 

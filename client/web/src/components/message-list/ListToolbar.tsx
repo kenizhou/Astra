@@ -6,13 +6,16 @@
 // because the core owes no filtered view of its own. A live search
 // replaces the folder's own toolbar: the result count and the depth note
 // stand where the folder name stood (a zero horizon claims no note), the
-// filter control hides (its tabs derive from the folder the search is not
-// showing), and the exit affordance clears the search back to the folder
-// view. The outbox mode keeps only the title: the queue has no filter and
-// no grouping mode.
+// note opening the settings on the accounts section where the depth is
+// set, the filter control hides (its tabs derive from the folder the
+// search is not showing), and the exit affordance clears the search back
+// to the folder view. The outbox mode keeps only the title: the queue has
+// no filter and no grouping mode.
 
 import { dispatch, intents } from '@/services/ipc';
 import type { MessageRowView, SearchState, ViewMode } from '@/services/surfaces';
+import { useSettingsStore } from '@/features/settings/settingsStore';
+import { useUiStore } from '@/stores/uiStore';
 import type { ListFilter } from './listFilter';
 
 const MODES: ReadonlyArray<{ id: ViewMode; label: string }> = [
@@ -139,11 +142,19 @@ export function ListToolbar({ folderName, viewMode, filter, filterCounts, onFilt
               {search.rows.length === 1 ? '1 result' : `${search.rows.length} results`}
             </span>
             {search.depth_months > 0 && (
-              <span className="min-w-0 truncate text-xs text-muted-foreground">
+              <button
+                type="button"
+                title="Change how far back mail syncs"
+                onClick={() => {
+                  useSettingsStore.getState().requestCategory('accounts');
+                  useUiStore.getState().setSettingsOpen(true);
+                }}
+                className="min-w-0 truncate rounded-[var(--radius-xs)] px-1 text-xs text-muted-foreground underline decoration-border underline-offset-2 transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
                 {search.depth_months === 1
                   ? 'Searched the last month'
                   : `Searched the last ${search.depth_months} months`}
-              </span>
+              </button>
             )}
           </span>
         )}

@@ -16,6 +16,8 @@ vi.mock('@/services/ipc', async (importOriginal) => ({
 }));
 
 import type { MessageRowView, SearchState } from '@/services/surfaces';
+import { useSettingsStore } from '@/features/settings/settingsStore';
+import { useUiStore } from '@/stores/uiStore';
 import { ListToolbar } from './ListToolbar';
 
 afterEach(() => {
@@ -126,6 +128,31 @@ describe('the search header', () => {
 
     expect(screen.getByText('0 results')).toBeTruthy();
     expect(screen.queryByText(/^Searched the last/)).toBeNull();
+  });
+});
+
+describe('the depth note link', () => {
+  /** A live search state with a three-month horizon. */
+  const search = (): SearchState => ({
+    query: 'compiler',
+    scope: 'all_except_trash',
+    rows: [],
+    depth_months: 3,
+  });
+
+  it('opens the settings on the accounts section from the depth note', () => {
+    renderToolbar({ search: search() });
+
+    fireEvent.click(screen.getByRole('button', { name: /Searched the last/ }));
+
+    expect(useSettingsStore.getState().requestedCategory).toBe('accounts');
+    expect(useUiStore.getState().settingsOpen).toBe(true);
+  });
+
+  it('claims no link where the search claims no horizon', () => {
+    renderToolbar({ search: { ...search(), depth_months: 0 } });
+
+    expect(screen.queryByRole('button', { name: /Searched the last/ })).toBeNull();
   });
 });
 

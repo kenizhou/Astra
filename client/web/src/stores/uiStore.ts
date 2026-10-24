@@ -9,7 +9,7 @@
 
 import { create } from 'zustand';
 
-import type { AccountSyncProgress, SyncProgressSnapshot } from '@/services/surfaces';
+import type { AccountSyncProgress, DeliveryState, SyncProgressSnapshot } from '@/services/surfaces';
 
 export type ThemeMode = 'follow_host' | 'light' | 'dark';
 
@@ -39,6 +39,9 @@ interface UiStoreState {
   engineState: EngineState;
   /** Per-account sync positions from the last sync-progress pull. */
   sync: AccountSyncProgress[];
+  /** The delivery state from the last sync-progress pull: the offline
+   *  banner's answer and the accounts in outage. */
+  delivery: DeliveryState;
   accountSetupOpen: boolean;
   /** The feature filling the shell's content row. */
   shellView: ShellView;
@@ -115,6 +118,7 @@ export const useUiStore = create<UiStoreState>((set) => ({
   themeMode: 'follow_host',
   engineState: 'starting',
   sync: [],
+  delivery: { offline_banner: false },
   accountSetupOpen: false,
   shellView: 'mail',
   agentOpen: false,
@@ -130,7 +134,8 @@ export const useUiStore = create<UiStoreState>((set) => ({
 
   markRunning: () => set({ engineState: 'running' }),
 
-  applySyncProgress: (snapshot) => set({ sync: snapshot.accounts }),
+  applySyncProgress: (snapshot) =>
+    set({ sync: snapshot.accounts, delivery: snapshot.delivery ?? { offline_banner: false } }),
 
   setAccountSetupOpen: (open) => set({ accountSetupOpen: open }),
 

@@ -154,6 +154,52 @@ describe('the General detail', () => {
   });
 });
 
+describe('the notifications switch', () => {
+  it('stands on by default, the block carrying no field', () => {
+    render(<GeneralDetail />);
+
+    expect((screen.getByRole('checkbox', { name: 'New mail notifications' }) as HTMLInputElement)
+      .checked).toBe(true);
+  });
+
+  it('reflects the persisted block, never local optimism', () => {
+    useSettingsStore.getState().applySnapshot({
+      settings: {
+        theme: 'follow_host',
+        twenty_four_clock: false,
+        zone: 'Etc/UTC',
+        first_day_of_week: 'mo',
+        horizon_days: 42,
+        quote_below: true,
+        view_mode: 'flat',
+        notifications_enabled: false,
+      },
+      accounts: [],
+      about: { version: '0.1.0' },
+    });
+    render(<GeneralDetail />);
+
+    const box = screen.getByRole('checkbox', {
+      name: 'New mail notifications',
+    }) as HTMLInputElement;
+    expect(box.checked).toBe(false);
+
+    fireEvent.click(box);
+    expect(box.checked).toBe(false);
+  });
+
+  it('writes its payload through the settings family when toggled', () => {
+    render(<GeneralDetail />);
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'New mail notifications' }));
+
+    expect(ipc.dispatch).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
+      '{"settings":{"set_notifications_enabled":{"enabled":false}}}',
+    );
+  });
+});
+
 describe('the texture control', () => {
   it('writes the texture through the appearance store from the segmented row', () => {
     render(<GeneralDetail />);

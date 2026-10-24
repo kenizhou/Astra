@@ -45,11 +45,14 @@ testable without an OS.
 ## D3: offline-first bodies
 
 After every pass, the account's in-window mail missing a body is warmed
-through the engine's batched warm verb under the account's byte cap, and
+through the engine's batched warm verb under the account's cap, and
 the cap is enforced with the engine's drop-over verb, so opens are
-instant for mail that has synced once and the store never grows past
-the cap. The cap is a per-account setting (a default, an off state for
-metadata-only accounts, and an everything state). The warm queue is
+instant for mail that has synced once and no single body exceeds the
+cap. The cap is a per-account setting (a default, an off state for
+metadata-only accounts, and an everything state). The cap bounds each
+message body, not the account's total: the engine's cap verb forgets
+individual oversized sources, and a whole-account byte total is a later
+engine surface. The warm queue is
 idempotent and resumable by the engine's own contract; the loop simply
 drives it after each pass.
 
@@ -83,6 +86,9 @@ outcomes, so the banner and badge are testable and the host stays thin.
   wake are later platform rows.
 - The warm cap counts bodies, not attachments; a message's attachments
   warm only when opened (the engine's attachment reads stay lazy).
+- The cap bounds each message body, not the account's total offline
+  footprint: the engine's drop verb is per message, and a total bound
+  needs an engine surface that does not exist yet.
 - Narrowing the depth does not prune what an earlier depth already
   stored (the prune verb stays unwired).
 - The poll cadence minimum is 15 minutes; a faster manual refresh is
