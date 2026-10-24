@@ -134,7 +134,9 @@ impl<P: Provider> App<P> {
     /// settings surface on completion, because every arm moves something the
     /// snapshot shows (a setting, an account's row, the newest error) or
     /// nothing at all when it refused, which is itself something the surface
-    /// must hear.
+    /// must hear. The one exception is the device-zone offer's dismissal
+    /// with nothing standing: an already-absent offer publishes nothing,
+    /// the snapshot being already accurate.
     pub(crate) async fn dispatch_settings(&self, intent: SettingsIntent) {
         match intent {
             SettingsIntent::Refresh => self.rebuild_settings().await,

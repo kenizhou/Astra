@@ -24,7 +24,3 @@ uuid.workspace = true
 # The analytics counts column: a JSON object of name-to-integer pairs, the
 # never-content shape the ledger's rule names.
 serde_json.workspace = true
-
-[dev-dependencies]
-# Pinning the wire words of the use-case and tier enums in the tests.
-serde_json.workspace = true
