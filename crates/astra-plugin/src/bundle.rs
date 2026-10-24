@@ -290,19 +290,33 @@ fn verify_entries(
         return Err(BundleError::MissingSignature);
     }
     // The entrypoint must be in the bundle, whether the manifest names it or
-    // the convention does.
-    let entrypoint = manifest.entrypoint.clone().unwrap_or_else(|| {
-        format!(
-            "{}{}",
-            manifest
-                .id
-                .as_str()
-                .rsplit('.')
-                .next()
-                .expect("a parsed id is never empty"),
-            std::env::consts::EXE_SUFFIX
-        )
-    });
+    // the convention does. The convention tries the id's last segment bare
+    // and with the executable suffix, whichever platform packed the bundle
+    // and whichever verifies it: a publisher's Windows tree carries the
+    // suffixed spelling and a verifier's Linux host does not, so neither
+    // side's convention may be the only one.
+    let last = manifest
+        .id
+        .as_str()
+        .rsplit('.')
+        .next()
+        .expect("a parsed id is never empty")
+        .to_owned();
+    let entrypoint = match &manifest.entrypoint {
+        Some(named) => named.clone(),
+        None => {
+            if entries.contains_key(&last) {
+                last.clone()
+            } else {
+                let suffixed = format!("{last}.exe");
+                if entries.contains_key(&suffixed) {
+                    suffixed
+                } else {
+                    return Err(BundleError::MissingEntrypoint(last));
+                }
+            }
+        }
+    };
     if !entries.contains_key(&entrypoint) {
         return Err(BundleError::MissingEntrypoint(entrypoint));
     }
