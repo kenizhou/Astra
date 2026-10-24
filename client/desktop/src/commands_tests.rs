@@ -134,6 +134,7 @@ fn the_pull_commands_return_what_the_app_published() {
             address: "user@example.test".to_owned(),
             expanded: true,
             can_edit_folders: false,
+            can_report_mail: false,
             folders: Vec::new(),
         }],
         ..Default::default()

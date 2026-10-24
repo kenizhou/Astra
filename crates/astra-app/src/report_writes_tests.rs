@@ -204,6 +204,36 @@ async fn reporting_a_thread_row_reports_every_member() {
     );
 }
 
+/// The pane row answers whether the account's provider can report its mail:
+/// the flag the row menu's Mark as spam and the verb row's Not spam gate on,
+/// the same rule the tree verbs' `can_edit_folders` follows, so a surface
+/// never offers a report the account cannot apply.
+#[tokio::test]
+async fn the_pane_row_answers_whether_the_account_can_report() {
+    let surfaces = Arc::new(Mutex::new(Vec::new()));
+    let provider = reporting(vec![inbox(), junk()], vec![inbox_mail("m1")]);
+    let app = app(vec![account("work", provider)], &surfaces);
+    app.dispatch(Intent::RefreshMail).await.unwrap();
+    let plain = {
+        let surfaces = Arc::new(Mutex::new(Vec::new()));
+        let provider = fakes::FakeProvider::with_mail(vec![inbox()], vec![inbox_mail("m1")]);
+        let app = fakes::app(vec![account("home", provider)], &surfaces);
+        app.dispatch(Intent::RefreshMail).await.unwrap();
+        app
+    };
+
+    let reporting_row = &app.mailbox_list().account_folders[0];
+    assert!(
+        reporting_row.can_report_mail,
+        "a reporting provider answers true, so the surface offers the verbs"
+    );
+    let plain_row = &plain.mailbox_list().account_folders[0];
+    assert!(
+        !plain_row.can_report_mail,
+        "a provider without the report capability answers false, so the surface hides them"
+    );
+}
+
 #[tokio::test]
 async fn a_report_on_a_provider_without_the_capability_is_refused_typed() {
     let surfaces = Arc::new(Mutex::new(Vec::new()));

@@ -345,6 +345,15 @@ pub(crate) fn account_folder_rows<P: Provider>(
                 .providers
                 .first()
                 .is_some_and(|provider| provider.connection_info().capabilities.mailbox_writes()),
+            // The pane's report verbs ride the provider's report capability,
+            // so a surface never offers a report the account cannot apply.
+            can_report_mail: account.providers.first().is_some_and(|provider| {
+                provider
+                    .connection_info()
+                    .capabilities
+                    .mail_report()
+                    .is_some()
+            }),
             folders,
         });
     }
