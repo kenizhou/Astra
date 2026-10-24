@@ -315,3 +315,104 @@ fn removing_an_account_drops_its_sync_row() {
     assert!(prefs.remove_account("acct-1"));
     assert!(prefs.sync.is_empty(), "the account's row goes with it");
 }
+
+#[test]
+fn the_platform_preferences_default_and_load_from_an_older_file() {
+    let defaults = Preferences::default();
+    assert!(!defaults.debug_enabled);
+    assert!(!defaults.analytics_consented);
+    assert_eq!(defaults.language, "en-GB");
+    assert!(!defaults.zone_offered);
+    assert!(!defaults.zone_picked);
+
+    // A document exactly as the build before the platform fields wrote it.
+    let dir = scratch("older-platform-file");
+    let path = preferences_path(&dir);
+    std::fs::write(&path, "view_mode = \"threaded\"\n").unwrap();
+    let prefs = load_preferences(&path);
+    assert_eq!(prefs.view_mode, ViewMode::Threaded);
+    assert!(!prefs.debug_enabled);
+    assert!(!prefs.analytics_consented);
+    assert_eq!(prefs.language, "en-GB");
+    assert!(!prefs.zone_offered);
+    assert!(!prefs.zone_picked);
+}
+
+#[test]
+fn the_platform_preferences_round_trip_through_the_file() {
+    let dir = scratch("platform-round-trip");
+    let path = preferences_path(&dir);
+    let prefs = Preferences {
+        debug_enabled: true,
+        analytics_consented: true,
+        language: "fr-FR".to_owned(),
+        zone_offered: true,
+        zone_picked: true,
+        ..Preferences::default()
+    };
+    save_preferences(&path, &prefs).unwrap();
+
+    let back = load_preferences(&path);
+    assert_eq!(back, prefs);
+    assert!(back.debug_enabled);
+    assert!(back.analytics_consented);
+    assert_eq!(back.language, "fr-FR");
+    assert!(back.zone_offered);
+    assert!(back.zone_picked);
+}
+
+#[test]
+fn a_default_platform_preference_leaves_the_file() {
+    let dir = scratch("platform-defaults-leave");
+    let path = preferences_path(&dir);
+
+    // A fresh file carries none of the platform keys: absent is each
+    // default, the same discipline the expansion maps follow.
+    save_preferences(&path, &Preferences::default()).unwrap();
+    let fresh = std::fs::read_to_string(&path).unwrap();
+    for key in [
+        "debug_enabled",
+        "analytics_consented",
+        "language",
+        "zone_offered",
+        "zone_picked",
+    ] {
+        assert!(!fresh.contains(key), "the default writes no entry: {fresh}");
+    }
+
+    // A value written back to its default is the unset: the file loses the
+    // key again, so the default and an explicit equal are one state.
+    let mut prefs = Preferences {
+        debug_enabled: true,
+        analytics_consented: true,
+        language: "fr-FR".to_owned(),
+        zone_offered: true,
+        zone_picked: true,
+        ..Preferences::default()
+    };
+    save_preferences(&path, &prefs).unwrap();
+    let written = std::fs::read_to_string(&path).unwrap();
+    assert!(written.contains("debug_enabled = true"));
+    assert!(written.contains("analytics_consented = true"));
+    assert!(written.contains("language = \"fr-FR\""));
+    assert!(written.contains("zone_offered = true"));
+    assert!(written.contains("zone_picked = true"));
+
+    prefs.debug_enabled = false;
+    prefs.analytics_consented = false;
+    prefs.language = "en-GB".to_owned();
+    prefs.zone_offered = false;
+    prefs.zone_picked = false;
+    save_preferences(&path, &prefs).unwrap();
+    let back = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(load_preferences(&path), Preferences::default());
+    for key in [
+        "debug_enabled",
+        "analytics_consented",
+        "language",
+        "zone_offered",
+        "zone_picked",
+    ] {
+        assert!(!back.contains(key), "the default leaves the file: {back}");
+    }
+}

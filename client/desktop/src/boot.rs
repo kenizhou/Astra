@@ -154,6 +154,11 @@ pub(crate) fn assemble_state(
         Arc::clone(&refusals),
         Arc::clone(&crypto_store),
     )));
+    // The analytics ledger beside the account store: the consented
+    // product events append to the same sqlite the AI ledgers live
+    // in, installed before the state hands anything to a command so
+    // the first event the boot records finds it standing.
+    core.install_analytics_store(Arc::clone(&ai_store));
     // The crypto store opened before the dial (above) rides the state: the
     // account-add flow and the headless dial build wrappers from it too.
     // Prime the settings snapshot: nothing republishes it until a settings
@@ -218,6 +223,8 @@ pub(crate) fn assemble_state(
         oauth,
         refusals,
         pending_mailto: std::sync::Mutex::new(None),
+        pending_share: std::sync::Mutex::new(None),
+        log_path: crate::logging::file_path(data_dir),
         runtime,
     })
 }
@@ -293,6 +300,15 @@ pub(crate) fn setup_host(app: &mut tauri::App) -> Result<(), Box<dyn std::error:
         .path()
         .app_data_dir()
         .map_err(|err| format!("the app data directory could not be resolved: {err}"))?;
+    // The file logger first, before any line the boot itself logs: the
+    // diagnostics contract holds from the first line of the run.
+    crate::logging::install(&data_dir);
+    // The window state's creation half: the persisted geometry applies
+    // here, before the event loop's first paint, so no wrong-size
+    // frame ever flashes.
+    if let Some(window) = app.get_webview_window("main") {
+        crate::window_state::restore(&window, &data_dir);
+    }
     let observer: Arc<dyn astra_app::AppObserver> = Arc::new(DebouncedObserver::new(
         ObserverBridge::new(Box::new(TauriEventSink::new(handle.clone()))),
     ));
@@ -314,7 +330,9 @@ pub(crate) fn setup_host(app: &mut tauri::App) -> Result<(), Box<dyn std::error:
     // The mailto entry's host leg: the launch link, when the process was
     // started by one, is held for the page-load drain, and the deep-link
     // and reading-pane roads are wired once the state they read stands.
+    // The share hand-off's launch files hold beside it, the sibling.
     crate::mailto::hold_launch_link(app.handle(), &mut state);
+    crate::share::hold_launch_files(&mut state);
     // The background delivery: one loop per dialled account, beside the
     // first-sync spawns the core's boot already made. Each loop joins its
     // account's first pass before its first watch, so nothing duplicates
@@ -329,6 +347,15 @@ pub(crate) fn setup_host(app: &mut tauri::App) -> Result<(), Box<dyn std::error:
     let handle = app.handle().clone();
     app.manage(state);
     crate::mailto::listen(&handle);
+
+    // The platform legs: the boot zone report (the core's offer stands
+    // on the settings snapshot before the web's first pull) and the
+    // boot's own product event.
+    let state = app.state::<AppState>();
+    crate::platform::report_boot_zone(&state);
+    state
+        .app
+        .record_analytics(&crate::platform::app_open_event(accounts));
 
     log::info!("boot: the app core is up over {accounts} account(s)");
     Ok(())

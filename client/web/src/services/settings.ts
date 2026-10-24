@@ -42,6 +42,18 @@ export interface SettingsBlock {
   plugins_enabled?: boolean;
   /** Whether new mail raises OS notifications; on by default. */
   notifications_enabled?: boolean;
+  /** Whether the log level is debug, the Diagnostics toggle; off by default,
+   *  and the logger reads it at boot, so the change lands with the next
+   *  launch. */
+  debug_enabled?: boolean;
+  /** Whether analytics consent stands, the Privacy switch; off by default,
+   *  and one click withdraws it again. */
+  analytics_consented?: boolean;
+  /** The language tag the copy and the dates follow, for example `en-GB`;
+   *  absent reads back as the default tag. */
+  language?: string;
+  /** The device-zone offer's once-latch: whether any offer was ever made. */
+  zone_offered?: boolean;
 }
 
 /** One account's signature assignment: what its new mail and its replies
@@ -130,7 +142,8 @@ export type SettingsError =
   | 'persist_failed'
   | 'zone_unresolvable'
   | 'horizon_out_of_bounds'
-  | 'remove_failed';
+  | 'remove_failed'
+  | 'zone_picked';
 
 /** The settings snapshot the surface renders after every pull. */
 export interface SettingsSnapshot {
@@ -138,6 +151,12 @@ export interface SettingsSnapshot {
   accounts?: AccountSettingsRow[];
   about: AboutBlock;
   error?: SettingsError;
+  /**
+   * The device zone the core has offered and no answer has landed for,
+   * carried verbatim as the IANA id. Absent crosses no key: no offer
+   * stands.
+   */
+  device_zone_offer?: string;
 }
 
 /**
@@ -184,7 +203,13 @@ export type SettingsIntentBody =
         body_cap?: SyncBodyCap;
         poll_minutes?: number;
       };
-    };
+    }
+  | { set_debug_enabled: { enabled: boolean } }
+  | { set_analytics_consented: { consented: boolean } }
+  | { set_language: { language: string } }
+  | { report_device_zone: { zone: string } }
+  | { accept_device_zone: { zone: string } }
+  | 'dismiss_device_zone';
 
 /**
  * The section constructor's omission discipline: a field the editor did
@@ -281,6 +306,25 @@ export const settingsIntents = {
       },
     },
   }),
+  /** Set whether the log level is debug, the Diagnostics toggle; the logger
+   *  reads the level at boot, so the change lands with the next launch. */
+  setDebugEnabled: (enabled: boolean) => ({
+    settings: { set_debug_enabled: { enabled } },
+  }),
+  /** Set whether analytics consent stands; the withdrawal is this same
+   *  write turned off. */
+  setAnalyticsConsented: (consented: boolean) => ({
+    settings: { set_analytics_consented: { consented } },
+  }),
+  /** Set the language tag the copy and the dates follow, carried verbatim. */
+  setLanguage: (language: string) => ({ settings: { set_language: { language } } }),
+  /** Report the device's resolved zone; the core validates it and decides
+   *  whether the diary's offer stands. */
+  reportDeviceZone: (zone: string) => ({ settings: { report_device_zone: { zone } } }),
+  /** Accept the standing device-zone offer into the calendar's zone. */
+  acceptDeviceZone: (zone: string) => ({ settings: { accept_device_zone: { zone } } }),
+  /** Dismiss the standing device-zone offer without accepting it. */
+  dismissDeviceZone: () => ({ settings: 'dismiss_device_zone' as const }),
 };
 
 /** Pulls the settings snapshot. */

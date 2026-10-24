@@ -12,10 +12,11 @@ use std::sync::Arc;
 
 use astra_ai::{AiDocumentKind, KnowledgeId};
 use astra_app::{
-    Account, AttachmentContent, AttachmentReadError, AvatarView, BriefDocumentError, CardRef, Chip,
-    CompositionId, ContactDraftInput, DigestView, DocumentError, DocumentView, DraftResume,
-    EmlContent, EmlReadError, ExtractionSummary, Intent, KnowledgeView, MeetingBriefView,
-    NewMailBatch, PassOutcome, Snippet, SplitEntry, SummariseMessageError, TranslateLanguage,
+    Account, AnalyticsEvent, AttachmentContent, AttachmentReadError, AvatarView,
+    BriefDocumentError, CardRef, Chip, CompositionId, ContactDraftInput, DigestView, DocumentError,
+    DocumentView, DraftResume, EmlContent, EmlReadError, ExtractionSummary, Intent, KnowledgeView,
+    MeetingBriefView, NewMailBatch, PassOutcome, Snippet, SplitEntry, SummariseMessageError,
+    TranslateLanguage,
 };
 use astra_viewmodel::{
     CalendarSnapshot, ComposeRequestSnapshot, DraftStatusSnapshot, MailboxListSnapshot, MailtoOpen,
@@ -264,6 +265,11 @@ pub(crate) trait AppPort: Send + Sync {
     /// settings signal.
     fn settings(&self) -> SettingsSnapshot;
 
+    /// Records one product analytics event through the consent-gated
+    /// recorder: the row lands in the local ledger only while consent
+    /// stands, and a host flow never fails over a declined event.
+    fn record_analytics(&self, event: &AnalyticsEvent);
+
     /// The editor's seed for one card: the stored card the reference names,
     /// rendered as the editor's input subset, or `None` when nobody stores
     /// it.
@@ -338,10 +344,18 @@ pub(crate) struct AppState {
     /// the host account store the settings rows render through.
     pub(crate) refusals: Arc<crate::oauth::grant_refusals::GrantRefusals>,
     /// The launch mailto link, when the process was started by one: the
-    /// plugin consumed the launch argument before any listener stood, so
-    /// the link is held here until the main page's load drains it into
+    /// plugin consumed the launch argument before any listener stood, so the
+    /// link is held here until the main page's load drains it into
     /// the open the web's listener hears.
     pub(crate) pending_mailto: std::sync::Mutex<Option<String>>,
+    /// The launch's shared files, when the process was started by a
+    /// share hand-off: held until the main page's load drains them
+    /// into the share channel, the mailto hold's sibling.
+    pub(crate) pending_share: std::sync::Mutex<Option<Vec<crate::share::SharedFile>>>,
+    /// The current log file's path, under the app data directory: the
+    /// boot-installed logger writes it and the diagnostics commands
+    /// read it.
+    pub(crate) log_path: std::path::PathBuf,
     /// The app's async runtime: dispatches, first syncs and blocking dials run on it.
     pub(crate) runtime: AppRuntime,
 }

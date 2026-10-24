@@ -76,6 +76,10 @@ serde_json.workspace = true
 thiserror.workspace = true
 # Diagnostic lines for the boot and dial paths; the host installs the logger.
 log.workspace = true
+# The device's own zone, resolved once at boot for the core's device-zone
+# report arm (src/platform.rs). Already in the tree through chrono, so the
+# direct edge adds no new package.
+iana-time-zone = "0.1"
 # The app's async runtime: every engine call the host drives runs on it, and
 # blocking host calls are polled on a thread of our own (src/runtime.rs). The
 # time feature drives the five second bound around one detection run; the

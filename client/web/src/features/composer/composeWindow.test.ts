@@ -50,6 +50,7 @@ import {
   readComposerParam,
   readPrefillParam,
   readResumeParam,
+  readShareParam,
 } from './composeWindow';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -121,6 +122,42 @@ describe('the prefill query param', () => {
         `?composer=compose-9&prefill=${encodeURIComponent(JSON.stringify({ from: 'work' }))}`,
       ),
     ).toBeNull();
+  });
+});
+
+describe('the share query param', () => {
+  const shares = [{ name: 'notes.txt', path: 'C:\\Users\\ada\\notes.txt' }];
+  const encodedShares = encodeURIComponent(JSON.stringify(shares));
+
+  it('reads the pending share set the URL carries', () => {
+    expect(readShareParam(`?composer=compose-9&share=${encodedShares}`)).toEqual(shares);
+  });
+
+  it('reads nothing for a plain pop-out', () => {
+    expect(readShareParam('?composer=compose-9')).toBeNull();
+    expect(readShareParam('?composer=compose-9&share=')).toBeNull();
+  });
+
+  it('refuses a share set that is not the wire shape', () => {
+    expect(
+      readShareParam(`?composer=compose-9&share=${encodeURIComponent('not json')}`),
+    ).toBeNull();
+    expect(
+      readShareParam(
+        `?composer=compose-9&share=${encodeURIComponent(JSON.stringify([{ name: 'x' }]))}`,
+      ),
+    ).toBeNull();
+    expect(
+      readShareParam(
+        `?composer=compose-9&share=${encodeURIComponent(JSON.stringify([{ path: 'C:\\x' }]))}`,
+      ),
+    ).toBeNull();
+  });
+
+  it('rides the URL after the prefill when both cross', () => {
+    expect(composerWindowUrl('compose-9', undefined, prefill, shares)).toBe(
+      `index.html?composer=compose-9&prefill=${encodedPrefill}&share=${encodedShares}`,
+    );
   });
 });
 

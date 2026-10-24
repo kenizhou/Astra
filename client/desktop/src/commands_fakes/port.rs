@@ -452,6 +452,10 @@ impl AppPort for FakeApp {
         self.settings.lock().unwrap().clone()
     }
 
+    fn record_analytics(&self, event: &astra_app::AnalyticsEvent) {
+        self.analytics.lock().unwrap().push(event.clone());
+    }
+
     async fn card_seed(&self, card: &CardRef) -> Option<ContactDraftInput> {
         self.seeded_into.lock().unwrap().push((
             card.person.get(),

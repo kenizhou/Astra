@@ -46,6 +46,12 @@ pub struct SettingsSnapshot {
     /// write that landed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<SettingsError>,
+    /// The device zone the core has offered and no answer has landed for,
+    /// carried verbatim as the IANA id. Absent crosses no key: no offer
+    /// stands, either because none was made or because the accept, the
+    /// pick, or the dismissal answered it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_zone_offer: Option<String>,
 }
 
 /// Why one settings write refused or failed, as the surface states it.
@@ -63,6 +69,9 @@ pub enum SettingsError {
     HorizonOutOfBounds,
     /// The account's removal could not be completed; nothing went.
     RemoveFailed,
+    /// The device-zone offer's acceptance refused: a zone the person
+    /// picked stands, and an accepted offer never overrides a pick.
+    ZonePicked,
 }
 
 /// The persisted settings the screen renders: the preferences document's
@@ -106,6 +115,34 @@ pub struct SettingsBlock {
     /// snapshot from a build before the field reads back on.
     #[serde(default = "default_notifications_enabled")]
     pub notifications_enabled: bool,
+    /// Whether the log level is debug, the Diagnostics toggle. Off by
+    /// default: the log runs at info until the person raises it, and the
+    /// logger reads the level at boot, so the change lands with the next
+    /// launch. Absent on a snapshot from a build before the field reads
+    /// back as off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub debug_enabled: bool,
+    /// Whether analytics consent stands, the Privacy switch. Off by
+    /// default: nothing is recorded until the person consents, and one
+    /// click withdraws it again. Absent on a snapshot from a build before
+    /// the field reads back as off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub analytics_consented: bool,
+    /// The language tag the copy and the dates follow, for example
+    /// `en-GB`. The tag carries the mechanism, not a catalogue of
+    /// translations: the picker's offered set is the surface's own
+    /// honesty, and the core holds no language list. Absent reads back as
+    /// the default tag.
+    #[serde(
+        default = "default_language",
+        skip_serializing_if = "is_default_language"
+    )]
+    pub language: String,
+    /// Whether the device-zone offer has been made, its once-latch: the
+    /// first-run offer never returns on a later launch. Absent on a
+    /// snapshot from a build before the field reads back as off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub zone_offered: bool,
 }
 
 /// The switch's default: plugins run unless the preference says otherwise.
@@ -117,6 +154,18 @@ fn default_plugins_enabled() -> bool {
 /// preference says otherwise.
 fn default_notifications_enabled() -> bool {
     true
+}
+
+/// The language preference's default: the tag the copy and the dates
+/// follow before the person names another.
+fn default_language() -> String {
+    "en-GB".to_owned()
+}
+
+/// The language preference's default, as the serialiser's omission test
+/// reads it.
+fn is_default_language(language: &str) -> bool {
+    language == default_language()
 }
 
 /// The theme the chrome renders: follow the host, or an explicit override.

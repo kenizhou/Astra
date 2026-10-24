@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The composition root: hydrate both surfaces once, mount the surface_changed,
-// agent, draft-pool, and mailto event listeners for the session, and hand the
+// agent, draft-pool, mailto, and share event listeners for the session,
+// report the device's own zone through the core's arm, and hand the
 // screen to the shell. The listener mounts are StrictMode safe: a dispose that
 // lands before the registration resolves is handled inside each mount, not
 // here. The agent listeners live at the root so approval asks land in the
 // store whether or not the panel is up, the draft-pool listener so a landed
-// pool row refreshes the reading pane's chips whether or not it is open, and
-// the mailto listener so a parsed open reaches the composer's route whatever
-// surface stands.
+// pool row refreshes the reading pane's chips whether or not it is open, the
+// mailto listener so a parsed open reaches the composer's route whatever
+// surface stands, and the share listener so a shared file hand-off reaches
+// the composer's route the same way.
 
 import { useEffect } from 'react';
 
@@ -15,7 +17,9 @@ import { AppShell } from '@/components/layout/AppShell';
 import { mountDraftPoolEvents } from '@/events/draftPoolEvents';
 import { mountAgentEvents } from '@/events/agentEvents';
 import { mountMailtoEvents } from '@/events/mailtoEvents';
+import { mountShareEvents } from '@/events/shareEvents';
 import { hydrate, mountSurfaceEvents } from '@/events/surfaceEvents';
+import { reportDeviceZone } from '@/features/settings/deviceZone';
 import { applyAppearance } from '@/services/appearance';
 import { useUiStore } from '@/stores/uiStore';
 
@@ -32,6 +36,7 @@ export default function App() {
 
   useEffect(() => {
     void hydrate();
+    reportDeviceZone();
     return mountSurfaceEvents();
   }, []);
 
@@ -40,6 +45,8 @@ export default function App() {
   useEffect(() => mountDraftPoolEvents(), []);
 
   useEffect(() => mountMailtoEvents(), []);
+
+  useEffect(() => mountShareEvents(), []);
 
   // The webview's native context menu shows nowhere: the surfaces that own
   // one render their own, and everywhere else a right-click does nothing

@@ -16,8 +16,10 @@ import {
   CalendarIcon,
   CloseIcon,
   ComposeIcon,
+  DiagnosticsIcon,
   PeopleIcon,
   PluginIcon,
+  PrivacyIcon,
   ReadingIcon,
   SettingsIcon,
   ShortcutsIcon,
@@ -30,8 +32,10 @@ import { AccountsDetail } from './AccountsDetail';
 import { AdvancedDetail } from './AdvancedDetail';
 import { CalendarDetail } from './CalendarDetail';
 import { ComposingDetail } from './ComposingDetail';
+import { DiagnosticsDetail } from './DiagnosticsDetail';
 import { GeneralDetail } from './GeneralDetail';
 import { PluginsDetail } from './PluginsDetail';
+import { PrivacyDetail } from './PrivacyDetail';
 import { ReadingDetail } from './ReadingDetail';
 import { ShortcutsDetail } from './ShortcutsDetail';
 import { useSettingsStore, type SettingsCategory } from './settingsStore';
@@ -52,25 +56,32 @@ const CATEGORIES: ReadonlyArray<{
   { id: 'accounts', label: 'Accounts', Icon: PeopleIcon },
   { id: 'plugins', label: 'Plugins', Icon: PluginIcon },
   { id: 'advanced', label: 'Advanced', Icon: AdvancedIcon },
+  { id: 'diagnostics', label: 'Diagnostics', Icon: DiagnosticsIcon },
+  { id: 'privacy', label: 'Privacy', Icon: PrivacyIcon },
   { id: 'about', label: 'About', Icon: AboutIcon },
 ];
 
 /** The settings modal over the shell. */
 export function SettingsScreen() {
   const open = useUiStore((s) => s.settingsOpen);
+  const requested = useSettingsStore((s) => s.requestedCategory);
   const [category, setCategory] = useState<SettingsCategory>('general');
   const dialogRef = useRef<HTMLDivElement>(null);
+
+  // A caller may ask for one category (the Help menu's About, a link
+  // inside another detail); the ask is spent the moment the screen takes
+  // it, whether it landed while the screen stood closed or open.
+  useEffect(() => {
+    if (requested === null) {
+      return;
+    }
+    useSettingsStore.getState().requestCategory(null);
+    setCategory(requested);
+  }, [requested]);
 
   useEffect(() => {
     if (!open) {
       return;
-    }
-    // A caller may have asked for one category (the Help menu's About); the
-    // ask is spent the moment the screen opens on it.
-    const requested = useSettingsStore.getState().requestedCategory;
-    if (requested !== null) {
-      useSettingsStore.getState().requestCategory(null);
-      setCategory(requested);
     }
     let standing = true;
     settings()
@@ -162,6 +173,8 @@ export function SettingsScreen() {
               {category === 'accounts' && <AccountsDetail />}
               {category === 'plugins' && <PluginsDetail />}
               {category === 'advanced' && <AdvancedDetail />}
+              {category === 'diagnostics' && <DiagnosticsDetail />}
+              {category === 'privacy' && <PrivacyDetail />}
               {category === 'about' && <AboutDetail />}
             </div>
           </div>

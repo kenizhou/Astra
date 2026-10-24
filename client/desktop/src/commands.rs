@@ -51,12 +51,15 @@ pub(crate) mod people;
 // The settings command surface (the snapshot pull), under the same split.
 pub(crate) mod settings;
 
+// The diagnostics (log tail, log export) and platform (default-mail) surfaces.
+pub(crate) mod diagnostics;
+pub(crate) mod platform;
+
 // The mcp and plugin surfaces (the advanced panel's seam, the registry's verbs).
 pub(crate) mod mcp;
 pub(crate) mod plugin;
 
-// The jmap add command surface (the wizard's JMAP form's password leg),
-// the attachments Save As, and the eml save, under the same split.
+// The jmap add, attachments Save As, and eml save command surfaces.
 pub(crate) mod attachments;
 pub(crate) mod eml;
 pub(crate) mod jmap;

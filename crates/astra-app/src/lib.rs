@@ -18,6 +18,7 @@ mod ai_docs;
 mod ai_replies;
 mod ai_results;
 mod ai_rules;
+mod analytics;
 mod attachments;
 mod body_warm;
 mod boot;
@@ -30,6 +31,7 @@ mod dispatch;
 mod drafts;
 mod folder_writes;
 mod gate;
+mod ids;
 mod list_rows;
 mod mail_writes;
 mod notifications;
@@ -145,6 +147,7 @@ pub use ai_rules::{
     Category, MailContext, MatchResult, RulesError, CATEGORISE_PROMPT_VERSION, COLD_JUDGE_VERSION,
     MATCH_CONTEXT_BODY_CAP, RULES_MATCH_VERSION, RULES_PROMPT_VERSION,
 };
+pub use analytics::AnalyticsEvent;
 pub use attachments::{AttachmentContent, AttachmentReadError, EmlContent, EmlReadError};
 pub use boot::{boot, BootError, SpawnedTask};
 pub use calendar::{
@@ -359,6 +362,10 @@ pub struct App<P> {
     /// The plugin message decoder: every reading open's raw source passes it
     /// before the render. `None` (the default) renders the store's own read.
     pub(crate) decoder: Option<Arc<dyn crate::decode::MessageDecoder>>,
+    /// The ledger the consented analytics events append to, installed by
+    /// the host beside the account store. `None` (the default) and the
+    /// recorder records nothing. See `analytics`.
+    analytics: Mutex<Option<Arc<astra_ai::AiStore>>>,
 }
 
 impl<P> core::fmt::Debug for App<P> {
@@ -434,6 +441,7 @@ impl<P: Provider> App<P> {
             send_gate: None,
             compose_transform: None,
             decoder: None,
+            analytics: Mutex::new(None),
         }
     }
 
@@ -485,15 +493,7 @@ impl<P: Provider> App<P> {
     // their own modules, beside the ports they install.
 }
 
-/// A unique-per-intent idempotency key under `prefix`, from the wall clock
-/// and a process counter: the one mint every write family shares, so no
-/// family carries its own copy of the recipe.
-pub(crate) fn mint_idempotency(prefix: &str) -> String {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static SEQ: AtomicU64 = AtomicU64::new(0);
-    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_nanos());
-    format!("{prefix}:{nanos}:{seq}")
-}
+/// The idempotency-key mint, split into [`ids`] for the file cap and
+/// re-exported so every write family's `crate::` path stands.
+/// [`ids`]: self::ids
+pub(crate) use ids::mint_idempotency;

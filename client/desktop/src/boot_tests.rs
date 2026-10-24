@@ -414,6 +414,17 @@ fn a_graph_dial_that_fails_skips_the_account_without_blocking_the_boot() {
 #[path = "boot_tests/graph_refusal_tests.rs"]
 mod graph_refusals;
 
+// The platform legs' boot wiring: the analytics ledger the assembly
+// installs behind the consent gate, and the boot device-zone report.
+#[path = "boot_tests/platform_legs_tests.rs"]
+mod platform_legs;
+
+// The platform batch's live proofs: the real boot's file logger
+// observed end to end in a process of its own, and the export over the
+// file the real launch wrote.
+#[path = "boot_tests/platform_proofs.rs"]
+mod platform_proofs;
+
 // The google account's boot half: the stored document's dial, its dead
 // grant's row, and the folder binder's google arm.
 #[path = "boot_tests/google_boot_tests.rs"]

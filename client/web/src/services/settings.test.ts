@@ -32,7 +32,12 @@ describe('the settings snapshot wire', () => {
       plugins_enabled: true,
       notifications_enabled: true,
       default_calendar: { account: 'work', key: 'cal-1' },
+      language: 'fr-FR',
+      debug_enabled: true,
+      analytics_consented: true,
+      zone_offered: true,
     });
+    expect(snapshot.device_zone_offer).toBe('Asia/Shanghai');
     expect(snapshot.accounts).toEqual([
       {
         account: 'work',
@@ -229,6 +234,59 @@ describe('the settings intent wire', () => {
     expect(JSON.stringify(settingsIntents.setSignature('work', true, null))).toBe(
       '{"settings":{"set_signature":{"account":"work","reply":true,"signature":null}}}',
     );
+  });
+});
+
+// The platform arms the Diagnostics, Privacy, language, and device-zone
+// surfaces ride, each pinned against its exact wire in
+// protocol_settings_tests.rs's the_platform_arms_cross_their_exact_wires.
+describe('the platform settings arms', () => {
+  it('crosses the debug toggle and the analytics consent', () => {
+    expect(JSON.stringify(settingsIntents.setDebugEnabled(true))).toBe(
+      '{"settings":{"set_debug_enabled":{"enabled":true}}}',
+    );
+    expect(JSON.stringify(settingsIntents.setAnalyticsConsented(true))).toBe(
+      '{"settings":{"set_analytics_consented":{"consented":true}}}',
+    );
+    expect(JSON.stringify(settingsIntents.setAnalyticsConsented(false))).toBe(
+      '{"settings":{"set_analytics_consented":{"consented":false}}}',
+    );
+  });
+
+  it('crosses the language tag verbatim', () => {
+    expect(JSON.stringify(settingsIntents.setLanguage('fr-FR'))).toBe(
+      '{"settings":{"set_language":{"language":"fr-FR"}}}',
+    );
+  });
+
+  it('crosses the device-zone report, acceptance, and dismissal', () => {
+    expect(JSON.stringify(settingsIntents.reportDeviceZone('Europe/Berlin'))).toBe(
+      '{"settings":{"report_device_zone":{"zone":"Europe/Berlin"}}}',
+    );
+    expect(JSON.stringify(settingsIntents.acceptDeviceZone('Europe/Berlin'))).toBe(
+      '{"settings":{"accept_device_zone":{"zone":"Europe/Berlin"}}}',
+    );
+    expect(JSON.stringify(settingsIntents.dismissDeviceZone())).toBe(
+      '{"settings":"dismiss_device_zone"}',
+    );
+  });
+
+  it('carries the device zone offer and the platform block fields additively', () => {
+    const snapshot = JSON.parse(
+      '{"settings":{"theme":"follow_host","twenty_four_clock":false,"zone":"Etc/UTC","first_day_of_week":"mo","horizon_days":42,"quote_below":true,"view_mode":"flat","language":"fr-FR","debug_enabled":true,"analytics_consented":true,"zone_offered":true},"about":{"version":""},"device_zone_offer":"Asia/Shanghai"}',
+    ) as SettingsSnapshot;
+    expect(snapshot.device_zone_offer).toBe('Asia/Shanghai');
+    expect(snapshot.settings.language).toBe('fr-FR');
+    expect(snapshot.settings.debug_enabled).toBe(true);
+    expect(snapshot.settings.analytics_consented).toBe(true);
+    expect(snapshot.settings.zone_offered).toBe(true);
+  });
+
+  it('carries the zone picked refusal word beside the older words', () => {
+    const snapshot = JSON.parse(
+      '{"settings":{"theme":"follow_host","twenty_four_clock":false,"zone":"Etc/UTC","first_day_of_week":"mo","horizon_days":42,"quote_below":true,"view_mode":"flat"},"about":{"version":""},"error":"zone_picked"}',
+    ) as SettingsSnapshot;
+    expect(snapshot.error).toBe('zone_picked');
   });
 });
 

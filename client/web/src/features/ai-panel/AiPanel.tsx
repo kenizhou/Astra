@@ -12,6 +12,7 @@ import { useEffect } from 'react';
 import { DAYS_MAX, DAYS_MIN, useAiPanelStore } from './aiPanelStore';
 import { AiIcon, CloseIcon } from '@/components/icons';
 import { RAIL_BUTTON_CLASS, railButtonColours } from '@/components/layout/railButton';
+import { shortMonthName } from '@/features/settings/language';
 import type { DocumentKind } from '@/services/ai';
 import { useAccountStore } from '@/stores/accountStore';
 import { useFolderStore } from '@/stores/folderStore';
@@ -22,26 +23,11 @@ const TABS: ReadonlyArray<{ id: DocumentKind; label: string }> = [
   { id: 'report', label: 'Report' },
 ];
 
-/** The month abbreviations the period label uses, in UTC order. */
-const MONTHS = [
-  'Jan',
-  'Feb',
-  'Mar',
-  'Apr',
-  'May',
-  'Jun',
-  'Jul',
-  'Aug',
-  'Sep',
-  'Oct',
-  'Nov',
-  'Dec',
-] as const;
-
-/** One period bound as the label writes it: day, month, and year. */
+/** One period bound as the label writes it: day, month, and year, the
+ *  month's short name in the standing language. */
 function dayWord(stamp: number): string {
   const day = new Date(stamp * 1000);
-  return `${day.getUTCDate()} ${MONTHS[day.getUTCMonth()]} ${day.getUTCFullYear()}`;
+  return `${day.getUTCDate()} ${shortMonthName(day.getUTCMonth())} ${day.getUTCFullYear()}`;
 }
 
 /** The stored window as the label shows it: whole UTC days, start to end. */

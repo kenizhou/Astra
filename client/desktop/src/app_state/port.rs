@@ -6,10 +6,11 @@
 
 use astra_ai::{AiDocumentKind, KnowledgeId};
 use astra_app::{
-    App, AttachmentContent, AttachmentReadError, AvatarView, BriefDocumentError, CardRef, Chip,
-    CompositionId, ContactDraftInput, DigestView, DocumentError, DocumentView, DraftResume,
-    EmlContent, EmlReadError, ExtractionSummary, Intent, KnowledgeView, MeetingBriefView,
-    NewMailBatch, PassOutcome, Snippet, SplitEntry, SummariseMessageError, TranslateLanguage,
+    AnalyticsEvent, App, AttachmentContent, AttachmentReadError, AvatarView, BriefDocumentError,
+    CardRef, Chip, CompositionId, ContactDraftInput, DigestView, DocumentError, DocumentView,
+    DraftResume, EmlContent, EmlReadError, ExtractionSummary, Intent, KnowledgeView,
+    MeetingBriefView, NewMailBatch, PassOutcome, Snippet, SplitEntry, SummariseMessageError,
+    TranslateLanguage,
 };
 use astra_viewmodel::{
     CalendarSnapshot, ComposeRequestSnapshot, DraftStatusSnapshot, MailboxListSnapshot, MailtoOpen,
@@ -182,6 +183,10 @@ impl AppPort for App<HostProvider> {
 
     fn settings(&self) -> SettingsSnapshot {
         App::settings(self)
+    }
+
+    fn record_analytics(&self, event: &AnalyticsEvent) {
+        App::record_analytics(self, event);
     }
 
     async fn card_seed(&self, card: &CardRef) -> Option<ContactDraftInput> {

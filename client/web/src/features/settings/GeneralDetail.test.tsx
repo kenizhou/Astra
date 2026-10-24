@@ -5,24 +5,44 @@
 // failure's sentence under the controls. The appearance choices (accent,
 // contrast, font size) are device-local: they write localStorage and the
 // document-root attributes and dispatch no intent.
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const ipc = vi.hoisted(() => ({ dispatch: vi.fn() }));
+const platform = vi.hoisted(() => ({ registerDefaultMail: vi.fn() }));
 
 vi.mock('@/services/ipc', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   dispatch: ipc.dispatch,
 }));
+vi.mock('@/services/platform', () => ({
+  registerDefaultMail: platform.registerDefaultMail,
+}));
 
 import { GeneralDetail } from './GeneralDetail';
 import { useSettingsStore } from './settingsStore';
 import { useAppearanceStore } from '@/services/appearance';
+import { useAccountStore } from '@/stores/accountStore';
 
 beforeEach(() => {
   ipc.dispatch.mockReset();
   ipc.dispatch.mockResolvedValue(undefined);
+  platform.registerDefaultMail.mockReset();
+  platform.registerDefaultMail.mockResolvedValue('registered');
   localStorage.clear();
+  act(() => {
+    useAccountStore.getState().applySnapshot({
+      account_folders: [
+        {
+          account_id: 'work',
+          display_name: 'Ada',
+          address: 'ada@example.test',
+          expanded: false,
+          folders: [],
+        },
+      ],
+    });
+  });
   const root = document.documentElement;
   delete root.dataset.skin;
   delete root.dataset.contrast;
@@ -246,6 +266,74 @@ describe('the density control', () => {
 
     expect(screen.getByRole('button', { name: 'Compact' }).getAttribute('aria-pressed')).toBe('true');
     expect(screen.getByRole('button', { name: 'Comfortable' }).getAttribute('aria-pressed')).toBe('false');
+  });
+});
+
+describe('the language picker', () => {
+  it('offers the one catalogue that ships and follows the persisted tag', () => {
+    render(<GeneralDetail />);
+
+    const picker = screen.getByLabelText('Language') as HTMLSelectElement;
+    expect(Array.from(picker.options).map((option) => option.value)).toEqual(['en-GB']);
+    expect(picker.value).toBe('en-GB');
+  });
+
+  it('dispatches the language arm on a choice', () => {
+    render(<GeneralDetail />);
+
+    fireEvent.change(screen.getByLabelText('Language'), { target: { value: 'en-GB' } });
+
+    expect(ipc.dispatch).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
+      '{"settings":{"set_language":{"language":"en-GB"}}}',
+    );
+  });
+
+  it('states honestly what follows the tag today', () => {
+    render(<GeneralDetail />);
+
+    expect(
+      screen.getByText('Dates and the first localised surfaces follow it today.'),
+    ).toBeTruthy();
+  });
+});
+
+describe('the default-mail setting', () => {
+  it('re-asserts the registration through the host verb', async () => {
+    render(<GeneralDetail />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Make Astra Mail the default mail app' }));
+
+    await waitFor(() => expect(platform.registerDefaultMail).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText(/is the default mail app/)).toBeTruthy();
+    expect(ipc.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('surfaces an already-standing registration', async () => {
+    platform.registerDefaultMail.mockResolvedValue('already_default');
+    render(<GeneralDetail />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Make Astra Mail the default mail app' }));
+
+    expect(await screen.findByText(/already/)).toBeTruthy();
+  });
+
+  it('surfaces a refusal and hides the row when no account stands', async () => {
+    platform.registerDefaultMail.mockResolvedValue({ failed: { reason: 'the registry refused' } });
+    render(<GeneralDetail />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Make Astra Mail the default mail app' }));
+    expect(await screen.findByText(/the registry refused/)).toBeTruthy();
+
+    cleanup();
+    act(() => {
+      useAccountStore.getState().applySnapshot({ account_folders: [] });
+    });
+    render(<GeneralDetail />);
+
+    expect(
+      screen.queryByRole('button', { name: 'Make Astra Mail the default mail app' }),
+    ).toBeNull();
   });
 });
 

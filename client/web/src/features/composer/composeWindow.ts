@@ -19,6 +19,7 @@ import {
   type MailtoOpen,
 } from './composerStore';
 import { editorToDocument } from './documentWire';
+import type { SharedFile } from './shareOpen';
 
 /** The query parameter a composer window's URL carries its composition id in. */
 const COMPOSER_PARAM = 'composer';
@@ -28,6 +29,9 @@ const RESUME_PARAM = 'resume';
 
 /** The query parameter a mailto window carries its prefill in, encoded. */
 const PREFILL_PARAM = 'prefill';
+
+/** The query parameter a share window carries its pending set in, encoded. */
+const SHARE_PARAM = 'share';
 
 /** The composition id a composer window's URL names; null for the main window. */
 export function readComposerParam(search: string): CompositionId | null {
@@ -70,23 +74,63 @@ export function readPrefillParam(search: string): MailtoOpen | null {
 }
 
 /**
+ * The pending share set a share window opens with, decoded off its URL;
+ * null for a plain pop-out and for anything the wire would not recognise,
+ * so a mangled copy opens blank rather than half-seeded.
+ */
+export function readShareParam(search: string): SharedFile[] | null {
+  const raw = new URLSearchParams(search).get(SHARE_PARAM);
+  if (raw === null || raw === '') {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed)) {
+    return null;
+  }
+  const files = parsed as unknown[];
+  if (
+    !files.every(
+      (file) =>
+        typeof file === 'object' &&
+        file !== null &&
+        typeof (file as Record<string, unknown>).name === 'string' &&
+        typeof (file as Record<string, unknown>).path === 'string',
+    )
+  ) {
+    return null;
+  }
+  return parsed as SharedFile[];
+}
+
+/**
  * The URL a composer window loads: the bundle with the composition id, the
- * resume marker when the dock's draft transfers, and the prefill when a
- * mailto link opened the window.
+ * resume marker when the dock's draft transfers, the prefill when a
+ * mailto link opened the window, and the pending share set when a share
+ * hand-off opened it.
  */
 export function composerWindowUrl(
   composition: CompositionId,
   resumeAccount?: string,
   prefill?: MailtoOpen,
+  shares?: SharedFile[],
 ): string {
   const base = `index.html?${COMPOSER_PARAM}=${encodeURIComponent(composition)}`;
   const withResume =
     resumeAccount === undefined
       ? base
       : `${base}&${RESUME_PARAM}=${encodeURIComponent(resumeAccount)}`;
-  return prefill === undefined
-    ? withResume
-    : `${withResume}&${PREFILL_PARAM}=${encodeURIComponent(JSON.stringify(prefill))}`;
+  const withPrefill =
+    prefill === undefined
+      ? withResume
+      : `${withResume}&${PREFILL_PARAM}=${encodeURIComponent(JSON.stringify(prefill))}`;
+  return shares === undefined
+    ? withPrefill
+    : `${withPrefill}&${SHARE_PARAM}=${encodeURIComponent(JSON.stringify(shares))}`;
 }
 
 /** The window label a composition's pop-out takes, under the composer-* capability. */
@@ -108,10 +152,11 @@ export async function openComposerWindow(
   title: string,
   resumeAccount?: string,
   prefill?: MailtoOpen,
+  shares?: SharedFile[],
 ): Promise<void> {
   const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
   const webview = new WebviewWindow(composerWindowLabel(composition), {
-    url: composerWindowUrl(composition, resumeAccount, prefill),
+    url: composerWindowUrl(composition, resumeAccount, prefill, shares),
     title,
     width: 720,
     height: 640,

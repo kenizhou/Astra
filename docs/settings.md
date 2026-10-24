@@ -22,7 +22,7 @@ row that renders nothing invites a support answer nobody can give.
 
 | # | Category | What lives in it |
 |---|---|---|
-| 1 | **General** | Appearance (Follow host, Light, Dark) · Clock (24-hour on, 12-hour off) · New mail notifications (on by default) |
+| 1 | **General** | Appearance (Follow host, Light, Dark) · Clock (24-hour on, 12-hour off) · New mail notifications (on by default) · Language (the mechanism, one catalogue today, per timestamps.md) · Default mail app (the re-assertion row, per os-integration.md) |
 | 2 | **Calendar** | Display zone · First day of the week · Horizon · Default calendar |
 | 3 | **Reading** | Conversation grouping (flat or threaded) · Swipe actions (one pick per direction, held device-local) |
 | 4 | **Composing** | Quote style (the quoted original below or above the reply) · Default send account (the app-level account the new-message button and the mailto entry open from) · Signatures (rich text, per-account new mail and reply slots, per signatures.md) |
@@ -30,7 +30,9 @@ row that renders nothing invites a support answer nobody can give.
 | 6 | **Accounts** | Every configured account, each opening its own page: the dav editor, the crypto method, and the account's own sync settings |
 | 7 | **Plugins** | Every discovered plugin with its lifecycle, granted permissions, and the enable/disable verb; activated plugins' declared settings sections below |
 | 8 | **Advanced** | AI assistant access (the MCP server): the on/off toggle, the per-account allowlist, the client-config snippet |
-| 9 | **About** | The version and the attributions, from the core, not the web's guess |
+| 9 | **Diagnostics** | The log tail viewer · Copy for support · Export · Debug logging (the next-launch wording, per logging.md) |
+| 10 | **Privacy** | The plain statement (what stays on the device, what the AI features send, what plugins may ask for) · Product analytics (the consent switch, per analytics.md) · The plugin registry link |
+| 11 | **About** | The version and the attributions, from the core, not the web's guess |
 
 **Every control that dispatches an intent reflects the persisted truth,
 never local optimism.** A change dispatches its intent and the control
@@ -324,7 +326,7 @@ never the history.
 
 | Surface | Ships |
 |---|---|
-| Desktop | The settings modal from the title strip's gear: the categories above, each control persisting before it answers; the accounts page with the dav editor, the crypto method, the per-account sync section, and the confirmed removal; the General page's notifications switch the delivery bridge reads; the Advanced page with the AI assistant access panel (host-side toggle, allowlist, client-config snippet; off and empty at every boot); the theme and clock applying across the chrome; the zone, first day, horizon, default calendar, grouping, and quote style consumed by the diary, the create dialog, the list, and the composer; the per-account sync settings consumed by the pass window, the warm-body cap, the poll cadence, and the search depth |
+| Desktop | The settings modal from the title strip's gear: the categories above, each control persisting before it answers; the accounts page with the dav editor, the crypto method, the per-account sync section, and the confirmed removal; the General page's notifications switch the delivery bridge reads, its language picker driving the dates, and its default-mail re-assertion; the Diagnostics page (viewer, copy, export, the debug toggle) and the Privacy page (the statement, the analytics switch, the plugin registry link); the Advanced page with the AI assistant access panel (host-side toggle, allowlist, client-config snippet; off and empty at every boot); the theme and clock applying across the chrome; the zone, first day, horizon, default calendar, grouping, and quote style consumed by the diary, the create dialog, the list, and the composer; the per-account sync settings consumed by the pass window, the warm-body cap, the poll cadence, and the search depth |
 
 The live proofs: the gated harness suite drives the seam end to end over
 a scratch config document that mirrors the host store's merge rule and
@@ -343,14 +345,14 @@ seeded artefact is withdrawn at the end.
 
 ## Known gaps
 
-- **The categories that do not ship, by name**: the Allodia account,
-  Notifications (its new-mail switch ships in General; the category
-  mail-calendar gives it stays absent), Privacy, and Diagnostics are
-  absent, and so are the entries inside shipped categories that
-  mail-calendar carries: the app language and the default mail app
-  (General) and the reset local database
-  (Advanced, whose MCP panel does ship). Each arrives with the slice
-  that implements it, in the slot the taxonomy gives it.
+- **The categories that do not ship, by name**: the Allodia account
+  and Notifications (its new-mail switch ships in General; the category
+  mail-calendar gives it stays absent) are absent, and so is the entry
+  inside a shipped category that mail-calendar carries: the reset local
+  database (Advanced, whose MCP panel does ship). Each arrives with the
+  slice that implements it, in the slot the taxonomy gives it. Privacy
+  and Diagnostics now ship, as do the app language and the
+  default-mail re-assertion in General.
 - **The client-config snippet names a relay the bundle does not yet
   stage.** The snippet derives the relay binary beside the app, but the
   desktop bundle carries no `astra-mcp-relay` beside the executable
@@ -360,8 +362,9 @@ seeded artefact is withdrawn at the end.
 - **The gear is a text button.** The title strip's entry reads Settings
   and draws no glyph; the icon set arrives with the chrome pass.
 - **The work week's first day is an explicit picker, not a locale
-  default.** Nothing follows the app locale, because the app ships no
-  language setting yet; the weekday labels read English until then.
+  default.** The language setting drives words and dates (timestamps.md)
+  but not the week's anchor; the first day stays a pick the person
+  makes, never an inference from the tag.
 - **The per-message quote override has no web control.** The app default
   ships in Composing; mail-calendar's per-message opt-in is not offered
   in the composer.
@@ -372,6 +375,9 @@ seeded artefact is withdrawn at the end.
 - **The zone picker offers the browser's own list**, so an engine that
   supports a zone the browser does not list can be set by a hand-edited
   file but not through the screen.
-- **No device-zone prompt.** A device whose zone changes is not offered
-  the change; time-zone-aware display with the prompt is the ported row
-  that stays open.
+- **The device-zone offer is once per zone value per process.** The
+  boot resolves the OS zone once and the diary offers it (skippable,
+  never over a picked zone); the OS exposes no change notification a
+  windowless host piece can ride, so no while-running watch stands.
+  Time-zone-aware display for the message timestamps stays the open
+  half, per timestamps.md.

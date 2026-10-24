@@ -24,6 +24,14 @@ export function sendErrorMessage(err: unknown): string {
 /** A reply whose original arrived with no Message-ID: nothing to thread under. */
 export const REPLY_WITHOUT_ORIGIN = 'The original message has no Message-ID to reply under';
 
+/**
+ * A send refused while a shared file stands pending: the byte-staging read
+ * seam is the row's named remainder, and a message that names an
+ * attachment it does not carry would be a lie.
+ */
+export const SHARES_NOT_ATTACHED =
+  'Shared files cannot be attached yet. Remove them to send this message.';
+
 /** The state the submit path reads at click time. */
 export interface SubmitState {
   request: CompositionRequest | null;

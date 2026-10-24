@@ -5,8 +5,8 @@
 // that picking an event opens. Clicking an event picks it for the dock; the
 // dock's Edit opens the event editor, and a drag over empty time opens the
 // editor prefilled with the dragged slot. The write banners, the
-// reply-delivery prompt, the briefs panel, and the refresh on entry and on
-// focus regain ride the pane as before.
+// reply-delivery prompt, the briefs panel, the device-zone offer prompt,
+// and the refresh on entry and on focus regain ride the pane as before.
 
 import { useEffect, useState } from 'react';
 
@@ -22,6 +22,7 @@ import { BriefsPanel } from './BriefsPanel';
 import { CalendarRail } from './CalendarRail';
 import { CalendarToolbar } from './CalendarToolbar';
 import { DayGrid } from './DayGrid';
+import { DeviceZoneOffer } from './DeviceZoneOffer';
 import { EventDetailDock } from './EventDetailDock';
 import { EventDialog } from './EventDialog';
 import { MonthGrid } from './MonthGrid';
@@ -134,6 +135,7 @@ export function CalendarPane() {
       }}
     >
       <CalendarToolbar onCreate={() => openCreate(null)} onBriefs={() => setBriefsOpen(true)} />
+      <DeviceZoneOffer />
       <WriteBanners />
       <div className="min-h-0 flex-1 p-1">
         <Group

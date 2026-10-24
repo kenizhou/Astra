@@ -503,6 +503,7 @@ dependencies = [
  "engine-provider",
  "engine-tls",
  "hickory-resolver",
+ "iana-time-zone",
  "keyring",
  "log",
  "reqwest",
