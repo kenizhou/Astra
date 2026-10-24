@@ -105,22 +105,57 @@ fn launch(data_dir: &Path, flip_debug: bool) {
 
 /// Spawns this test binary as one launch over `data_dir` and waits for
 /// it, failing with the child's own output when the launch did not
-/// answer zero.
+/// answer zero or did not settle inside the bound. The child boots the
+/// whole real assembly, more work than any other spawned test child,
+/// so a wedged launch must fail the proof red rather than hanging the
+/// run forever.
 fn spawn_launch(data_dir: &Path, flip: bool) {
+    /// How long one launch may take before the proof kills it.
+    const LAUNCH_BOUND: std::time::Duration = std::time::Duration::from_secs(120);
+
     let exe = std::env::current_exe().expect("the test binary's path resolves");
     let mut command = std::process::Command::new(exe);
     command
         .args(["--exact", PROOF_TEST, "--nocapture", "--test-threads=1"])
-        .env(LAUNCH_DIR, data_dir);
+        .env(LAUNCH_DIR, data_dir)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
     if flip {
         command.env(LAUNCH_FLIP, "1");
     }
-    let output = command.output().expect("the launch process spawns");
+    let mut child = command.spawn().expect("the launch process spawns");
+    let deadline = std::time::Instant::now() + LAUNCH_BOUND;
+    let status = loop {
+        match child.try_wait().expect("the launch stays askable") {
+            Some(status) => break status,
+            None if std::time::Instant::now() >= deadline => {
+                child.kill().expect("the wedged launch is killed");
+                child.wait().expect("the killed launch is reaped");
+                panic!(
+                    "the launch over {} did not settle inside {}:\n",
+                    data_dir.display(),
+                    LAUNCH_BOUND.as_secs(),
+                );
+            }
+            None => std::thread::sleep(std::time::Duration::from_millis(100)),
+        }
+    };
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    if let Some(mut pipe) = child.stdout.take() {
+        use std::io::Read;
+        let _ = pipe.read_to_string(&mut stdout);
+    }
+    if let Some(mut pipe) = child.stderr.take() {
+        use std::io::Read;
+        let _ = pipe.read_to_string(&mut stderr);
+    }
     assert!(
-        output.status.success(),
-        "the launch over {} did not answer zero:\n{}",
+        status.success(),
+        "the launch over {} did not answer zero:\n{}\n{}",
         data_dir.display(),
-        String::from_utf8_lossy(&output.stderr),
+        stdout,
+        stderr,
     );
 }
 
