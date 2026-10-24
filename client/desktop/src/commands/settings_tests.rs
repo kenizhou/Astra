@@ -35,6 +35,10 @@ fn the_settings_pull_round_trips_the_published_snapshot() {
             default_send_account: None,
             plugins_enabled: true,
             notifications_enabled: true,
+            debug_enabled: false,
+            analytics_consented: false,
+            language: "en-GB".to_owned(),
+            zone_offered: false,
         },
         accounts: vec![AccountSettingsRow {
             account: account(),
@@ -63,6 +67,7 @@ fn the_settings_pull_round_trips_the_published_snapshot() {
             attributions: vec!["email-calendar-sync-engine".to_owned()],
         },
         error: None,
+        device_zone_offer: None,
     };
     *app.settings.lock().unwrap() = snapshot.clone();
     let state = state("settings-pull", Arc::clone(&app), FakeStore::accepting());

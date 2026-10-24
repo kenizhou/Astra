@@ -14,7 +14,7 @@
 //! 0006, the knowledge entries of 0007, the snippet library of 0008, the
 //! text cache of 0009, and the AI documents of 0010, and the MCP
 //! tool-call
-//! ledger of 0011), the
+//! ledger of 0011, and the analytics events of 0012), the
 //! prompt-injection
 //! hardening wrapper ([`tag_untrusted`]), the active data loss
 //! prevention gate ([`DlpPolicy`] with its [`redact`] and [`apply`]),
@@ -28,6 +28,7 @@
 
 mod ai_documents;
 mod ai_results;
+mod analytics_events;
 mod chip_dismissals;
 mod correlation;
 mod dlp;
@@ -80,6 +81,7 @@ mod use_case_tests;
 
 pub use ai_documents::{AiDocumentKind, AiDocumentRow, NewAiDocument};
 pub use ai_results::{AiResultRow, NewAiResult};
+pub use analytics_events::{AnalyticsEventRow, NewAnalyticsEvent};
 pub use correlation::CorrelationId;
 pub use dlp::{apply, redact, DlpError, DlpOutcome, DlpPolicy};
 pub use draft_pool::{DraftPoolRow, NewDraftPoolRow, StyleProfileRow};

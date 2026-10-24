@@ -271,6 +271,43 @@ fn a_malformed_account_id_is_refused_on_the_wire() {
 }
 
 #[test]
+fn the_platform_arms_cross_their_exact_wires() {
+    // The Diagnostics toggle, the Privacy switch, the language tag, and
+    // the device-zone family: each pinned against its exact wire, so a
+    // renamed word can never slip out silently.
+    round_trips(
+        &Intent::Settings(SettingsIntent::SetDebugEnabled { enabled: true }),
+        r#"{"settings":{"set_debug_enabled":{"enabled":true}}}"#,
+    );
+    round_trips(
+        &Intent::Settings(SettingsIntent::SetAnalyticsConsented { consented: true }),
+        r#"{"settings":{"set_analytics_consented":{"consented":true}}}"#,
+    );
+    round_trips(
+        &Intent::Settings(SettingsIntent::SetLanguage {
+            language: "fr-FR".to_owned(),
+        }),
+        r#"{"settings":{"set_language":{"language":"fr-FR"}}}"#,
+    );
+    round_trips(
+        &Intent::Settings(SettingsIntent::ReportDeviceZone {
+            zone: "Europe/Berlin".to_owned(),
+        }),
+        r#"{"settings":{"report_device_zone":{"zone":"Europe/Berlin"}}}"#,
+    );
+    round_trips(
+        &Intent::Settings(SettingsIntent::AcceptDeviceZone {
+            zone: "Europe/Berlin".to_owned(),
+        }),
+        r#"{"settings":{"accept_device_zone":{"zone":"Europe/Berlin"}}}"#,
+    );
+    round_trips(
+        &Intent::Settings(SettingsIntent::DismissDeviceZone),
+        r#"{"settings":"dismiss_device_zone"}"#,
+    );
+}
+
+#[test]
 fn the_settings_surface_crosses_as_its_word() {
     assert_eq!(
         serde_json::to_string(&Surface::Settings).unwrap(),

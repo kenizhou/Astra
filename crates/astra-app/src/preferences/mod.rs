@@ -133,10 +133,45 @@ pub struct Preferences {
     #[serde(default = "default_true")]
     pub notifications_enabled: bool,
     /// Each account's own sync settings, by account id; the file holds only
-    /// the fields the user set, and an absent row or field falls back to the
-    /// product defaults.
+    /// the fields the user set, and an absent row or field falls back to
+    /// the product defaults.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub sync: BTreeMap<engine_api::AccountId, AccountSyncSettings>,
+    /// Whether the log level is debug, the Diagnostics toggle. Off by
+    /// default: the log runs at info until the person raises it, and the
+    /// logger reads the level at boot, so the change lands with the next
+    /// launch. A default (off) leaves the file, the same canonicalisation
+    /// the expansion maps follow.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub debug_enabled: bool,
+    /// Whether analytics consent stands, the Privacy switch. Off by
+    /// default: nothing is recorded until the person consents, and the
+    /// one-click withdrawal is this same write turned off. A default (off)
+    /// leaves the file.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub analytics_consented: bool,
+    /// The language tag the copy and the dates follow, for example
+    /// `en-GB`. The tag carries the mechanism, not a catalogue of
+    /// translations: the picker's offered set is the surface's own
+    /// honesty, and the core holds no language list. The default tag
+    /// leaves the file.
+    #[serde(
+        default = "default_language",
+        skip_serializing_if = "is_default_language"
+    )]
+    pub language: String,
+    /// Whether the device-zone offer has ever been made, its once-latch:
+    /// set when an offer stands, never cleared, so the first-run offer
+    /// never returns on a later launch. A default (off) leaves the file.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub zone_offered: bool,
+    /// Whether the standing zone was picked, the marker the device-zone
+    /// offer defers to: a picked zone stands, the offer is not even made,
+    /// and an accepted offer never overrides one. Set by the zone picker's
+    /// own write, never by the offer's acceptance. A default (off) leaves
+    /// the file.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub zone_picked: bool,
 }
 
 /// The shipped defaults, which the serde field defaults and a first launch
@@ -161,6 +196,11 @@ impl Default for Preferences {
             plugins_enabled: true,
             notifications_enabled: true,
             sync: BTreeMap::new(),
+            debug_enabled: false,
+            analytics_consented: false,
+            language: default_language(),
+            zone_offered: false,
+            zone_picked: false,
         }
     }
 }
@@ -168,6 +208,18 @@ impl Default for Preferences {
 /// The calendar's display zone until the user picks one.
 fn default_zone() -> String {
     "Etc/UTC".to_owned()
+}
+
+/// The language preference's default: the tag the copy and the dates
+/// follow before the person names another.
+fn default_language() -> String {
+    "en-GB".to_owned()
+}
+
+/// The language preference's default, as the serialiser's omission test
+/// reads it.
+fn is_default_language(language: &str) -> bool {
+    language == default_language()
 }
 
 /// The calendar's cold window, in days.

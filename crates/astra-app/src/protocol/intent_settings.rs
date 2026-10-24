@@ -149,6 +149,50 @@ pub enum SettingsIntent {
         /// The signature to seed from, or `None` to clear the slot.
         signature: Option<Signature>,
     },
+    /// Set whether the log level is debug, the Diagnostics toggle. The
+    /// logger reads the level at boot, so the change lands with the next
+    /// launch; the surface states that honestly.
+    SetDebugEnabled {
+        /// On or off.
+        enabled: bool,
+    },
+    /// Set whether analytics consent stands, the Privacy switch. Off by
+    /// default, and the withdrawal is this same write turned off: one
+    /// click stops the recorder at its next call.
+    SetAnalyticsConsented {
+        /// Whether consent stands.
+        consented: bool,
+    },
+    /// Set the language tag the copy and the dates follow. The tag is
+    /// carried verbatim: it names the mechanism, not a catalogue of
+    /// translations, and the picker's offered set is the surface's own.
+    SetLanguage {
+        /// The language tag, for example `en-GB`.
+        language: String,
+    },
+    /// Report the device's resolved zone: the host's answer to a
+    /// resolution or a change it observed. The core validates the id and
+    /// decides whether the diary's offer stands (once per zone value per
+    /// process, and never once a zone was picked); a standing offer
+    /// publishes on the settings snapshot as the pending device zone.
+    ReportDeviceZone {
+        /// The device's resolved IANA id, carried verbatim; the core
+        /// validates it on dispatch.
+        zone: String,
+    },
+    /// Accept the device-zone offer: the id is validated and written
+    /// through the same path the zone picker rides, into the standing
+    /// zone. Refused, typed, when a zone was picked: a picked zone stands
+    /// and an accepted offer never overrides one.
+    AcceptDeviceZone {
+        /// The offered IANA id, carried verbatim; the core validates it
+        /// on dispatch.
+        zone: String,
+    },
+    /// Dismiss the standing device-zone offer without accepting it. The
+    /// offer's latches stand, so the dismissed value never offers again
+    /// this process and the first-run offer never returns.
+    DismissDeviceZone,
     /// Write one account's own sync settings: the fetch depth, the body
     /// cap, and the polling cadence. Each field named is written and each
     /// absent field keeps what stood, the same omission discipline the dav

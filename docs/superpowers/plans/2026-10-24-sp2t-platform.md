@@ -60,7 +60,7 @@ fragment.
 - Interface chain: the core state (T1) -> the host legs (T2) -> the
   surfaces (T3) -> proofs + docs (T4).
 - Risks: the file logger must honour the log contract from its first
-  line (no secrets, no content, no paths — the tests grep the file for
+  line (no secrets, no content, no paths; the tests grep the file for
   the forbidden classes); the analytics recorder must be unreachable
   without consent (pin the negative); the language preference must not
   touch the calendar's zone; the device-zone offer must never override

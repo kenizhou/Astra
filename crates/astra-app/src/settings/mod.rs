@@ -52,10 +52,11 @@
 //! [`accounts`]: self::accounts
 
 mod accounts;
+mod device_zone;
 
 pub use accounts::{AccountInfo, DavLegs, HostAccountOps};
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::BTreeMap, collections::BTreeSet, sync::Arc};
 
 use astra_viewmodel::{AboutBlock, SettingsError, SettingsSnapshot};
 use engine_api::{AccountId, Provider};
@@ -82,6 +83,14 @@ pub(crate) struct SettingsState {
     /// Why the newest settings write was refused or failed, when it was.
     /// `None` is the state of every write that landed.
     pub(crate) error: Option<SettingsError>,
+    /// The device-zone values this process has already offered, the
+    /// offer's per-value latch: a value in the set never offers again this
+    /// process, whatever the host reports.
+    pub(crate) offered_device_zones: BTreeSet<String>,
+    /// The standing device-zone offer, the pending question the settings
+    /// snapshot carries: the offered id when an answer has not landed,
+    /// `None` beside it.
+    pub(crate) device_zone_offer: Option<String>,
 }
 
 impl<P: Provider> App<P> {
@@ -144,7 +153,10 @@ impl<P: Provider> App<P> {
                 self.set_setting(|prefs| prefs.notifications_enabled = enabled)
                     .await;
             }
-            SettingsIntent::SetZone { zone } => self.set_zone(zone).await,
+            SettingsIntent::SetZone { zone } => {
+                self.set_zone(zone, true).await;
+                self.clear_device_zone_offer().await;
+            }
             SettingsIntent::SetFirstDayOfWeek { weekday } => {
                 self.set_setting(|prefs| prefs.first_day_of_week = weekday)
                     .await;
@@ -192,6 +204,20 @@ impl<P: Provider> App<P> {
                 })
                 .await;
             }
+            SettingsIntent::SetDebugEnabled { enabled } => {
+                self.set_setting(|prefs| prefs.debug_enabled = enabled)
+                    .await;
+            }
+            SettingsIntent::SetAnalyticsConsented { consented } => {
+                self.set_setting(|prefs| prefs.analytics_consented = consented)
+                    .await;
+            }
+            SettingsIntent::SetLanguage { language } => {
+                self.set_setting(|prefs| prefs.language = language).await;
+            }
+            SettingsIntent::ReportDeviceZone { zone } => self.report_device_zone(zone).await,
+            SettingsIntent::AcceptDeviceZone { zone } => self.accept_device_zone(zone).await,
+            SettingsIntent::DismissDeviceZone => self.dismiss_device_zone().await,
         }
     }
 
@@ -208,49 +234,8 @@ impl<P: Provider> App<P> {
             .await;
     }
 
-    /// The zone arm: the id must resolve through the engine's zone resolver,
-    /// because every floating and all-day instant in the calendar resolves
-    /// through the display zone and a zone the engine cannot localise is a
-    /// diary that cannot be laid out. A refusal keeps the standing zone.
-    async fn set_zone(&self, zone: String) {
-        let resolvable =
-            engine_api::TimeZoneId::iana(&zone).is_ok_and(|id| engine_api::is_supported_zone(&id));
-        if !resolvable {
-            self.answer(Some(SettingsError::ZoneUnresolvable)).await;
-            return;
-        }
-        self.set_setting(|prefs| prefs.zone = zone).await;
-        // The calendar resolves through the zone, so it republishes beside
-        // the settings block: the same change is a change to both surfaces.
-        // The re-expansion comes first, because a floating event's stored
-        // instant is only correct for the zone it was expanded under; the
-        // accounts whose re-expansion refused keep old-zone instants, so
-        // their rows say a retry is owed while the zone itself stands.
-        let stranded = self.reexpand_calendar().await;
-        self.answer_zone_reexpansion(&stranded).await;
-        self.rebuild_calendar().await;
-    }
-
-    /// Records the zone change's per-account re-expansion outcomes and
-    /// republishes: the accounts whose re-expansion refused carry the
-    /// sentence, the rest clear, so the channel states the newest zone
-    /// change the way the others do. The zone itself stands, because it
-    /// persisted; this names the accounts whose stored occurrences still
-    /// resolve through the old one.
-    async fn answer_zone_reexpansion(&self, stranded: &[AccountId]) {
-        {
-            let mut state = self.settings_state.lock().expect("settings mutex poisoned");
-            state.refresh_errors.clear();
-            for account in stranded {
-                state.refresh_errors.insert(
-                    account.clone(),
-                    "the diary could not be re-expanded under the new zone; set the zone again to retry"
-                        .to_owned(),
-                );
-            }
-        }
-        self.rebuild_settings().await;
-    }
+    // The zone write and the device-zone offer family live in the
+    // device_zone module, beside the paths they share.
 
     /// The horizon arm: the cold window may span a week to a year, the
     /// bounds the rebuild's own clamp enforces on read.
@@ -411,11 +396,10 @@ impl<P: Provider> App<P> {
             }
             accounts
         };
-        let error = self
-            .settings_state
-            .lock()
-            .expect("settings mutex poisoned")
-            .error;
+        let (error, device_zone_offer) = {
+            let state = self.settings_state.lock().expect("settings mutex poisoned");
+            (state.error, state.device_zone_offer.clone())
+        };
         let save_failed = self
             .pane
             .lock()
@@ -426,6 +410,7 @@ impl<P: Provider> App<P> {
             accounts,
             about: about_block(),
             error: error.or(save_failed.then_some(SettingsError::PersistFailed)),
+            device_zone_offer,
         });
     }
 }
@@ -471,3 +456,7 @@ mod composer_tests;
 #[cfg(test)]
 #[path = "../settings_sync_tests.rs"]
 mod sync_tests;
+
+#[cfg(test)]
+#[path = "../settings_platform_tests.rs"]
+mod platform_tests;
