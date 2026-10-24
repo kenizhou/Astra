@@ -29,6 +29,16 @@ fn state(width: u32, height: u32, x: i32, y: i32, maximised: bool) -> WindowStat
 }
 
 #[test]
+fn a_frame_above_the_floor_round_trips() {
+    // A maximised frame on a small or scaled display can sit under the
+    // config minimums, so the floor is what no real frame falls under.
+    let dir = scratch("floor");
+    let small = state(250, 210, 10, 10, false);
+    save(&dir, &small);
+    assert_eq!(load(&dir), Some(small));
+}
+
+#[test]
 fn the_window_state_round_trips() {
     let dir = scratch("round-trip");
     let saved = state(1440, 900, 40, 20, true);
@@ -82,6 +92,8 @@ fn an_insane_geometry_falls_back_like_a_corrupt_file() {
     let insane = [
         state(0, 800, 0, 0, false),
         state(1200, 0, 0, 0, false),
+        state(199, 800, 0, 0, false),
+        state(1200, 199, 0, 0, false),
         state(1200, 800, 200_001, 0, false),
         state(1200, 800, 0, -200_001, false),
     ];

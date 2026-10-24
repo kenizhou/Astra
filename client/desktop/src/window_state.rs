@@ -53,10 +53,14 @@ pub(crate) struct WindowState {
 }
 
 /// The sane bounds a stored state may hold: a window nobody could size
-/// or place is a corrupt file, not a state to restore.
+/// or place is a corrupt file, not a state to restore. The floor sits
+/// below the config minimums on purpose: a maximised frame on a small
+/// or scaled display can be narrower than 800 physical pixels, so the
+/// floor is what no real frame of this app falls under, not the config
+/// minimum.
 fn sane(state: &WindowState) -> bool {
-    (1..=100_000).contains(&state.width)
-        && (1..=100_000).contains(&state.height)
+    (200..=100_000).contains(&state.width)
+        && (200..=100_000).contains(&state.height)
         && state.x.abs() <= 100_000
         && state.y.abs() <= 100_000
 }
@@ -97,6 +101,32 @@ pub(crate) fn restore<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>, data_
     let Some(state) = load(data_dir) else {
         return;
     };
+    // A position saved on a monitor that no longer exists (a laptop
+    // leaving its dock) would open the frame invisible: the saved
+    // rectangle must touch a standing monitor, or the config defaults
+    // stand instead.
+    let on_a_monitor = window
+        .available_monitors()
+        .ok()
+        .map(|monitors| {
+            monitors.iter().any(|monitor| {
+                let position = monitor.position();
+                let size = monitor.size();
+                let width = i32::try_from(size.width).unwrap_or(i32::MAX);
+                let height = i32::try_from(size.height).unwrap_or(i32::MAX);
+                let state_width = i32::try_from(state.width).unwrap_or(i32::MAX);
+                let state_height = i32::try_from(state.height).unwrap_or(i32::MAX);
+                let touches = state.x < position.x + width
+                    && state.x + state_width > position.x
+                    && state.y < position.y + height
+                    && state.y + state_height > position.y;
+                touches
+            })
+        })
+        .unwrap_or(true);
+    if !on_a_monitor {
+        return;
+    }
     let _ = window.set_size(tauri::PhysicalSize::new(state.width, state.height));
     let _ = window.set_position(tauri::PhysicalPosition::new(state.x, state.y));
     if state.maximised {

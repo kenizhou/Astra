@@ -45,10 +45,15 @@ pub(crate) struct SharedFile {
     pub(crate) path: String,
 }
 
-/// The extensions the OS would execute on a double-click: the share
-/// hand-off drops them at the door, because an executable mailed
-/// through a share is the classic phishing shape.
-const UNSAFE_TYPES: [&str; 8] = ["exe", "bat", "cmd", "com", "scr", "msi", "ps1", "vbs"];
+/// The extensions the OS would execute on a double-click, including the
+/// script hosts a stock install associates (WScript, mshta, shortcuts,
+/// registry merges): the share hand-off drops them all at the door,
+/// because an executable or a script mailed through a share is the
+/// classic phishing shape.
+const UNSAFE_TYPES: [&str; 20] = [
+    "exe", "bat", "cmd", "com", "scr", "msi", "ps1", "vbs", "js", "jse", "vbe", "wsf", "wsh",
+    "hta", "lnk", "pif", "scf", "cpl", "reg", "jar",
+];
 
 /// One candidate name's sanity: a plain file name, no control
 /// characters, none of the two names a path resolves on its own.

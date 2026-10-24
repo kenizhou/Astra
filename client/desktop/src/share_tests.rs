@@ -84,6 +84,33 @@ fn the_executable_extension_drops_whatever_its_case() {
 }
 
 #[test]
+fn the_script_host_extensions_drop_like_any_executable() {
+    // A stock install executes these on a double-click (WScript, mshta,
+    // shortcuts, registry merges), so the door drops them exactly like
+    // an executable: the phishing shape is the script, not just the exe.
+    let dir = scratch("scripts");
+    let dropped = [
+        "invoice.js",
+        "readme.jse",
+        "payload.vbe",
+        "sheet.wsf",
+        "doc.wsh",
+        "patch.hta",
+        "link.lnk",
+        "old.pif",
+        "shell.scf",
+        "panel.cpl",
+        "merge.reg",
+        "app.jar",
+    ];
+    let paths: Vec<_> = dropped.iter().map(|name| plain(&dir, name)).collect();
+    assert!(
+        shared_files(paths).is_empty(),
+        "every stock script extension drops at the door"
+    );
+}
+
+#[test]
 fn an_extensionless_file_with_a_safe_name_crosses() {
     let dir = scratch("no-extension");
     let license = plain(&dir, "LICENSE");
