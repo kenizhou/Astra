@@ -35,6 +35,7 @@ vi.mock('@tauri-apps/api/window', () => ({
 }));
 
 import type { ReadingSnapshot } from '@/services/ipc';
+import { READING_CSP_GATED, wrapBodyDocument } from '@/components/reading-pane/MessageHtml';
 import { useAppearanceStore } from '@/services/appearance';
 import { useReadingStore } from '@/stores/readingStore';
 
@@ -114,10 +115,13 @@ describe('the print document', () => {
     expect(screen.getByText('Ada Lovelace')).toBeTruthy();
     expect(screen.getByText('ada@example.test')).toBeTruthy();
     expect(screen.getByText('9 Oct 2026, 08:30')).toBeTruthy();
-    // The sanitised body rides the document verbatim: no second sanitiser,
-    // no escape, and the remote placeholder stays a placeholder.
+    // The sanitised body rides the reading pane's own instrument: a
+    // scriptless sandboxed frame over the wrapped document with the gated
+    // CSP on it, and the remote placeholder stays a placeholder inside.
     const body = screen.getByTestId('print-body');
-    expect(body.innerHTML).toBe(sanitisedHtml);
+    expect(body.getAttribute('sandbox')).toBe('allow-same-origin');
+    expect(body.getAttribute('csp')).toBe(READING_CSP_GATED);
+    expect(body.getAttribute('srcdoc')).toBe(wrapBodyDocument(sanitisedHtml, 'default'));
     expect(screen.getByText('report.pdf')).toBeTruthy();
     expect(screen.getByText('notes.txt')).toBeTruthy();
   });
@@ -128,7 +132,11 @@ describe('the print document', () => {
     await settle();
     await Promise.resolve();
 
-    expect(screen.getByTestId('print-body').style.fontSize).toBe('20px');
+    // The zoom rides the wrapper document's base font, so the printed
+    // body scales exactly as the pane's does.
+    expect(screen.getByTestId('print-body').getAttribute('srcdoc')).toBe(
+      wrapBodyDocument(sanitisedHtml, 'large'),
+    );
   });
 
   it('prints itself once the document lands and closes after the dialog settles', async () => {

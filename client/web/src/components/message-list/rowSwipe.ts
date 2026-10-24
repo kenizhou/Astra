@@ -51,10 +51,10 @@ export function swipeIntent(action: SwipeAction, row: MessageRowView): Intent {
     case 'trash':
       return intents.moveToTrash(row.key);
     case 'read':
-      return intents.markRead(row.key, !row.unread);
+      return intents.markRead(row.key, row.unread);
     case 'flag':
       return intents.setFlagged(row.key, !row.flagged);
-  }
+    }
 }
 
 /** The intent that reverses one act, or null when none is expressible: a
@@ -74,7 +74,7 @@ export function swipeReverse(
     return intents.moveMessages([row.key.message], sittingFolder);
   }
   if (action === 'read') {
-    return intents.markRead(row.key, row.unread);
+    return intents.markRead(row.key, !row.unread);
   }
   return intents.setFlagged(row.key, row.flagged);
 }

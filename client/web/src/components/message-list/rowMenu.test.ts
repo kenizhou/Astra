@@ -41,14 +41,16 @@ const m1 = row({ message: { account: 'work', key: 'k1' } });
 const m2 = row({ message: { account: 'work', key: 'k2' } });
 const th = row({ thread: { account: 'work', thread_id: 'th-1' } });
 
-/** The account context the menu holds: one destination folder and a
- * provider that can report its mail. */
+/** The account context the menu holds: one destination folder, a junk
+ * folder the report files into, and a provider that can report its
+ * mail. */
 const accountCtx = {
   account: 'work',
   currentKey: 'INBOX',
   canReportMail: true,
   folders: [
     { key: 'Archive', name: 'Archive', unread: 0, depth: 0, has_children: false, expanded: false },
+    { key: 'Junk', name: 'Junk', role: 'junk', unread: 0, depth: 0, has_children: false, expanded: false },
   ] as FolderRow[],
 } satisfies RowAccountContext;
 

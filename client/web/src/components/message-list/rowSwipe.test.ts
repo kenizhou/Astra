@@ -67,13 +67,13 @@ describe('the swipe intents', () => {
   it('dispatches each action over the row', () => {
     expect(swipeIntent('archive', messageRow)).toEqual(intents.archiveMessage(messageRow.key));
     expect(swipeIntent('trash', messageRow)).toEqual(intents.moveToTrash(messageRow.key));
-    expect(swipeIntent('read', messageRow)).toEqual(intents.markRead(messageRow.key, false));
+    expect(swipeIntent('read', messageRow)).toEqual(intents.markRead(messageRow.key, true));
     expect(swipeIntent('flag', messageRow)).toEqual(intents.setFlagged(messageRow.key, true));
   });
 
   it('flips the read and flag states off what the row carries', () => {
     const readRow = row(messageRow.key, { unread: false, flagged: true });
-    expect(swipeIntent('read', readRow)).toEqual(intents.markRead(readRow.key, true));
+    expect(swipeIntent('read', readRow)).toEqual(intents.markRead(readRow.key, false));
     expect(swipeIntent('flag', readRow)).toEqual(intents.setFlagged(readRow.key, false));
   });
 });
@@ -94,7 +94,7 @@ describe('the swipe reverses', () => {
   });
 
   it('reverses the state flips through their own flip', () => {
-    expect(swipeReverse('read', messageRow, null)).toEqual(intents.markRead(messageRow.key, true));
+    expect(swipeReverse('read', messageRow, null)).toEqual(intents.markRead(messageRow.key, false));
     expect(swipeReverse('flag', messageRow, null)).toEqual(intents.setFlagged(messageRow.key, false));
   });
 });

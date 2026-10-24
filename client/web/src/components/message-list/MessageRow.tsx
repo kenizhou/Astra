@@ -120,7 +120,9 @@ export function MessageRow({ row, selected, multiSelected = false, draft = false
       onClick={(event) => {
         if (swipe.swiped) {
           // A fired swipe owns this row for the moment: the click that
-          // trails the pointer-up does not also open the message.
+          // trails the pointer-up does not also open the message, and the
+          // swallow spends itself here so the next click lands.
+          swipe.clearSwallowed();
           return;
         }
         onSelect(row.key, event);

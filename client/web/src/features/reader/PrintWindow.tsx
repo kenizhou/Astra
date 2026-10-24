@@ -14,7 +14,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 
 import { createListenerRegistry, isTauri, pullSurface, type Surface } from '@/events/surfaceEvents';
 import { formatReadingDate } from '@/components/reading-pane/ReadingHeader';
-import { READING_ZOOM_BASE_PX } from '@/components/reading-pane/MessageHtml';
+import { READING_CSP_GATED, READING_ZOOM_BASE_PX, wrapBodyDocument } from '@/components/reading-pane/MessageHtml';
 import { dispatch, intents, reading, settings, type MessageRef } from '@/services/ipc';
 import { useAppearanceStore } from '@/services/appearance';
 import { useReadingStore } from '@/stores/readingStore';
@@ -129,14 +129,17 @@ export function PrintWindow({ message }: PrintWindowProps) {
           {snapshot.from_address !== '' && <p className="text-sm">{snapshot.from_address}</p>}
           {date !== '' && <p className="text-sm text-neutral-600">{date}</p>}
           {snapshot.html !== undefined ? (
-            <div
+            <iframe
               data-testid="print-body"
-              style={{ fontSize: `${READING_ZOOM_BASE_PX[zoom]}px` }}
-              // The sanitised body reused verbatim: the snapshot's HTML is
-              // the sanitiser's own output, its remote references still the
-              // inert placeholders print never rewrites.
-              dangerouslySetInnerHTML={{ __html: snapshot.html }}
-              className="min-h-0 flex-1 py-4"
+              title="Printed message body"
+              sandbox="allow-same-origin"
+              csp={READING_CSP_GATED}
+              srcDoc={wrapBodyDocument(snapshot.html, zoom)}
+              // The printed body rides the reading pane's own instrument: a
+              // scriptless sandboxed frame over the sanitised fragment, its
+              // CSP the gated constants, so the sender's styling renders and
+              // no script and no remote load ever crosses print.
+              className="min-h-0 w-full flex-1 border-0 bg-white"
             />
           ) : snapshot.plain !== undefined ? (
             <pre

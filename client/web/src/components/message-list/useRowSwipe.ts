@@ -35,6 +35,8 @@ export interface RowSwipe {
   revealedAction: SwipeAction | null;
   /** Whether a completed swipe should swallow the click that follows. */
   swiped: boolean;
+  /** Spends a standing swallow, so the click after the swallowed one lands. */
+  clearSwallowed: () => void;
   /** The pointer handlers the row's root carries. */
   handlers: {
     onPointerDown: (event: React.PointerEvent) => void;
@@ -71,6 +73,10 @@ export function useRowSwipe(row: MessageRowView): RowSwipe {
     setSwiped(true);
   };
 
+  const clearSwallowed = (): void => {
+    setSwiped(false);
+  };
+
   const reset = (): void => {
     gesture.current = null;
     setDx(0);
@@ -83,6 +89,7 @@ export function useRowSwipe(row: MessageRowView): RowSwipe {
     revealedAction:
       revealed === null ? null : swipeActionFor(revealed, swipePrimary, swipeSecondary),
     swiped,
+    clearSwallowed,
     handlers: {
       // Only the touch pointer starts a swipe: the mouse owns the folder
       // drag, and a stylus is not this slice's gesture.

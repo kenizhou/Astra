@@ -96,15 +96,38 @@ function openWindowItem(
   };
 }
 
+/** The folder names the junk destination answers to besides its role,
+ *  mirroring the core resolver's own candidates: an account whose server
+ *  tags no Junk role still files reports when a folder carries one of
+ *  these names. */
+const JUNK_FOLDER_NAMES: readonly string[] = [
+  'junk',
+  'junk mail',
+  'junk e-mail',
+  'spam',
+  'bulk mail',
+  'ongewenste e-mail',
+];
+
 /** The spam-report verb: one mark_junk per target through the report
  *  family, the report that files the message into Junk as part of itself.
- *  Offered only where the account's provider can report its mail, so the
- *  verb never stands where dispatching it would only be refused. */
+ *  Offered only where the account's provider can report its mail AND the
+ *  tree resolves a junk destination (the RFC 6154 role or a conventional
+ *  name), so the verb never stands where dispatching it would only be
+ *  refused or silently skipped. */
 function spamItem(
   targets: MessageRowView[],
   context: RowAccountContext | undefined,
 ): ContextMenuItem | null {
   if (context === undefined || !context.canReportMail) {
+    return null;
+  }
+  const junk = context.folders.some(
+    (folder) =>
+      folder.role === 'junk' ||
+      JUNK_FOLDER_NAMES.includes(folder.name.trim().toLowerCase()),
+  );
+  if (!junk) {
     return null;
   }
   return {

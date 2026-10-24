@@ -16,11 +16,12 @@ pattern exactly: a URL-param-mounted root in the same bundle, a minted
 window id, the capability's window wildcard, the closing semantics (the
 window closes when its message closes). The window carries the whole
 reading view the pane renders (header, invitation card, AI surfaces,
-body, attachments, the reply strip) over its own snapshot pull; opening
-from the row menu moves nothing (the pane keeps its own open message
-until the person changes it); the pane and the window are two readers of
-one store, and a mark-read from either lands once. reading-window.md is
-created with the zh copy.
+body, attachments, the reply strip) over its own snapshot pull. The host
+holds ONE open reading state and no per-message body command exists, so
+the window opens its message through the same guarded open path and the
+pane FOLLOWS the window's open; a mark-read from either lands once, and
+the window closes when the open reading moves off its message.
+reading-window.md is created with the zh copy.
 
 ## D2: Save as .eml and print
 
@@ -72,8 +73,9 @@ its own axis.
 
 ## Known gaps recorded, not hidden
 
-- The own-window is one message at a time per window; a multi-message
-  window is not this slice.
+- One message window at a time: the host holds one open reading state,
+  so opening a second moves the first window to close; an independent
+  per-window reading state is a later host leg.
 - Print prints the sanitised reading view, never the raw source; a
   "print original" is not offered.
 - The zoom's steps are three, matching the app font steps; a free

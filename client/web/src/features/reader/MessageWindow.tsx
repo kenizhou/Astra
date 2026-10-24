@@ -103,11 +103,19 @@ export function MessageWindow({ message, folderKey }: MessageWindowProps) {
   // The window closes when its message closes: the reading state no longer
   // holding the window's message is the closing, whichever way it happened
   // (a close intent, a refresh that dropped the message, another reader
-  // opening something else).
+  // opening something else). The closing arms only after the state has held
+  // the message once, so a broadcast that lands between the mount and the
+  // hydration's own apply (the pane's pre-open snapshot) cannot shut a
+  // window that never opened.
+  const heldOnce = useRef(false);
   useEffect(
     () =>
       useReadingStore.subscribe((state) => {
-        if (!holdsMessage(state.snapshot, message) && isTauri) {
+        if (holdsMessage(state.snapshot, message)) {
+          heldOnce.current = true;
+          return;
+        }
+        if (heldOnce.current && isTauri) {
           void getCurrentWindow()
             .close()
             .catch(() => undefined);
