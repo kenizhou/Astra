@@ -26,5 +26,16 @@ sync-progress snapshot to the web, republished the moment they move, so
 the banner and the pane badges (their rendering lands with the surface
 slice) always read the latest state.
 
+The batch is proven live against the local harness. A mail submitted
+while the recipient's INBOX watch stands answers `Changed`, the pass it
+runs lands the mail, and the new-mail queue holds the notice; a poll
+arm's pass lands a delivered mail through the same seam beside the
+cadence the settings carry; the body cap's states run over the
+account's own passes (off keeps the notes as metadata alone, a byte
+cap warms them until none is missing its body, off again drops the
+cached sources with the reading pipeline still answering); and the
+outage classification runs over a real refused dial, two refused passes
+marking the only dialled account and one successful pass clearing both.
+
 Platforms: desktop
 Bump: minor
