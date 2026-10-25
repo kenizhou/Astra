@@ -278,6 +278,7 @@ dependencies = [
  "provider-graph",
  "provider-imap",
  "provider-jmap",
+ "psl",
  "rcgen",
  "rustls",
  "serde",

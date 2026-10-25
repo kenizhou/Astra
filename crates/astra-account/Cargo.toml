@@ -16,6 +16,10 @@ astra-autodetect = { path = "../astra-autodetect" }
 # The OAuth client the graph token source refreshes through: the product core's own
 # token-exchange crate, shared by every provider family.
 astra-oauth = { path = "../astra-oauth" }
+# The Public Suffix List behind the mail OAuth issuer chain's registrable-domain
+# candidate: the same library the autodetect crate's MX derivation uses, so the
+# one list answers everywhere a domain is cut.
+psl = { workspace = true }
 engine-api.workspace = true
 # The dav dial logs a leg that failed while the other stands: the account's
 # own errors carry what a caller needs, but a half-up diary is worth a line
@@ -66,7 +70,7 @@ serde.workspace = true
 serde_json.workspace = true
 # The async runtime the IMAP connections dial and deduplicate over (the TCP stream,
 # the dial mutex, and the listener the scripted test server binds).
-tokio = { workspace = true, features = ["net", "sync"] }
+tokio = { workspace = true, features = ["net", "sync", "time"] }
 # Names the stream an IMAP account's connections run over (`ImapConnections`); the
 # engine is generic over it and exports no alias.
 tokio-rustls.workspace = true

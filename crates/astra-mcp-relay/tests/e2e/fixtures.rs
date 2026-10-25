@@ -89,6 +89,7 @@ pub(crate) fn account(
             server_name: host.to_owned(),
             username: user.to_owned(),
             password: Some(Secret::new(password.to_owned())),
+            oauth: None,
             security: ConnectionSecurity::ImplicitTls,
         }),
         smtp: Some(SmtpAccount {
