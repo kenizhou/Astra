@@ -177,3 +177,34 @@ fn an_exclusion_carrying_recurrence_stays_bare() {
 fn a_recurrence_with_no_rule_at_all_reads_as_none() {
     assert_eq!(rule_read(&Recurrence::default()), None);
 }
+
+#[test]
+fn a_daily_rule_filtered_to_named_days_hedges_to_the_bare_word() {
+    // The engine's expansion drops every day that is not Monday or
+    // Wednesday, so the bare cadence head ("repeats every day") would be a
+    // sentence the grid beneath it contradicts: the fallback hedges.
+    let mut rule = RecurrenceRule::new(Frequency::Daily);
+    rule.by_day = vec![
+        NDay {
+            day: Weekday::Mo,
+            nth_of_period: None,
+        },
+        NDay {
+            day: Weekday::We,
+            nth_of_period: None,
+        },
+    ];
+    let read = worded(rule).expect("the rule words");
+    assert_eq!(read.sentence, "Repeats.");
+    assert!(read.days.is_empty(), "no day set crosses a hedged rule");
+}
+
+#[test]
+fn a_monthly_rule_filtered_to_january_hedges_to_the_bare_word() {
+    // Eleven months of the year carry no occurrence at all, so "repeats
+    // every month" would be false.
+    let mut rule = RecurrenceRule::new(Frequency::Monthly);
+    rule.by_month = vec!["1".to_owned()];
+    let read = worded(rule).expect("the rule words");
+    assert_eq!(read.sentence, "Repeats.");
+}

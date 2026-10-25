@@ -262,8 +262,8 @@ pub struct App<P> {
     /// one thing. See `calendar`.
     calendar: Surfaced<astra_viewmodel::CalendarSnapshot>,
     /// The calendar view state a rebuild projects and the intents move: the
-    /// window, the visible set, the anchor, the horizon watermark, the write
-    /// states, and the reply prompts. See `calendar`.
+    /// view kind, the window, the visible set, the anchor, the horizon
+    /// watermark, the write states, and the reply prompts. See `calendar`.
     calendar_state: Mutex<calendar::CalendarState>,
     /// The people snapshot and its signal: the unified rows, the open
     /// person's detail, the write states, and the create targets, as one

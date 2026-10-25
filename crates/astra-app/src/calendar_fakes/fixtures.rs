@@ -205,7 +205,7 @@ pub(crate) fn crowded_meeting(key: &str, attendees: usize) -> Event {
 /// The series the read-back words in full: every third week on Mondays and
 /// Wednesdays, ten instances.
 pub(crate) fn every_third_week_series(key: &str) -> Event {
-    let mut event = zoned_event(key, "Fortnightly sync", "2026-10-19T09:00:00");
+    let mut event = zoned_event(key, "Third-week sync", "2026-10-19T09:00:00");
     let mut rule = RecurrenceRule::new(Frequency::Weekly);
     rule.interval = NonZeroU32::new(3).unwrap();
     rule.by_day = vec![

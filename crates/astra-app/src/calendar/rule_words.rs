@@ -18,9 +18,12 @@ use engine_api::{
 ///
 /// A recurrence the vocabulary cannot serve in full (a rule carrying parts
 /// beyond frequency, interval, a plain weekly day set, and the bound; a union
-/// or an exclusion) crosses its first rule's cadence alone: the day set and
-/// the end drop rather than being worded wrongly, and the sentence says no
-/// more than the interval and frequency.
+/// or an exclusion) crosses only what the surviving parts still make true:
+/// where the narrowing parts cannot drop whole periods the cadence head
+/// stands, and where they can (a daily rule filtered to named days, a
+/// monthly day-of-month on a longer frequency) the sentence hedges to the
+/// bare repeating word, because a cadence head that the grid beneath it
+/// contradicts is a wrong sentence.
 pub(crate) fn rule_read(recurrence: &Recurrence) -> Option<RuleRead> {
     let rule = recurrence.rules.first()?;
     let full = words_in_full(recurrence, rule);
@@ -99,8 +102,10 @@ fn end_read(rule: &RecurrenceRule) -> Option<RuleEndRead> {
     }
 }
 
-/// The sentence: the cadence always, the day set and the end only where the
-/// words serve them.
+/// The sentence: the cadence always where the cadence is true, the day set
+/// and the end only where the words serve them, and the bare repeating word
+/// where a narrowing part makes the cadence head a lie (a daily rule that
+/// filters to named days does not repeat every day).
 fn sentence(rule: &RecurrenceRule, full: bool) -> String {
     // A digit interval takes the plural period ("every 13 weeks"); the
     // ordinal words carry their own singular ("every third week").
@@ -110,7 +115,10 @@ fn sentence(rule: &RecurrenceRule, full: bool) -> String {
         _ => format!("Repeats every {} {period}", interval_words(rule)),
     };
     if !full {
-        return format!("{head}.");
+        if cadence_is_true(rule) {
+            return format!("{head}.");
+        }
+        return "Repeats.".to_owned();
     }
     let days = day_set(rule);
     let mut words = if days.is_empty() {
@@ -265,3 +273,17 @@ fn until_words(until: &engine_api::LocalDateTime) -> String {
 #[cfg(test)]
 #[path = "../calendar_rule_words_tests.rs"]
 mod tests;
+
+/// Whether the bare cadence head ("repeats every day") is true of the rule's
+/// occurrences: the narrowing parts must not be able to drop whole periods.
+/// The engine's expansion filters BYDAY on a daily rule, BYMONTHDAY on a
+/// daily rule, and BYMONTH on anything but a yearly one down below one
+/// occurrence per period, so a rule carrying one of those shapes occurs
+/// less often than its frequency names and the head would be a wrong
+/// sentence.
+fn cadence_is_true(rule: &RecurrenceRule) -> bool {
+    let daily_filtered = rule.frequency == Frequency::Daily
+        && (!rule.by_day.is_empty() || !rule.by_month_day.is_empty());
+    let month_filtered = !rule.by_month.is_empty() && rule.frequency != Frequency::Yearly;
+    !(daily_filtered || month_filtered)
+}
