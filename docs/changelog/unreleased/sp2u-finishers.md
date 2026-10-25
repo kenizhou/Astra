@@ -24,8 +24,8 @@ The finishers are proven live against the local harness: an event seeded
 over the calendar face with a ten-person guest list and a weekly rule reads
 back through the app's own sync and detail read, organiser first, the
 folded tail counted, the rule worded in full; and a seeded contact's photo
-stands on the sender's row of a seeded note once the engine's photo cache
-fills, the monogram until then.
+resolves onto the sender's row of a seeded note once the engine's photo
+cache fills, the monogram until then.
 
 Platforms: desktop
 Bump: minor

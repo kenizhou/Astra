@@ -25,7 +25,10 @@ command, which serves a data URI for paths inside the engine's own
 contact-photo area: the web view never reads the file system, and no photo
 path crosses as a URL a browser could be pointed elsewhere by. The monogram
 stands until the photo lands; a row, a header, or a list never blocks on the
-read, and an unresolvable read leaves the monogram standing.
+read, and an unresolvable read leaves the monogram standing. No shipped
+pass fills the cache today: the engine exposes the fill verb and the proof
+drives it, but the product schedules no photo pass, so the monogram is what
+most rows show until a fill pass ships.
 
 The cache's trust bounds are the engine's. A resource the provider answered
 "no photo" for is trusted a week before anyone asks again (a correspondent

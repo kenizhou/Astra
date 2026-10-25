@@ -35,6 +35,18 @@ async fn the_sender_s_row_resolves_its_avatar_through_the_real_cache() {
         eprintln!("skipping live harness test: ASTRA_LIVE_HARNESS is not 1");
         return;
     };
+    let (app, first, _second) = people_suite(&host, &port, &user, &password).await;
+    app.dispatch(Intent::People(PeopleIntent::Refresh))
+        .await
+        .unwrap();
+    // The door guard, before this run seeds anything: the proof's surname is
+    // minted by every run of it, so a card left behind by a panicked prior
+    // run fails here rather than passing silently beneath this run's token.
+    assert!(
+        rows_carrying(&app.people(), "Photon").is_empty(),
+        "no avatar-proof card survives a prior run"
+    );
+
     let token = run_token();
     // The token rides inside the name (the last word stays "Photon", so the
     // monogram's initials are stable whatever the token mints).
@@ -54,7 +66,6 @@ async fn the_sender_s_row_resolves_its_avatar_through_the_real_cache() {
         "the seeding PUT stores the card on the reader's own book"
     );
 
-    let (app, first, _second) = people_suite(&host, &port, &user, &password).await;
     app.dispatch(Intent::People(PeopleIntent::Refresh))
         .await
         .unwrap();
