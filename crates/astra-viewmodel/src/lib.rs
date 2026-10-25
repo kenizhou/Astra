@@ -21,8 +21,9 @@ mod sync_progress;
 pub mod view;
 
 pub use calendar::{
-    CalendarRow, CalendarSnapshot, CalendarWriteRow, CalendarWriteState, NowLineData,
-    OccurrenceAccuracy, OccurrenceRow, Participation, ReplyPromptRow,
+    CalendarRow, CalendarShape, CalendarSnapshot, CalendarViewWire, CalendarWriteRow,
+    CalendarWriteState, EventDetail, NowLineData, OccurrenceAccuracy, OccurrenceRow,
+    ParticipantRow, Participation, ReplyPromptRow, RuleEndRead, RuleRead,
 };
 pub use compose_open::MailtoOpen;
 pub use compose_request::{ComposeKind, ComposeRequestSnapshot};

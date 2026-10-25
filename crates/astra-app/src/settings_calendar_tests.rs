@@ -20,6 +20,7 @@ fn fortnight() -> Intent {
     Intent::Calendar(CalendarIntent::SetRange {
         start: utc("2026-10-18T00:00:00Z"),
         days: 14,
+        view: None,
     })
 }
 
@@ -61,6 +62,7 @@ fn range(start: &str, days: u16) -> Intent {
     Intent::Calendar(CalendarIntent::SetRange {
         start: utc(start),
         days,
+        view: None,
     })
 }
 

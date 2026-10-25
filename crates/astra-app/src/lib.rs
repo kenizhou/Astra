@@ -65,39 +65,33 @@ mod window;
 #[path = "tests_live_harness.rs"]
 mod tests_live_harness;
 
-// The dispatch-loop test fixtures: one compiled copy of the fake provider and its
-// builders, at the crate root so every test module (the dispatch tests, the list
-// tests they split off, and the reading tests) includes the same module rather
-// than its own.
+// The dispatch-loop test fixtures: one compiled copy of the fake provider
+// and its builders, at the crate root so every test module includes the same
+// module rather than its own.
 #[cfg(test)]
 mod dispatch_fakes;
 
 // The calendar slice's test fixtures: the calendar-and-mail provider the
-// calendar tests drive, at the crate root for the same reason. Each calendar
-// module's tests attach to the module itself, the house pattern.
+// calendar tests drive, at the crate root for the same reason.
 #[cfg(test)]
 #[path = "calendar_fakes/mod.rs"]
 mod calendar_fakes;
 
-// The people slice's test fixtures: the contacts-leg provider the people
-// tests drive, beside the calendar's for the same reason.
+// The people slice's test fixtures: the contacts-leg provider the people tests
+// drive, beside the calendar's.
 #[cfg(test)]
 #[path = "people_fakes/mod.rs"]
 mod people_fakes;
 
 // The settings slice's test fixtures: the scripted account store the
-// settings tests drive over the account-info seam, beside the calendar's
-// and people's for the same reason.
+// settings tests drive, beside the calendar's and people's for the same reason.
 #[cfg(test)]
 #[path = "settings_fakes/mod.rs"]
 mod settings_fakes;
 
-// The eval harness: the scenario fixtures under the repository's evals/
-// directory, driven through the same seams the unit tests exercise. The
-// scenario vocabulary and the seam-parameter drive are library surface
-// (the desktop host's live suite drives the live-mode fixtures over its
-// background client); the offline battery and its fixture injection stay
-// test-only, riding the dispatch-loop fakes.
+// The eval harness: the scenario fixtures under evals/, driven through the
+// same seams the unit tests exercise. The vocabulary and the drive are
+// library surface; the offline battery stays test-only, riding the fakes.
 pub mod evals;
 
 use std::{
@@ -447,24 +441,31 @@ impl<P: Provider> App<P> {
 
     /// Names the preferences file the app persists through. Call it before the first
     /// dispatch: the view mode, the expansion map, and the selected scope load from
-    /// here (defaults while unnamed, as an in-memory build wants), and a persisted
+    /// here (defaults while unnamed, as an in-memory build wants), a persisted
     /// selection seeds the scope so a relaunch reopens the folder, the account, or
-    /// the unified view that was showing.
+    /// the unified view that was showing, and the calendar's shape preference seeds
+    /// the calendar state the same way (the view kind and the anchor the person
+    /// left, or the defaults, whose anchor is today by behaviour).
     #[must_use]
     pub fn with_prefs_path(mut self, path: Option<PathBuf>) -> Self {
         let pane = Mutex::new(PreferencesState::new(path));
-        let scope = {
+        let (scope, calendar_shape) = {
             let pane = pane.lock().expect("preferences mutex poisoned");
-            pane.selected_folder().map_or_else(
+            let scope = pane.selected_folder().map_or_else(
                 || {
                     pane.selected_account()
                         .map_or_else(Scope::default, Scope::Account)
                 },
                 Scope::Folder,
+            );
+            (
+                scope,
+                calendar::CalendarState::seeded(pane.calendar_view(), pane.calendar_anchor()),
             )
         };
         self.pane = pane;
         self.scope = Mutex::new(scope);
+        self.calendar_state = Mutex::new(calendar_shape);
         self
     }
 

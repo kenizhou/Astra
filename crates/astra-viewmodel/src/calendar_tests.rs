@@ -65,6 +65,7 @@ fn the_wire_shape_is_snake_case_and_carries_every_row_kind() {
             now: utc("2026-10-19T08:12:00Z"),
             zone: "Europe/Amsterdam".to_owned(),
         }),
+        shape: None,
     };
 
     let wire = serde_json::to_value(&snapshot).expect("the snapshot serialises");
@@ -252,6 +253,7 @@ fn a_row_without_a_colour_or_an_occurrence_token_omits_them() {
         write_states: Vec::new(),
         reply_prompts: Vec::new(),
         now_data: None,
+        shape: None,
     };
 
     let wire = serde_json::to_value(&snapshot).expect("the snapshot serialises");
@@ -271,6 +273,10 @@ fn a_row_without_a_colour_or_an_occurrence_token_omits_them() {
         wire.get("now_data").is_none(),
         "no now line crosses no key: {wire}"
     );
+    assert!(
+        wire.get("shape").is_none(),
+        "no standing shape crosses no key: {wire}"
+    );
 
     let back: CalendarSnapshot = serde_json::from_value(wire).expect("reads back");
     assert_eq!(back, snapshot);
@@ -286,4 +292,105 @@ fn the_shared_web_fixture_parses_as_the_snapshot() {
     let wire = serde_json::to_value(&back).expect("the snapshot serialises");
     let raw: serde_json::Value = serde_json::from_str(raw).expect("the fixture is JSON");
     assert_eq!(wire, raw, "the fixture round trips value for value");
+}
+
+#[test]
+fn the_detail_wire_crosses_the_roll_call_and_the_rule() {
+    // The detail read's wire: the roll-call's rows skip their absent words
+    // (a plain attendee carries no role key), the folded tail crosses only
+    // when a cap folded one, and the rule carries the engine's own frequency
+    // and weekday words beside the app's sentence.
+    let detail = crate::EventDetail {
+        account: account("work"),
+        event: ProviderKey::new("/dav/cal/work/default/evt-1.ics").unwrap(),
+        participants: vec![
+            crate::ParticipantRow {
+                name_or_address: "Boss".to_owned(),
+                role: Some("organiser".to_owned()),
+                response: Participation::Accepted,
+            },
+            crate::ParticipantRow {
+                name_or_address: "kim@example.test".to_owned(),
+                role: None,
+                response: Participation::NeedsAction,
+            },
+        ],
+        folded_participants: 3,
+        rule: Some(crate::RuleRead {
+            frequency: engine_api::Frequency::Weekly,
+            interval: 3,
+            days: vec![engine_api::Weekday::Mo, engine_api::Weekday::We],
+            end: Some(crate::RuleEndRead::AfterCount(10)),
+            sentence: "Repeats every third week on Mondays and Wednesdays, ten times.".to_owned(),
+        }),
+    };
+
+    let wire = serde_json::to_value(&detail).expect("the detail serialises");
+    assert_eq!(
+        wire,
+        serde_json::json!({
+            "account": "work",
+            "event": "/dav/cal/work/default/evt-1.ics",
+            "participants": [
+                {
+                    "name_or_address": "Boss",
+                    "role": "organiser",
+                    "response": "accepted"
+                },
+                {
+                    "name_or_address": "kim@example.test",
+                    "response": "needs_action"
+                }
+            ],
+            "folded_participants": 3,
+            "rule": {
+                "frequency": "weekly",
+                "interval": 3,
+                "days": ["mo", "we"],
+                "end": { "after_count": 10 },
+                "sentence": "Repeats every third week on Mondays and Wednesdays, ten times."
+            }
+        })
+    );
+    let back: crate::EventDetail = serde_json::from_value(wire).expect("the detail reads back");
+    assert_eq!(back, detail);
+}
+
+#[test]
+fn an_empty_detail_and_a_fully_worded_shape_cross_only_what_stands() {
+    // A one-off appointment with nobody on it crosses its keys alone, and
+    // the shape crosses the anchor only where one stands: today's shape is
+    // the view word by itself.
+    let bare = crate::EventDetail {
+        account: account("work"),
+        event: ProviderKey::new("evt-2").unwrap(),
+        participants: Vec::new(),
+        folded_participants: 0,
+        rule: None,
+    };
+    let wire = serde_json::to_value(&bare).expect("the bare detail serialises");
+    assert_eq!(
+        wire,
+        serde_json::json!({
+            "account": "work",
+            "event": "evt-2"
+        })
+    );
+
+    let view_only = crate::CalendarShape {
+        view: crate::CalendarViewWire::Agenda,
+        anchor: None,
+    };
+    assert_eq!(
+        serde_json::to_value(&view_only).unwrap(),
+        serde_json::json!({ "view": "agenda" })
+    );
+    let anchored = crate::CalendarShape {
+        view: crate::CalendarViewWire::Month,
+        anchor: Some(engine_api::CalendarDate::new(2026, 10, 6).unwrap()),
+    };
+    assert_eq!(
+        serde_json::to_value(&anchored).unwrap(),
+        serde_json::json!({ "view": "month", "anchor": "2026-10-06" })
+    );
 }

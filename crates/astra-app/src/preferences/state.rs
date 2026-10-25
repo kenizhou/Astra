@@ -7,7 +7,7 @@
 
 use std::path::PathBuf;
 
-use astra_viewmodel::{FolderRow, SyncBodyCap, WeekdayWire};
+use astra_viewmodel::{CalendarViewWire, FolderRow, SyncBodyCap, WeekdayWire};
 
 use super::{
     load_preferences, save_preferences, Preferences, DEFAULT_BODY_CAP_OCTETS, DEFAULT_POLL_MINUTES,
@@ -139,6 +139,37 @@ impl PreferencesState {
         self.prefs.first_day_of_week
     }
 
+    /// The view kind the calendar restores at launch, from the persisted
+    /// shape preference.
+    pub(crate) fn calendar_view(&self) -> CalendarViewWire {
+        self.prefs.calendar_view
+    }
+
+    /// Records the view kind half of the calendar's shape preference and
+    /// persists it.
+    pub(crate) fn set_calendar_view(&mut self, view: CalendarViewWire) {
+        if self.prefs.calendar_view == view {
+            return;
+        }
+        self.set_setting(|prefs| prefs.calendar_view = view);
+    }
+
+    /// The navigation anchor the calendar restores at launch, from the
+    /// persisted shape preference; `None` is today by behaviour.
+    pub(crate) fn calendar_anchor(&self) -> Option<engine_api::CalendarDate> {
+        self.prefs.calendar_anchor
+    }
+
+    /// Records the anchor half of the calendar's shape preference and
+    /// persists it. The date stands verbatim: an anchor from a past launch
+    /// restores exactly, which is what makes the preference honest.
+    pub(crate) fn set_calendar_anchor(&mut self, anchor: engine_api::CalendarDate) {
+        if self.prefs.calendar_anchor == Some(anchor) {
+            return;
+        }
+        self.set_setting(|prefs| prefs.calendar_anchor = Some(anchor));
+    }
+
     /// The cold window's length in days, clamped into the bounds the horizon
     /// setting enforces so a hand-edited file cannot ask the rebuild for a
     /// window the product would itself refuse.
@@ -251,6 +282,8 @@ impl PreferencesState {
         on_disk.zone.clone_from(&self.prefs.zone);
         on_disk.first_day_of_week = self.prefs.first_day_of_week;
         on_disk.horizon_days = self.prefs.horizon_days;
+        on_disk.calendar_view = self.prefs.calendar_view;
+        on_disk.calendar_anchor = self.prefs.calendar_anchor;
         on_disk.quote_below = self.prefs.quote_below;
         on_disk
             .default_calendar

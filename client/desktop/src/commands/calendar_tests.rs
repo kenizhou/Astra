@@ -82,6 +82,7 @@ fn the_calendar_pull_round_trips_the_published_snapshot() {
         write_states: Vec::new(),
         reply_prompts: Vec::new(),
         now_data: None,
+        shape: None,
     };
     *app.calendar.lock().unwrap() = snapshot.clone();
     let state = state("calendar-pull", Arc::clone(&app), FakeStore::accepting());

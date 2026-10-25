@@ -10,7 +10,10 @@
 //! itself never assembles in one read: a calendar's colour and rights, and an
 //! occurrence's instants beside its master's title and markers.
 
-use engine_api::{AccountId, CalendarId, LocalDateTime, ProviderKey, UtcDateTime};
+use engine_api::{
+    AccountId, CalendarDate, CalendarId, Frequency, LocalDateTime, ProviderKey, UtcDateTime,
+    Weekday,
+};
 use serde::{Deserialize, Serialize};
 
 /// An immutable calendar snapshot for a surface to render: the calendar
@@ -45,6 +48,44 @@ pub struct CalendarSnapshot {
     /// view. `None` on the default snapshot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub now_data: Option<NowLineData>,
+    /// The calendar's standing view shape: the view kind the pane renders and
+    /// the navigation anchor it stands on, published with every rebuild so a
+    /// surface restores the shape the person left. `None` on the default
+    /// snapshot, before any rebuild has run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shape: Option<CalendarShape>,
+}
+
+/// The view kinds the calendar pane lays its occurrences out as, crossing as
+/// a snake_case word. The shape preference and the snapshot's shape share
+/// this one vocabulary; the surface's own layout picks the grid each word
+/// stands for.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CalendarViewWire {
+    /// The scrolling list of coming days.
+    Agenda,
+    /// One civil day's grid.
+    Day,
+    /// The working week's grid.
+    WorkWeek,
+    /// The month's grid. The default, so a first launch opens on the month.
+    #[default]
+    Month,
+}
+
+/// The calendar's standing view shape, as the snapshot publishes it for a
+/// surface to restore at boot: which view kind the pane renders, and the
+/// navigation anchor it stands on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CalendarShape {
+    /// The view kind the pane renders.
+    pub view: CalendarViewWire,
+    /// The navigation anchor the view stands on, a civil date in the view's
+    /// own terms. `None` while no anchor stands: the surface falls back to
+    /// today, the same seeding the now line offers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anchor: Option<CalendarDate>,
 }
 
 /// One calendar a user can see, colour, and toggle: the row the calendar
@@ -274,6 +315,93 @@ pub struct NowLineData {
     /// IANA id, so it crosses as the bare name (an event's own zone may be a
     /// server-defined one, but the view's never is).
     pub zone: String,
+}
+
+/// One event's detail read: the roll-call of who is on the event and the
+/// full repeating rule, the two halves the occurrence row stays too lean to
+/// carry. The host asks for it by the event reference a picked row names;
+/// the title and the clocks stay on the row the host already holds.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EventDetail {
+    /// The account whose store holds the event.
+    pub account: AccountId,
+    /// The master event's provider key, echoed from the ask.
+    pub event: ProviderKey,
+    /// The roll-call: the organiser first, then every further participant in
+    /// stored order, each as one line. Empty when the event carries nobody
+    /// (the user's own appointment).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub participants: Vec<ParticipantRow>,
+    /// How many further participants the roll-call's cap folded away: the
+    /// count a surface renders as the honest tail of a crowded meeting.
+    /// Zero, crossing no key, while every participant fits the roll-call.
+    #[serde(default, skip_serializing_if = "folded_is_zero")]
+    pub folded_participants: u32,
+    /// The full repeating rule as the event's own master carries it, with the
+    /// read-back sentence the app words from it. `None` for a one-off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule: Option<RuleRead>,
+}
+
+/// One line of the roll-call: who the participant is, the word for their
+/// seat at the table where it is not the plain attendee's, and how they
+/// answered.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ParticipantRow {
+    /// The participant's name, or their address when the line carries none:
+    /// the one string a surface renders for the line.
+    pub name_or_address: String,
+    /// The role word: `organiser`, `chair`, `optional`, `informational`, or
+    /// `contact` where the participant holds that seat, a role this vocabulary
+    /// does not know verbatim, and nothing at all for the plain attendee.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    /// How the participant answered, the same five words a grid marks a hold
+    /// by; the unanswered default is the hold.
+    #[serde(default)]
+    pub response: Participation,
+}
+
+/// The serialiser's omission test for a zero folded tail.
+fn folded_is_zero(count: &u32) -> bool {
+    *count == 0
+}
+
+/// A repeating rule as the detail read crosses it: the rule's own shape in
+/// the vocabulary the read-back words, beside the sentence itself. The
+/// shape's empty halves (no day set, no end) are the honest floor for a rule
+/// the wording cannot serve in full; the sentence never claims more than the
+/// rule says.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuleRead {
+    /// The base frequency, the engine's own lowercase word.
+    pub frequency: Frequency,
+    /// How many periods between instances; one for every period.
+    pub interval: u32,
+    /// The named weekdays, in the canonical Monday-first order, when the rule
+    /// names a set the words serve. Empty when the rule takes its days from
+    /// its start, and empty for a rule whose day set the wording refuses.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub days: Vec<Weekday>,
+    /// When the series stops: after a count of instances, or on a date.
+    /// `None` when it never stops, and `None` for a rule whose end the
+    /// wording refuses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<RuleEndRead>,
+    /// The read-back sentence: the app's own words for the rule, present
+    /// tense, built to stand under the detail's repeat line.
+    pub sentence: String,
+}
+
+/// When a repeating series stops, as the detail read crosses it. Crosses as
+/// a snake_case word with its bound.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuleEndRead {
+    /// After a fixed number of instances, counting the first.
+    AfterCount(u32),
+    /// On a calendar date, the rule's own bound.
+    UntilDate(CalendarDate),
 }
 
 #[cfg(test)]

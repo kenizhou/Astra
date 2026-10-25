@@ -24,7 +24,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use astra_viewmodel::{SyncBodyCap, ThemeMode, WeekdayWire};
+use astra_viewmodel::{CalendarViewWire, SyncBodyCap, ThemeMode, WeekdayWire};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -107,6 +107,18 @@ pub struct Preferences {
     /// How many days the calendar's cold window covers.
     #[serde(default = "default_horizon")]
     pub horizon_days: u32,
+    /// The view kind the calendar pane restores at launch. The default (the
+    /// month) leaves the file, the same canonicalisation the language tag
+    /// follows, so the file holds the preference only where the person left
+    /// another view standing.
+    #[serde(default, skip_serializing_if = "is_default_calendar_view")]
+    pub calendar_view: CalendarViewWire,
+    /// The navigation anchor the calendar restores at launch, a civil date in
+    /// the display zone's own terms. Absent (no navigation has landed, or a
+    /// file from before the field existed) is today by behaviour: the cold
+    /// window opens around now and the surface seeds from the now line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub calendar_anchor: Option<engine_api::CalendarDate>,
     /// Whether the composer quotes the original below the reply.
     #[serde(default = "default_true")]
     pub quote_below: bool,
@@ -189,6 +201,8 @@ impl Default for Preferences {
             zone: default_zone(),
             first_day_of_week: WeekdayWire::default(),
             horizon_days: default_horizon(),
+            calendar_view: CalendarViewWire::default(),
+            calendar_anchor: None,
             quote_below: default_true(),
             default_calendar: None,
             default_send_account: None,
@@ -226,6 +240,14 @@ fn is_default_language(language: &str) -> bool {
 fn default_horizon() -> u32 {
     42
 }
+
+/// The calendar view preference's omission test: the shipped default (the
+/// month) leaves the file, so the entry exists only where the person left
+/// another view standing.
+fn is_default_calendar_view(view: &CalendarViewWire) -> bool {
+    matches!(view, CalendarViewWire::Month)
+}
+
 /// The shortest horizon a setting may name: a window shorter than a week
 /// cannot hold the week a cold grid paints.
 pub(crate) const HORIZON_MIN_DAYS: u32 = 7;

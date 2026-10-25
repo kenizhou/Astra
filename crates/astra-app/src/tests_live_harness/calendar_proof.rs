@@ -256,6 +256,7 @@ pub(super) fn range() -> Intent {
     Intent::Calendar(CalendarIntent::SetRange {
         start: "2026-11-02T00:00:00Z".parse().expect("the window start"),
         days: 21,
+        view: None,
     })
 }
 
