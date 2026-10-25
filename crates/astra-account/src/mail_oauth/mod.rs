@@ -27,5 +27,5 @@ mod probe;
 
 pub use credentials::{imap_oauth_credential_source, imap_oauth_token_source};
 pub use grant::MailOauthGrant;
-pub use issuer::{mail_oauth_issuer, register_mail_client};
+pub use issuer::{detected_issuer, mail_oauth_issuer, register_mail_client};
 pub use probe::{imap_auth_offer, ImapAuth, ImapAuthQuery};

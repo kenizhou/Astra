@@ -98,6 +98,16 @@ pub(crate) mod jmap_commands;
 /// The Google Desktop flow's loopback capture: the listener the redirect
 /// lands on, bound before the authorization URL mints.
 pub(crate) mod loopback;
+/// The mail sign-in's account half: what a completed exchange's document
+/// becomes once it answered, and the dial every path that brings a
+/// grant-carrying mail account up runs.
+pub(crate) mod mail_add;
+/// The mail sign-in's route walk: the static table or the discovered
+/// issuer, the registration, and the minted PKCE request.
+pub(crate) mod mail_begin;
+/// The mail sign-in command surface: the wizard's three-answer probe and
+/// the begin's session half.
+pub(crate) mod mail_commands;
 pub(crate) mod session;
 pub(crate) mod transaction;
 /// The sign-in surface's Tauri-touching wiring: the opener browser, the

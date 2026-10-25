@@ -8,8 +8,10 @@
 // settings snapshot's account rows carry; a healthy account renders
 // neither. The expired row is the cross-family surface: its action
 // targets the family the grant belongs to, google for a Google account
-// as microsoft for a Microsoft one, while the banner stays
-// Microsoft-only (Google has no calendar re-auth).
+// as microsoft for a Microsoft one, while the jmap and imap_smtp
+// families have no integrated provider flow to re-run: their rows name
+// the refused credential and point at reconnecting the account. The
+// banner stays Microsoft-only (Google has no calendar re-auth).
 
 import { useState } from 'react';
 
@@ -94,9 +96,10 @@ export function ReconnectBanner({ rows }: { rows: AccountSettingsRow[] }) {
 /** The expired-sign-in row: a dead grant renders its own card, because a
  * sign-in button inside the open-button row is markup no screen reader
  * tolerates. The sentence names the sign-in, never an outage, and its
- * action is the same re-grant. A jmap row has no integrated provider
- * flow to re-run: its sentence names the refused credential and its
- * remedy is reconnecting the account here. */
+ * action is the same re-grant. The jmap and imap_smtp families have no
+ * integrated provider flow to re-run: their rows name the refused
+ * credential and their remedy is reconnecting the account here, until
+ * an in-place grant ships. */
 export function ExpiredSignInRow({
   row,
   onOpen,
@@ -105,7 +108,7 @@ export function ExpiredSignInRow({
   onOpen: () => void;
 }) {
   const regrant = useRegrant();
-  const jmap = row.kind === 'jmap';
+  const namedCredential = row.kind === 'jmap' || row.kind === 'imap_smtp';
   return (
     <div
       role="status"
@@ -114,12 +117,12 @@ export function ExpiredSignInRow({
     >
       <p className="text-xs font-medium text-foreground">{row.address}</p>
       <p className="text-xs text-muted-foreground">
-        {jmap
+        {namedCredential
           ? 'This account\u2019s credential was refused. Remove the account and connect it again to update it.'
           : 'The sign-in expired or was withdrawn. Sign in again to reconnect this account.'}
       </p>
       <div className="flex gap-2 pt-1">
-        {!jmap && (
+        {!namedCredential && (
           <button
             type="button"
             aria-label={`Sign in again as ${row.address}`}

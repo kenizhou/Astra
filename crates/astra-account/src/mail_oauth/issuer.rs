@@ -137,6 +137,30 @@ fn issuer_candidates(
     candidates
 }
 
+/// The detection stand-in a host builds from the issuer its
+/// recommendation view carried: the wizard holds the recommendation, not
+/// the raw [`DetectedMailSettings`] the chain read, and the chain's only
+/// use of the detection result is the issuer field. The stand-in carries
+/// that field; every other field is inert filler the struct requires and
+/// nothing on this path reads.
+#[must_use]
+pub fn detected_issuer(issuer: Option<String>) -> astra_autodetect::DetectedMailSettings {
+    astra_autodetect::DetectedMailSettings {
+        incoming: Vec::new(),
+        outgoing: Vec::new(),
+        // The recommendation is the trust-filtered product of the run
+        // that named the issuer: only a provider describing itself over
+        // HTTPS may name one, and that fact crossed when the field did.
+        is_trusted: true,
+        source: astra_autodetect::Source {
+            kind: astra_autodetect::SourceKind::Autoconfig,
+            url: String::new(),
+        },
+        oauth_issuer: issuer,
+        dav: astra_autodetect::DetectedDav::default(),
+    }
+}
+
 /// Registers this install as a client of `metadata`'s server (RFC 7591),
 /// reusing the id already minted this session for the same issuer and
 /// redirect.

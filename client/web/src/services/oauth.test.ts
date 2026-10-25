@@ -12,11 +12,14 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke }));
 vi.mock('@tauri-apps/api/event', () => ({ listen }));
 
 import {
+  imapAuthOffer,
+  imapOauthBegin,
   jmapOauthBegin,
   jmapOauthOffered,
   oauthBegin,
   oauthCancel,
   oauthOffer,
+  onImapSignInResult,
   onJmapSignInResult,
   onOauthSignInResult,
 } from './oauth';
@@ -118,6 +121,59 @@ describe('the jmap oauth wire', () => {
     expect(event).toBe('jmap_sign_in_result');
     handler({ payload: { outcome: { added: { address: 'work@example.test' } } } });
     expect(seen).toEqual([{ outcome: { added: { address: 'work@example.test' } } }]);
+    teardown();
+    expect(unlisten).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('the mail oauth wire', () => {
+  const setup = {
+    imap_host: 'mail.example.test',
+    username: 'work@example.test',
+    credential: { password: '' },
+    imap_security: 'implicit_tls' as const,
+    smtp_security: 'implicit_tls' as const,
+  };
+
+  it('asks the dialled server with the setup payload and the autoconfig issuer', async () => {
+    invoke.mockResolvedValue('password');
+    await expect(imapAuthOffer(setup, 'https://id.example.test')).resolves.toBe('password');
+    expect(invoke).toHaveBeenCalledWith('imap_auth_offer', {
+      setup,
+      oauthIssuer: 'https://id.example.test',
+    });
+  });
+
+  it('begins the mail sign-in over the same payload', async () => {
+    invoke.mockResolvedValue(undefined);
+    await imapOauthBegin(setup);
+    expect(invoke).toHaveBeenCalledWith('imap_oauth_begin', {
+      setup,
+      oauthIssuer: undefined,
+    });
+  });
+
+  it('subscribes to the mail sign-in result event and hands the payload over', async () => {
+    const unlisten = vi.fn();
+    listen.mockResolvedValue(unlisten);
+    const seen: unknown[] = [];
+    const teardown = await onImapSignInResult((result) => {
+      seen.push(result);
+    });
+
+    const [event, handler] = listen.mock.calls[0] as [
+      string,
+      (event: { payload: unknown }) => void,
+    ];
+    expect(event).toBe('imap_sign_in_result');
+    handler({
+      payload: {
+        outcome: { refused: { refusal: 'dead', detail: 'the grant was revoked' } },
+      },
+    });
+    expect(seen).toEqual([
+      { outcome: { refused: { refusal: 'dead', detail: 'the grant was revoked' } } },
+    ]);
     teardown();
     expect(unlisten).toHaveBeenCalledTimes(1);
   });

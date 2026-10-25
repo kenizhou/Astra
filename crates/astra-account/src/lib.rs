@@ -57,8 +57,8 @@ pub use jmap::{
 };
 pub use log_handle::account_log_handle;
 pub use mail_oauth::{
-    imap_auth_offer, imap_oauth_credential_source, imap_oauth_token_source, mail_oauth_issuer,
-    register_mail_client, ImapAuth, ImapAuthQuery, MailOauthGrant,
+    detected_issuer, imap_auth_offer, imap_oauth_credential_source, imap_oauth_token_source,
+    mail_oauth_issuer, register_mail_client, ImapAuth, ImapAuthQuery, MailOauthGrant,
 };
 pub use oauth_accounts::{GoogleAccount, GraphAccount};
 pub use pass_folders::pass_syncs;

@@ -320,6 +320,17 @@ fn graph_dial(answer: Result<(), &'static str>) -> crate::oauth::graph_add::Grap
     })
 }
 
+/// A mail grant dial seam that is never meant to run: the boot tests
+/// that share this helper dial no oauth-carrying imap account, so a
+/// call here means the arm routed where it should not.
+fn unused_mail_dial() -> crate::oauth::mail_add::MailGrantDial {
+    std::sync::Arc::new(|_account, _tokens, _config, _pool| {
+        Box::pin(
+            async move { panic!("a boot test dialled a mail oauth account it did not script") },
+        )
+    })
+}
+
 /// Runs one boot's stored-account dial over `dials` with the given graph
 /// dial, on a test runtime. The refusal map is its own throwaway: what
 /// the dial records is the child module's tests.
@@ -339,6 +350,7 @@ fn boot_dials(
             &crate::commands_fakes::crypto_store(),
             dial,
             google_boot::unused_dial(),
+            unused_mail_dial(),
             &refusals,
         )
         .await
@@ -436,6 +448,13 @@ mod google_boot;
 // arm.
 #[path = "boot_tests/jmap_boot_tests.rs"]
 mod jmap_boot;
+
+// The mail oauth account's boot half: the stored grant document's dial
+// over the sink-backed source (the rotation a ratcheting server issues
+// at that dial lands in the entry and the store), the dead grant's row,
+// and the password arm's untouched routing.
+#[path = "boot_tests/mail_boot_tests.rs"]
+mod mail_boot;
 
 // The scripted loopback servers and flow fixtures the offline lifecycle
 // proofs share: a stand-in profile read and the ratcheting token

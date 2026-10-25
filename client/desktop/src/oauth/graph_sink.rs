@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! The desktop's [`TokenSink`]: the host half every OAuth token source
 //! reports a rotation or a moved scope set to, whichever family the
-//! account's grant belongs to (`[graph]` or `[google]`). One sink serves
-//! every account, keyed by the id it is handed; the boot's restore and
-//! the sign-in's completion build it over the same two stores (the dial
-//! table and the credential transaction), so both paths land their
-//! writes in the same places.
+//! account's grant belongs to (`[graph]`, `[google]`, `[jmap]`, or
+//! `[imap]`). One sink serves every account, keyed by the id it is
+//! handed; the boot's restore and the sign-in's completion build it over
+//! the same two stores (the dial table and the credential transaction),
+//! so both paths land their writes in the same places.
 
 use std::sync::Arc;
 
@@ -38,6 +38,13 @@ fn oauth_grant_mut(config: &mut AccountConfig) -> Option<(&mut Secret, &mut Opti
 /// dropped one kills the account at the next launch.
 fn jmap_refresh_mut(config: &mut AccountConfig) -> Option<&mut Secret> {
     Some(&mut config.jmap.as_mut()?.oauth.as_mut()?.refresh_token)
+}
+
+/// The entry's mail grant's refresh slot, when the account carries one:
+/// the `[imap.oauth]` rotation lands here, and a dropped one kills the
+/// account at the next launch exactly the JMAP grant's does.
+fn imap_refresh_mut(config: &mut AccountConfig) -> Option<&mut Secret> {
+    Some(&mut config.imap.as_mut()?.oauth.as_mut()?.refresh_token)
 }
 
 /// The sink over the dial table and the credential transaction: the boot's
@@ -78,11 +85,14 @@ impl TokenSink for DialTableTokenSink {
             return;
         };
         // Whichever family's grant the entry carries, microsoft, google,
-        // or jmap: the rotation advances it, and a jmap grant has no
-        // granted-set slot to move beside it.
+        // jmap, or the mail family's `[imap.oauth]`: the rotation
+        // advances it, and the jmap and mail grants have no granted-set
+        // slot to move beside them.
         let refresh = if let Some((refresh, _)) = oauth_grant_mut(&mut config) {
             refresh
         } else if let Some(refresh) = jmap_refresh_mut(&mut config) {
+            refresh
+        } else if let Some(refresh) = imap_refresh_mut(&mut config) {
             refresh
         } else {
             // Registered, but with no grant to advance: a stored-secret

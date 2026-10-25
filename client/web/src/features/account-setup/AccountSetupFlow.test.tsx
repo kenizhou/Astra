@@ -15,6 +15,7 @@ const ipc = vi.hoisted(() => ({
   imapTestConnection: vi.fn(),
   detectAccountSettings: vi.fn(),
   oauthOffer: vi.fn(),
+  imapAuthOffer: vi.fn(),
 }));
 
 vi.mock('@/services/ipc', async (importOriginal) => ({
@@ -55,6 +56,8 @@ beforeEach(() => {
   ipc.detectAccountSettings.mockReset();
   ipc.oauthOffer.mockReset();
   ipc.oauthOffer.mockResolvedValue({ providers: [] });
+  ipc.imapAuthOffer.mockReset();
+  ipc.imapAuthOffer.mockResolvedValue('password');
   useUiStore.setState({ accountSetupOpen: true });
 });
 
@@ -188,6 +191,29 @@ describe('the manual setup flow', () => {
     expect(await screen.findByText(/no route to host/)).toBeTruthy();
     expect(useUiStore.getState().accountSetupOpen).toBe(true);
     expect(ipc.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('asks the dialled server and stands the sign-in button primary beside the demoted password', async () => {
+    // The manual step's own ask: the flow hands the card its fields, the
+    // server's sign-in answer stands the primary button, and the password
+    // demotes behind the control rather than standing beside it.
+    ipc.imapAuthOffer.mockResolvedValue({
+      sign_in: {
+        issuer: 'https://id.example.test',
+        provider_label: null,
+        password_also_works: true,
+      },
+    });
+    render(<AccountSetupFlow />);
+    fireEvent.click(screen.getByRole('button', { name: 'Set up manually' }));
+    fillForm();
+
+    expect(
+      await screen.findByRole('button', { name: 'Sign in with id.example.test' })
+    ).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Use a password instead' })).toBeTruthy();
+    expect(screen.queryByLabelText('Password')).toBeNull();
+    expect(ipc.imapAuthOffer).toHaveBeenCalledTimes(1);
   });
 
   it('carries the start_tls security through the tested setup', async () => {

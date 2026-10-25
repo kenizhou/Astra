@@ -216,6 +216,7 @@ fn boot_dials(
             &crate::commands_fakes::crypto_store(),
             unused_graph_dial(),
             unused_google_dial(),
+            super::unused_mail_dial(),
             &refusals,
         )
         .await

@@ -29,6 +29,7 @@ import { useDialogFocus } from '@/components/ui/useDialogFocus';
 import { buildAccountToml } from './accountToml';
 import { DetectStep } from './DetectStep';
 import { CertificateOffer } from './CertificateOffer';
+import { ImapAuthCard } from './ImapAuthCard';
 import { JmapForm } from './JmapForm';
 import { OAuthOffer, type OAuthFlowState } from './OAuthOffer';
 import { RecommendationPanel } from './RecommendationPanel';
@@ -37,6 +38,7 @@ import {
   detectFallbackNote,
   detectWithGuard,
   EMPTY_FIELDS,
+  imapIssuerFrom,
   jmapSeedFrom,
   manualDefaults,
   manualPrefill,
@@ -419,19 +421,21 @@ export function AccountSetupFlow() {
                   className="rounded-full border border-input bg-background px-3 py-1.5 text-[13px] text-foreground outline-none transition-colors focus-visible:border-primary"
                 />
               </label>
-              <label className="grid gap-1 text-xs text-muted-foreground">
-                Password
-                <input
-                  type="password"
-                  value={fields.password}
-                  onChange={(e) => set('password')(e.target.value)}
-                  autoComplete="new-password"
-                  className="rounded-full border border-input bg-background px-3 py-1.5 text-[13px] text-foreground outline-none transition-colors focus-visible:border-primary"
-                />
-              </label>
-              <p className="-mt-2 text-[11px] text-muted-foreground">
-                Your password goes to the system keychain, never to a log file.
-              </p>
+              {/* The server's own answer to the step's question draws the
+                  sign-in card and gates the password area: standing,
+                  demoted behind a control, or hidden where the server
+                  admits no password. */}
+              <ImapAuthCard
+                host={fields.host}
+                port={fields.port}
+                security={fields.security}
+                username={fields.username}
+                oauthIssuer={imapIssuerFrom(view)}
+                accepted={accepted}
+                password={fields.password}
+                onPasswordChange={set('password')}
+                onAdded={close}
+              />
 
               {certificate !== null && <CertificateOffer certificate={certificate} />}
 

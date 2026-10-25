@@ -306,6 +306,7 @@ fn the_sign_in_completes_the_rotation_lands_and_the_next_boot_dials_the_advanced
                 &crate::commands_fakes::crypto_store(),
                 super::google_boot::unused_graph_dial(),
                 dial,
+                super::unused_mail_dial(),
                 &refusals,
             )
             .await
@@ -383,6 +384,7 @@ fn a_dead_grant_s_classification_reaches_the_accounts_row_and_a_re_sign_in_clear
                 &crate::commands_fakes::crypto_store(),
                 super::google_boot::unused_graph_dial(),
                 dial,
+                super::unused_mail_dial(),
                 &refusals,
             )
             .await
