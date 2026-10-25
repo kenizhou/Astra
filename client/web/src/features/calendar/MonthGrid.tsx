@@ -62,8 +62,11 @@ function Chip({
       <CalendarDot color={color} />
       <span className="truncate">{title}</span>
       {span !== null && (span.continuesAfter || span.continuesBefore) && (
-        <span aria-hidden="true" className="ml-auto shrink-0 text-muted-foreground">
-          ›
+        <span
+          aria-hidden="true"
+          className="ml-auto shrink-0 text-muted-foreground"
+        >
+          {span.continuesBefore && !span.continuesAfter ? '‹' : '›'}
         </span>
       )}
     </button>

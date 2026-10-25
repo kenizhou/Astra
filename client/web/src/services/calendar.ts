@@ -385,16 +385,6 @@ export interface InvitationBlock {
   organizer: string;
 }
 
-/** The calendar snapshot the surface renders after every pull. */
-export interface CalendarSnapshot {
-  calendars?: CalendarRow[];
-  occurrences?: OccurrenceRow[];
-  write_states?: CalendarWriteRow[];
-  reply_prompts?: ReplyPromptRow[];
-  now_data?: NowLineData;
-  shape?: CalendarShape;
-}
-
 /** Where one brief of one day stands; a snake_case word. */
 export type MeetingBriefState = 'generated' | 'no_meetings';
 

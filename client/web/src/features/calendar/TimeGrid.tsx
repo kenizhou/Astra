@@ -248,7 +248,7 @@ function AllDayLane({
           const hold = isHold(banner.row);
           return (
             <button
-              key={`${banner.row.account}:${banner.row.event}`}
+              key={`${banner.row.account}:${banner.row.event}:${banner.row.start}`}
               type="button"
               data-banner=""
               data-hold={hold}
