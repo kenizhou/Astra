@@ -153,20 +153,29 @@ pub async fn imap_auth_offer(
     let host = host_of(&query.imap_host);
     // A registration this build already holds beats discovery: the
     // provider has told us in advance which client we are, and
-    // re-registering would be neither possible nor wanted.
+    // re-registering would be neither possible nor wanted. A table
+    // entry whose client id is absent (a blank injection) is not a
+    // route: it is skipped and discovery answers.
     if let Some(provider) =
         astra_oauth::provider_for_host(&astra_oauth::static_mail_providers(), host)
     {
-        log::info!(
-            "imap auth: using this build's registration for {} at {}",
-            provider.label,
-            provider.issuer,
-        );
-        return classify(
-            offer.oauth,
-            offer.password,
-            &Route::Table(provider.label, provider.issuer),
-        );
+        if provider.client_id.is_empty() {
+            log::info!(
+                "imap auth: this build's registration for {} carries no client id; discovery answers",
+                provider.label,
+            );
+        } else {
+            log::info!(
+                "imap auth: using this build's registration for {} at {}",
+                provider.label,
+                provider.issuer,
+            );
+            return classify(
+                offer.oauth,
+                offer.password,
+                &Route::Table(provider.label, provider.issuer),
+            );
+        }
     }
     let route = match issuer_within(query).await {
         Some(metadata) => Route::Issuer(metadata.issuer),
