@@ -30,8 +30,8 @@ pub(crate) fn rule_read(recurrence: &Recurrence) -> Option<RuleRead> {
     Some(RuleRead {
         frequency: rule.frequency,
         interval: rule.interval.get(),
-        days: full.then(|| day_set(rule)).unwrap_or_default(),
-        end: full.then(|| end_read(rule)).flatten(),
+        days: if full { day_set(rule) } else { Vec::new() },
+        end: if full { end_read(rule) } else { None },
         sentence: sentence(rule, full),
     })
 }
@@ -256,7 +256,10 @@ fn month_word(month: u8) -> &'static str {
 /// The bound's wall clock as the sentence names it: the date in day month
 /// year order, and the clock beside it whenever the bound does not sit on
 /// the final second of its own day, because a mid-day bound really does cut
-/// that day's later occurrences and the date alone would promise them.
+/// that day's later occurrences and the date alone would promise them. A
+/// clock whose seconds are not zero words them too: a bound inside a minute
+/// never reads as the whole minute, and "at 23:59" never stands in for the
+/// half minute the rule stops short of the day's end.
 fn until_words(until: &engine_api::LocalDateTime) -> String {
     let date = format!(
         "{} {} {}",
@@ -267,7 +270,15 @@ fn until_words(until: &engine_api::LocalDateTime) -> String {
     if until.hour() == 23 && until.minute() == 59 && until.second() == 59 {
         return date;
     }
-    format!("{date} at {:02}:{:02}", until.hour(), until.minute())
+    if until.second() == 0 {
+        return format!("{date} at {:02}:{:02}", until.hour(), until.minute());
+    }
+    format!(
+        "{date} at {:02}:{:02}:{:02}",
+        until.hour(),
+        until.minute(),
+        until.second()
+    )
 }
 
 #[cfg(test)]

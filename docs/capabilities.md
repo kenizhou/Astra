@@ -71,18 +71,18 @@ this row ports.
 | Calendar | Agenda view with create and delete event | 🚧 | calendar.md |
 | Calendar | Write affordances gated on per-row can_write | 🚧 | calendar.md |
 | Calendar | Write-status feedback: spinner while saving, warning on unconfirmed, retry | 🚧 | writing and failed-with-retry states settle per dispatch; calendar.md |
-| Calendar | All-day and multi-day banners with a per-day overflow count that expands | ⬜ | the all-day lane ships; the banner shape does not |
+| Calendar | All-day and multi-day banners with a per-day overflow count that expands | 🚧 | a multi-day all-day occurrence renders as one spanning banner across the lane's joined columns with the clipped edges marked, and the month's N-more counts banners once on their starting day over all-day and timed alike; the overflow expands into the day view; the timed multi-day block keeps its clamped shape; calendar.md |
 | Calendar | Calendar manager: per-calendar visibility and colour override, persisted | 🚧 | visibility toggles ship; no colour override, nothing persisted; calendar.md |
 | Settings | Display settings: first day of week, 12 or 24-hour clock, light or dark appearance, calendar horizon | 🚧 | all four ship in the settings screen; accent skin, contrast, and font size ship as device-local options; the time zone carries via the calendar's display zone; settings.md |
-| Calendar | The shape and horizon you left the calendar in, restored on launch | ⬜ | |
+| Calendar | The shape and horizon you left the calendar in, restored on launch | 🚧 | the view kind and the navigation anchor persist as a calendar preference (every navigation write carries them), the boot seeds the window around a past anchor exactly, and a refused write keeps the standing shape; the horizon setting is its own row and stays; calendar.md |
 | Calendar | The diary on screen from the store at launch, filled without opening it, there offline | ⬜ | |
 | Calendar | Calendar refreshes periodically while the app stays open | ⬜ | |
 | Calendar | Event creation with a calendar picker, all-day, notes, location | 🚧 | calendar.md |
 | Calendar | Tap an event to view its detail and edit title, time, notes, location | 🚧 | a tap selects the event into the detail dock; the editor opens from there; calendar.md |
-| Calendar | Attendee list with responses, on the detail and read-only in the editor | ⬜ | |
+| Calendar | Attendee list with responses, on the detail and read-only in the editor | 🚧 | the detail read carries the roll-call (the organiser first, the role word, the response state) over the event's own participants, capped at eight with the tail folded into a count sentence, and the editor carries the same list read-only; an expansion affordance and guest-list editing are later rows; calendar.md |
 | Calendar | Deleting one occurrence of a repeating event asks this event or all events first | 🚧 | calendar.md |
 | Calendar | Editing a whole repeating event warns where the server would throw away single-occurrence changes | 🚧 | calendar.md |
-| Calendar | A repeating rule read back in full on the event detail | ⬜ | the read-back is minimal; calendar.md's gap |
+| Calendar | A repeating rule read back in full on the event detail | 🚧 | the detail read carries the rule's own shape beside the app-worded sentence (the interval, the day set, the end in count or date words, the until clock wording its seconds), with the honest interval-and-frequency fallback for a rule outside the vocabulary; the minimal line is retired on the detail and the editor; calendar.md |
 | Calendar | One occurrence of a repeating event shows that occurrence's date and time | 🚧 | calendar.md |
 | Calendar | Editing one occurrence of a repeating event asks this event or all events first | 🚧 | calendar.md |
 | Calendar | Setting a repeat rule: how often, how many periods to skip, weekdays, what ends it; a rule too detailed to state is shown, not offered | 🚧 | create path only; edit-time restructuring is calendar.md's gap; calendar.md |
@@ -103,7 +103,7 @@ this row ports.
 | Sending | Reply and reply all from the reading pane: prefilled recipients, subject, and quoted original, sent as a threaded reply | 🚧 | sending.md |
 | Sending | Forward from the reading pane: quoted original under a Fwd: subject, to recipients you name | 🚧 | sending.md |
 | Sending | Threading written on send: replies link by In-Reply-To with the References chain; forwards carry the chain alone | 🚧 | sending.md |
-| Contacts | Sender avatars: a coloured monogram, replaced by an address-book photo | 🚧 | the monogram ships on the People view and the composer's suggestions, one derivation; the photo reads through the validated cached-photo command; no avatar on the mail list row yet; avatars.md, contacts.md |
+| Contacts | Sender avatars: a coloured monogram, replaced by an address-book photo | 🚧 | the monogram ships on the People view, the composer's suggestions, and the mail list row's leading edge (hidden at the compact density), one derivation resolved per address through the per-address cache; the photo reads through the validated cached-photo command and replaces the monogram only when it lands; avatars.md, contacts.md |
 | Contacts | The same person in several accounts is one row, joined on a shared address, and says so | 🚧 | joined on the shared canonical address, names never join; In N accounts on the row, Also in and per-value provenance on the detail; proven live; contacts.md |
 | Composer | Recipient autosuggest ranked from synced contacts and from people you have written to | 🚧 | the token ranking with pills over the engine's suggestions; sent-mail history mined during sync and never hidden; contacts.md |
 | Search | from: and to: search DSL, unified across accounts, newest first, every folder but Trash | 🚧 | search.md |

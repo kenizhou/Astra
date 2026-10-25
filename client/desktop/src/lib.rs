@@ -142,6 +142,7 @@ pub fn run() {
             commands::ai_docs::split_map,
             commands::calendar::calendar,
             commands::calendar::calendar_brief_generate,
+            commands::calendar::calendar_event_detail,
             commands::people::people,
             commands::people::people_card,
             commands::people::people_suggestions,

@@ -123,6 +123,59 @@ describe('the calendar store apply', () => {
   });
 });
 
+describe('the calendar store shape restore', () => {
+  it('seeds the view and a past anchor from the snapshot own shape', () => {
+    // A launch whose preference left the agenda standing on a September
+    // day: the store restores that shape exactly, not today in the month.
+    useCalendarStore.getState().applySnapshot({
+      shape: { view: 'agenda', anchor: '2026-09-15' },
+      now_data: { now: '2026-10-19T22:30:00Z', zone: 'Europe/Amsterdam' },
+    });
+
+    expect(useCalendarStore.getState().view).toBe('agenda');
+    expect(useCalendarStore.getState().anchor).toBe('2026-09-15');
+  });
+
+  it('falls back to the month and the zone-local today when the shape holds no anchor', () => {
+    useCalendarStore.getState().applySnapshot({
+      shape: { view: 'month' },
+      now_data: { now: '2026-10-19T22:30:00Z', zone: 'Europe/Amsterdam' },
+    });
+
+    expect(useCalendarStore.getState().view).toBe('month');
+    expect(useCalendarStore.getState().anchor).toBe('2026-10-20');
+  });
+
+  it('follows the published shape, so a refused write keeps the standing view', () => {
+    useCalendarStore.getState().applySnapshot({ shape: { view: 'month' } });
+
+    // The optimistic switch a navigation makes...
+    useCalendarStore.getState().setView('day');
+    expect(useCalendarStore.getState().view).toBe('day');
+
+    // ...and the publish after the refused write still carries the standing
+    // shape, which the store follows back.
+    useCalendarStore.getState().applySnapshot({ shape: { view: 'month' } });
+    expect(useCalendarStore.getState().view).toBe('month');
+  });
+
+  it('keeps a standing anchor over a later shape the navigation did not move', () => {
+    useCalendarStore.getState().applySnapshot({
+      shape: { view: 'month', anchor: '2026-09-15' },
+    });
+    useCalendarStore.getState().setAnchor('2026-11-02');
+
+    useCalendarStore.getState().applySnapshot({
+      shape: { view: 'month', anchor: '2026-09-15' },
+      now_data: { now: '2026-12-24T10:00:00Z', zone: 'Europe/Amsterdam' },
+    });
+
+    // The anchor is the user's place in the diary, moved only by
+    // navigation; the shape's anchor seeds the boot, never a later publish.
+    expect(useCalendarStore.getState().anchor).toBe('2026-11-02');
+  });
+});
+
 describe('the calendar store selection', () => {
   it('picks an occurrence and clears it on a second pick', () => {
     const row = occurrence();

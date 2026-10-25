@@ -51,6 +51,20 @@ export type Frequency =
 /** A weekday a repeat rule names; crosses as a snake_case word. */
 export type Weekday = 'mo' | 'tu' | 'we' | 'th' | 'fr' | 'sa' | 'su';
 
+/** The calendar's view kinds as the shape preference crosses them. */
+export type CalendarViewWire = 'agenda' | 'day' | 'work_week' | 'month';
+
+/**
+ * The calendar's standing view shape, as the snapshot publishes it for the
+ * surface to restore at boot: which view kind the pane renders and the
+ * navigation anchor it stands on, absent while no anchor stands (today by
+ * behaviour).
+ */
+export interface CalendarShape {
+  view: CalendarViewWire;
+  anchor?: string;
+}
+
 /** A repeat rule as the host can state it, the editor's subset. */
 export interface RepeatRule {
   frequency: Frequency;
@@ -118,7 +132,7 @@ export type RsvpAnswer = 'accepted' | 'tentative' | 'declined';
  */
 export type CalendarIntentBody =
   | 'refresh'
-  | { set_range: { start: string; days: number } }
+  | { set_range: { start: string; days: number; view?: CalendarViewWire } }
   | { set_visible_calendars: { ids: CalendarRef[] } }
   | { create_event: CalendarEventCreate }
   | { update_event: { event: EventRef; edit: CalendarEventEdit } }
@@ -139,9 +153,17 @@ export type CalendarIntentBody =
 export const calendarIntents = {
   /** Sync the account's calendars and refresh the calendar snapshot. */
   refreshCalendar: () => ({ calendar: 'refresh' as const }),
-  /** Move the visible window: the UTC instant it opens at and its length in days. */
-  setCalendarRange: (start: string, days: number) => ({
-    calendar: { set_range: { start, days } },
+  /** Move the visible window: the UTC instant it opens at, its length in
+   * days, and the view kind it serves, which the core persists as the
+   * calendar's shape preference. */
+  setCalendarRange: (start: string, days: number, view?: CalendarViewWire) => ({
+    calendar: {
+      set_range: {
+        start,
+        days,
+        ...(view !== undefined && { view }),
+      },
+    },
   }),
   /** Name which calendars' events are drawn; an empty set hides every calendar's. */
   setVisibleCalendars: (ids: CalendarRef[]) => ({
@@ -298,6 +320,54 @@ export interface NowLineData {
 }
 
 /**
+ * A repeating rule as the event detail read crosses it: the rule's own
+ * shape in the wording vocabulary's terms beside the read-back sentence,
+ * the app's own words built core-side. The empty halves are the honest
+ * floor for a rule the wording cannot serve in full.
+ */
+export interface RuleRead {
+  frequency: Frequency;
+  interval: number;
+  days?: Weekday[];
+  end?: RuleEndRead;
+  sentence: string;
+}
+
+/** When a repeating series stops; crosses as a snake_case word with its bound. */
+export type RuleEndRead = { after_count: number } | { until_date: string };
+
+/** One line of the roll-call: who the participant is and how they answered. */
+export interface ParticipantRow {
+  name_or_address: string;
+  role?: string;
+  response: Participation;
+}
+
+/**
+ * One event's detail read: the roll-call of who is on the event (the
+ * organiser first, the capped tail folded into a count) and the full
+ * repeating rule with its read-back sentence. Both halves are absent for an
+ * event that carries neither guests nor a rule.
+ */
+export interface EventDetail {
+  account: string;
+  event: string;
+  participants?: ParticipantRow[];
+  folded_participants?: number;
+  rule?: RuleRead;
+}
+
+/** The calendar snapshot the surface renders after every pull. */
+export interface CalendarSnapshot {
+  calendars?: CalendarRow[];
+  occurrences?: OccurrenceRow[];
+  write_states?: CalendarWriteRow[];
+  reply_prompts?: ReplyPromptRow[];
+  now_data?: NowLineData;
+  shape?: CalendarShape;
+}
+
+/**
  * The invitation card above the reading pane's body: what the open message
  * means to this account's calendar. The words are the two-condition gate's,
  * the same verdict the answer path decides through.
@@ -322,6 +392,7 @@ export interface CalendarSnapshot {
   write_states?: CalendarWriteRow[];
   reply_prompts?: ReplyPromptRow[];
   now_data?: NowLineData;
+  shape?: CalendarShape;
 }
 
 /** Where one brief of one day stands; a snake_case word. */
@@ -351,6 +422,15 @@ export interface MeetingBriefView {
 /** Pulls the calendar snapshot. */
 export function calendar(): Promise<CalendarSnapshot> {
   return invoke('calendar');
+}
+
+/**
+ * Reads one event's detail: the roll-call (the organiser first, the tail
+ * folded into a count) and the full repeating rule's read-back sentence.
+ * Answers null when nobody holds the event the reference names.
+ */
+export function calendarEventDetail(account: string, key: string): Promise<EventDetail | null> {
+  return invoke('calendar_event_detail', { account, key });
 }
 
 /** Generates the account's meeting brief for the civil day, answered fresh every ask. */

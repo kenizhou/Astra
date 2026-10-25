@@ -243,7 +243,9 @@ fn default_horizon() -> u32 {
 
 /// The calendar view preference's omission test: the shipped default (the
 /// month) leaves the file, so the entry exists only where the person left
-/// another view standing.
+/// another view standing. The reference is serde's own requirement for a
+/// `skip_serializing_if` predicate.
+#[allow(clippy::trivially_copy_pass_by_ref)]
 fn is_default_calendar_view(view: &CalendarViewWire) -> bool {
     matches!(view, CalendarViewWire::Month)
 }

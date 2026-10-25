@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// One message row: the sender and the UTC-derived stamp on the first line,
-// the subject with its state icons on the second, the A3 hairline under
-// every row. The read state is carried by the weight stops alone (560
-// unread, 450 read; the A3 type voice), so the column needs no ribbons and
-// no monograms. The row's own actions (mark read, flag) ride the trailing
-// edge and show while the row is hovered or selected, with a flagged row
+// One message row: the sender's avatar at the leading edge (the monogram
+// until the photo lands), the sender and the UTC-derived stamp on the
+// first line, the subject with its state icons on the second, the A3
+// hairline under every row. The read state is carried by the weight stops
+// alone (560 unread, 450 read; the A3 type voice), so the column needs no
+// ribbons. The row's own actions (mark read, flag) ride the trailing edge
+// and show while the row is hovered or selected, with a flagged row
 // keeping its flag visible so the state never hides. The whole row drags:
 // the drag carries the selection it rides in (itself alone otherwise), keys
 // only, never content. The touch pointer owns the horizontal swipe: the
@@ -22,6 +23,7 @@ import {
   TrashIcon,
 } from '@/components/icons';
 import { dispatch, intents } from '@/services/ipc';
+import { Avatar } from '@/features/people/Avatar';
 import { useListStore } from '@/stores/listStore';
 import type { RowKey, MessageRowView } from '@/services/surfaces';
 import { resolveTargets } from './listSelection';
@@ -156,6 +158,7 @@ export function MessageRow({ row, selected, multiSelected = false, draft = false
         style={{ transform: `translateX(${swipe.dx}px)` }}
         className={`relative z-10 flex min-w-0 flex-1 items-start gap-2.5 px-3 ${swipe.dx === 0 ? '' : 'bg-card'}`}
       >
+        {density !== 'compact' && <Avatar address={row.sender_address} size={28} />}
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline justify-between gap-2">
             <span

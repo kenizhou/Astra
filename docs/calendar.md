@@ -28,7 +28,60 @@ title, the resolved UTC start and end, the all-day and recurrence markers, the
 occurrence token (below), the participation, whether the row may move, and
 the series-edit warning. Times are occurrence-accurate: each row of a series
 carries its own instants, resolved through the expansion zone the horizon was
-widened in.
+widened in. The snapshot also publishes the calendar's standing shape (the
+view kind and the navigation anchor, below), so a surface restores what the
+person left.
+
+## The event detail read
+
+Picking an event pulls its detail over the host command
+`calendar_event_detail`: the roll-call and the full repeating rule, both read
+from the master the event reference names through the same targeted read the
+rebuild rides. The occurrence row stays lean; this read is the only carrier
+of the two halves a crowded meeting and a rich rule need.
+
+- **The roll-call** carries the owner-role participant (the organiser) first,
+  every further participant behind in stored order, each as one line: the
+  name, or the address when the line carries no name, the word for a seat
+  beside the plain attendee's (`chair`, `optional`, `informational`,
+  `contact`, a foreign role verbatim), and the response state. The list caps
+  at the first eight lines and folds the tail into a count the surface
+  renders as the honest end of a crowded meeting; an expansion affordance is
+  a later row.
+- **The rule read-back** crosses the rule's own shape beside the sentence
+  the app words from it (the house pattern: the engine carries the rule, the
+  app words it): the frequency with its interval, the day set where the rule
+  names one, and the end in count or date words. A rule outside the wording
+  vocabulary crosses only what the surviving parts still make true, down to
+  the bare interval and frequency, never a sentence the rule does not make
+  true. The until clock words its seconds whenever they are not zero, so a
+  bound inside a minute never reads as the whole minute nor as end of day.
+- The editor carries both halves **read-only**: an editor cannot change a
+  guest list or reword a rule this slice; the list is there so the person
+  can see who they are writing to, and the sentence is the read where the
+  create select stays the editable vocabulary.
+
+## The persisted shape
+
+The calendar's shape (the view kind and the navigation anchor) persists as a
+preference and restores on launch. A `set_range` that names its view records
+it; `set_date` records the anchor; a write that names neither leaves the
+standing preference untouched, and a refused write keeps the standing shape
+(the snapshot publishes it on every rebuild, and a surface follows the
+publish). A past anchor restores exactly: the boot seeds the window around
+the anchor's own week, so the diary paints on the day the person left, not
+today. The horizon's persisted setting is its own row and stays.
+
+## The all-day banner
+
+A multi-day all-day occurrence renders as **one** spanning banner across its
+days in the all-day lane, the columns joined, with the continuation into
+days the window hides marked at the clipped edge; banners that share days
+stack in their own lanes. A timed occurrence, however many days it spans,
+never becomes a banner: it keeps its clamped block, because a banner is an
+all-day concept. The month grid chips a spanning all-day occurrence once, on
+the day it starts, so its overflow count names occurrences rather than
+repeats.
 
 ## The window and the horizon
 
@@ -49,7 +102,7 @@ answered as such, never a confident empty.
 | Intent | Meaning |
 |---|---|
 | `refresh` | Sync the window's calendars and republish |
-| `set_range` | Set the visible window (start, days) |
+| `set_range` | Set the visible window (start, days, maybe the view it serves) |
 | `set_visible_calendars` | Toggle calendar visibility for the rebuild |
 | `create_event` | The engine's draft, on a calendar the row says is writable |
 | `update_event` | The patch verb: title, notes, location, clocks, rule |
@@ -137,8 +190,13 @@ spends **no** call. Briefs regenerate on request; nothing is cached.
   view switch, and month day-cells set the range; scrolling a grid does not.
 - **Grid drags move whole blocks.** A resize is offered by the event dialog's
   end edit, not by a grid edge handle.
-- **The calendar's shape and horizon are not persisted across launches**, and
-  there is no periodic refresh timer; entry and focus regain refresh.
-- **Multi-day banners with a per-day overflow count do not ship**; the
-  all-day lane renders all-day occurrences only.
+- **The roll-call caps at eight lines with no expansion affordance.** A
+  meeting of thirty shows eight names and the folded count; seeing attendee
+  nine is a later row.
+- **The rule read-back words the supported vocabulary.** An exotic rule
+  falls back to the honest interval-and-frequency shape rather than a wrong
+  sentence.
+- **No periodic refresh timer; the offline diary at launch is a later row.**
+  The shape the person left now restores on launch; entry and focus regain
+  refresh, and rows 78 and 79 stay open.
 - **Briefs are not persisted.** Each request regenerates.

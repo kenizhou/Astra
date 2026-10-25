@@ -4,7 +4,7 @@
 // packed side by side so nothing renders on top of anything else.
 import { describe, expect, it } from 'vitest';
 
-import { dayBlocks } from './rowLayout';
+import { allDayBanners, dayBlocks } from './rowLayout';
 import type { OccurrenceRow } from '@/services/ipc';
 
 /** A timed occurrence row on 19 October 2026, Amsterdam. */
@@ -108,5 +108,113 @@ describe('the day blocks', () => {
     const early = row({ event: 'a', start: '2026-10-19T07:00:00Z', end: '2026-10-19T08:00:00Z' });
     const { timed } = dayBlocks([later, early], '2026-10-19', ZONE);
     expect(timed.map((block) => block.row.event)).toEqual(['a', 'c']);
+  });
+});
+
+describe('the all-day banners', () => {
+  /** The week the banner tests lay out: Monday 19 to Sunday 25 October 2026. */
+  const WEEK = [
+    '2026-10-19',
+    '2026-10-20',
+    '2026-10-21',
+    '2026-10-22',
+    '2026-10-23',
+    '2026-10-24',
+    '2026-10-25',
+  ];
+
+  /** An all-day row covering the given UTC midnights of Amsterdam days. */
+  function allDay(over: Partial<OccurrenceRow> = {}): OccurrenceRow {
+    return row({
+      all_day: true,
+      accuracy: 'all_day',
+      start: '2026-10-19T22:00:00Z',
+      end: '2026-10-20T22:00:00Z',
+      ...over,
+    });
+  }
+
+  it('renders a multi-day all-day occurrence as one banner across its days', () => {
+    // The 20th and the 21st in Amsterdam: one banner, not a chip per day.
+    const conference = allDay({
+      event: 'conf',
+      title: 'Conference',
+      start: '2026-10-19T22:00:00Z',
+      end: '2026-10-21T22:00:00Z',
+    });
+
+    const banners = allDayBanners(WEEK, [conference], ZONE);
+
+    expect(banners).toHaveLength(1);
+    expect(banners[0]!.row).toBe(conference);
+    expect(banners[0]!.from).toBe(1);
+    expect(banners[0]!.to).toBe(2);
+    expect(banners[0]!.continuesBefore).toBe(false);
+    expect(banners[0]!.continuesAfter).toBe(false);
+  });
+
+  it('marks the continuation where the window clips a banner', () => {
+    // Starts before the week and runs past it: both edges clip.
+    const away = allDay({
+      event: 'away',
+      title: 'Away',
+      start: '2026-10-15T22:00:00Z',
+      end: '2026-10-28T23:00:00Z',
+    });
+
+    const [banner] = allDayBanners(WEEK, [away], ZONE);
+
+    expect(banner!.from).toBe(0);
+    expect(banner!.to).toBe(6);
+    expect(banner!.continuesBefore).toBe(true);
+    expect(banner!.continuesAfter).toBe(true);
+  });
+
+  it('stacks overlapping banners in their own lanes and reuses a freed lane', () => {
+    const first = allDay({
+      event: 'a',
+      title: 'First',
+      start: '2026-10-19T22:00:00Z',
+      end: '2026-10-21T22:00:00Z',
+    });
+    const second = allDay({
+      event: 'b',
+      title: 'Second',
+      start: '2026-10-20T22:00:00Z',
+      end: '2026-10-22T22:00:00Z',
+    });
+    // The 25th, clear of both: the first lane is free again.
+    const later = allDay({
+      event: 'c',
+      title: 'Later',
+      start: '2026-10-24T22:00:00Z',
+      end: '2026-10-25T22:00:00Z',
+    });
+
+    const banners = allDayBanners(WEEK, [first, second, later], ZONE);
+
+    const byTitle = new Map(banners.map((banner) => [banner.row.title, banner]));
+    expect(byTitle.get('First')!.lane).toBe(0);
+    expect(byTitle.get('Second')!.lane).toBe(1);
+    expect(byTitle.get('Later')!.lane).toBe(0);
+    expect(banners.map((banner) => banner.lanes)).toEqual([2, 2, 2]);
+  });
+
+  it('keeps a single-day all-day row and a timed multi-day row out of the banners', () => {
+    // The 20th alone: one banner of one day.
+    const oneDay = allDay({ event: 'one', title: 'Single' });
+    const timedSpan = row({
+      event: 'timed',
+      title: 'Timed span',
+      start: '2026-10-19T18:00:00Z',
+      end: '2026-10-20T02:00:00Z',
+    });
+
+    const banners = allDayBanners(WEEK, [oneDay, timedSpan], ZONE);
+
+    expect(banners).toHaveLength(1);
+    expect(banners[0]!.row.event).toBe('one');
+    expect(banners[0]!.from).toBe(1);
+    expect(banners[0]!.to).toBe(1);
   });
 });

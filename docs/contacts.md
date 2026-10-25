@@ -234,6 +234,8 @@ no provider round trips), and it reaches the web view only through the host's
 validated photo command, which serves a data URI for paths inside the
 engine's own contact-photo area: the web view never reads the file system,
 and no photo path crosses as a URL a browser could be pointed elsewhere by.
+`avatars.md` owns the whole avatar contract: where the column stands on each
+surface (the mail list row included), the cache, and the cost note.
 
 ## The DAV legs
 
@@ -311,12 +313,10 @@ at the end, so the harness keeps the shape the mail suites pin.
   and dials at boot, but no surface writes one yet; the field lands with the
   settings slice.
 - **The photo is re-read per mount.** The avatar command answers a data URI
-  built from the cached file on every call, with no in-memory caching in the
-  host, so a list of photo-bearing people costs a file read per avatar per
-  render.
-- **The mail list row carries no avatar.** Monograms and photos render on
-  the People view and the composer's suggestions; the message list's rows
-  draw none yet.
+  built from the cached file on every call, with one ask per address per
+  session in the web service (the per-address cache avatars.md owns), so a
+  list of photo-bearing people still costs a file read per address per
+  session; a batched resolve is the later row.
 - **The list is capped at 200 people** with no paging surface: search
   narrows in the engine, so a person beyond the cap is findable but not
   scrollable to.

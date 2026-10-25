@@ -87,6 +87,31 @@ fn a_until_clock_that_is_not_the_final_second_keeps_its_time() {
 }
 
 #[test]
+fn a_until_clock_whose_seconds_are_not_zero_words_them() {
+    // A bound inside a minute never reads as the whole minute: the seconds
+    // print whenever they are not zero, so the words promise nothing the
+    // rule does not serve.
+    let mut rule = RecurrenceRule::new(Frequency::Weekly);
+    rule.bound = RecurrenceBound::Until("2026-11-30T09:00:30".parse().unwrap());
+    assert_eq!(
+        sentence(rule),
+        "Repeats every week until 30 November 2026 at 09:00:30."
+    );
+}
+
+#[test]
+fn a_until_clock_inside_the_final_minute_names_its_seconds() {
+    // 23:59:30 cut the day's last half minute: "at 23:59" would read as the
+    // end of the day, so the seconds stand beside the minute.
+    let mut rule = RecurrenceRule::new(Frequency::Weekly);
+    rule.bound = RecurrenceBound::Until("2026-11-30T23:59:30".parse().unwrap());
+    assert_eq!(
+        sentence(rule),
+        "Repeats every week until 30 November 2026 at 23:59:30."
+    );
+}
+
+#[test]
 fn a_large_interval_falls_back_to_digits_and_so_does_a_large_count() {
     let mut rule = RecurrenceRule::new(Frequency::Weekly);
     rule.interval = NonZeroU32::new(13).unwrap();

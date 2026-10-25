@@ -13,7 +13,7 @@ use astra_app::{
     NewMailBatch, PassOutcome, Snippet, SplitEntry, SummariseMessageError, TranslateLanguage,
 };
 use astra_viewmodel::{
-    CalendarSnapshot, ComposeKind, ComposeRequestSnapshot, DraftStatusSnapshot,
+    CalendarSnapshot, ComposeKind, ComposeRequestSnapshot, DraftStatusSnapshot, EventDetail,
     MailboxListSnapshot, MailtoOpen, PeopleSnapshot, ReadingSnapshot, SendingSnapshot,
     SettingsSnapshot, SyncProgressSnapshot,
 };
@@ -430,6 +430,14 @@ impl AppPort for FakeApp {
 
     fn calendar(&self) -> CalendarSnapshot {
         self.calendar.lock().unwrap().clone()
+    }
+
+    async fn calendar_event_detail(&self, event: &astra_app::EventRef) -> Option<EventDetail> {
+        self.detail_into.lock().unwrap().push((
+            event.account.as_str().to_owned(),
+            event.key.as_str().to_owned(),
+        ));
+        self.event_detail.lock().unwrap().clone()
     }
 
     async fn generate_meeting_brief(

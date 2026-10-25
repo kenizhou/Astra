@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The calendar surface's state: the last pulled snapshot's row sets (the
 // calendar manager, the joined occurrences, the write states, the reply
-// prompts, the now data), the view kind the toolbar switches, and the
-// navigation anchor. The window itself lives in the core: the anchor seeds
-// once from the snapshot's own now data so a cold calendar opens on today in
-// the display zone, and after that only navigation moves it.
+// prompts, the now data), the view kind, and the navigation anchor. The
+// view follows the snapshot's published shape so the one a past launch
+// left restores at boot and a refused write keeps the standing shape; the
+// anchor seeds once from the shape the person left (today in the display
+// zone when no anchor stands) and after that only navigation moves it.
 
 import { create } from 'zustand';
 
@@ -75,10 +76,16 @@ export const useCalendarStore = create<CalendarStoreState>((set) => ({
         writeStates: snapshot.write_states ?? [],
         replyPrompts: snapshot.reply_prompts ?? [],
         nowData: snapshot.now_data ?? null,
-        // The anchor is the user's place in the diary, not the clock's: seeded
-        // once from the first now data, moved only by navigation after that.
+        // The published shape is the standing one: the store follows the
+        // view every publish (an optimistic switch a refused write never
+        // confirmed reverts with the next publish), while the anchor stays
+        // the user's own place in the diary, seeded once from the shape a
+        // past launch left and moved only by navigation after that.
+        view: snapshot.shape?.view ?? state.view,
         anchor:
-          state.anchor ?? (snapshot.now_data ? zoneToday(snapshot.now_data.now, snapshot.now_data.zone) : null),
+          state.anchor ??
+          snapshot.shape?.anchor ??
+          (snapshot.now_data ? zoneToday(snapshot.now_data.now, snapshot.now_data.zone) : null),
         // The pick tracks the publish: the fresh row replaces the stale one,
         // and a row the window no longer holds drops the pick with it.
         selectedEvent:

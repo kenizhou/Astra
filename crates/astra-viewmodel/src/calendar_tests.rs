@@ -382,7 +382,7 @@ fn an_empty_detail_and_a_fully_worded_shape_cross_only_what_stands() {
         anchor: None,
     };
     assert_eq!(
-        serde_json::to_value(&view_only).unwrap(),
+        serde_json::to_value(view_only).unwrap(),
         serde_json::json!({ "view": "agenda" })
     );
     let anchored = crate::CalendarShape {
@@ -390,7 +390,7 @@ fn an_empty_detail_and_a_fully_worded_shape_cross_only_what_stands() {
         anchor: Some(engine_api::CalendarDate::new(2026, 10, 6).unwrap()),
     };
     assert_eq!(
-        serde_json::to_value(&anchored).unwrap(),
+        serde_json::to_value(anchored).unwrap(),
         serde_json::json!({ "view": "month", "anchor": "2026-10-06" })
     );
 }

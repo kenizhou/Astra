@@ -19,8 +19,9 @@ use astra_app::{
     TranslateLanguage,
 };
 use astra_viewmodel::{
-    CalendarSnapshot, ComposeRequestSnapshot, DraftStatusSnapshot, MailboxListSnapshot, MailtoOpen,
-    PeopleSnapshot, ReadingSnapshot, SendingSnapshot, SettingsSnapshot, SyncProgressSnapshot,
+    CalendarSnapshot, ComposeRequestSnapshot, DraftStatusSnapshot, EventDetail,
+    MailboxListSnapshot, MailtoOpen, PeopleSnapshot, ReadingSnapshot, SendingSnapshot,
+    SettingsSnapshot, SyncProgressSnapshot,
 };
 use async_trait::async_trait;
 use engine_api::{AccountId, CalendarDate, Provider, ProviderKey, RecipientSuggestion};
@@ -256,6 +257,12 @@ pub(crate) trait AppPort: Send + Sync {
     /// The published calendar snapshot, for the host's pull after a
     /// calendar signal.
     fn calendar(&self) -> CalendarSnapshot;
+
+    /// One event's detail read: the roll-call of who is on the event (the
+    /// organiser first, the tail folded into a count) and the full
+    /// repeating rule with its read-back sentence, or `None` when the
+    /// store holds no event at the reference's key.
+    async fn calendar_event_detail(&self, event: &astra_app::EventRef) -> Option<EventDetail>;
 
     /// The published people snapshot, for the host's pull after a
     /// people signal.

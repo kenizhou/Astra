@@ -362,7 +362,9 @@ pub struct ParticipantRow {
     pub response: Participation,
 }
 
-/// The serialiser's omission test for a zero folded tail.
+/// The serialiser's omission test for a zero folded tail. The reference is
+/// serde's own requirement for a `skip_serializing_if` predicate.
+#[allow(clippy::trivially_copy_pass_by_ref)]
 fn folded_is_zero(count: &u32) -> bool {
     *count == 0
 }

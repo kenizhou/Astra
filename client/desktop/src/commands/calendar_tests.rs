@@ -8,10 +8,13 @@
 use std::sync::Arc;
 
 use astra_app::{BriefDocumentError, BriefMeetingRow, MeetingBriefState, MeetingBriefView};
-use astra_viewmodel::{CalendarRow, CalendarSnapshot, OccurrenceRow};
-use engine_api::{CalendarDate, CalendarId, ProviderKey, UtcDateTime};
+use astra_viewmodel::{
+    CalendarRow, CalendarSnapshot, EventDetail, OccurrenceRow, ParticipantRow, Participation,
+    RuleRead,
+};
+use engine_api::{CalendarDate, CalendarId, Frequency, ProviderKey, UtcDateTime};
 
-use super::{calendar_brief_generate_of, calendar_of};
+use super::{calendar_brief_generate_of, calendar_event_detail_of, calendar_of};
 use crate::commands::CommandError;
 use crate::commands_fakes::{state, FakeApp, FakeStore};
 
@@ -147,6 +150,101 @@ fn the_no_meetings_view_crosses_as_its_wire_literal() {
             "account": "work",
             "day": "2026-10-19",
             "state": "no_meetings"
+        }),
+    );
+}
+
+/// The seeded detail the roll-call tests answer with: the organiser first,
+/// one plain attendee, the folded tail, and the repeating rule's sentence.
+fn seeded_detail() -> EventDetail {
+    EventDetail {
+        account: account(),
+        event: ProviderKey::new("/dav/cal/work/default/evt-1.ics").unwrap(),
+        participants: vec![
+            ParticipantRow {
+                name_or_address: "Ada Lovelace".to_owned(),
+                role: Some("organiser".to_owned()),
+                response: Participation::Accepted,
+            },
+            ParticipantRow {
+                name_or_address: "blaise@example.test".to_owned(),
+                role: None,
+                response: Participation::NeedsAction,
+            },
+        ],
+        folded_participants: 4,
+        rule: Some(RuleRead {
+            frequency: Frequency::Weekly,
+            interval: 1,
+            days: Vec::new(),
+            end: None,
+            sentence: "Repeats every week.".to_owned(),
+        }),
+    }
+}
+
+#[test]
+fn the_event_detail_threads_the_reference_and_answers_its_view() {
+    let app = FakeApp::new();
+    *app.event_detail.lock().unwrap() = Some(seeded_detail());
+    let state = state("calendar-detail", Arc::clone(&app), FakeStore::accepting());
+
+    let detail = state
+        .runtime
+        .block_on(|| calendar_event_detail_of(&state, "work", "/dav/cal/work/default/evt-1.ics"))
+        .expect("the seeded detail answers");
+    assert_eq!(detail, seeded_detail());
+    assert_eq!(
+        app.detail_into.lock().unwrap().as_slice(),
+        [(
+            "work".to_owned(),
+            "/dav/cal/work/default/evt-1.ics".to_owned()
+        )]
+        .as_slice(),
+        "the account and key crossed to the core as one reference",
+    );
+}
+
+#[test]
+fn the_event_detail_answers_none_for_an_event_nobody_holds() {
+    let app = FakeApp::new();
+    let state = state(
+        "calendar-detail-none",
+        Arc::clone(&app),
+        FakeStore::accepting(),
+    );
+
+    let detail = state
+        .runtime
+        .block_on(|| calendar_event_detail_of(&state, "work", "/dav/cal/work/default/gone.ics"));
+    assert_eq!(detail, None, "an unheld event answers null, never a panic");
+}
+
+#[test]
+fn the_event_detail_wire_crosses_its_roll_call_and_rule_whole() {
+    let wire = serde_json::to_value(seeded_detail()).expect("the detail serialises");
+    assert_eq!(
+        wire,
+        serde_json::json!({
+            "account": "work",
+            "event": "/dav/cal/work/default/evt-1.ics",
+            "participants": [
+                {
+                    "name_or_address": "Ada Lovelace",
+                    "role": "organiser",
+                    "response": "accepted"
+                },
+                {
+                    "name_or_address": "blaise@example.test",
+                    "response": "needs_action"
+                }
+            ],
+            "folded_participants": 4,
+            "rule": {
+                "frequency": "weekly",
+                "interval": 1,
+                "sentence": "Repeats every week."
+            }
         }),
     );
 }

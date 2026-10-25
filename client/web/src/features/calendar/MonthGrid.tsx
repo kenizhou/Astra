@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The month view: the fixed six-week civil grid around the anchor month
 // under a weekday header row in the grid's own first-day order, a day cell
-// per key with its chips bucketed by zone-local day, the overflow affordance
-// into the day view, and today named from the snapshot's now data.
+// per key with its chips bucketed by zone-local day, the all-day banners
+// chipped once on the day they start so the overflow affordance counts
+// occurrences rather than repeats, and today named from the snapshot's
+// now data.
 
 import { useCalendarStore } from './calendarStore';
 import { useSettingsStore } from '@/features/settings/settingsStore';
 import { dayKeyOf, monthGrid, parseDayKey } from './calendarRange';
 import { fullDayLabel, firstDayIndex, weekdayShortLabel } from './dayLabels';
 import { CalendarDot, RepeatGlyph, holdClass, isHold } from './EventMarkers';
-import { dayBlocks } from './rowLayout';
+import { allDayBanners, dayBlocks, type AllDayBanner } from './rowLayout';
 import type { OccurrenceRow } from '@/services/ipc';
 
 /** How many chips a month cell shows before offering the day view. */
@@ -19,10 +21,17 @@ const MAX_CHIPS = 3;
 function Chip({
   row,
   color,
+  tooltip,
+  span,
   onSelectEvent,
 }: {
   row: OccurrenceRow;
   color: string | undefined;
+  /** The chip's hover text: the row's own title, or the banner's span. */
+  tooltip: string;
+  /** The banner continuation mark: the chip names an occurrence that runs
+   * on into later days (or arrived from earlier ones). */
+  span: AllDayBanner | null;
   onSelectEvent: (row: OccurrenceRow) => void;
 }) {
   const hold = isHold(row);
@@ -32,7 +41,8 @@ function Chip({
       type="button"
       data-chip=""
       data-hold={hold}
-      title={title}
+      data-span={span !== null}
+      title={tooltip}
       onClick={() => onSelectEvent(row)}
       className={`flex w-full items-center gap-1 truncate rounded-[var(--radius)] border px-1 text-left text-[10px] leading-4 ${holdClass(hold)}`}
       style={
@@ -51,6 +61,11 @@ function Chip({
       )}
       <CalendarDot color={color} />
       <span className="truncate">{title}</span>
+      {span !== null && (span.continuesAfter || span.continuesBefore) && (
+        <span aria-hidden="true" className="ml-auto shrink-0 text-muted-foreground">
+          ›
+        </span>
+      )}
     </button>
   );
 }
@@ -78,6 +93,10 @@ export function MonthGrid({
   const today = nowData !== null ? dayKeyOf(new Date(nowData.now), zone) : null;
   const anchorMonth = parseDayKey(anchor).month;
   const grid = monthGrid(anchor, firstDay);
+  // The banner read over the whole grid: a spanning all-day occurrence is
+  // one chip on the day it starts, never a chip per day, so the overflow
+  // count names distinct occurrences.
+  const banners = allDayBanners(grid, occurrences, zone);
   const colorOf = (row: OccurrenceRow): string | undefined =>
     calendars.find((c) => c.account === row.account && c.id === row.calendar)?.color;
 
@@ -94,10 +113,26 @@ export function MonthGrid({
         ))}
       </div>
       <div className="grid min-h-0 flex-1 grid-cols-7 overflow-y-auto border-l border-border-subtle">
-      {grid.map((dayKey) => {
+      {grid.map((dayKey, at) => {
         const inMonth = parseDayKey(dayKey).month === anchorMonth;
         const blocks = dayBlocks(occurrences, dayKey, zone);
-        const chips = [...blocks.allDay, ...blocks.timed.map((block) => block.row)];
+        // A banner chips on its first visible day only; the days it runs
+        // over hold their own timed chips free of it.
+        const starting = banners.filter((banner) => banner.from === at);
+        const chips: Array<{ row: OccurrenceRow; span: AllDayBanner | null; tooltip: string }> = [
+          ...starting.map((banner) => ({
+            row: banner.row,
+            span: banner,
+            tooltip: `${banner.row.title === '' ? '(no title)' : banner.row.title}, ${fullDayLabel(
+              grid[banner.from]!,
+            )} to ${fullDayLabel(grid[banner.to]!)}`,
+          })),
+          ...blocks.timed.map((block) => ({
+            row: block.row,
+            span: null,
+            tooltip: block.row.title === '' ? '(no title)' : block.row.title,
+          })),
+        ];
         const overflow = chips.length - MAX_CHIPS;
         const isToday = today === dayKey;
         return (
@@ -125,11 +160,13 @@ export function MonthGrid({
               {parseDayKey(dayKey).day}
             </button>
             <div className="flex min-h-0 flex-col gap-0.5 overflow-hidden">
-              {chips.slice(0, MAX_CHIPS).map((row) => (
+              {chips.slice(0, MAX_CHIPS).map(({ row, span, tooltip }) => (
                 <Chip
                   key={`${row.account}:${row.event}:${row.start}`}
                   row={row}
                   color={colorOf(row)}
+                  tooltip={tooltip}
+                  span={span}
                   onSelectEvent={onSelectEvent}
                 />
               ))}

@@ -26,7 +26,7 @@ import {
   holdClass,
   isHold,
 } from './EventMarkers';
-import { dayBlocks, type PlacedBlock } from './rowLayout';
+import { dayBlocks, allDayBanners, type PlacedBlock } from './rowLayout';
 import {
   clockLabel,
   dayNumber,
@@ -201,6 +201,93 @@ function DayColumn({
   );
 }
 
+/** The all-day lane: the banners one per occurrence, the columns joined,
+ * the continuation into days the window hides marked at the clipped edge. */
+function AllDayLane({
+  days,
+  occurrences,
+  zone,
+  colorOf,
+  onSelectEvent,
+}: {
+  days: string[];
+  occurrences: OccurrenceRow[];
+  zone: string;
+  colorOf: (row: OccurrenceRow) => string | undefined;
+  onSelectEvent: (row: OccurrenceRow) => void;
+}) {
+  const banners = allDayBanners(days, occurrences, zone);
+  const rows = banners.reduce((tall, banner) => Math.max(tall, banner.lane + 1), 0);
+  return (
+    <div className="flex shrink-0 border-b border-border-subtle bg-surface">
+      <div
+        style={{ width: GUTTER_W }}
+        className="shrink-0 px-2 py-1 text-[10px] uppercase tracking-wide text-muted-text"
+      >
+        All day
+      </div>
+      <div
+        aria-label="All day lane"
+        className="grid min-w-0 flex-1 gap-0.5 py-0.5 pl-1"
+        style={{
+          gridTemplateColumns: `repeat(${days.length}, minmax(0, 1fr))`,
+          gridTemplateRows:
+            rows > 0 ? `repeat(${rows}, minmax(1.5rem, auto))` : 'minmax(1.5rem, auto)',
+        }}
+      >
+        {days.map((dayKey, at) => (
+          <div
+            key={dayKey}
+            aria-hidden="true"
+            className="border-l border-border-subtle"
+            style={{ gridColumn: at + 1, gridRow: '1 / -1' }}
+          />
+        ))}
+        {banners.map((banner) => {
+          const title = banner.row.title === '' ? '(no title)' : banner.row.title;
+          const hold = isHold(banner.row);
+          return (
+            <button
+              key={`${banner.row.account}:${banner.row.event}`}
+              type="button"
+              data-banner=""
+              data-hold={hold}
+              data-continues-before={banner.continuesBefore}
+              data-continues-after={banner.continuesAfter}
+              aria-label={`All day, ${title}`}
+              onClick={() => onSelectEvent(banner.row)}
+              title={title}
+              className={`z-10 flex items-center gap-1 overflow-hidden rounded-[var(--radius)] border px-1 text-left text-[11px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${holdClass(hold)}`}
+              style={{
+                gridColumn: `${banner.from + 1} / span ${banner.to - banner.from + 1}`,
+                gridRow: banner.lane + 1,
+                ...colorStyling(colorOf(banner.row), hold),
+              }}
+            >
+              {banner.continuesBefore && (
+                <span aria-hidden="true" className="shrink-0 text-muted-foreground">
+                  ‹
+                </span>
+              )}
+              {banner.row.recurring && (
+                <span title={`${title} repeats`} className="flex shrink-0 items-center">
+                  <RepeatGlyph />
+                </span>
+              )}
+              <span className="truncate">{title}</span>
+              {banner.continuesAfter && (
+                <span aria-hidden="true" className="ml-auto shrink-0 text-muted-foreground">
+                  ›
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /** The shared hour grid over the given civil days. */
 export function TimeGrid({ days, ariaLabel, onSelectEvent, onCreateSlot }: TimeGridProps) {
   const occurrences = useCalendarStore((s) => s.occurrences);
@@ -265,40 +352,13 @@ export function TimeGrid({ days, ariaLabel, onSelectEvent, onCreateSlot }: TimeG
           </div>
         ))}
       </div>
-      <div className="flex shrink-0 border-b border-border-subtle bg-surface">
-        <div
-          style={{ width: GUTTER_W }}
-          className="shrink-0 px-2 py-1 text-[10px] uppercase tracking-wide text-muted-text"
-        >
-          All day
-        </div>
-        {days.map((dayKey) => (
-          <div
-            key={dayKey}
-            aria-label={`All day, ${fullDayLabel(dayKey)}`}
-            className="flex min-h-[24px] min-w-0 flex-1 flex-col gap-0.5 border-l border-border-subtle px-1 py-0.5"
-          >
-            {dayBlocks(laidOut, dayKey, zone).allDay.map((row) => (
-              <button
-                key={`${row.account}:${row.event}`}
-                type="button"
-                data-hold={isHold(row)}
-                onClick={() => onSelectEvent(row)}
-                title={row.title === '' ? '(no title)' : row.title}
-                className={`flex items-center gap-1 truncate rounded-[var(--radius)] border px-1 text-left text-[11px] ${holdClass(isHold(row))}`}
-                style={colorStyling(colorOf(row), isHold(row))}
-              >
-                {row.recurring && (
-                  <span title={`${row.title || '(no title)'} repeats`}>
-                    <RepeatGlyph />
-                  </span>
-                )}
-                <span className="truncate">{row.title === '' ? '(no title)' : row.title}</span>
-              </button>
-            ))}
-          </div>
-        ))}
-      </div>
+      <AllDayLane
+        days={days}
+        occurrences={laidOut}
+        zone={zone}
+        colorOf={colorOf}
+        onSelectEvent={onSelectEvent}
+      />
       <div
         ref={drag.gridRef}
         aria-label={ariaLabel}
