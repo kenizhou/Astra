@@ -20,5 +20,12 @@ One wording honesty: a repeating rule that stops mid-minute now says the
 seconds it stops at (until 30 November 2026 at 09:00:30), where before the
 seconds were silently truncated.
 
+The finishers are proven live against the local harness: an event seeded
+over the calendar face with a ten-person guest list and a weekly rule reads
+back through the app's own sync and detail read, organiser first, the
+folded tail counted, the rule worded in full; and a seeded contact's photo
+stands on the sender's row of a seeded note once the engine's photo cache
+fills, the monogram until then.
+
 Platforms: desktop
 Bump: minor

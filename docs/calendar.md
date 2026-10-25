@@ -181,6 +181,25 @@ the redaction path before the untrusted wrap; timings stay trusted. A day
 with no meetings after the read answers the defined no-meetings state and
 spends **no** call. Briefs regenerate on request; nothing is cached.
 
+## The live proofs
+
+The gated harness suite proves the diary live, seeded straight onto the
+calendar face under unique run tokens and read back through the product's own
+sync and snapshot: the diary sync materialises the seeded plain, weekly, and
+all-day events with occurrence-accurate times, and the write family
+round-trips (a create, a title edit, a drag move, the content-only occurrence
+edit that fills both clocks unchanged, and deletes), every write state
+settling by the time its dispatch returns. The invitation machine's proof
+walks the whole flow over the scheduling route the harness serves, and the
+meeting brief's proof generates from the stored diary through the relayed
+model tier. The finishers' proof seeds one event carrying a full guest list
+(an organiser merged with her own chair line, attendees across the role and
+response seats, two more lines than the roll-call's cap) and a weekly rule
+with a day set and a count bound, then reads both back through the detail
+read: the organiser first with the role and response words, the folded count,
+and the sentence that words the rule in full. Every proof withdraws what it
+seeded, so the harness keeps the shape the mail suites pin.
+
 ## Known gaps
 
 - **Edit-time rule restructuring is absent.** The create path offers the

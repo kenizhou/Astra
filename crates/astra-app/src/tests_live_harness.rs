@@ -57,7 +57,12 @@
 //! proof submits its own mail so the history it ranks is the run's
 //! own, and every seeded card and sent mail is withdrawn at the end (cards
 //! through the raw seeding helper: the product ships no contact delete; mail
-//! through the product's own delete). The gated settings tests (`settings`)
+//! through the product's own delete). The avatar proof (`people_avatar`)
+//! seeds a card carrying an inline photo whose address matches a seeded
+//! note's sender and proves the row's avatar ask both sides of the cache
+//! fill: the monogram first, the cached photo after one fetch through the
+//! installed leg; its card is withdrawn the same raw way and the note is
+//! the harness's own seed, so nothing else moves. The gated settings tests (`settings`)
 //! prove the settings editor's account seam live: the dav editor's save dials
 //! the real `connect_dav_providers` over a scratch config mirroring the
 //! store's merge rule and dial-before-persist ordering, installs both legs,
@@ -146,6 +151,8 @@ use crate::{reference::MessageRef, App, AppObserver, FolderRef, Intent, RowRef, 
 mod calendar;
 #[path = "tests_live_harness/calendar_brief.rs"]
 mod calendar_brief;
+#[path = "tests_live_harness/calendar_detail.rs"]
+mod calendar_detail;
 #[path = "tests_live_harness/calendar_invite.rs"]
 mod calendar_invite;
 #[path = "tests_live_harness/calendar_proof.rs"]
@@ -176,6 +183,8 @@ mod move_to_folder;
 mod outage_proof;
 #[path = "tests_live_harness/people.rs"]
 mod people;
+#[path = "tests_live_harness/people_avatar.rs"]
+mod people_avatar;
 #[path = "tests_live_harness/people_proof.rs"]
 mod people_proof;
 #[path = "tests_live_harness/proof.rs"]

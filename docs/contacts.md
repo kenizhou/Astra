@@ -288,8 +288,13 @@ detail that names both sources. A second suite round-trips the writes: a
 create into the writable book and a rename on the named card, each read back
 off the server, every write state settling. A third submits one fresh mail
 through the engine's send path and asserts the autosuggest ranking over this
-run's own mined history. Every seeded card and every sent mail is withdrawn
-at the end, so the harness keeps the shape the mail suites pin.
+run's own mined history. A fourth proves the sender avatar: a card carrying
+an inline photo is seeded onto the reader's own book under the address of a
+seeded note's sender, and the note's row resolves its avatar through the real
+cache both ways, the monogram while the cache holds nothing and the cached
+photo's file after one fetch through the installed CardDAV leg fills it.
+Every seeded card and every sent mail is withdrawn at the end, so the
+harness keeps the shape the mail suites pin.
 
 ## Known gaps
 

@@ -27,6 +27,17 @@ path crosses as a URL a browser could be pointed elsewhere by. The monogram
 stands until the photo lands; a row, a header, or a list never blocks on the
 read, and an unresolvable read leaves the monogram standing.
 
+The cache's trust bounds are the engine's. A resource the provider answered
+"no photo" for is trusted a week before anyone asks again (a correspondent
+outside the address books has no picture anywhere, and re-probing every
+stranger every pass costs a request per stranger); a photo whose card carries
+nothing that would notice a change (no media fingerprint, no revision token)
+is trusted three days and re-fetched after; and a card that does carry a
+fingerprint or a revision invalidates its photo on its own, so a re-fetch
+happens only when it can learn something new. An inline photo (the vCard's
+own `PHOTO;ENCODING=b` bytes, stored as a data URI) is its own revision: the
+bytes are the picture.
+
 ## The cache
 
 One ask per address per session: the web service holds the resolved view
