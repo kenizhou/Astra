@@ -67,9 +67,10 @@ describe('the calendar toolbar navigation', () => {
     );
     // The month window over today opens at the grid's first day (28
     // September), whose midnight in Amsterdam is still 27 September in UTC
-    // while summer time holds.
+    // while summer time holds; the write carries the view, so the shape
+    // preference moves with the navigation.
     expect(JSON.stringify(ipc.dispatch.mock.calls[1]?.[0])).toBe(
-      '{"calendar":{"set_range":{"start":"2026-09-27T22:00:00Z","days":42}}}',
+      '{"calendar":{"set_range":{"start":"2026-09-27T22:00:00Z","days":42,"view":"month"}}}',
     );
   });
 
@@ -104,7 +105,7 @@ describe('the calendar toolbar actions', () => {
       (call) => JSON.stringify(call[0]).includes('set_range'),
     )?.[0];
     expect(JSON.stringify(range)).toBe(
-      '{"calendar":{"set_range":{"start":"2026-10-14T22:00:00Z","days":1}}}',
+      '{"calendar":{"set_range":{"start":"2026-10-14T22:00:00Z","days":1,"view":"day"}}}',
     );
   });
 

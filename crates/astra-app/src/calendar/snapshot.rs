@@ -116,18 +116,25 @@ fn participation_of(event: &Event, my_address: &str) -> Participation {
                 .as_deref()
                 .is_some_and(|attendee| addresses_match(attendee, my_address))
         })
-        .map_or(Participation::NeedsAction, |participant| match participant
-            .participation_status
-            .as_str()
-        {
-            "accepted" => Participation::Accepted,
-            "declined" => Participation::Declined,
-            "tentative" => Participation::Tentative,
-            "delegated" => Participation::Delegated,
-            // An unknown or vendor status is the honest "we do not know that
-            // you answered", and the safe one: the hold stays a hold.
-            _ => Participation::NeedsAction,
+        .map_or(Participation::NeedsAction, |participant| {
+            participation_word(&participant.participation_status)
         })
+}
+
+/// The participation one participant's own `PARTSTAT` words: the same five
+/// words the diary's rows mark a hold by, shared with the detail roll-call
+/// so the two reads can never disagree about what a status means.
+///
+/// An unknown or vendor status is the honest "we do not know that this
+/// participant answered", and the safe one: the hold stays a hold.
+pub(crate) fn participation_word(status: &engine_api::ParticipationStatus) -> Participation {
+    match status.as_str() {
+        "accepted" => Participation::Accepted,
+        "declined" => Participation::Declined,
+        "tentative" => Participation::Tentative,
+        "delegated" => Participation::Delegated,
+        _ => Participation::NeedsAction,
+    }
 }
 
 /// How an occurrence row's instants were resolved, from the master's time
@@ -205,6 +212,7 @@ impl<P: Provider> App<P> {
                 now: crate::calendar::now_utc().unwrap_or(inputs.window.start()),
                 zone: inputs.zone.as_str().to_owned(),
             }),
+            shape: Some(inputs.shape),
         });
     }
 

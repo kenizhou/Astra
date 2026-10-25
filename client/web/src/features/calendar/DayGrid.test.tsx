@@ -101,8 +101,9 @@ describe('the day grid', () => {
     seedStore([row({ all_day: true, start: '2026-10-18T22:00:00Z', end: '2026-10-19T22:00:00Z', accuracy: 'all_day' })]);
     render(<DayGrid onSelectEvent={() => undefined} />);
 
-    const lane = screen.getByLabelText('All day, Monday 19 October 2026');
+    const lane = screen.getByLabelText('All day lane');
     expect(lane.textContent).toContain('Standup');
+    expect(screen.getByRole('button', { name: 'All day, Standup' })).toBeTruthy();
   });
 
   it('marks an unanswered invitation as a hold, distinct from a commitment', () => {

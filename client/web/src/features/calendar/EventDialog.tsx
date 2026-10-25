@@ -5,8 +5,10 @@
 // applies in the event's own wall clock: exact for floating and all-day
 // events, the drag semantics for zoned ones. One-vs-all scopes a recurring
 // row; a series edit that would discard per-occurrence changes is confirmed
-// first; the repeat rule is read-only (the snapshot carries no rule to seed
-// an editor with, and a rule half-seen is a rule silently rewritten).
+// first; the repeat rule reads back in full over the detail read (the
+// create select stays the editable vocabulary), because a rule half-seen
+// is a rule silently rewritten, and the guest list rides the same
+// read-only copy.
 
 import { useMemo, useState } from 'react';
 
@@ -21,6 +23,7 @@ import type {
 import { addDays, dayKeyOf } from './calendarRange';
 import { localDelta, localSlotValue, localValueOf } from './localDateTime';
 import { useCalendarStore } from './calendarStore';
+import { DetailReadonlyCopy, useEventDetail } from './EventDetailRead';
 import { useSettingsStore } from '@/features/settings/settingsStore';
 import { useDialogFocus } from '@/components/ui/useDialogFocus';
 import { DeleteChoice, SeriesWarning } from './EventDialogSteps';
@@ -77,6 +80,10 @@ export function EventDialog({ row, slot = null, onClose }: EventDialogProps) {
 
   const editing = row !== null;
   const scopeable = editing && row.recurring && row.occurrence_start !== undefined;
+  // The read-only copy the editor carries (the guest list and the rule
+  // sentence): there so the person sees who they are writing to; an editor
+  // changes neither this slice.
+  const detail = useEventDetail(row);
 
   const [summary, setSummary] = useState(row?.title ?? '');
   const [location, setLocation] = useState('');
@@ -361,10 +368,8 @@ export function EventDialog({ row, slot = null, onClose }: EventDialogProps) {
               </label>
             )}
 
-            {editing && row.recurring && (
-              <p className="text-xs text-muted-foreground">
-                Repeats. The series holds its own rule.
-              </p>
+            {editing && detail !== null && (
+              <DetailReadonlyCopy detail={detail} recurring={row.recurring} />
             )}
 
             {!editing && (

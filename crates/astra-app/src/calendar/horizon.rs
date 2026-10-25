@@ -14,7 +14,10 @@
 //! setting the user changes moves the calendar with no restart and no code
 //! path of its own: the reads here are the whole consumption.
 
-use engine_api::{AccountId, Horizon, Provider, TimeZoneId, UtcDateTime};
+use engine_api::{
+    resolve_instant_in, AccountId, CalendarDate, CalendarDateTime, Horizon, Provider, TimeZoneId,
+    UtcDateTime,
+};
 
 use crate::calendar::now_utc;
 use crate::App;
@@ -59,17 +62,24 @@ impl Window {
 
 /// The window a rebuild or a refresh falls back to before the first
 /// `SetRange`: `days` around `now`, a week of them behind, so a cold app
-/// still paints the week it is in. The days come from the persisted horizon
-/// preference; one definition, because a refresh that synced a different span
-/// than the one the rebuild reads would materialize occurrences the grid
-/// never shows, and show ones it never synced.
-pub(crate) fn default_window(now: UtcDateTime, days: u16) -> Window {
-    Window {
-        start: now
-            .checked_sub(core::time::Duration::from_hours(7 * 24))
-            .unwrap_or(now),
-        days,
-    }
+/// still paints the week it is in; or, when the boot seed restored an anchor,
+/// the same week of days around that anchor's own midnight in `zone`. The
+/// days come from the persisted horizon preference and the anchor from the
+/// persisted shape preference; one definition, because a refresh that synced
+/// a different span than the one the rebuild reads would materialize
+/// occurrences the grid never shows, and show ones it never synced.
+pub(crate) fn default_window(
+    now: UtcDateTime,
+    days: u16,
+    anchor: Option<CalendarDate>,
+    zone: &TimeZoneId,
+) -> Window {
+    let week_behind = core::time::Duration::from_hours(7 * 24);
+    let start = anchor
+        .and_then(|date| resolve_instant_in(&CalendarDateTime::Date(date), zone).ok())
+        .and_then(|midnight| midnight.checked_sub(week_behind))
+        .unwrap_or_else(|| now.checked_sub(week_behind).unwrap_or(now));
+    Window { start, days }
 }
 
 impl<P: Provider> App<P> {
@@ -161,6 +171,8 @@ impl<P: Provider> App<P> {
     /// (so a refresh never narrows what the app has expanded), the default
     /// window around now otherwise, matching the window a cold rebuild reads.
     pub(crate) fn sync_horizon(&self) -> Horizon {
+        let zone = self.display_zone();
+        let days = self.horizon_days();
         let state = self.calendar_state.lock().expect("calendar mutex poisoned");
         match state.horizon {
             Some((low, high)) => Horizon::new(low, high).unwrap_or_else(|_| {
@@ -174,7 +186,9 @@ impl<P: Provider> App<P> {
                 now_utc().unwrap_or_else(|| {
                     UtcDateTime::new(2026, 1, 1, 0, 0, 0).expect("a representable instant")
                 }),
-                self.horizon_days(),
+                days,
+                state.anchor,
+                &zone,
             )
             .horizon(),
         }

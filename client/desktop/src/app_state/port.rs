@@ -13,8 +13,9 @@ use astra_app::{
     TranslateLanguage,
 };
 use astra_viewmodel::{
-    CalendarSnapshot, ComposeRequestSnapshot, DraftStatusSnapshot, MailboxListSnapshot, MailtoOpen,
-    PeopleSnapshot, ReadingSnapshot, SendingSnapshot, SettingsSnapshot, SyncProgressSnapshot,
+    CalendarSnapshot, ComposeRequestSnapshot, DraftStatusSnapshot, EventDetail,
+    MailboxListSnapshot, MailtoOpen, PeopleSnapshot, ReadingSnapshot, SendingSnapshot,
+    SettingsSnapshot, SyncProgressSnapshot,
 };
 use async_trait::async_trait;
 use engine_api::{AccountId, CalendarDate, ProviderKey, RecipientSuggestion};
@@ -175,6 +176,10 @@ impl AppPort for App<HostProvider> {
 
     fn calendar(&self) -> CalendarSnapshot {
         App::calendar(self)
+    }
+
+    async fn calendar_event_detail(&self, event: &astra_app::EventRef) -> Option<EventDetail> {
+        App::calendar_event_detail(self, event).await
     }
 
     fn people(&self) -> PeopleSnapshot {

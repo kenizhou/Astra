@@ -144,6 +144,12 @@ pub(crate) struct FakeApp {
     pub(crate) docs: Mutex<DocsSeeds>,
     /// The calendar snapshot the pull answers with.
     pub(crate) calendar: Mutex<CalendarSnapshot>,
+    /// The event detail read's answer.
+    pub(crate) event_detail: Mutex<Option<astra_viewmodel::EventDetail>>,
+    /// The (account, key) pairs the detail read was asked for, so a test
+    /// can assert the command hands the webview's reference through to
+    /// the core.
+    pub(crate) detail_into: Mutex<Vec<(String, String)>>,
     /// The calendar brief pull's seeds and their record, under the same
     /// one-struct-one-lock discipline.
     pub(crate) brief: Mutex<BriefSeeds>,
@@ -222,6 +228,8 @@ impl FakeApp {
             assist: Mutex::new(AssistSeeds::default()),
             docs: Mutex::new(DocsSeeds::default()),
             calendar: Mutex::new(CalendarSnapshot::default()),
+            event_detail: Mutex::new(None),
+            detail_into: Mutex::new(Vec::new()),
             brief: Mutex::new(BriefSeeds::default()),
             people: Mutex::new(PeopleSnapshot::default()),
             card_seed: Mutex::new(None),

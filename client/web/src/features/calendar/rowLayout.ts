@@ -32,6 +32,24 @@ export interface DayBlocks {
   timed: PlacedBlock[];
 }
 
+/** One all-day occurrence placed as a banner over the lane's day columns. */
+export interface AllDayBanner {
+  /** The occurrence row the banner draws. */
+  row: OccurrenceRow;
+  /** The banner's first visible day, as an index into the window's days. */
+  from: number;
+  /** The banner's last visible day, as an index into the window's days. */
+  to: number;
+  /** Whether the row began on an earlier day than the window's first. */
+  continuesBefore: boolean;
+  /** Whether the row runs on past the window's last day. */
+  continuesAfter: boolean;
+  /** The stack lane the banner sits in, 0-based. */
+  lane: number;
+  /** How many lanes the lane stack needs. */
+  lanes: number;
+}
+
 /** A row's civil day keys in `zone`, from its resolved instants. */
 function spanKeys(row: OccurrenceRow, zone: string): { first: string; last: string } {
   const start = new Date(row.start);
@@ -129,4 +147,62 @@ function pack(blocks: PlacedBlock[]): PlacedBlock[] {
   }
   flush();
   return packed;
+}
+
+/**
+ * The all-day occurrences over `days` as spanning banners: one banner per
+ * occurrence across every day it covers (the lane's columns joined), the
+ * edges the window clips marked, and banners that share a day stacked in
+ * their own lanes so nothing renders on top of anything else. A timed row,
+ * however many days it spans, never becomes a banner: a banner is an
+ * all-day concept and the timed block keeps its clamped shape.
+ */
+export function allDayBanners(
+  days: string[],
+  occurrences: OccurrenceRow[],
+  zone: string,
+): AllDayBanner[] {
+  if (days.length === 0) {
+    return [];
+  }
+  const first = days[0]!;
+  const last = days[days.length - 1]!;
+  const spans: Array<{ row: OccurrenceRow; first: string; last: string }> = [];
+  for (const row of occurrences) {
+    if (!row.all_day) {
+      continue;
+    }
+    const keys = spanKeys(row, zone);
+    if (keys.last < first || keys.first > last) {
+      continue;
+    }
+    spans.push({ row, ...keys });
+  }
+  // The banner that starts earliest takes the first lane, and a longer
+  // banner wins the lane over a shorter one that starts the same day, so
+  // the stack reads by start then by reach.
+  spans.sort((a, b) => a.first.localeCompare(b.first) || b.last.localeCompare(a.last));
+  const laneEnds: string[] = [];
+  const banners: AllDayBanner[] = spans.map((span) => {
+    // The first lane whose last day sits before this banner opens; a lane
+    // reuse always ends later than it did, because the reuse proves the
+    // banner starts after the lane's standing end.
+    const free = laneEnds.findIndex((end) => end < span.first);
+    const placed = free === -1 ? laneEnds.length : free;
+    laneEnds[placed] = span.last;
+    return {
+      row: span.row,
+      from: days.indexOf(span.first < first ? first : span.first),
+      to: days.indexOf(span.last > last ? last : span.last),
+      continuesBefore: span.first < first,
+      continuesAfter: span.last > last,
+      lane: placed,
+      lanes: 0,
+    };
+  });
+  const lanes = banners.reduce((tall, banner) => Math.max(tall, banner.lane + 1), 0);
+  for (const banner of banners) {
+    banner.lanes = lanes;
+  }
+  return banners;
 }

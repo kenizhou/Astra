@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use astra_viewmodel::SyncBodyCap;
+use astra_viewmodel::{CalendarViewWire, SyncBodyCap};
 
 use crate::{
     load_preferences, preferences_path,
@@ -415,4 +415,41 @@ fn a_default_platform_preference_leaves_the_file() {
     ] {
         assert!(!back.contains(key), "the default leaves the file: {back}");
     }
+}
+
+#[test]
+fn the_calendar_shape_round_trips_and_its_defaults_leave_the_file() {
+    let dir = scratch("shape-round-trip");
+    let path = preferences_path(&dir);
+    let prefs = Preferences {
+        calendar_view: CalendarViewWire::Day,
+        calendar_anchor: Some("2026-09-15".parse().unwrap()),
+        ..Preferences::default()
+    };
+    save_preferences(&path, &prefs).unwrap();
+    let written = std::fs::read_to_string(&path).unwrap();
+    assert!(written.contains("calendar_view = \"day\""));
+    assert!(written.contains("calendar_anchor = \"2026-09-15\""));
+    assert_eq!(load_preferences(&path), prefs);
+
+    // A fresh file carries neither shape key: the month view and the absent
+    // anchor are each the default, the same discipline the language tag
+    // follows.
+    save_preferences(&path, &Preferences::default()).unwrap();
+    let fresh = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        !fresh.contains("calendar_view") && !fresh.contains("calendar_anchor"),
+        "the defaults write no entry: {fresh}"
+    );
+}
+
+#[test]
+fn an_older_file_without_the_shape_fields_loads_the_defaults_for_them() {
+    let dir = scratch("shape-older-file");
+    let path = preferences_path(&dir);
+    std::fs::write(&path, "horizon_days = 30\n").unwrap();
+    let prefs = load_preferences(&path);
+    assert_eq!(prefs.horizon_days, 30);
+    assert_eq!(prefs.calendar_view, CalendarViewWire::Month);
+    assert_eq!(prefs.calendar_anchor, None);
 }

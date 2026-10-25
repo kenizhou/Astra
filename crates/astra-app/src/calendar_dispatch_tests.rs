@@ -24,6 +24,7 @@ fn week() -> Intent {
     Intent::Calendar(CalendarIntent::SetRange {
         start: utc("2026-10-18T00:00:00Z"),
         days: 14,
+        view: None,
     })
 }
 
@@ -344,6 +345,7 @@ async fn a_window_past_the_horizon_materializes_through_the_widener() {
     app.dispatch(Intent::Calendar(CalendarIntent::SetRange {
         start: utc("2026-10-18T00:00:00Z"),
         days: 7,
+        view: None,
     }))
     .await
     .unwrap();
@@ -361,6 +363,7 @@ async fn a_window_past_the_horizon_materializes_through_the_widener() {
     app.dispatch(Intent::Calendar(CalendarIntent::SetRange {
         start: utc("2026-11-15T00:00:00Z"),
         days: 7,
+        view: None,
     }))
     .await
     .unwrap();

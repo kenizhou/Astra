@@ -66,7 +66,11 @@ the photo, the cache, and the cost note (the per-mount read).
 
 ## Known gaps recorded, not hidden
 
-- The attendee list is read-only; editing a guest list is a later row.
+- The attendee list is read-only; editing a guest list is a later
+  row.
+- The roll-call caps at the first eight participants and folds the rest
+  into a count; an expansion affordance (seeing attendee nine of thirty)
+  is a later row.
 - The rule read-back words the supported vocabulary; an exotic rule
   falls back to the honest interval-and-frequency shape.
 - The banner spans the all-day lane only; timed multi-day keeps its

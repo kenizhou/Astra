@@ -18,8 +18,8 @@ mod fixtures;
 mod provider;
 
 pub(crate) use fixtures::{
-    all_day_event, calendar, local, meeting, overridden_weekly_event, readonly, utc, weekly_event,
-    zoned_event,
+    all_day_event, calendar, crowded_meeting, every_third_week_series, exotic_series, local,
+    meeting, overridden_weekly_event, readonly, roll_call_meeting, utc, weekly_event, zoned_event,
 };
 
 use std::{

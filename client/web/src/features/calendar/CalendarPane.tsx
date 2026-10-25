@@ -28,7 +28,10 @@ import { EventDialog } from './EventDialog';
 import { MonthGrid } from './MonthGrid';
 import { ReplyPromptDialog } from './ReplyPromptDialog';
 import { WorkWeekGrid } from './WorkWeekGrid';
+import { navigateTo } from './navigate';
 import { useCalendarStore } from './calendarStore';
+import { firstDayIndex } from './dayLabels';
+import { useSettingsStore } from '@/features/settings/settingsStore';
 import type { CreateSlot } from './useEventDrag';
 
 /** The write banners: a write settling, and a write that did not settle. */
@@ -86,10 +89,12 @@ export function CalendarPane() {
   const view = useCalendarStore((s) => s.view);
   const replyPrompts = useCalendarStore((s) => s.replyPrompts);
   const selectedEvent = useCalendarStore((s) => s.selectedEvent);
+  const nowData = useCalendarStore((s) => s.nowData);
   const setView = useCalendarStore((s) => s.setView);
   const setAnchor = useCalendarStore((s) => s.setAnchor);
   const selectEvent = useCalendarStore((s) => s.selectEvent);
   const clearSelection = useCalendarStore((s) => s.clearSelection);
+  const firstDay = firstDayIndex(useSettingsStore((s) => s.settings.first_day_of_week));
   const [editing, setEditing] = useState<OccurrenceRow | null>(null);
   const [creating, setCreating] = useState(false);
   const [createSlot, setCreateSlot] = useState<CreateSlot | null>(null);
@@ -120,8 +125,12 @@ export function CalendarPane() {
   };
 
   const pickDay = (dayKey: string): void => {
+    // The month's day click is navigation: the store arms move at once and
+    // the write follows, so the core's shape (and the publish that will
+    // confirm it) lands on the same day the pane is already showing.
     setAnchor(dayKey);
     setView('day');
+    navigateTo(dayKey, 'day', nowData?.zone ?? 'Etc/UTC', firstDay);
   };
 
   return (
