@@ -28,7 +28,7 @@ Auth-Code+PKCE loopback flow and captures fixtures — the exact mirror of
 
 `provider-google` implements the `engine_provider::Provider` contract for **mail
 (read/sync + on-demand source + writes + submission)** on `GmailProvider` and **calendar
-(read/sync + writes)** on `GoogleCalendarProvider` (calendar-bound), each over its own
+(read/sync + writes)** on `GoogleCalendarProvider` (every calendar), each over its own
 `GoogleClient` on the same token. The mail layers:
 
 - **`error`** — `GoogleError` (`Status`/`HistoryExpired`/`Json`/`Protocol`/`Transport`)
@@ -39,7 +39,8 @@ Auth-Code+PKCE loopback flow and captures fixtures — the exact mirror of
   **rate limit** when its reason says so (`rateLimitExceeded`/`userRateLimitExceeded`/…)
   and an insufficient-permission **permanent** failure otherwise. `401`→auth, `409`/`412`
   →conflict, `410`→`NeedsResync` (Calendar's expired `syncToken`), `429`→rate limit,
-  `5xx`→retryable.
+  `5xx`→retryable. People's expired `syncToken` is a `400 FAILED_PRECONDITION` whose
+  `ErrorInfo` reason is `EXPIRED_SYNC_TOKEN`, and is the one `400` that is `NeedsResync`.
 - **`base64url`** — the URL-safe base64 codec Gmail's `raw` message field uses **both
   ways** (`send` takes it, `get?format=raw` returns it). Unlike the other adapters, which
   either assemble (encode-only, `engine-rfc5322`) or fetch raw bytes (Graph's `$value`),
@@ -83,7 +84,7 @@ Four `SyncScope` variants (`engine-core/src/sync/scope.rs`) mirror the shape:
   no cursor), applied before the messages that reference its labels.
 - **`GoogleCalendarList { account }`** / **`GoogleCalendar { account, calendar }`** — the
   calendar-discovery container and the per-calendar event scope (cursor =
-  `nextSyncToken`).
+  `nextSyncToken` behind a version prefix; a cursor without it syncs its calendar afresh).
 
 ## Gmail label → model mapping (the crux)
 
@@ -293,9 +294,15 @@ is one sent to itself, and `SENT` is a placement.
 
 ## Google Calendar
 
-`GoogleCalendarProvider` is **bound to one calendar** (like `GraphCalendarProvider`): its
-`event_scope` names that calendar (`GoogleCalendar`) and syncs its `events.list`; the
-calendar list syncs under the per-account `GoogleCalendarList`. It advertises calendar
+One `GoogleCalendarProvider` serves every calendar of the account (like
+`GraphCalendarProvider`): `event_scope(account, calendar)` names that calendar
+(`GoogleCalendar`) and `sync_events` reads its `events.list`; the calendar list syncs under
+the per-account `GoogleCalendarList`. A Google event id is unique within its calendar only
+(one meeting has the same id in every calendar it shows in), so the engine's `EventId` is
+`<calendar>/<event>` (`cal_id`): a create goes to the draft's calendar, and a patch, RSVP or
+delete to the calendar its id names, with or without the stored event. A calendar is named by
+its listed id; the `primary` alias is refused, being a second id for the default calendar,
+whose listed id is the account's address. It advertises calendar
 read/sync **and** writes guarded by `If-Match` (`WriteGuard::Enforced`).
 
 - **IANA-native** (`cal_normalize`): event `start`/`end` are `{ dateTime, timeZone }` with
@@ -315,6 +322,11 @@ read/sync **and** writes guarded by `If-Match` (`WriteGuard::Enforced`).
   `syncToken` request cannot also carry a window). A `410` on a stale `syncToken`
   classifies as `NeedsResync` → snapshot restart (the same mechanism as Gmail's
   history-expiry; here the error classifier maps `410` directly, no special case).
+  **A subscribed holiday calendar never syncs incrementally.** Its snapshot carries a
+  `nextSyncToken`, and the first request with that token is answered `410
+  fullSyncRequired`, so every pass over such a calendar costs the refused delta and a
+  full snapshot (a national holiday calendar holds about 200 events, in one page).
+  Correct, and bounded by the calendar's size; nothing to fix in the adapter.
 - **Writes** (`cal_write`): `events.insert` (create), `events.patch` (a partial merge —
   the neutral `EventEdit` intent → a partial event JSON, never re-serializing the
   projection; a start/end move that would change the time *form* is refused),
@@ -448,9 +460,11 @@ diagnosing).
 
 `GoogleContactProvider` binds independently to owned Connections, Other
 Contacts, Workspace directory people, or contact groups. Each source has its own
-scope, token lifecycle, source class, and permission degradation. Connection
-tokens that expire with `410` restart as a snapshot; optional-source permission
-failures do not fail owned contacts. Contact groups normalize to the same
+scope, token lifecycle, source class, and permission degradation. A sync token
+expires seven days after the sync that issued it; People answers `400
+FAILED_PRECONDITION` with an `ErrorInfo` reason of `EXPIRED_SYNC_TOKEN` (not `410`),
+and the source restarts as a snapshot. Optional-source permission failures do not
+fail owned contacts. Contact groups normalize to the same
 provider-neutral group-card kind as JMAP and vCard.
 
 **A People page with nothing to report omits its collection key entirely** — a quiet

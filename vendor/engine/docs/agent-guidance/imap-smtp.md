@@ -881,7 +881,14 @@ folders into Trash is proven offline only: all three servers file a folder insid
   The keep-alive interval is the one host-supplied
   knob (a protocol timer, clamped to a sane range; default 28 min, shorter on mobile to
   detect a dead link sooner), not a product policy — **scheduling and reconnect/backoff
-  live in the host**, not the engine.
+  live in the host**, not the engine. A change the server reports before it accepts an
+  `IDLE` (ahead of the `+` continuation) is not repeated once idling, so it is reported as
+  `Changed` too.
+- **A server's own `IDLE` delay is accepted, not polled around.** Yahoo reports changes over
+  `IDLE` only on a two-minute cycle, so its new mail shows up to two minutes late
+  (`spec-deviations.md`, YAHOO-15). A `NOOP` between short turns would show it sooner, at the
+  cost of a command every few seconds per watched folder per user, the load `IDLE` exists to
+  spare a server; it was tried and withdrawn.
 - **Coverage.** The `idle` primitives (continuation handling, untagged-line
   classification, `DONE` drain) are unit-tested over scripted transcripts; the watcher's
   keep-alive timing and stay-idling-across-events behavior are tested over a real
