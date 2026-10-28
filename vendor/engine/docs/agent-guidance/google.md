@@ -58,9 +58,15 @@ Auth-Code+PKCE loopback flow and captures fixtures — the exact mirror of
   fetch layer threads back as query params it builds itself — so, unlike Graph's `@odata`
   links, **there is no URL to rebase**; `with_base` (a proxy, a regional endpoint, or the
   test replay server) is reached because the client roots every path there.
-- **`fetch`** — the label list, the message snapshot (`messages.list` → per-id
+- **`fetch`**: the label list, a backfill page (`messages.list` → per-id
   `messages.get`, fanned out `MAX_CONCURRENT_GETS` at a time), the history delta
   (`history.list`), and the raw-source fetch.
+- **`cursor`**: where a message sync stands between passes: synced, backfilling from a page
+  token, or due its reconcile.
+- **`pass`**: the pass each cursor calls for: a delta, a backfill a page at a time with a
+  delta before each page, or the list-only reconcile.
+- **`quota`**: what each Gmail call costs, and the pace that keeps an account under the
+  per-user quota (`http-throttling.md`).
 - **`mutate`/`submit`** — `edit_mail` (label deltas) and `submit_email` (`messages.send`).
 - **`labels_write`**: `edit_mailbox`, the folder changes (below).
 - **`provider`** — `GmailProvider`, the `Provider` impl.
@@ -130,10 +136,14 @@ lookup is case-insensitive) is preserved bracket-stripped as a threading **hint*
 identity — the Gmail message `id` is identity. `internalDate` (epoch-millis) →
 `received_at`; the `Date` header (RFC 2822) → `sent_at`.
 
-## Sync (snapshot + history delta)
+## Sync (backfill, reconcile, history delta)
 
-- **Snapshot** (cursor `None`): capture the account `historyId` from `profile` **before**
-  enumerating, then page `messages.list`, fetching each id full (`format=metadata` with a
+Where a sync stands lives in the cursor (`src/cursor.rs`), and each pass is the one it calls
+for (`src/pass.rs`). A bare `historyId` is a synced account; `backfill;h=…;p=…` is a backfill
+part way; `reconcile;h=…` is a backfill finished and not yet reconciled.
+
+- **Backfill** (no cursor, or `backfill;…`): capture the account `historyId` from `profile`
+  **before** enumerating, then page `messages.list`, fetching each id full (`format=metadata` with a
   fixed `metadataHeaders` set for a minimal, deterministic payload). Those per-id gets are
   the pass's whole cost — `messages.list` returns bare `{id, threadId}` and Gmail offers no
   companion batch-get — so a page fetches them **concurrently**, `MAX_CONCURRENT_GETS` in
@@ -143,10 +153,11 @@ identity — the Gmail message `id` is identity. `internalDate` (epoch-millis) �
   with width. It is simply nowhere near 20. The figure this line used to carry, "20 clean, 30
   occasional, 50 throttles a tenth", was a *rate* result wearing a width's clothes: a fixed
   width of 5 goes 0% → 21% → 82% refused across three consecutive unrested blocks, because the
-  quota emptied and nothing about the width changed. The limit an ordinary pass actually meets
-  is that quota — Total Query Cost, 6,000 units per minute per user, announced as `403
-  rateLimitExceeded`. Both refusals are captured under `tests/fixtures/error/`, and
-  `http-throttling.md` has the sweep. 20 stays as the fan-out width because it is a sensible
+  quota emptied and nothing about the width changed. The limit an unpaced pass meets is that
+  quota: Total Query Cost, 6,000 units per minute per user and 20 of them per message fetched,
+  announced as `403 rateLimitExceeded`. So the client paces every Gmail call to it through the
+  account's gate (`src/quota.rs`). Both refusals are captured under `tests/fixtures/error/`, and
+  `http-throttling.md` has the sweep and the pace. 20 stays as the fan-out width because it is a sensible
   amount of work to have outstanding, not because Gmail refuses 21. The batch endpoint is not used: a batch of n counts as n
   requests, is no faster at equal width (both shapes cost one round trip), costs ~25% more
   bytes for the multipart envelope, and answers `200` while individual members carry their
@@ -154,10 +165,30 @@ identity — the Gmail message `id` is identity. `internalDate` (epoch-millis) �
   the gated probe that keeps that decision honest. That same 20 is what the adapter narrows
   the account's `engine_http::RequestGate` to (`http-throttling.md`), so the ceiling now
   bounds everything the account does at once rather than one page's fan-out at a time — a
-  body warm overlapping a snapshot used to be able to exceed it. The persisted cursor
-  is that captured `historyId` (messages arriving mid-snapshot are re-reported by the
-  first delta — idempotent). This is a **reconciling** pass (its present set tombstones
-  absent rows). A `SyncWindow` floor windows the enumeration to `q: after:<epoch>`.
+  body warm overlapping a backfill used to be able to exceed it. A `SyncWindow` floor windows
+  the enumeration to `q: after:<epoch>`.
+
+  It is **additive** and checkpointed after every page with the token of the next, because at
+  20 units a message a large mailbox takes many passes (about 270 messages a minute under the
+  pace), and an app is suspended or quit long before it is done. The token is the only
+  position that can resume it: `messages.list` is not ordered strictly by date (3 of 193
+  messages out of order on the test account, one by 13 days), so a date boundary skips mail.
+  A token Gmail cannot read answers `400 Invalid pageToken` and the backfill starts again from
+  the top; a well-formed one it does not recognise answers the first page by itself
+  (`tests/fixtures/error/invalid_page_token.json`). Before every page but a fresh backfill's
+  first (its `historyId` was captured a moment before) a **delta** from the cursor's `historyId`
+  runs (2 units), so mail arriving during a backfill of hours is not held
+  back until it ends, and changes to what is already stored keep arriving. A pass killed
+  partway (`tests/live_backfill.rs`) loses at most the page it was on.
+
+  Widening the sync depth clears the cursor in the host, so the backfill fetches again what is
+  already stored inside the old window: the adapter cannot see the store, and a fetch costs
+  20 units whether the message is new or not.
+- **Reconcile** (`reconcile;h=…`): the window's ids listed and nothing fetched, at 500 a page
+  for 5 units, so the store tombstones what the server no longer has; it ends on the bare
+  `historyId` the backfill reached, and the delta after it replays everything since. A pass of
+  its own because a pass is one mode throughout, and a backfill must be additive to be
+  checkpointed.
 - **Delta** (cursor `Some`): `history.list?startHistoryId=…` returns
   `messagesAdded`/`labelsAdded`/`labelsRemoved` — whose message objects are **partials**
   (id + labelIds only) — and `messagesDeleted`, which tombstones. This is an **additive**
@@ -180,9 +211,10 @@ identity — the Gmail message `id` is identity. `internalDate` (epoch-millis) �
 
   A `404` (the
   `startHistoryId` aged out of Gmail's window) → `GoogleError::HistoryExpired`
-  (`NeedsResync`) → the stream drops the cursor and restarts as a snapshot, exactly like
-  Graph's `410` restart, and only before the first page is committed. Gmail always returns
-  the latest `historyId`, so the cursor always advances.
+  (`NeedsResync`) → the pass captures a fresh `historyId` and backfills the window again from
+  the top, in the same additive pass; the reconcile after it tombstones what is gone. Only
+  before the first history page is passed on. Gmail always returns the latest `historyId`, so
+  the cursor always advances.
 
 ## Writes + submission
 
@@ -251,11 +283,13 @@ identity — the Gmail message `id` is identity. `internalDate` (epoch-millis) �
   A stored draft therefore names only the recipients it has: `assemble_draft_message` writes
   no `To` header when there are none, and every adapter that stores MIME drafts uses it.
   `tests/live_drafts.rs` saves one with no recipients.
-- **A whole-account snapshot is expensive enough to fail a live run.** Gmail meters a
-  "Total Query Cost" of 6000 units per minute per user, and a `sync_email` snapshot
-  fetches every message; a few in quick succession answer `403 rateLimitExceeded`, which
-  reads like a permissions problem and is not. The draft live tests take one snapshot per
-  phase and reuse it. The engine **classifies** that `403` correctly (`src/throttle.rs`) and,
+- **A whole-account snapshot costs about two thirds of a minute's quota.** Gmail meters a
+  "Total Query Cost" of 6000 units per minute per user and a `sync_email` snapshot fetches
+  every message at 20 units apiece. The client paces itself under that budget, but each live
+  test builds its own client and so its own budget, so two run at once can still draw
+  `403 rateLimitExceeded`, which reads like a permissions problem and is not. The draft live
+  tests take one snapshot per phase and reuse it. The engine **classifies** that `403`
+  correctly (`src/throttle.rs`) and,
   where the refusal names its quota window — about a third do, measured — reports the instant
   it clears through `ProviderError::retry_after`. It does not sleep through it: a quota window
   is tens of seconds, and parking a task on one holds a lane of the account's gate against a
@@ -420,6 +454,63 @@ read/sync **and** writes guarded by `If-Match` (`WriteGuard::Enforced`).
   engine has exactly one iCalendar parser and a second one here would eventually disagree
   with it. An `EXDATE` value becomes an excluded override; an `RDATE` becomes an override that
   patches nothing, which is JSCalendar's way of saying "this instance happens as well".
+
+### `accessRole` → `CalendarAccess`: five roles, four different grants
+
+Google documents five values for a `calendarList` entry's `accessRole`, and collapsing any two
+tells a host it may do something the API refuses — or, for `freeBusyReader`, that it may read
+events it may only see the busy times of. The adapter used to map `writer` to `owner()` and
+`freeBusyReader` to `reader()`, which did both.
+
+- `owner` — everything, including "the additional ability to see and modify access levels of
+  other users": sharing, and deleting the calendar.
+- `writer`, `writerWithoutPrivateAccess` — read and write **events**, but neither re-share nor
+  delete the calendar, which stay the owner's. They differ only in whether a private event's
+  details are visible, which `CalendarAccess` does not model.
+- `reader` — see the events, change nothing.
+- `freeBusyReader` — busy times only (`CalendarAccess::free_busy_only`).
+
+An absent or unknown role reads as `reader`: visible and immutable, hiding a capability
+rather than inviting a rejected write.
+
+**All five are live-verified**, and against behaviour rather than the label. `owner` and
+`reader` are roles the throwaway holds on its own calendars (`live_calendar.rs`). The other
+three only exist on *another* account's calendar, so `live_calendar_roles.rs` takes a second
+account (`GOOGLE_SHARER_ACCESS_TOKEN`, calendar scope only). It shares one calendar per role
+with the throwaway and then tries, as the throwaway, everything the engine's answer makes a
+claim about. What Google allowed (2026-09-23):
+
+| Role | Read an event | Busy time | Add an event | Re-share | Delete the calendar |
+|---|---|---|---|---|---|
+| `writer` | yes | yes | yes | no | no |
+| `writerWithoutPrivateAccess` | yes | yes | yes | no | no |
+| `reader` | yes | yes | no | no | no |
+| `freeBusyReader` | **no** | yes | no | no | no |
+
+Three things the run found that a spec reading would not:
+
+- **A free/busy reader's `events.get` answers `200`**, with the times alone: no summary, no
+  creator. So "may read" is judged on seeing the event's details, not on the status; a probe
+  keyed on `200` would have called `freeBusyReader` a reader.
+- **A grant reaches event reads after the calendar list shows it.** One run was refused an
+  event on a `writerWithoutPrivateAccess` calendar that the next run read at once, and one read
+  the fresh subscriptions back missing from `calendarList`. The test therefore waits for the
+  list to settle, and probes each calendar until two rounds agree. It keeps any success it
+  sees, because nothing is revoked mid-run: a success is never an artefact, a refusal can be.
+- **A writer's entry names the owner** (`dataOwner`); a reader's does not.
+
+Restoring the old mapping fails the live test on `writer: share`. The captured entries are
+`tests/fixtures/calendar/calendars_shared_roles.json`, pinned offline in `cal_normalize_tests`.
+
+## Shared mailboxes: Gmail has no usable mechanism
+
+`GmailProvider` advertises `SharedMailboxes::Unsupported`, and that is a decision rather than
+an omission. Gmail delegation is a real product feature, but a user credential cannot reach it:
+the API route that would serve it, `users/{userId}` for another user, needs a **service
+account with domain-wide delegation** — a different credential model from the user bearer
+token this adapter holds. Advertising anything else would offer a host an onboarding flow that
+could only fail, so both discovery verbs keep their rejecting defaults (`providers.md`). Google
+*Calendar* sharing is a separate mechanism, the `accessRole` above.
 
 ## Testing (3-tier, mirroring Graph — `AGENTS.md` offline-mock caveat)
 
@@ -639,14 +730,14 @@ read, the path encoding, the response shape, and a rename that reaches Gmail and
 Each was proven able to fail; patching a property Gmail does not accept on that resource is
 rejected outright rather than silently ignored, so a wrong patch cannot pass as a success.
 
-## Spam and Trash are not optional in the snapshot
+## Spam and Trash are not optional in the listing
 
 `messages.list` omits `SPAM` and `TRASH` unless `includeSpamTrash=true`. `history.list`
-takes no such flag and reports their label changes regardless. The two passes therefore
-disagree, and not symmetrically: **a snapshot tombstones every key absent from its present
-set**, so the snapshot wins by deleting what the delta had just filed correctly. Which one
-the store believes comes down to whether the last pass happened to be a snapshot, and a
-`historyId` aging out is enough to turn one into the other.
+takes no such flag and reports their label changes regardless. The two therefore disagree,
+and not symmetrically: **the reconcile tombstones every key absent from its listing**, so it
+wins by deleting what the delta had just filed correctly. Which one the store believes comes
+down to whether the last pass happened to be a reconcile, and a `historyId` aging out is
+enough to bring one about.
 
 So `fetch::list_url` always sets the flag — including on the windowed `q=after:<epoch>`
 shape, which excludes them just as the unwindowed one does (verified live; an explicit
@@ -654,14 +745,14 @@ shape, which excludes them just as the unwindowed one does (verified live; an ex
 
 Two consequences worth knowing before touching this:
 
-- **A snapshot fetches every spam and trash message full**, one `messages.get` each, the
+- **A backfill fetches every spam and trash message full**, one `messages.get` each, the
   same as any other. Gmail purges both after 30 days and the sync-window floor bounds it
-  further, but an account with a large Trash pays for it on every reconcile.
+  further, but an account with a large Trash pays for it on every backfill.
 - **Spam and Trash are ordinary place labels here**, so `memberships_of` files a message
   in them like any other folder and the roles are already mapped (`SPAM` → `Junk`,
   `TRASH` → `Trash`). A message with only keyword labels still falls through to the
   synthetic All Mail, which is why spam does not appear there — matching Gmail's own
   All Mail, which excludes both.
 
-`live_spam_trash.rs` drives both passes over one message and asserts they agree; it fails
-on the snapshot half alone if the flag is dropped.
+`live_spam_trash.rs` drives a first sync and a delta over one message and asserts they agree;
+it fails on the first sync alone if the flag is dropped.

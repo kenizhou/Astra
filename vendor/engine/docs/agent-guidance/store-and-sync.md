@@ -192,6 +192,13 @@ are one mechanism here, not alternatives.
   and bumps the generation, and when the suspended worker resumes its apply is
   rejected as stale instead of corrupting state. Workers handle `StaleLease` by
   re-claiming and recomputing — never by retrying the stale write.
+- A pass can outlast its lease: a backfill paced under a server's quota runs for as long as the
+  mailbox is large. Unrenewed, its lease lapses mid-pass, the next poll claims the scope, and the
+  two passes fence each other out commit by commit. So the mail stream renews its lease every
+  third of the TTL while it waits on its provider (`engine_sync::keep_alive`,
+  `Store::renew_sync_scope_lease`), the same shape as the outbox's renewal below. The
+  `SyncLease` handle keeps its claim-time expiry; only the stored lease moves, which is what lets
+  `read_since` read the pass's start off the handle.
 - `release_sync_scope` frees a scope before its TTL so a finished worker does not
   block the next sync for the full lease window.
 - **The claim → fetch → apply → release cycle lives in exactly one place**:
@@ -625,6 +632,16 @@ and tombstones them — so nothing is orphaned, and the durable outbox is untouc
 A fix to one adapter's **sync**, rather than to decoding, does not need this: the adapter
 versions its own cursor and reads an older one as no cursor, so only its scopes re-sync
 (IMAP: `CURSOR_VERSION`, `imap-smtp.md`).
+
+Version **6** is a bump that is not about decoding bytes: a mailbox now carries the caller's
+rights (`Mailbox::access`, `modeling.md`), read from JMAP `myRights` and the IMAP `MYRIGHTS`
+letters. A mailbox stored before that holds none and loads as the `owner()` default. IMAP and
+Graph re-list their folders every pass and would correct it on their own, but a JMAP folder
+list is a `Mailbox/changes` delta, so an unchanged mailbox would keep the default for good —
+the re-snapshot is what makes each one say what it really allows. The cost is the usual one
+and is not small: the clear is global, so every account's **mail** re-snapshots once too,
+not only its folder lists. A per-scope-kind invalidation would make a folder-only change
+cheaper; it does not exist, and building it belongs in its own change. (No schema change.)
 
 The **host-triggered reset** (`Engine::reset`) uses the same primitive: clear the cursors
 so the next sync is a full refetch. It is the manual counterpart of the automatic
