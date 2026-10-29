@@ -216,12 +216,9 @@ async fn missing_body_work_list_shrinks_as_a_warm_pass_fetches() {
 
     // A fully-warm window returns an empty work list.
     warm(&engine, &provider, &rest).await;
-    assert!(
-        engine
-            .mail_missing_body(&[account()], 50)
-            .await
-            .unwrap()
-            .is_empty()
+    assert_eq!(
+        engine.mail_missing_body(&[account()], 50).await.unwrap(),
+        []
     );
 }
 
@@ -407,11 +404,6 @@ pub(super) fn age_blobs(db: &std::path::Path) {
         .unwrap()
         .flatten()
     {
-        std::fs::OpenOptions::new()
-            .write(true)
-            .open(entry.path())
-            .unwrap()
-            .set_modified(stale)
-            .unwrap();
+        std::fs::set_times(entry.path(), std::fs::FileTimes::new().set_modified(stale)).unwrap();
     }
 }
