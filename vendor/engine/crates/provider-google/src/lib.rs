@@ -28,6 +28,7 @@
 
 mod affiliation;
 mod base64url;
+mod cal_conference;
 mod cal_fetch;
 mod cal_id;
 mod cal_invite;
@@ -45,6 +46,10 @@ mod error;
 mod fetch;
 mod http_transport;
 mod identity;
+mod imap_cursor;
+mod imap_labels;
+mod imap_mail;
+mod imap_pass;
 mod json;
 mod labels_write;
 mod mutate;

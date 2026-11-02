@@ -598,6 +598,93 @@ tzdata, and a removed occurrence `404`s), so `provider-graph` asks for the maste
 a recurring Graph event is stored in the zone it was **authored** in, unlike every
 non-recurring one, which carries the provider's display zone.
 
+## Conferences
+
+`Event::conferences` holds the meetings an event can be joined at, one
+`Conference` per meeting with every way in it offers (a join link, dial-in numbers, a SIP
+address, each with its codes), the service it runs on and how it came to be on the event.
+The formats split two ways, and the model takes the second shape because it is what a person
+sees:
+
+| Format | Shape | Read by |
+|---|---|---|
+| iCalendar `CONFERENCE` (RFC 7986 §5.11) | flat list of URIs | `engine-ical`'s `party` → `group_flat` |
+| JSCalendar `virtualLocations` (RFC 8984 §4.2.6) | flat map of URIs | `provider-jmap`'s `calendar_conference` → `group_flat` |
+| Google `conferenceData` | one meeting, `entryPoints[]` | `provider-google`'s `cal_conference` |
+| Graph `isOnlineMeeting` + `onlineMeeting` | one meeting, `joinUrl` + numbers | `provider-graph`'s `cal_conference` |
+
+- **Grouping a flat list** (`engine_core::calendar::group_flat`): each web URI starts a
+  meeting; a `tel:` or `sip:` URI joins it when the list holds exactly one web URI and stands
+  alone otherwise, since nothing in either format says which meeting a number dials into.
+- **Origin.** `Native` is a meeting the calendar server made and keeps: Google's
+  `hangoutsMeet` (removable, with `pending`/`failure` read from `createRequest.status`) and
+  any Graph online meeting (never removable: Graph refuses `isOnlineMeeting: false`).
+  `Attached` is a meeting stored in a field built for it that the server did not make:
+  `CONFERENCE`, `virtualLocations`, a Google `addOn`. `Detected` is one found elsewhere
+  (below).
+- **Service** comes from the server where it names one (`hangoutsMeet`,
+  `onlineMeetingProvider`) and otherwise from `ConferenceService::recognise`, which matches
+  each service's *meeting* URL shapes only, never its bare domain. `None` means neither said.
+- **`ConferenceUri`** admits `https`, `http`, `tel`, `sip` and `sips`, and a web URI only
+  with a host and no credentials. A host opens this value when a person asks to join, so an
+  entry with any other value is left out of the projection; the raw payload keeps it.
+- **Keys** name a conference for a later edit: the `virtualLocations` map key, the field
+  name where the provider allows one conference (`conferenceData`, `onlineMeeting`), else
+  the first URI.
+- **Detection** (`engine_core::calendar::add_detected`, run by every adapter after its
+  conference fields): the vendor properties Google's and Microsoft's invitations carry
+  (`X-GOOGLE-CONFERENCE`, `X-MICROSOFT-SKYPETEAMSMEETINGURL`; iCalendar only, since JMAP
+  does not carry them), then a location that is only a web link, or a meeting link in one,
+  then a meeting link in the description. In a description only a link `recognise`
+  names counts, and a link written inside another is part of it: Google Calendar wraps
+  every link in an invitation's description as `https://www.google.com/url?q=https://…`, and
+  the copy inside carries Google's parameters. A Teams link is a meeting only under `/meet/`
+  or `/l/meetup-join/`; the meeting's chat (`/l/chat/`) and options page sit beside it. Graph's description is its preview, so Graph reads the whole `body`,
+  whose HTML holds links in `href`s. A link joins a meeting already held
+  (`Conference::joined_at`) when `ConferenceUri::same_meeting` says so (host and path,
+  escapes compared without case, and one query holding every parameter of the other), or
+  when it runs on the service of a `Native` meeting or one a vendor property names, which is
+  the event's one meeting there:
+  a work tenant's Teams `joinUrl` (and `X-MICROSOFT-SKYPETEAMSMEETINGURL`) is the long
+  `meetup-join` link and its body the short `meet/<id>?p=` one. A detected meeting takes
+  the fullest link any place writes for it (`ConferenceUri::fuller_than`), so a location's
+  bare Zoom link gives way to the description's one with its `pwd`; a stored or server-made
+  meeting keeps its own. Stalwart, SabreDAV
+  and Nextcloud all keep `X-GOOGLE-CONFERENCE` over CalDAV (the seed's
+  `meeting-attendees.ics`).
+- **Notes.** `Event::notes(shown)` is the description without each meeting block an
+  invitation writes that repeats a conference the caller shows: a block goes when a link in it
+  joins such a conference (`Conference::joined_at`), or when it holds no link at all. Any
+  other block stays, because it is then the only place its meeting appears, so the caller
+  passes the same rule it uses to show a conference. Teams writes two shapes: between rules (a line of
+  underscores, a first line naming "Microsoft Teams", a closing line of underscores at least
+  as long as the opening one, since shorter rules separate the block's own sections), and,
+  as a work tenant does today, appended with no rule above it (a heading naming "Microsoft
+  Teams" whose next line holds the meeting link, running to the end of the text). Google's
+  has `-::~:~::~:~…::-` above and below. A block without its closing line runs to the end,
+  because Graph's preview cuts it off. `description` itself stays the server's text, since edits are computed
+  against it.
+- **Graph's stand-in location.** Exchange gives an online meeting a location named after the
+  provider in the organiser's language ("Microsoft Teams-vergadering") with no address or
+  coordinates. A typed location has the same shape, so the brand in the name is the test
+  (a booked `conferenceRoom` is always kept), and the projection, an occurrence's
+  included, leaves it out. An iCalendar copy of the invitation carries it as plain
+  `LOCATION` text, which is kept, since nothing there tells it from a typed one.
+- **Dial-in numbers.** `EntryPoint::phone_number` is the number a person reads for a `tel:`
+  way in: the server's label when it is written as a number (Google's and Graph's are), else
+  the URI's number without its parameters and without what is dialled after the call connects
+  (`tel:+14255550100,,123456789#`). A JSCalendar `name` such as "Dial in" names the way in,
+  not the number.
+- **Occurrences** read the master's conferences; no override carries its own.
+- **Which calendars make one** is the server's to say, per calendar: Graph's
+  `allowedOnlineMeetingProviders`, Google's `conferenceProperties`. Observed live: a
+  work or school calendar lists `teamsForBusiness` and makes the meeting on create; a
+  personal Microsoft account's calendar lists only `unknown`, and a create asking for
+  `teamsForBusiness` succeeds with `isOnlineMeeting: false` and no meeting, without an
+  error. `live_calendar_conference` in `provider-graph` and `provider-google` reads a
+  server-made meeting back through the adapter, and a meeting written only into the
+  location and description.
+
 ## Supported recurrence subset
 
 The model stores recurrence structurally (all of RFC 5545 `RRULE`), but the

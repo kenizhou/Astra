@@ -83,4 +83,26 @@ pub use store::Store;
 ///   folder whose owner granted less, such as each folder of a store shared read-only. A JMAP
 ///   folder list is a delta, so an unchanged mailbox would keep the default indefinitely; the
 ///   re-snapshot is what makes each one say what it really allows.
-pub const NORMALIZER_VERSION: u32 = 6;
+/// - `7`: an event's conference links became [`Conference`](engine_core::calendar::Conference)s:
+///   one meeting with every way in it offers, the service it runs on and how it came to be on the
+///   event, where the projection held bare join links. Google's dial-in numbers, codes and notes
+///   and Graph's dial-in numbers and conference ID were not read at all, and an iCalendar
+///   parameter's RFC 6868 escapes were not decoded. A stored event loads with no conferences until
+///   the re-snapshot re-projects it.
+/// - `8`: an event's meetings are also read from where no conference field holds them: the vendor
+///   properties Google's and Microsoft's invitations carry, a location, and a meeting link in the
+///   description. Graph's stand-in location for an online meeting ("Microsoft Teams Meeting") is no
+///   longer a location. A stored event keeps the conferences it had until the re-snapshot
+///   re-projects it.
+/// - `9`: a detected meeting takes the fullest link any place writes for it, so a location's bare
+///   Zoom link gives way to the description's one with its passcode.
+/// - `10`: a link written inside another (Google Calendar's `google.com/url?q=` wrapper) is no
+///   meeting of its own, and a Teams link is a meeting only under `/meet/` or `/l/meetup-join/`, so
+///   an add-in's invitation no longer reads as two meetings.
+/// - `11`: the re-sync a version change asks for reaches every calendar. Earlier changes cleared
+///   the cursors and kept each calendar's collection tag, so a CalDAV calendar whose tag had not
+///   moved was skipped as unchanged and kept the projection of whichever version first read it.
+/// - `12`: a Gmail message's inbox category (`CATEGORY_*`), `CHAT` and superstar labels are no
+///   longer memberships, nor mailboxes in the label list. The label list drops them on its next
+///   read; a stored message keeps them as places until the re-snapshot re-reads it.
+pub const NORMALIZER_VERSION: u32 = 12;

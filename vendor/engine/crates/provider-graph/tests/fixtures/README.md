@@ -215,10 +215,16 @@ public repo must not ship a working join link (see Finding 10).
 10. **A Teams online meeting carries `isOnlineMeeting: true`, `onlineMeetingProvider:
     "teamsForBusiness"`, and an `onlineMeeting.joinUrl`** (the deprecated
     `onlineMeetingUrl` stays `null`); the join link, meeting-id, and passcodes are also
-    duplicated as HTML in the `body`. The `joinUrl` **is** projected today, as an
-    `Event.virtual_locations` entry. What is *not* modelled yet is the online-meeting
-    **provider identity** (`onlineMeetingProvider`/`isOnlineMeeting`); that stays on the
-    preserved raw payload (`Event.extended`) for a future provider-typing mapper.
+    duplicated as HTML in the `body`. `cal_conference` projects them as one native
+    `Conference` (service from `onlineMeetingProvider`, the dial-in numbers and
+    `conferenceId` beside the `joinUrl`). The body is read for meeting links like any
+    description, and its Teams link is the same meeting even where it differs: live, a
+    work tenant's `joinUrl` is the long `meetup-join` link and its body the short
+    `meet/<id>?p=` one. Exchange also adds a `location` named after the provider in the
+    organiser's language ("Microsoft Teams-vergadering"), with no address or coordinates;
+    the projection leaves it out. The fixture's body is Teams' older block between
+    underscore rules; a work tenant now writes the block with no rule above it, a heading
+    and `Deelnemen: <link>` first, and the meeting-options section last (`conference_block`).
 11. **One MS account owns many calendars** (`GET /me/calendars` → a list). Each is a
     distinct `Calendar` with its own immutable id, `isDefaultCalendar` flag, and colour
     (`hexColor` `#rrggbb` wins over the named `color`). A Graph `event` object does not

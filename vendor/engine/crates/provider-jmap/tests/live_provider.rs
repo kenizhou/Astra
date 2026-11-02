@@ -6,6 +6,7 @@
 use std::time::Duration;
 
 use engine_core::{
+    calendar::{ConferenceOrigin, DetectedIn},
     ids::{AccountId, MailboxId, MessageIdHeader},
     mail::{EmailAddress, Message, SystemKeyword},
     sync::{JmapDataType, SyncUpdate},
@@ -215,6 +216,47 @@ async fn live_calendar_fetch() {
     ] {
         assert!(uids.contains(uid), "seed event uid missing: {uid}");
     }
+    // Stalwart serves the seed's two `CONFERENCE` lines as two `virtualLocations`, which
+    // read back as one meeting with its dial-in number.
+    let conferences = &objects
+        .iter()
+        .find(|e| e.uid.as_str() == "virtual-2004@test.local")
+        .unwrap()
+        .conferences;
+    assert_eq!(conferences.len(), 1, "{conferences:?}");
+    let entry_uris: Vec<&str> = conferences[0]
+        .entry_points
+        .iter()
+        .map(|entry| entry.uri.as_str())
+        .collect();
+    assert_eq!(
+        entry_uris,
+        ["https://meet.example.com/harness-room", "tel:+15555550100"]
+    );
+    // JMAP carries no `X-GOOGLE-CONFERENCE`, so the Google-shaped invitation's meeting is the
+    // one its description's block links to, and the notes leave the block out.
+    let invitation = objects
+        .iter()
+        .find(|e| e.uid.as_str() == "meeting-2003@test.local")
+        .unwrap();
+    let found: Vec<_> = invitation
+        .conferences
+        .iter()
+        .map(|c| (c.join().map(ToString::to_string), c.origin))
+        .collect();
+    assert_eq!(
+        found,
+        [(
+            Some("https://meet.google.com/abc-defg-hij".to_owned()),
+            ConferenceOrigin::Detected {
+                place: DetectedIn::Description
+            }
+        )]
+    );
+    assert_eq!(
+        invitation.notes(|_| true).as_deref(),
+        Some("Bring the quarterly figures.")
+    );
 }
 
 #[tokio::test]

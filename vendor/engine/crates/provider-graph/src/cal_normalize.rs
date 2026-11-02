@@ -19,8 +19,8 @@
 
 use engine_core::{
     calendar::{
-        Calendar, CalendarAccess, Event, EventStatus, FreeBusyStatus, Location, Participant,
-        ParticipantKind, ParticipantRole, ParticipationStatus, Privacy, VirtualLocation,
+        Calendar, CalendarAccess, DetectionSources, Event, EventStatus, FreeBusyStatus, Location,
+        Participant, ParticipantKind, ParticipantRole, ParticipationStatus, Privacy, add_detected,
     },
     ids::{CalendarId, EventId, Uid},
     membership::Memberships,
@@ -30,6 +30,7 @@ use engine_core::{
 use serde_json::Value;
 
 use crate::{
+    cal_conference,
     cal_recur::parse_recurrence,
     error::GraphError,
     json::{bool_field, datetime, opt_str, req_str, wrap_id},
@@ -136,7 +137,20 @@ pub(crate) fn event_from_json(value: &Value, calendar: &CalendarId) -> Result<Ev
     event.recurrence = parse_recurrence(value)?;
     event.participants = participants(value);
     event.locations = locations(value);
-    event.virtual_locations = virtual_locations(value);
+    event.conferences = cal_conference::conferences(value);
+    // The whole body, not the preview the description falls back to: an HTML body holds
+    // its links in `href`s the preview leaves out.
+    add_detected(
+        &mut event.conferences,
+        &DetectionSources {
+            locations: &event.locations,
+            description: value
+                .get("body")
+                .and_then(|body| opt_str(body, "content"))
+                .or(event.description.as_deref()),
+            ..DetectionSources::default()
+        },
+    );
     event.categories = value
         .get("categories")
         .and_then(Value::as_array)
@@ -287,7 +301,8 @@ fn address(email: &Value) -> Option<(String, Option<String>)> {
     Some((addr.to_owned(), opt_str(email, "name").map(str::to_owned)))
 }
 
-/// The physical `locations` (falling back to the singular `location`).
+/// The physical `locations` (falling back to the singular `location`), without the one
+/// Exchange adds to an online meeting ([`cal_conference::is_placeholder`]).
 fn locations(value: &Value) -> Vec<Location> {
     let array = value.get("locations").and_then(Value::as_array);
     let items: Vec<&Value> = match array {
@@ -296,6 +311,7 @@ fn locations(value: &Value) -> Vec<Location> {
     };
     items
         .into_iter()
+        .filter(|loc| !cal_conference::is_placeholder(value, loc))
         .filter_map(|loc| {
             let name = opt_str(loc, "displayName").filter(|n| !n.is_empty())?;
             let mut location = Location::named(name);
@@ -311,16 +327,6 @@ fn coordinates(loc: &Value) -> Option<String> {
     let lat = coords.get("latitude").and_then(Value::as_f64)?;
     let lon = coords.get("longitude").and_then(Value::as_f64)?;
     Some(format!("geo:{lat},{lon}"))
-}
-
-/// The online-meeting join URL as a virtual location, when the event is an online meeting.
-fn virtual_locations(value: &Value) -> Vec<VirtualLocation> {
-    value
-        .get("onlineMeeting")
-        .and_then(|m| opt_str(m, "joinUrl"))
-        .filter(|u| !u.is_empty())
-        .map(|uri| vec![VirtualLocation::new(uri)])
-        .unwrap_or_default()
 }
 
 /// The revision tokens Graph supplies: the `@odata.etag` and the `changeKey`.

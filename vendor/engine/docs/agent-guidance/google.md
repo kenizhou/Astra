@@ -67,6 +67,8 @@ Auth-Code+PKCE loopback flow and captures fixtures — the exact mirror of
   delta before each page, or the list-only reconcile.
 - **`quota`**: what each Gmail call costs, and the pace that keeps an account under the
   per-user quota (`http-throttling.md`).
+- **`imap_pass`**, **`imap_cursor`**, **`imap_labels`**, **`imap_mail`**: the message sync
+  read over IMAP, when the host connects it (below).
 - **`mutate`/`submit`** — `edit_mail` (label deltas) and `submit_email` (`messages.send`).
 - **`labels_write`**: `edit_mailbox`, the folder changes (below).
 - **`provider`** — `GmailProvider`, the `Provider` impl.
@@ -96,11 +98,17 @@ Four `SyncScope` variants (`engine-core/src/sync/scope.rs`) mirror the shape:
 
 Gmail labels drive all three of the message's independent axes (`modeling.md`):
 
-- **Membership** = a message's `labelIds`, minus the keyword-only labels. Gmail is
-  **multi-membership** (a message is in `INBOX` *and* `SENT` *and* a custom label at
+- **Membership** = a message's `labelIds`, minus the keyword-only and the unfiled labels.
+  Gmail is **multi-membership** (a message is in `INBOX` *and* `SENT` *and* a custom label at
   once), exactly the shape `engine-core` was built for. A message with no place label (an
-  archived, uncategorized message) falls back to a **synthetic `ALL_MAIL` mailbox** so
-  the non-empty `Memberships` invariant holds; the label list emits that mailbox.
+  archived message) falls back to a **synthetic `ALL_MAIL` mailbox** so the non-empty
+  `Memberships` invariant holds; the label list emits that mailbox.
+- **Unfiled labels** (`normalize::is_unfiled_label`) mark a message without filing it: the
+  inbox categories (`CATEGORY_*`), `CHAT`, and the superstars (`YELLOW_STAR`, `RED_BANG`, …).
+  They are **excluded** from membership and **never emitted as mailboxes**, and they carry no
+  state either. A message in an inbox tab still holds `INBOX`, so it is in the Inbox; one
+  archived from a tab keeps its category and is in All Mail, as Gmail shows it. `IMPORTANT`
+  is not one: it has a role.
 - **Keywords** = `UNREAD`/`STARRED` are *state*, not a place: `$seen` is the **absence**
   of `UNREAD` (an inversion — setting `$seen` *removes* `UNREAD`), `STARRED` → `$flagged`,
   and `DRAFT` sets `$draft` (while also being the Drafts place). Keyword-only labels are
@@ -119,8 +127,8 @@ Gmail labels drive all three of the message's independent axes (`modeling.md`):
   folder pane that opens nothing. `A/B/C` with an `A` but no `A/B` therefore sits under `A`,
   keeping `B/C` as its own name.
 - **Roles** (label list): `INBOX`→Inbox, `SENT`→Sent, `DRAFT`→Drafts, `TRASH`→Trash,
-  `SPAM`→Junk, `IMPORTANT`→Important, plus the synthetic All-Mail→All; category/chat/
-  custom labels are roleless mailboxes.
+  `SPAM`→Junk, `IMPORTANT`→Important, plus the synthetic All-Mail→All; a user's label is a
+  roleless mailbox.
 
 - **A label standing for a keyword** is neither. Gmail stores no free-form keyword, so a host
   that wants one kept registers a `KeywordName` (`GmailProvider::with_keyword_names`): the name
@@ -216,6 +224,37 @@ part way; `reconcile;h=…` is a backfill finished and not yet reconciled.
   before the first history page is passed on. Gmail always returns the latest `historyId`, so
   the cursor always advances.
 
+## Mail read over IMAP
+
+`GmailProvider::with_imap` takes a `provider_imap::GmailMail` (from `ImapAccount::gmail`,
+offered only on a session advertising `X-GM-EXT-1`) and moves the message sync and every body
+read onto IMAP. Labels, writes, drafts, sending, reports and identities stay on the API. The
+reason is the quota: the API bills a message's metadata 20 units and its body 60 against 6,000
+per user per minute, about 270 messages a minute, and IMAP bills nothing per message.
+
+- **One store, the API's ids.** All Mail, Spam and Trash are read together, each message with
+  `X-GM-MSGID`, `X-GM-THRID` and `X-GM-LABELS`. In hex the first two are the API's message and
+  thread ids, so both modes write the same keys and threads, and an account moves between them
+  without a resync of its rows.
+- **The API's labels, rebuilt.** `imap_labels` turns what IMAP says into the label ids the API
+  would list (a system label from its backslash name, a user label from its name through
+  `labels.list`, `UNREAD` and `STARRED` from the flags, `SPAM` and `TRASH` from the folder) and
+  hands them to `memberships_of` and `keywords_from_labels`, so a label means one thing in both
+  modes. IMAP does not show the inbox categories as labels, and need not: they are unfiled
+  labels, which the API pass drops as well.
+- **Cursor and delta.** The cursor is `imap;a=…;s=…;t=…`, each folder's validity, `UIDNEXT`,
+  mod-sequence and count. A cursor of the other mode starts this one afresh. A delta reads
+  what arrived (UID at or above the last `UIDNEXT`) and what changed (`CHANGEDSINCE`, CONDSTORE).
+  Gmail has no `QRESYNC`, so a folder holding fewer messages than it should is what reveals a
+  removal, and that pass reconciles the window.
+- **Limits.** `connection_info` reports four body reads in flight and fifty sources a request.
+  Google documents a 2,500 MB daily IMAP download limit for Workspace accounts and none for
+  personal ones. Neither is enforced at that figure (measured 2026-11-01): a personal account
+  downloaded 7.9 GB in 34 minutes and a Workspace account 6.8 GB in 13, each refused nothing,
+  so no body read is paced against it.
+- **Parity is a live test.** `tests/live_imap_parity.rs` syncs one account both ways and
+  compares every message's key, thread, memberships and keywords.
+
 ## Writes + submission
 
 - **`edit_mail`** → `messages.modify` (label deltas), `messages.trash`, `messages.delete`.
@@ -224,8 +263,8 @@ part way; `reconcile;h=…` is a backfill finished and not yet reconciled.
   honours the neutral "ends up in exactly the destination" contract (matching JMAP's
   `mailboxIds` replacement): because Gmail is multi-membership and `modify` takes deltas,
   the current place labels are fetched (`format=minimal`) and all bar the destination, the
-  keyword-state labels, and the system labels `modify` cannot touch (`SENT`/`DRAFT`/`CHAT`)
-  are removed while the destination is added. A `MoveTo` to `TRASH` uses `messages.trash`.
+  keyword-state labels, the unfiled labels, and the system labels `modify` cannot touch
+  (`SENT`/`DRAFT`/`CHAT`) are removed while the destination is added. A `MoveTo` to `TRASH` uses `messages.trash`.
   **A `MoveTo` to the synthetic `ALL_MAIL` is the archive, and adds no label at all**:
   Gmail has no Archive place — archiving *is* the absence of `INBOX` — and `ALL_MAIL` is an
   id this adapter reserves for the mailbox it synthesizes (`normalize::ALL_MAIL_ID`), so
@@ -342,8 +381,10 @@ read/sync **and** writes guarded by `If-Match` (`WriteGuard::Enforced`).
 - **IANA-native** (`cal_normalize`): event `start`/`end` are `{ dateTime, timeZone }` with
   an IANA zone (the wall clock is the RFC 3339 value stripped of its offset, paired with
   the `timeZone`) — **no Windows-zone table**. An all-day event is `{ date }`. `location`
-  and `description` are plain strings; `hangoutLink`/`conferenceData` video entry point →
-  a virtual location; the raw event rides `Event::extended` under `"google/event"`.
+  and `description` are plain strings; `conferenceData` (else `hangoutLink`) → one
+  `Conference` with every entry point and its codes (`cal_conference`,
+  `calendar-semantics.md` → "Conferences"); the raw event rides `Event::extended` under
+  `"google/event"`.
 - **RRULE strings → the shared parser.** `recurrence` is an array of RFC 5545 `RRULE`
   strings, parsed through `engine_core::calendar::parse_rrule` — the one shared
   RRULE-string parser (CalDAV delegates to it too). Google returns recurring events as
