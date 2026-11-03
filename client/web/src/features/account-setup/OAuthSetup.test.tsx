@@ -21,6 +21,7 @@ const ipc = vi.hoisted(() => ({
   syncProgress: vi.fn(),
   addAccount: vi.fn(),
   imapTestConnection: vi.fn(),
+  imapAuthOffer: vi.fn(),
   detectAccountSettings: vi.fn(),
   oauthOffer: vi.fn(),
   oauthBegin: vi.fn(),
@@ -55,6 +56,12 @@ async function openOnManualForm(email = 'work@example.test') {
   fireEvent.change(screen.getByLabelText('Email address'), { target: { value: email } });
   fireEvent.click(screen.getByRole('button', { name: 'Set up manually' }));
   await screen.findByLabelText('Mail server');
+  // The auth card asks once the server and the address stand: fill the
+  // host (the manual step's email prefills from the first screen) so the
+  // ask runs and its password answer lands.
+  fireEvent.change(screen.getByLabelText('Mail server'), {
+    target: { value: 'imap.example.test' },
+  });
 }
 
 beforeEach(() => {
@@ -62,6 +69,10 @@ beforeEach(() => {
   ipc.addAccount.mockReset();
   ipc.dispatch.mockReset();
   ipc.imapTestConnection.mockReset();
+  ipc.imapAuthOffer.mockReset();
+  // The auth card's ask fails soft to the password screen; the mocked
+  // answer keeps the landing inside the test's own clock.
+  ipc.imapAuthOffer.mockResolvedValue('password');
   ipc.oauthOffer.mockReset();
   ipc.oauthOffer.mockResolvedValue({ providers: [] });
   ipc.oauthBegin.mockReset();
@@ -100,7 +111,12 @@ describe('the oauth offer', () => {
 
     expect(await screen.findByText('Sign in with Microsoft')).toBeTruthy();
     expect(screen.getByText('Sign in with Google')).toBeTruthy();
-    expect(screen.getByLabelText('Password')).toBeTruthy();
+    // The card's password field arrives with its landed answer (the
+    // settle passes, the unanswered ask fails soft to password), so the
+    // beside-the-form assertion waits for the landing.
+    expect(
+      await screen.findByLabelText('Password', {}, { timeout: 3000 }),
+    ).toBeTruthy();
   });
 });
 
