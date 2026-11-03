@@ -23,7 +23,8 @@ const PROBE_BUDGET: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// How long the issuer search may take before the decision answers
 /// without one. The bound is needed because a candidate can accept a
-/// connection and never answer.
+/// connection and never answer. The live proof carries a mirroring
+/// constant of its own; move the two together.
 const ISSUER_SEARCH_BUDGET: std::time::Duration = std::time::Duration::from_secs(6);
 
 /// What a mail account's setup should ask for. Three answers, because
