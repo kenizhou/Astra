@@ -66,7 +66,7 @@ function setupPayload() {
 /** Renders the card as the manual step does. */
 function renderCard(over: Partial<Parameters<typeof ImapAuthCard>[0]> = {}) {
   const onAdded = vi.fn();
-  render(
+  const view = render(
     <ImapAuthCard
       host={fields.host}
       port={fields.port}
@@ -81,7 +81,7 @@ function renderCard(over: Partial<Parameters<typeof ImapAuthCard>[0]> = {}) {
       {...over}
     />,
   );
-  return onAdded;
+  return { onAdded, view };
 }
 
 /** Waits past the ask's settle so a mocked answer lands. */
@@ -159,6 +159,10 @@ describe('the ask', () => {
       screen.queryByRole('button', { name: /Sign in with/ }),
       'no button renders before the answer lands'
     ).toBeNull();
+    expect(
+      screen.queryByLabelText('Password'),
+      'nothing credential-shaped renders before the answer lands'
+    ).toBeNull();
     never?.('password');
   });
 
@@ -176,7 +180,10 @@ describe('the ask', () => {
     await answerArrives();
 
     expect(ipc.imapAuthOffer).not.toHaveBeenCalled();
-    expect(screen.getByLabelText('Password')).toBeTruthy();
+    expect(
+      screen.queryByLabelText('Password'),
+      'the card stays inert while it has nothing to ask'
+    ).toBeNull();
   });
 });
 
@@ -375,5 +382,52 @@ describe('a begun mail sign-in', () => {
     await begun();
     cleanup();
     expect(ipc.oauthCancel).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('the re-ask', () => {
+  it('holds the landed screen while an edit asks again', async () => {
+    ipc.imapAuthOffer.mockResolvedValue(SIGN_IN);
+    const { view } = renderCard();
+    await answerArrives();
+    expect(screen.queryByLabelText('Password')).toBeNull();
+
+    // The host edits: the ask re-runs, and the landed sign-in screen
+    // holds rather than rebuilding a password field mid-ask.
+    let never: ((answer: ImapAuthAnswer) => void) | undefined;
+    ipc.imapAuthOffer.mockReturnValue(
+      new Promise<ImapAuthAnswer>((resolve) => {
+        never = resolve;
+      }),
+    );
+    await act(async () => {
+      view.rerender(
+        <ImapAuthCard
+          host="mail2.example.test"
+          port={fields.port}
+          security={fields.security}
+          username={fields.username}
+          accepted={null}
+          password=""
+          onPasswordChange={() => {
+            /* the flow's own setter */
+          }}
+          onAdded={() => {
+            /* the flow's own callback */
+          }}
+        />,
+      );
+    });
+    await answerArrives();
+    expect(screen.getByRole('status', { name: 'Asking the server' })).toBeTruthy();
+    expect(
+      screen.queryByLabelText('Password'),
+      'a field on screen stays; the card does not rebuild mid-ask'
+    ).toBeNull();
+    expect(
+      screen.getByRole('button', { name: /Sign in with/ }),
+      'the landed sign-in screen holds through the re-ask'
+    ).toBeTruthy();
+    never?.('password');
   });
 });

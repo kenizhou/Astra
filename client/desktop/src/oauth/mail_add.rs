@@ -311,45 +311,6 @@ pub(crate) fn production_mail_completion(
     })
 }
 
-/// Carries what an existing account stored over to the document a new
-/// sign-in for it produced: the pinned id and every section the grant
-/// does not own, because a re-consent changes the grant and nothing
-/// else.
-fn keep_stored_shape(signed_in: &mut AccountConfig, stored: Option<AccountConfig>) {
-    let Some(stored) = stored else {
-        return;
-    };
-    signed_in.shape.id = stored.shape.id;
-    signed_in.dav = stored.dav;
-    signed_in.certificate_exceptions = stored.certificate_exceptions;
-}
-
-/// Takes the pre-registration back: a new add's entry goes whole, a
-/// re-consent's entry is put back as it stood, config and pool
-/// together, because a failed dial or a refused store must leave a live
-/// account dialling exactly as it did.
-fn roll_back(
-    dials: &AccountDials,
-    id: &AccountId,
-    stored: Option<AccountConfig>,
-    stored_pool: Option<Arc<ImapConnections>>,
-) {
-    match (stored, stored_pool) {
-        (Some(config), Some(pool)) => {
-            if let Err(err) = dials.register(id, config, pool) {
-                log::warn!("oauth: a rolled-back account's entry could not be restored: {err}");
-            }
-        }
-        _ => {
-            if let Err(err) = dials.remove(id.as_str()) {
-                log::warn!(
-                    "oauth: a rolled-back account's id stayed in the dial table's index: {err}"
-                );
-            }
-        }
-    }
-}
-
 /// Completes a mail sign-in into an account: the document parses, the
 /// dial table entry registers **before** the dial (the rotation sink
 /// reads it), the dial proves the grant works, the grant persists
@@ -494,6 +455,9 @@ pub(crate) async fn complete_mail_signin(
     );
     Ok(email)
 }
+
+mod shape;
+use shape::{keep_stored_shape, roll_back};
 
 #[cfg(test)]
 #[path = "mail_add_tests.rs"]

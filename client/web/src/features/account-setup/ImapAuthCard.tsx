@@ -120,6 +120,11 @@ export function ImapAuthCard({
   // The ask's state: idle before the fields stand, asking while the
   // card waits, answered with one of the three screens.
   const [ask, setAsk] = useState<'idle' | 'asking' | { answer: ImapAuthAnswer }>('idle');
+  // The last answer that landed, held through re-asks so the card never
+  // rebuilds a screen the person may be typing into: nothing
+  // credential-shaped renders until the first answer lands, and an edit's
+  // re-ask keeps the standing screen while it asks again.
+  const [landed, setLanded] = useState<ImapAuthAnswer | null>(null);
   const [flow, setFlow] = useState<ImapFlowState>({ status: 'idle' });
   const [passwordOpen, setPasswordOpen] = useState(false);
   // The unmount cleanup reads the LIVE status; a closure over the
@@ -133,6 +138,7 @@ export function ImapAuthCard({
   useEffect(() => {
     if (host.trim() === '' || username.trim() === '') {
       setAsk('idle');
+      setLanded(null);
       return;
     }
     let live = true;
@@ -146,11 +152,14 @@ export function ImapAuthCard({
         (answer) => {
           if (live) {
             setAsk({ answer });
+            setLanded(answer);
           }
         },
         () => {
           if (live) {
-            setAsk({ answer: 'password' });
+            const answer: ImapAuthAnswer = 'password';
+            setAsk({ answer });
+            setLanded(answer);
           }
         },
       );
@@ -210,7 +219,11 @@ export function ImapAuthCard({
     }
   }, [flow, onAdded]);
 
-  const answer = typeof ask === 'object' ? ask.answer : null;
+  // The screen derives from the last LANDED answer, never the ask's
+  // transient state: while the first ask stands, nothing
+  // credential-shaped renders; while a re-ask stands, the last screen
+  // holds so no field appears and is then taken away.
+  const answer = landed;
   const signIn =
     answer !== null && typeof answer === 'object' && 'sign_in' in answer
       ? answer.sign_in
@@ -242,15 +255,20 @@ export function ImapAuthCard({
     setFlow({ status: 'idle' });
   };
 
-  // The password area's three standings: hidden entirely where the
-  // server admits no password, demoted behind a secondary control where
-  // the sign-in stands and a password still works, and standing as
-  // today everywhere else. Never removed while the form lives.
+  // The password area's three standings: nothing at all before the first
+  // answer lands (a field that appears and is then taken away reads as
+  // the app changing its mind), hidden entirely where the server admits
+  // no password, demoted behind a secondary control where the sign-in
+  // stands and a password still works, and standing as today everywhere
+  // else. Never removed while the screen lives.
+  const screenLanded = landed !== null;
   const passwordHidden =
+    !screenLanded ||
     (signIn !== null && !signIn.password_also_works) ||
     (registrationNeeded !== null && !registrationNeeded.password_also_works);
-  const passwordDemoted = signIn !== null && signIn.password_also_works;
-  const passwordStanding = !passwordHidden && !(passwordDemoted && !passwordOpen);
+  const passwordDemoted = screenLanded && signIn !== null && signIn.password_also_works;
+  const passwordStanding =
+    screenLanded && !passwordHidden && !(passwordDemoted && !passwordOpen);
 
   return (
     <>

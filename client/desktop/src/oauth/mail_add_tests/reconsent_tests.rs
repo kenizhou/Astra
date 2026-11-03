@@ -32,6 +32,11 @@ fn standing_config() -> AccountConfig {
         "caldav_url = \"https://dav.example.test\"\n",
         "username = \"Alice@Example.test\"\n",
         "password = \"dav-secret\"\n",
+        "\n[smtp]\n",
+        "addr = \"smtp.example.test:465\"\n",
+        "server_name = \"smtp.example.test\"\n",
+        "\n[crypto]\n",
+        "method = \"pgp\"\n",
         "\n[[certificate_exception]]\n",
         "server_name = \"mail.example.test\"\n",
         "sha256 = \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\n",
@@ -88,6 +93,14 @@ fn a_sign_in_for_an_account_that_stands_keeps_its_shape_and_rotates() {
     assert!(
         config.dav.is_some(),
         "the dav section the grant does not own stays"
+    );
+    assert!(
+        config.smtp.is_some(),
+        "a stored submission host the grant does not own stays"
+    );
+    assert!(
+        config.crypto.is_some(),
+        "a settings-written crypto method the grant does not own stays"
     );
     assert_eq!(
         config.certificate_exceptions.len(),
