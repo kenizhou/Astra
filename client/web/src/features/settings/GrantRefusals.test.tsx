@@ -198,6 +198,37 @@ describe('the expired-sign-in row', () => {
     expect(screen.getByRole('button', { name: 'Remove account' })).toBeTruthy();
   });
 
+  it('an imap_smtp expired row names the refused credential and points at reconnecting', () => {
+    // The mail family's dead grant is the JMAP row's shape: the refused
+    // credential is named, the remedy is reconnecting the account until
+    // an in-place grant ships, and no provider flow begins.
+    useSettingsStore.getState().applySnapshot(
+      snapshot([
+        row({
+          account: 'imap',
+          address: 'ada@example.test',
+          kind: 'imap_smtp',
+          grant: 'sign_in_expired',
+        }),
+      ]),
+    );
+    render(<AccountsDetail />);
+
+    const sentence = screen.getByRole('status', { name: 'Sign-in expired' });
+    expect(sentence.textContent).toContain('ada@example.test');
+    expect(sentence.textContent).toMatch(/credential was refused/);
+    expect(sentence.textContent).toMatch(/connect it again/);
+    expect(
+      screen.queryByRole('button', { name: /Sign in again/ }),
+      'no microsoft or google flow begins for an imap_smtp row'
+    ).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open ada@example.test' }));
+
+    expect(screen.getByRole('button', { name: 'Remove account' })).toBeTruthy();
+    expect(ipc.oauthBegin).not.toHaveBeenCalled();
+  });
+
   it('keeps the expired account reachable for removal through its detail page', () => {
     useSettingsStore.getState().applySnapshot(
       snapshot([

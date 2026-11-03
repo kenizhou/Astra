@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 
 use engine_api::{AccountId, MailboxId, MailboxRole, MimeWrapper, Provider};
 use engine_core::sync::SyncUpdate;
+use provider_imap::CredentialSource;
 use tokio::net::TcpStream;
 use tokio_rustls::client::TlsStream;
 
@@ -36,6 +37,10 @@ pub struct ImapConnections {
     account: Mutex<Option<Arc<LiveImapAccount>>>,
     /// Held across a connect, so two callers finding no account open one between them.
     connecting: tokio::sync::Mutex<()>,
+    /// The credential source a grant-carrying account dials over, set
+    /// once by the dial that connects it. Absent for a password
+    /// account, whose source the config names on every connect.
+    credentials: Mutex<Option<Arc<dyn CredentialSource>>>,
 }
 
 impl std::fmt::Debug for ImapConnections {
@@ -51,6 +56,38 @@ impl ImapConnections {
     #[must_use]
     pub fn new() -> Arc<Self> {
         Arc::new(Self::default())
+    }
+
+    /// Installs the credential source every connection of this pool
+    /// presents: the source a grant-carrying account's dial builds over
+    /// its stored grant. The dial, a late folder bind, and a reconnect
+    /// after a dropped socket then all ask the one source, so the
+    /// sink-backed refresh it holds owns every rotation. A password
+    /// account installs nothing: its source the config names on every
+    /// connect.
+    pub fn install_credentials(&self, credentials: Arc<dyn CredentialSource>) {
+        self.credentials
+            .lock()
+            .expect("imap credential lock stands")
+            .replace(credentials);
+    }
+
+    /// The credential source this pool's next connect presents: the
+    /// installed one when a dial set it, else the config's own password
+    /// source.
+    fn source_for(
+        &self,
+        config: &AccountConfig,
+    ) -> Result<Arc<dyn CredentialSource>, AccountError> {
+        match self
+            .credentials
+            .lock()
+            .expect("imap credential lock stands")
+            .clone()
+        {
+            Some(credentials) => Ok(credentials),
+            None => imap_credential_source(config),
+        }
     }
 
     /// Drops every resting connection, so the next call dials fresh. For a host that saw the
@@ -79,7 +116,8 @@ impl ImapConnections {
         mime_wrapper: Option<Arc<dyn MimeWrapper>>,
     ) -> Result<Arc<LiveImapAccount>, AccountError> {
         let _connecting = self.connecting.lock().await;
-        let account = Arc::new(connect_account(config, mime_wrapper).await?);
+        let credentials = self.source_for(config)?;
+        let account = Arc::new(connect_account(config, credentials, mime_wrapper).await?);
         let replaced = self
             .account
             .lock()
@@ -105,7 +143,8 @@ impl ImapConnections {
         if let Some(account) = self.current() {
             return Ok(account);
         }
-        let account = Arc::new(connect_account(config, mime_wrapper).await?);
+        let credentials = self.source_for(config)?;
+        let account = Arc::new(connect_account(config, credentials, mime_wrapper).await?);
         *self.account.lock().expect("imap account mutex poisoned") = Some(Arc::clone(&account));
         Ok(account)
     }
@@ -155,13 +194,15 @@ impl ImapConnections {
 /// Logs in over the account's TLS policy, reading a refusal as the first login's.
 ///
 /// Every connection the account dials later asks the same credential source, so the account's
-/// hundredth connection presents the credential that is valid when it is dialled.
+/// hundredth connection presents the credential that is valid when it is dialled. The source
+/// itself is the pool's: an installed grant source when the dial set one, else the password
+/// the config names.
 async fn connect_account(
     config: &AccountConfig,
+    credentials: Arc<dyn CredentialSource>,
     mime_wrapper: Option<Arc<dyn MimeWrapper>>,
 ) -> Result<LiveImapAccount, AccountError> {
     let tls = account_tls(config)?;
-    let credentials = imap_credential_source(config)?;
     let mut imap = config.imap_config(credentials)?;
     if let Some(wrapper) = mime_wrapper {
         imap = imap.with_mime_wrapper(wrapper);

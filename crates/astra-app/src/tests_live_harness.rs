@@ -117,6 +117,17 @@
 //! `well_known_base_override`, mirroring mail-calendar's live JMAP tests; no
 //! host trust store is touched.
 //!
+//! The gated mail OAuth proofs (`mail_oauth_proof`) pin the wizard's question
+//! over the real server: the capability line read by the engine's probe verbs
+//! on both legs (the IMAP pre-auth line on 2143, the EHLO AUTH line on the
+//! submission listener), the decision composed over the product's own TLS
+//! acceptance walk into the registration-needed shape (the harness offers the
+//! OAuth mechanisms and serves no issuer), and the discovery's fail-soft over
+//! the resolving-nowhere domain: the issuer chain answers its miss inside its
+//! budget and the un-accepted certificate's refused dial answers the password
+//! screen, never an error. The full sign-in round trip waits on a real
+//! identity provider, exactly as JMAP's proof does.
+//!
 //! The tests skip unless `ASTRA_LIVE_HARNESS=1`, so the offline `cargo test` stays
 //! green. Against a running harness:
 //!
@@ -177,6 +188,8 @@ mod gate;
 mod jmap;
 #[path = "tests_live_harness/list.rs"]
 mod list;
+#[path = "tests_live_harness/mail_oauth_proof.rs"]
+mod mail_oauth_proof;
 #[path = "tests_live_harness/move_to_folder.rs"]
 mod move_to_folder;
 #[path = "tests_live_harness/outage_proof.rs"]
@@ -254,6 +267,7 @@ fn account(
             server_name: host.to_owned(),
             username: user.to_owned(),
             password: Some(Secret::new(password.to_owned())),
+            oauth: None,
             security: ConnectionSecurity::ImplicitTls,
         }),
         smtp: Some(SmtpAccount {

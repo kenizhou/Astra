@@ -15,6 +15,7 @@ const ipc = vi.hoisted(() => ({
   imapTestConnection: vi.fn(),
   detectAccountSettings: vi.fn(),
   oauthOffer: vi.fn(),
+  imapAuthOffer: vi.fn(),
 }));
 
 vi.mock('@/services/ipc', async (importOriginal) => ({
@@ -36,7 +37,7 @@ const rejectedCertificate = {
   not_after: null,
 };
 
-function fillForm() {
+async function fillForm() {
   fireEvent.change(screen.getByLabelText('Mail server'), {
     target: { value: 'imap.example.net' },
   });
@@ -44,7 +45,19 @@ function fillForm() {
   fireEvent.change(screen.getByLabelText('Email address'), {
     target: { value: 'work@example.net' },
   });
-  fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'secret' } });
+  // The auth card draws nothing credential-shaped until its ask lands:
+  // wait for the ask itself, then type the secret only where the landed
+  // answer stands a password field (the sign-in answer demotes it).
+  await waitFor(
+    () => expect(ipc.imapAuthOffer).toHaveBeenCalled(),
+    { timeout: 3000 },
+  );
+  await waitFor(() => {
+    const password = screen.queryByLabelText('Password');
+    if (password !== null) {
+      fireEvent.change(password, { target: { value: 'secret' } });
+    }
+  }, { timeout: 3000 });
 }
 
 beforeEach(() => {
@@ -55,6 +68,8 @@ beforeEach(() => {
   ipc.detectAccountSettings.mockReset();
   ipc.oauthOffer.mockReset();
   ipc.oauthOffer.mockResolvedValue({ providers: [] });
+  ipc.imapAuthOffer.mockReset();
+  ipc.imapAuthOffer.mockResolvedValue('password');
   useUiStore.setState({ accountSetupOpen: true });
 });
 
@@ -80,12 +95,25 @@ describe('the manual setup flow', () => {
     expect(useUiStore.getState().accountSetupOpen).toBe(false);
   });
 
-  it('assures the password goes to the system keychain', () => {
+  it('assures the password goes to the system keychain', async () => {
     render(<AccountSetupFlow />);
     fireEvent.click(screen.getByRole('button', { name: 'Set up manually' }));
 
+    // The card draws nothing credential-shaped until its ask lands, and
+    // the ask runs once the server and address stand: fill them, let the
+    // mocked password answer land, and the assurance rides it.
+    fireEvent.change(screen.getByLabelText('Mail server'), {
+      target: { value: 'imap.example.net' },
+    });
+    fireEvent.change(screen.getByLabelText('Email address'), {
+      target: { value: 'work@example.net' },
+    });
     expect(
-      screen.getByText('Your password goes to the system keychain, never to a log file.'),
+      await screen.findByText(
+        'Your password goes to the system keychain, never to a log file.',
+        {},
+        { timeout: 3000 },
+      ),
     ).toBeTruthy();
   });
 
@@ -106,7 +134,7 @@ describe('the manual setup flow', () => {
     });
     render(<AccountSetupFlow />);
     fireEvent.click(screen.getByRole('button', { name: 'Set up manually' }));
-    fillForm();
+    await fillForm();
     fireEvent.click(screen.getByRole('button', { name: 'Test connection' }));
 
     expect(await screen.findByText('the server refused the sign in')).toBeTruthy();
@@ -119,7 +147,7 @@ describe('the manual setup flow', () => {
     ipc.addAccount.mockResolvedValue({ account_id: 'work', email: 'work@example.net' });
     render(<AccountSetupFlow />);
     fireEvent.click(screen.getByRole('button', { name: 'Set up manually' }));
-    fillForm();
+    await fillForm();
     fireEvent.click(screen.getByRole('button', { name: 'Test connection' }));
 
     const add = await screen.findByRole('button', { name: 'Add account' });
@@ -148,7 +176,7 @@ describe('the manual setup flow', () => {
     ipc.addAccount.mockResolvedValue({ account_id: 'work', email: 'work@example.net' });
     render(<AccountSetupFlow />);
     fireEvent.click(screen.getByRole('button', { name: 'Set up manually' }));
-    fillForm();
+    await fillForm();
     fireEvent.click(screen.getByRole('button', { name: 'Test connection' }));
 
     // The Server row and the Claims to be row both carry the name.
@@ -181,7 +209,7 @@ describe('the manual setup flow', () => {
     ipc.addAccount.mockRejectedValue('the account could not be connected: no route to host');
     render(<AccountSetupFlow />);
     fireEvent.click(screen.getByRole('button', { name: 'Set up manually' }));
-    fillForm();
+    await fillForm();
     fireEvent.click(screen.getByRole('button', { name: 'Test connection' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Add account' }));
 
@@ -190,11 +218,34 @@ describe('the manual setup flow', () => {
     expect(ipc.dispatch).not.toHaveBeenCalled();
   });
 
+  it('asks the dialled server and stands the sign-in button primary beside the demoted password', async () => {
+    // The manual step's own ask: the flow hands the card its fields, the
+    // server's sign-in answer stands the primary button, and the password
+    // demotes behind the control rather than standing beside it.
+    ipc.imapAuthOffer.mockResolvedValue({
+      sign_in: {
+        issuer: 'https://id.example.test',
+        provider_label: null,
+        password_also_works: true,
+      },
+    });
+    render(<AccountSetupFlow />);
+    fireEvent.click(screen.getByRole('button', { name: 'Set up manually' }));
+    await fillForm();
+
+    expect(
+      await screen.findByRole('button', { name: 'Sign in with id.example.test' })
+    ).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Use a password instead' })).toBeTruthy();
+    expect(screen.queryByLabelText('Password')).toBeNull();
+    expect(ipc.imapAuthOffer).toHaveBeenCalledTimes(1);
+  });
+
   it('carries the start_tls security through the tested setup', async () => {
     ipc.imapTestConnection.mockResolvedValue({ ok: { account_id: 'work' } });
     render(<AccountSetupFlow />);
     fireEvent.click(screen.getByRole('button', { name: 'Set up manually' }));
-    fillForm();
+    await fillForm();
     fireEvent.change(screen.getByLabelText('Connection security'), {
       target: { value: 'start_tls' },
     });

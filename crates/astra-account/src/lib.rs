@@ -20,6 +20,7 @@ mod graph;
 mod imap;
 mod jmap;
 mod log_handle;
+mod mail_oauth;
 mod oauth_accounts;
 mod pass_folders;
 mod reconnect;
@@ -55,6 +56,10 @@ pub use jmap::{
     RefreshingJmapProvider,
 };
 pub use log_handle::account_log_handle;
+pub use mail_oauth::{
+    detected_issuer, imap_auth_offer, imap_oauth_credential_source, imap_oauth_token_source,
+    mail_oauth_issuer, register_mail_client, ImapAuth, ImapAuthQuery, MailOauthGrant,
+};
 pub use oauth_accounts::{GoogleAccount, GraphAccount};
 pub use pass_folders::pass_syncs;
 pub use reconnect::{ReconnectingImapProvider, Redial};
@@ -118,6 +123,13 @@ pub enum AccountError {
     /// dead password for an outage.
     #[error("jmap: {0}")]
     Jmap(String),
+    /// A mail OAuth step failed: the client registration, or a mail
+    /// account's token source build. The sign-in path treats every one
+    /// of these as the password field, which works everywhere; a
+    /// refusal the account cannot recover from arrives as
+    /// [`Self::SigninRejected`] instead.
+    #[error("mail oauth: {0}")]
+    MailOauth(String),
     /// The IMAP connection or login failed.
     #[error("imap: {0}")]
     Imap(#[from] provider_imap::ImapError),

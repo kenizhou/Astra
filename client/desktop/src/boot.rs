@@ -72,6 +72,7 @@ pub(crate) fn assemble_state(
             &crypto_store,
             crate::oauth::graph_add::production_dial(),
             crate::oauth::google_add::production_google_dial(),
+            crate::oauth::mail_add::production_mail_dial(Arc::clone(&crypto_store)),
             &refusals,
         )
     });

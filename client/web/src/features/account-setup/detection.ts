@@ -155,3 +155,16 @@ export function jmapSeedFrom(view: RecommendationView): JmapFormSeed | null {
   }
   return { email: rec.Jmap.email, serverUrl: rec.Jmap.server_url };
 }
+
+/**
+ * The issuer the provider's own autoconfig named, when the
+ * recommendation carried one across: the manual step's ask offers it to
+ * the host as the first issuer candidate, exactly the field the
+ * detection result held.
+ */
+export function imapIssuerFrom(view: RecommendationView | null): string | undefined {
+  if (view === null || !('Imap' in view.recommendation)) {
+    return undefined;
+  }
+  return view.recommendation.Imap.oauth_issuer;
+}
