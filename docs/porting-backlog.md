@@ -34,6 +34,27 @@ After SP2v: the lock-phase assessment (every row shipped, partial with
 recorded gaps, or explicitly decided), then the 22:00 upstream-sync
 activation.
 
+## The lock-phase assessment (2026-11-03, all slices landed)
+
+SP2k through SP2v are merged; the ladder is empty. The matrix counts
+16 rows shipped, 101 partial with named shortfalls in their notes, and
+13 unstarted, every one listed below for the owner to pick. The
+shortfall-naming discipline held through every slice: no partial row
+carries a silent gap, and the reviews enforced the naming at each
+landing. The references can be locked and the 22:00 upstream-sync
+activation scheduled.
+
+The 13 unstarted rows, the owner's picking list: the outgoing name per
+account; the JMAP and IMAP in-place re-grants (both families' expired
+rows name the reconnect remedy today); the unified inbox behind the
+account switcher; the vendor account family (the next-device list, the
+sign-in, the subscription view, already decided as mail-calendar's own
+business below); the Drafts row reopening into the composer; the image
+resize handle; the mail actions row (read and unread, flag, archive,
+delete, trash); the offline diary at launch and the periodic calendar
+refresh; the showcase mode (the fixtures dev server already renders the
+seeded shell); and the assistant chat with tool budget.
+
 ## The decisions this backlog owes
 
 - **The Allodia commerce surface** (the vendor account, the subscription
