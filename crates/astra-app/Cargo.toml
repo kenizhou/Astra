@@ -71,6 +71,9 @@ engine-provider.workspace = true
 # The calendar leg of the gated live harness suite: the real CalDAV adapter
 # the live calendar proofs sync and write through.
 provider-caldav.workspace = true
+# The mail OAuth proofs read the harness's pre-auth capability line through the
+# engine's own probe verbs on both legs; the facade re-exports neither probe.
+provider-imap.workspace = true
 # The relayed meeting-brief proof's transport, built over the engine's TLS
 # policy the same way the desktop host builds the background client.
 engine-tls.workspace = true

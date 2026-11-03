@@ -46,7 +46,8 @@ fn in_days(days: i64, hour: u8) -> String {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .expect("the clock reads after the epoch")
-        .as_secs() as i64;
+        .as_secs()
+        .cast_signed();
     let day = secs.div_euclid(86_400) + days;
     // Howard Hinnant's civil_from_days: the day number to (y, m, d).
     let z = day + 719_468;

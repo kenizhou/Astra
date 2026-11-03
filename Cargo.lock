@@ -326,6 +326,7 @@ dependencies = [
  "hex",
  "log",
  "provider-caldav",
+ "provider-imap",
  "reqwest",
  "serde",
  "serde_json",
