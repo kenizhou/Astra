@@ -617,8 +617,8 @@ sees:
   meeting; a `tel:` or `sip:` URI joins it when the list holds exactly one web URI and stands
   alone otherwise, since nothing in either format says which meeting a number dials into.
 - **Origin.** `Native` is a meeting the calendar server made and keeps: Google's
-  `hangoutsMeet` (removable, with `pending`/`failure` read from `createRequest.status`) and
-  any Graph online meeting (never removable: Graph refuses `isOnlineMeeting: false`).
+  `hangoutsMeet` (with `pending`/`failure` read from `createRequest.status`) and any Graph
+  online meeting. Both are removable, each its own way (below, "Writing a meeting").
   `Attached` is a meeting stored in a field built for it that the server did not make:
   `CONFERENCE`, `virtualLocations`, a Google `addOn`. `Detected` is one found elsewhere
   (below).
@@ -628,6 +628,8 @@ sees:
 - **`ConferenceUri`** admits `https`, `http`, `tel`, `sip` and `sips`, and a web URI only
   with a host and no credentials. A host opens this value when a person asks to join, so an
   entry with any other value is left out of the projection; the raw payload keeps it.
+  The iCalendar reader unescapes a `CONFERENCE` value before parsing it: Stalwart 0.16 serves
+  a dial-in's pause as `\,`, and a URI never holds a backslash.
 - **Keys** name a conference for a later edit: the `virtualLocations` map key, the field
   name where the provider allows one conference (`conferenceData`, `onlineMeeting`), else
   the first URI.
@@ -639,8 +641,9 @@ sees:
   names counts, and a link written inside another is part of it: Google Calendar wraps
   every link in an invitation's description as `https://www.google.com/url?q=https://…`, and
   the copy inside carries Google's parameters. A Teams link is a meeting only under `/meet/`
-  or `/l/meetup-join/`; the meeting's chat (`/l/chat/`) and options page sit beside it. Graph's description is its preview, so Graph reads the whole `body`,
-  whose HTML holds links in `href`s. A link joins a meeting already held
+  or `/l/meetup-join/`; the meeting's chat (`/l/chat/`) and options page sit beside it. Graph detects in the whole `body`: the sync
+  reads it as text, each link kept as `label<url>`, and one that arrives as HTML holds its
+  links in `href`s. A link joins a meeting already held
   (`Conference::joined_at`) when `ConferenceUri::same_meeting` says so (host and path,
   escapes compared without case, and one query holding every parameter of the other), or
   when it runs on the service of a `Native` meeting or one a vendor property names, which is
@@ -662,7 +665,8 @@ sees:
   as a work tenant does today, appended with no rule above it (a heading naming "Microsoft
   Teams" whose next line holds the meeting link, running to the end of the text). Google's
   has `-::~:~::~:~…::-` above and below. A block without its closing line runs to the end,
-  because Graph's preview cuts it off. `description` itself stays the server's text, since edits are computed
+  because a preview cuts it off (Graph's `bodyPreview`, the description of a body read as
+  HTML). `description` itself stays the server's text, since edits are computed
   against it.
 - **Graph's stand-in location.** Exchange gives an online meeting a location named after the
   provider in the organiser's language ("Microsoft Teams-vergadering") with no address or
@@ -674,16 +678,55 @@ sees:
   way in: the server's label when it is written as a number (Google's and Graph's are), else
   the URI's number without its parameters and without what is dialled after the call connects
   (`tel:+14255550100,,123456789#`). A JSCalendar `name` such as "Dial in" names the way in,
-  not the number.
+  not the number. `ConferenceUri::dialled_after_pause` is that remainder (`123456789#`), the
+  PIN of a way in whose only copy of it is its URI.
 - **Occurrences** read the master's conferences; no override carries its own.
-- **Which calendars make one** is the server's to say, per calendar: Graph's
-  `allowedOnlineMeetingProviders`, Google's `conferenceProperties`. Observed live: a
+- **Which calendars make one** is the server's to say, per calendar, never the account
+  kind, and is read with the calendar list into `Calendar::native_conferences`: Graph's
+  `allowedOnlineMeetingProviders` (`teamsForBusiness` is Teams) and Google's
+  `conferenceProperties.allowedConferenceSolutionTypes` (`hangoutsMeet` is Meet). A
+  subscribed or shared Exchange calendar lists nothing, and a Workspace admin can switch Meet
+  off. Retired services a server still names (Skype, Skype for Business, classic Hangouts)
+  are left out. The list does not depend on `access`: Google lists Meet on a calendar the
+  caller can only read, so a host reads the two together. CalDAV and JMAP servers make no
+  meetings. Observed live: a
   work or school calendar lists `teamsForBusiness` and makes the meeting on create; a
   personal Microsoft account's calendar lists only `unknown`, and a create asking for
   `teamsForBusiness` succeeds with `isOnlineMeeting: false` and no meeting, without an
   error. `live_calendar_conference` in `provider-graph` and `provider-google` reads a
   server-made meeting back through the adapter, and a meeting written only into the
   location and description.
+- **Writing a meeting** (`EventDraft::conference`, `EventPatch::conference`, advertised as
+  `Capabilities::conference_writes`). `NewConference::Native` asks the calendar's server for
+  one of its own; `NewConference::Attach` stores one made elsewhere. `ConferenceEdit::Set`
+  puts one on, replacing a named one, and `Remove` takes one off. A meeting belongs to the
+  series, so an occurrence edit carrying one is refused (`EventEdit::refuse_conference_on_occurrence`).
+  Measured per adapter:
+  - **Graph.** Teams is `isOnlineMeeting: true` with `teamsForBusiness`; Exchange appends its
+    block and stand-in location, and keeps changing the event while it sets up the meeting,
+    so a patch on a revision read just after the create can be refused as stale (`412`).
+    Taking Teams off is writing the body without Teams' block and clearing the stand-in:
+    Graph accepts `isOnlineMeeting: false` and ignores it. A meeting made elsewhere has no
+    field, so it is written as our block in the body and, when the event has none, as the
+    location; it reads back as a detected meeting, and a self-hosted server's link names no
+    service.
+  - **Google.** Everything is `conferenceData` under `conferenceDataVersion=1`, which Google
+    otherwise ignores. Meet is a `createRequest` for `hangoutsMeet` whose `requestId` comes
+    from the event's UID and the edit's stamp, so a retried write asks for the same meeting.
+    A meeting made elsewhere is an `addOn` conference with its entry points; Google Calendar
+    shows it with a Join button and writes its link into its own block and `LOCATION` in the
+    invitations it sends, so no block of ours is written. Removing either is
+    `conferenceData: null`.
+  - **CalDAV and JMAP** do not advertise the capability, and refuse a write that carries a
+    meeting rather than storing the event without it.
+  - **Our block** (`Conference::text_block`) is a rule of 40 `-=` characters, the meeting's
+    name (its label, else the caller's word for a video meeting), `Join: <link>`, its ID,
+    passcode and dial-in numbers, and the rule again. The words come from the caller in a
+    `ConferenceText`, since the engine has no locale. It is recognised like Teams' and
+    Google's blocks, so `notes` leaves it out, and removing the meeting takes it out of the
+    notes with every other block that joins it (`without_text_block`).
+  `live_calendar_conference_write` in `provider-graph` and `provider-google` puts each kind on
+  and takes it off through the adapter.
 
 ## Supported recurrence subset
 

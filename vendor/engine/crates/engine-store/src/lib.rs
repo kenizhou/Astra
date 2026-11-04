@@ -105,4 +105,11 @@ pub use store::Store;
 /// - `12`: a Gmail message's inbox category (`CATEGORY_*`), `CHAT` and superstar labels are no
 ///   longer memberships, nor mailboxes in the label list. The label list drops them on its next
 ///   read; a stored message keeps them as places until the re-snapshot re-reads it.
-pub const NORMALIZER_VERSION: u32 = 12;
+/// - `13`: a Graph event's description is its whole body, read as text, where an HTML body gave
+///   only `bodyPreview`, cut at 255 characters. A notes edit written back from the preview lost the
+///   rest and, on a Teams meeting, the meeting. A stored event keeps the preview until the
+///   re-snapshot re-reads it.
+/// - `14`: a Graph online meeting reads as removable: Exchange takes it off an event whose body is
+///   written without Teams' block. A stored one keeps `removable: false` until the re-snapshot
+///   re-reads it.
+pub const NORMALIZER_VERSION: u32 = 14;

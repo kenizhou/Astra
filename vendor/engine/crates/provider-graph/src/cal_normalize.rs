@@ -19,8 +19,9 @@
 
 use engine_core::{
     calendar::{
-        Calendar, CalendarAccess, DetectionSources, Event, EventStatus, FreeBusyStatus, Location,
-        Participant, ParticipantKind, ParticipantRole, ParticipationStatus, Privacy, add_detected,
+        Calendar, CalendarAccess, ConferenceService, DetectionSources, Event, EventStatus,
+        FreeBusyStatus, Location, Participant, ParticipantKind, ParticipantRole,
+        ParticipationStatus, Privacy, add_detected,
     },
     ids::{CalendarId, EventId, Uid},
     membership::Memberships,
@@ -87,8 +88,25 @@ pub(crate) fn calendar_from_json(value: &Value) -> Result<Calendar, GraphError> 
         .get("owner")
         .and_then(|o| opt_str(o, "address"))
         .map(str::to_owned);
+    calendar.native_conferences = native_conferences(value);
     calendar.revisions = revisions(value);
     Ok(calendar)
+}
+
+/// The meetings the calendar's server makes itself, from `allowedOnlineMeetingProviders`.
+///
+/// Only `teamsForBusiness` makes one: `skypeForBusiness` and `skypeForConsumer` name retired
+/// services, and `unknown` (what a personal account lists) names none.
+fn native_conferences(value: &Value) -> Vec<ConferenceService> {
+    let lists_teams = value
+        .get("allowedOnlineMeetingProviders")
+        .and_then(Value::as_array)
+        .is_some_and(|providers| providers.iter().any(|p| p == "teamsForBusiness"));
+    if lists_teams {
+        vec![ConferenceService::Teams]
+    } else {
+        Vec::new()
+    }
 }
 
 /// Normalizes one Graph `event` (`seriesMaster` or `singleInstance`) into an [`Event`]
@@ -201,8 +219,8 @@ fn resolve_zone(name: &str) -> Result<TimeZoneId, GraphError> {
     resolve_zone_name(name).map_err(|e| GraphError::protocol(format!("bad zone {name:?}: {e}")))
 }
 
-/// The event description: the plain-text `body` when Graph sent text, else the
-/// server-computed `bodyPreview`.
+/// The event description: the `body` when Graph sent it as text, which the sync asks for
+/// ([`crate::cal_fetch`]), else the server-computed `bodyPreview`, cut at 255 characters.
 fn description(value: &Value) -> Option<String> {
     let body = value.get("body");
     let text = if body.and_then(|b| opt_str(b, "contentType")) == Some("text") {
