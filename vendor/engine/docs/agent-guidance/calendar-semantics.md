@@ -701,7 +701,9 @@ sees:
   one of its own; `NewConference::Attach` stores one made elsewhere. `ConferenceEdit::Set`
   puts one on, replacing a named one, and `Remove` takes one off. A meeting belongs to the
   series, so an occurrence edit carrying one is refused (`EventEdit::refuse_conference_on_occurrence`).
-  Measured per adapter:
+  What an edit leaves in the notes and location is decided once, by `meeting_text`, for every
+  adapter that writes a meeting into them; an adapter decides only which of its own fields name
+  the meeting. Measured per adapter:
   - **Graph.** Teams is `isOnlineMeeting: true` with `teamsForBusiness`; Exchange appends its
     block and stand-in location, and keeps changing the event while it sets up the meeting,
     so a patch on a revision read just after the create can be refused as stale (`412`).
@@ -717,16 +719,66 @@ sees:
     shows it with a Join button and writes its link into its own block and `LOCATION` in the
     invitations it sends, so no block of ours is written. Removing either is
     `conferenceData: null`.
-  - **CalDAV and JMAP** do not advertise the capability, and refuse a write that carries a
-    meeting rather than storing the event without it.
+  - **CalDAV and JMAP.** No server makes a meeting of its own, so `NewConference::Native` is
+    refused before anything is sent (`refuse_native_conference`). A meeting made elsewhere is
+    one `CONFERENCE` line (RFC 7986, `FEATURE` from the way in's kind when none is stated, a
+    `LABEL` escaped per RFC 6868) or one `virtualLocations` entry per way in, our block in the
+    notes and, when the event has none, the join link as the location: Outlook, Google
+    Calendar and Thunderbird read neither field. Taking one off removes every
+    `CONFERENCE`, vendor property or `virtualLocations` entry whose address joins it, its
+    block, and the location when that is still its link; adding one replaces any entry for
+    the same address rather than repeating it. CalDAV resolves the meeting's key against the
+    projection of the stored document, so a key means what it did on the read. Stalwart,
+    SabreDAV and Nextcloud keep `CONFERENCE` and its `LABEL`, and Stalwart keeps
+    `virtualLocations` and their names.
   - **Our block** (`Conference::text_block`) is a rule of 40 `-=` characters, the meeting's
     name (its label, else the caller's word for a video meeting), `Join: <link>`, its ID,
-    passcode and dial-in numbers, and the rule again. The words come from the caller in a
-    `ConferenceText`, since the engine has no locale. It is recognised like Teams' and
+    passcode and dial-in numbers, and the rule again. A number's code (its `access_code`,
+    else its `pin`) follows the numbers once when every number shares it, as a Teams phone
+    conference ID is shared, and stands beside its number otherwise. The words come from the
+    caller in a `ConferenceText`, since the engine has no locale; a write queued before
+    `dial_in_code` existed reads it as empty and leaves the codes out. It is recognised like Teams' and
     Google's blocks, so `notes` leaves it out, and removing the meeting takes it out of the
     notes with every other block that joins it (`without_text_block`).
-  `live_calendar_conference_write` in `provider-graph` and `provider-google` puts each kind on
-  and takes it off through the adapter.
+  `live_calendar_conference_write` in `provider-graph`, `provider-google` and `provider-jmap`,
+  and `common::conference_write` against each DAV server in `provider-caldav`, put each kind
+  on and take it off through the adapter.
+- **Meeting services** (`MeetingService`) make a meeting for an event whose calendar's server
+  makes none, or makes one on another service than the person wants; the caller then attaches
+  it (`NewConference::attach`). A service is told only a `MeetingRequest`: a title, the start,
+  the end (a series' last end, since a service that expires a meeting does so after its end,
+  and for a series without one, as long as the caller wants it to last) and a `MeetingKey`.
+  The key is minted by the caller from at least 128 bits of a secure random source, because
+  the engine makes no randomness of its own; it is 26 to 64 lowercase letters and digits,
+  since Jitsi lowercases a room name, and its `Debug` hides it, because the key alone is a way
+  in. A service that keeps a key answers a repeated one with the same meeting.
+  `delete_meeting` takes the conference as the event holds it, `create_meeting`'s answer or
+  the same meeting read back, and finds the meeting by its join link, so nothing of the
+  service's own is kept beside the event; a meeting already gone is a success.
+  - **Jitsi** (`JitsiMeetings`) has no API: the meeting is `https://<server>/<key>`, made
+    without a request, and there is nothing to delete. The server is an `https` address
+    without a query or fragment, a path kept.
+  - **Teams** (`TeamsMeetings`, in `provider-graph`) uses `onlineMeetings/createOrGet` with
+    the key as `externalId`. The meeting is the signed-in user's whatever mailbox the client
+    is rooted at, because Graph makes one only for `/me`. Its answer becomes the join link with
+    its passcode, the meeting ID and each dial-in number, which carries `audioConferencing`'s
+    phone conference ID as its `access_code`. A delete looks the meeting up by
+    `JoinWebUrl` and deletes each match; Graph answers 404 for one that is gone, and after a
+    delete the same key makes a new meeting. `live_teams_meetings` checks both against a
+    work account.
+  - **Nextcloud Talk** (`TalkMeetings`, in `provider-caldav`) makes a public conversation
+    (`roomType` 3) named after the title, which a guest joins at
+    `<server>/index.php/call/<token>`. Talk keeps no key of the caller's, so a repeated
+    request makes a second conversation. Where the administrator forces a password on public
+    conversations (`force-passwords` in the capabilities) the key is the password, carried as
+    the join entry's `password`; elsewhere there is none, because a guest would then need more
+    than the link. A delete takes the token from the link only when the link is under this
+    server's `call` path, so a link to another server never names a conversation here; Talk
+    answers 404 for one that is gone. `offered` asks the capabilities alone, so a caller can
+    tell a server without Talk, or an account Talk lets start no conversation, from one it can
+    use before any meeting is wanted. The conversation is a regular one: an event carrying its
+    link does not make it an event conversation, so Talk's event retention never removes it.
+    `live_talk` runs against the Nextcloud harness, whose hook installs a pinned Talk.
 
 ## Supported recurrence subset
 

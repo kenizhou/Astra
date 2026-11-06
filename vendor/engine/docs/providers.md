@@ -80,6 +80,7 @@ the inputs — the `connect()` future, its result, the `FailureClass`, the
 | calendar write guard | absent | — | enforced ETag or schedule tag | enforced ETag | enforced ETag |
 | meeting invitations | yes, discovered account limit | — | yes, delivery needs RFC 6638 | yes, 500 attendees | yes, response propagation changes above 200 guests |
 | RSVP | yes | — | yes | yes | yes |
+| video meeting writes | made elsewhere | — | made elsewhere | Teams, or made elsewhere | Meet, or made elsewhere |
 | server-side scheduling | yes (asked for) | — | discovered (RFC 6638) | yes | yes |
 | contact read | yes | — | yes | personal + directory | owned + suggested + directory |
 | contact write guard | absent | — | enforced ETag | absent | enforced ETag |
@@ -264,6 +265,7 @@ share HTTP/TLS/WebDAV transport only; normalization remains domain-specific.
 - **RFC 6638** — CalDAV scheduling (server auto-schedule).
 - **RFC 6047** — iMIP (iTIP over email), inbound parse + RSVP write primitive.
 - **RFC 6350 / RFC 6352** — vCard and CardDAV address-book access.
+- **Nextcloud Talk** (OCS `apps/spreed/api/v4/room`), for `TalkMeetings`, which makes a Talk conversation for an event on any calendar. Not DAV, but the same server and the same `Credentials`.
 
 ### Capabilities
 
@@ -343,6 +345,7 @@ personal contacts.
 - Calendar API (`/me/calendars`, `calendarView/delta` with `Prefer: outlook.timezone` so DST resolves server-side), `If-Match` conditional writes, and the RSVP action endpoints.
 - Contact folders/contacts delta, organizational contacts, and directory users.
 - `Prefer: IdType="ImmutableId"` so object ids are stable across folder moves.
+- Online meetings (`/me/onlineMeetings/createOrGet`), for `TeamsMeetings`, which makes a Teams meeting for an event on any calendar. It needs `OnlineMeetings.ReadWrite`, which only a work or school account can grant.
 
 ### Capabilities
 
