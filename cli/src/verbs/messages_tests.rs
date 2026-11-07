@@ -213,6 +213,23 @@ async fn one_search_row_carries_the_facts_an_agent_acts_on() {
 }
 
 #[tokio::test]
+async fn an_undated_search_row_carries_the_empty_date_word() {
+    // The query row's contract spells an unknown date as the empty string,
+    // never JSON null: the model reads a string field on every hit.
+    let engine = Engine::open_in_memory().unwrap();
+    let mut undated = mail("m2", "inbox", "Quarterly report", 8);
+    undated.received_at = None;
+    let provider = FakeProvider::with(vec![inbox()], vec![undated]);
+    seed(&engine, &provider, &account()).await;
+
+    let answer = messages::search(&engine, &[account()], false, None, "report", 0, 20)
+        .await
+        .unwrap();
+
+    assert_eq!(answer["rows"][0]["date"], "");
+}
+
+#[tokio::test]
 async fn a_named_account_searches_its_whole_mailbox_including_trash() {
     let engine = seeded_accounts().await;
 

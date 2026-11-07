@@ -225,14 +225,19 @@ pub(crate) async fn search(
 }
 
 /// One search hit as the MCP query row: identity, subject, sender, date,
-/// and flags. No body crosses here.
+/// and flags. The date is the empty word when unknown, the query row's own
+/// contract, never JSON null. No body crosses here.
 fn search_row(row: &MailListRow) -> Value {
     json!({
         "account": row.account.as_str(),
         "key": row.mail.key.as_str(),
         "subject": row.mail.subject.clone().unwrap_or_default(),
         "sender": sender_line(row),
-        "date": row.mail.date_utc.map(whole_seconds),
+        "date": row
+            .mail
+            .date_utc
+            .map(whole_seconds)
+            .unwrap_or_default(),
         "unread": row.mail.flags.is_unread(),
         "flagged": row.mail.flags.flagged(),
         "has_attachment": row.mail.has_attachment,

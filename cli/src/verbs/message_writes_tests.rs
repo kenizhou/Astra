@@ -126,6 +126,26 @@ async fn a_move_resolves_a_conventionally_named_destination() {
 }
 
 #[tokio::test]
+async fn an_archive_falls_back_to_the_all_role_folder() {
+    // The third tier the app side also pins: an account whose only archive
+    // home is the All-rolled-up folder must move there, not fail.
+    let (engine, provider) = seeded(vec![
+        inbox(),
+        role_folder("all", "All Mail", MailboxRole::All),
+    ])
+    .await;
+
+    message_writes::archive(&engine, &provider, &account(), "m1", false)
+        .await
+        .unwrap();
+    let destination = engine_api::MailboxId::try_from("all").unwrap();
+    assert_eq!(
+        provider.mail_edits(),
+        vec![MailEdit::move_to(key(), destination)]
+    );
+}
+
+#[tokio::test]
 async fn a_move_with_no_destination_folder_is_a_runtime_error() {
     let (engine, provider) = seeded(vec![inbox()]).await;
 

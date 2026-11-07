@@ -95,7 +95,7 @@ export function capOutput(text: string, cap: number): string {
   return text.slice(0, cap) + `[truncated at ${cap} characters]`;
 }
 
-/** Gate plus outcome mapping shared by all five tools. The tool budget is
+/** Gate plus outcome mapping shared by every mail tool. The tool budget is
  *  the first gate: past the bound the model is told no (the skipped outcome
  *  the harness already reports, its audit row landing exactly as a refused
  *  tool's does through the same tool_result envelope), never a silent
@@ -335,7 +335,7 @@ export function createMailTools(deps: MailToolDeps): ToolDefinition[] {
       'Search mail and answer one page of hits, newest first, with no bodies: ' +
       'query the same DSL the app search field takes (from:a, to:b, quoted ' +
       'phrases, free text). Without an account the search covers every account ' +
-      'the host exposed except each one\'s Trash; an account covers its whole ' +
+      'in the index except each one\'s Trash; an account covers its whole ' +
       'mailbox; a folder narrows within the named account. Pages hold twenty ' +
       'by default: pass offset to continue, and more exist while offset plus ' +
       'rows is under total.',

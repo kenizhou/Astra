@@ -334,3 +334,40 @@ test('read_message caps its model-facing output at the read bound', async () => 
     delete process.env.ASTRA_STUB_PAD;
   }
 });
+
+test('the pi allowlist and the tool names are one list', async () => {
+  // Two hand-maintained lists gate the same ten tools: a typo in either
+  // silently disables a tool or fail-closes it in the live surface while
+  // every other test stays green. The parity pin keeps them one list. The
+  // adapter loads as an ESM bundle with its packages external (pi's own
+  // code mixes import.meta with dynamic require, so neither bundled format
+  // evaluates), written inside the sidecar so node resolves the externals.
+  const adapterBundle = path.resolve(__dirname, '..', '..', '.parity-allowlist.mjs');
+  await esbuild.build({
+    entryPoints: [path.resolve(__dirname, '..', 'harness', 'pi-adapter.ts')],
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    packages: 'external',
+    outfile: adapterBundle,
+    logLevel: 'silent',
+  });
+  try {
+    const adapter = (await import(
+      /* prettier-ignore */ require('node:url').pathToFileURL(adapterBundle).href
+    )) as { CHAT_TOOL_ALLOWLIST: readonly string[] };
+
+    const tools = createMailTools({
+      bridge: new BridgeCtor({ policy: () => POLICY }) as never,
+      cliPath: () => null,
+      correlationId: () => null,
+    });
+    assert.deepEqual(
+      [...adapter.CHAT_TOOL_ALLOWLIST].sort(),
+      tools.map((tool) => tool.name).sort(),
+      'the allowlist and createMailTools name exactly the same tools',
+    );
+  } finally {
+    fs.rmSync(adapterBundle, { force: true });
+  }
+});
