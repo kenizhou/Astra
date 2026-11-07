@@ -365,3 +365,78 @@ test('an allowlisted policy row skips the permission ask entirely', async () => 
   assert.equal(tr.status, 'ok');
   await until(s, 'done', seen);
 });
+
+test('the search tool runs auto end to end and its output is the CLI envelope', async () => {
+  const dir = stubDataDir();
+  const fixture = toolCallFixture(dir, 'search_messages', { query: 'quarterly report' });
+  const s = spawnSidecar();
+  s.send({
+    type: 'init',
+    harness: 'mock',
+    cli_path: process.execPath,
+    data_dir: dir,
+    mock_fixture: fixture,
+    policy: { search_messages: { level: 'auto' } },
+  });
+  await s.nextLine();
+  s.send({
+    type: 'prompt',
+    id: 'turn-s',
+    session_id: 'agent:main',
+    text: 'find the report',
+    correlation_id: 'corr-wire-12',
+  });
+  const seen: string[] = [];
+  const tr = await until(s, 'tool_result', seen);
+  assert.ok(!seen.includes('permission_request'), `a read row never asks, saw ${seen.join(',')}`);
+  assert.equal(tr.tool, 'search_messages');
+  assert.equal(tr.status, 'ok');
+  const out = JSON.parse(String(tr.output)) as { script: string; argv: string[] };
+  assert.equal(out.script, 'messages');
+  assert.deepEqual(out.argv.slice(0, 6), [
+    'search',
+    '--json',
+    '--correlation-id',
+    'corr-wire-12',
+    '--query',
+    'quarterly report',
+  ]);
+  await until(s, 'done', seen);
+});
+
+test('an act tool asks over the wire, approves, and runs its verb', async () => {
+  const dir = stubDataDir();
+  const fixture = toolCallFixture(dir, 'archive_message', {
+    account: 'acct-1',
+    key: 'msg-7',
+  });
+  const s = spawnSidecar();
+  s.send({
+    type: 'init',
+    harness: 'mock',
+    cli_path: process.execPath,
+    data_dir: dir,
+    mock_fixture: fixture,
+    policy: { archive_message: { level: 'confirm' } },
+  });
+  await s.nextLine();
+  s.send({
+    type: 'prompt',
+    id: 'turn-act',
+    session_id: 'agent:main',
+    text: 'file it away',
+    correlation_id: 'corr-wire-13',
+  });
+  const seen: string[] = [];
+  const req = await until(s, 'permission_request', seen);
+  assert.equal(req.tool, 'archive_message');
+  assert.equal(req.level, 'confirm');
+  s.send({ type: 'permission_response', id: req.id, approved: true, always_allow: false });
+  const tr = await until(s, 'tool_result', seen);
+  assert.equal(tr.status, 'ok');
+  const out = JSON.parse(String(tr.output)) as { script: string; argv: string[] };
+  assert.equal(out.script, 'messages');
+  assert.deepEqual(out.argv.slice(0, 4), ['archive', '--json', '--correlation-id', 'corr-wire-13']);
+  assert.deepEqual(out.argv.slice(-4), ['--account', 'acct-1', '--key', 'msg-7']);
+  await until(s, 'done', seen);
+});

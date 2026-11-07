@@ -33,6 +33,51 @@ pub(crate) enum Verb {
         /// The provider keys to resolve.
         keys: Vec<String>,
     },
+    /// Search mail, one page of hits newest first.
+    MessagesSearch {
+        /// The search DSL query.
+        query: String,
+        /// The account id from the index, when one account is named.
+        account: Option<String>,
+        /// The folder key narrowing within the named account.
+        folder: Option<String>,
+        /// How many hits to answer with.
+        limit: usize,
+        /// How many hits to skip, for paging.
+        offset: usize,
+    },
+    /// Mark one message read or unread through the engine's outbox.
+    MessagesMarkRead {
+        /// The account id from the index.
+        account: String,
+        /// The message's provider key.
+        key: String,
+        /// Whether the `--unread` flag asked for the unread direction.
+        unread: bool,
+    },
+    /// Flag one message or clear its flag through the engine's outbox.
+    MessagesSetFlagged {
+        /// The account id from the index.
+        account: String,
+        /// The message's provider key.
+        key: String,
+        /// Whether the `--clear` flag asked for the clearing direction.
+        clear: bool,
+    },
+    /// Move one message to the account's archive.
+    MessagesArchive {
+        /// The account id from the index.
+        account: String,
+        /// The message's provider key.
+        key: String,
+    },
+    /// Move one message to the account's trash.
+    MessagesTrash {
+        /// The account id from the index.
+        account: String,
+        /// The message's provider key.
+        key: String,
+    },
     /// Store a draft through the engine's outbox.
     DraftsSave {
         /// The assembled arguments, body text included.
@@ -146,6 +191,11 @@ impl Verb {
             Self::FoldersList { .. } => "folders list",
             Self::MessagesList { .. } => "messages list",
             Self::MessagesRead { .. } => "messages read",
+            Self::MessagesSearch { .. } => "messages search",
+            Self::MessagesMarkRead { .. } => "messages mark-read",
+            Self::MessagesSetFlagged { .. } => "messages set-flagged",
+            Self::MessagesArchive { .. } => "messages archive",
+            Self::MessagesTrash { .. } => "messages trash",
             Self::DraftsSave { .. } => "drafts save",
             Self::DraftsDiscard { .. } => "drafts discard",
             Self::RulesList => "rules list",
@@ -177,6 +227,10 @@ impl Verb {
             self,
             Self::DraftsSave { .. }
                 | Self::DraftsDiscard { .. }
+                | Self::MessagesMarkRead { .. }
+                | Self::MessagesSetFlagged { .. }
+                | Self::MessagesArchive { .. }
+                | Self::MessagesTrash { .. }
                 | Self::RulesCreate { .. }
                 | Self::RulesDelete { .. }
                 | Self::KnowledgeForget { .. }

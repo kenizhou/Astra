@@ -164,7 +164,7 @@ function makeTools(
   });
 }
 
-test('the five tools ship with the locked names', () => {
+test('the ten tools ship with the locked names', () => {
   const tools = makeTools({});
   assert.deepEqual(tools.map((t) => t.name), [
     'list_folders',
@@ -172,6 +172,11 @@ test('the five tools ship with the locked names', () => {
     'read_message',
     'save_draft',
     'discard_draft',
+    'search_messages',
+    'mark_read',
+    'set_flagged',
+    'archive_message',
+    'move_to_trash',
   ]);
 });
 

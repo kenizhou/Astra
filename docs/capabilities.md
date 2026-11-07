@@ -173,7 +173,7 @@ this row ports.
 | A2 | Reply drafting with writing style | 🚧 | draft pool, style profiles, the reading pane arming; ai-replies.md |
 | A2 | Smart reply chips: gated surfacing, accept into the reply composer, dismissal | 🚧 | the gate and chips ship; no badge surface on categorisation yet; ai-replies.md |
 | A2 | Summarisation with cache | 🚧 | the reading pane's summarise block; ai-replies.md |
-| A2 | Assistant chat with tool budget | 🚧 | the wall-clock tool budget ships: the clock starts at prompt receipt, past the bound tool calls answer skipped with their audit rows, a watchdog lands every turn done, and the panel notes when the bound bites; superpowers/specs/2026-11-07-sp2y-assistant-chat-design.md |
+| A2 | Assistant chat with tool budget | 🚧 | the wall-clock tool budget ships: the clock starts at prompt receipt, past the bound tool calls answer skipped with their audit rows, a watchdog lands every turn done, and the panel notes when the bound bites; the assistant's tool set now covers mail search (a read) and the confirm-gated message actions mark read, flag, archive, and trash, with no send tool anywhere; superpowers/specs/2026-11-07-sp2y-assistant-chat-design.md |
 | A3 | Knowledge: batch extraction with sources, draft-prompt shaping, forget | 🚧 | ai-assist.md |
 | A3 | Snippet library with ranked search and the composer picker | 🚧 | ai-assist.md |
 | A3 | Compose autocomplete: gesture-only chip with session dismiss | 🚧 | ai-assist.md |

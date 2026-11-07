@@ -15,9 +15,9 @@
  *   dir's agent directory, never ~/.pi. Session ids are sanitised because
  *   pi writes them verbatim into the JSONL filename and ':' is illegal on
  *   Windows.
- * - The five mail tools mount via customTools; the built-in coding tools
+ * - The ten mail tools mount via customTools; the built-in coding tools
  *   and any auto-discovered extension tools stay disabled by the explicit
- *   tools: allowlist (CHAT_TOOL_ALLOWLIST), so only the five names enable.
+ *   tools: allowlist (CHAT_TOOL_ALLOWLIST), so only the ten names enable.
  * - The astra-cli skill index rides the system prompt through a
  *   DefaultResourceLoader appendSystemPrompt entry. When a resourceLoader
  *   is supplied, createAgentSession does NOT reload it, so the adapter owns
@@ -49,7 +49,7 @@ import type {
 /** Provider id used when registering the configured endpoint. */
 const PROVIDER_ID = 'astra-agent';
 
-/** G10: the explicit session allowlist, the five mail tools and nothing
+/** G10: the explicit session allowlist, the ten mail tools and nothing
  *  else. With tools: provided, pi enables ONLY these names, so the built-in
  *  fs/bash tools and any future extension directory stay off. */
 export const CHAT_TOOL_ALLOWLIST: readonly string[] = [
@@ -58,14 +58,21 @@ export const CHAT_TOOL_ALLOWLIST: readonly string[] = [
   'read_message',
   'save_draft',
   'discard_draft',
+  'search_messages',
+  'mark_read',
+  'set_flagged',
+  'archive_message',
+  'move_to_trash',
 ];
 
 /** Resident skill index appended to every pi system prompt. Short by
  *  design; the full guide sits in the bundle's skills directory. */
 const ASTRA_CLI_SKILL_INDEX =
   'astra-cli: the mail operations CLI behind these tools. The mounted tools cover ' +
-  'folders, message lists and reads, and draft save and discard; each call is ' +
-  'audited against its turn. Sending is a human action in the app and is never ' +
+  'folders, message lists and reads, mail search, draft save and discard, and ' +
+  'the message actions mark read, flag, archive, and trash; each call is ' +
+  'audited against its turn. Trashing is the deepest action available: nothing ' +
+  'is permanently deleted. Sending stays a human action in the app and is never ' +
   'available here. Ask before writing anything; the approval cards are the user.';
 
 export interface PiHarnessOptions {
@@ -245,7 +252,7 @@ export class PiAdapter implements AgentHarness {
       dataDir: string;
       /** tier name to endpoint config, from init's model_configs. */
       modelConfigs: Map<string, ModelConfig>;
-      /** The five mail customTools; optional so unit constructions can omit. */
+      /** The ten mail customTools; optional so unit constructions can omit. */
       mailTools?: ToolDefinition[];
     },
   ) {

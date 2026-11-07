@@ -10,6 +10,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const script = path.basename(process.argv[1] ?? '');
 const args = process.argv.slice(2);
+// ASTRA_STUB_PAD grows the stdout document by that many characters, so a
+// test can drive an output past a tool's truncation bound. It rides the
+// safeExec ASTRA_* passthrough; unset or zero prints exactly the old shape.
+const pad = Number(process.env.ASTRA_STUB_PAD ?? 0);
 fs.appendFileSync(
   'stub-captures.jsonl',
   JSON.stringify({
@@ -27,6 +31,7 @@ process.stdout.write(
     data_dir: process.env.ASTRA_DATA_DIR ?? null,
     correlation_id: process.env.ASTRA_CORRELATION_ID ?? null,
     cwd: process.cwd(),
+    ...(Number.isFinite(pad) && pad > 0 ? { pad: 'x'.repeat(pad) } : {}),
   }),
 );
 process.exit(0);

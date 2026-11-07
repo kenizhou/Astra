@@ -17,7 +17,7 @@ the ledger does not know happened.
 
 ## The verbs
 
-Twenty-six ship today: nine mail, drafts, and rules verbs, the ten `ai`
+Thirty-one ship today: fourteen mail, drafts, and rules verbs, the ten `ai`
 verbs, and the seven `knowledge` and `snippets` verbs. The grammar is two
 positional
 words (`verb subverb`) plus flags, and flag order is free: the sidecar
@@ -36,6 +36,11 @@ audit row.
 | `folders list --account <id>` | the engine store's mailbox objects | `folders`: id, name, role, parent, `unread_count`, in the sidebar's canonical order, the tree flattened with each row carrying its parent so nesting is derivable |
 | `messages list --account <id> [--folder <key>] [--limit <n>]` | the engine store's windowed list read | `messages`: key, from, subject, date, unread, draft, has attachment, preview |
 | `messages read --account <id> --key <k> [--key <k>...]` | the engine store's whole-message read and cached body | `messages`: the envelope plus `body.plain` and `body.html_present` |
+| `messages search --query <q> [--account <id>] [--folder <key>] [--limit <n>] [--offset <n>]` | the engine's search surface, paged | `rows` (account, key, subject, sender, date, unread, flagged, has attachment; no bodies), `total`, `offset`, `has_more`, `windowed`. Without `--account` the search covers every account in the index except each account's own Trash; an account covers its whole mailbox; a folder narrows within the named account and requires it. Pages hold twenty by default, fifty at most |
+| `messages mark-read --account <id> --key <k> [--unread]` | writes the `$seen` keyword edit through the engine's outbox | `key`, `op`, `state` (`applied` or `queued`); `--preview` prints the exact edit |
+| `messages set-flagged --account <id> --key <k> [--clear]` | writes the `$flagged` keyword edit through the engine's outbox | `key`, `op`, `state`; `--preview` prints the exact edit |
+| `messages archive --account <id> --key <k>` | moves the message to the account's archive through the engine's outbox | `key`, `op`, `state`; `--preview` prints the exact move |
+| `messages trash --account <id> --key <k>` | moves the message to the account's trash through the engine's outbox; recoverable from there | `key`, `op`, `state`; `--preview` prints the exact move |
 | `drafts save --account <id> --from <a> --to <a,...> [--cc <a,...>] --subject <s> (--plain <text> or --file <path> or stdin)` | writes through the engine's `put_draft` | `message_id`, `op`, `state` (`stored` or `queued`), and `key` when stored |
 | `drafts discard --account <id> --key <k>` | writes through the engine's `delete_draft` | `key`, `op`, `state` (`removed` or `queued`) |
 | `rules list` | the rules store beside the audit ledger | `rules`: id, name, condition, `actions` as wire words, enabled, `created_at`; a stored payload outside the closed set fails the verb loudly, naming the rule |
@@ -79,8 +84,27 @@ Rules that bind every verb:
 - **A preview prints the action, from the one builder that runs it.**
   `drafts save --preview` prints the very draft the engine call would carry
   (addresses, subject, and the body's length, never its text); `drafts
-  discard --preview` prints the exact deletion. Nothing is written on a
-  preview; the audit row's outcome says `preview`.
+  discard --preview` prints the exact deletion. The four `messages` act
+  verbs print the exact `MailEdit` the engine call would carry, the same
+  discipline: `mark-read` and `set-flagged` show the keyword change,
+  `archive` and `trash` show the resolved destination. Nothing is written
+  on a preview; the audit row's outcome says `preview`.
+- **The act verbs stop at the row's trash.** `messages mark-read`,
+  `set-flagged`, `archive`, and `trash` are the whole act family: no
+  permanent-delete verb ships (the app layer's delete stays unexposed), and
+  a key naming no message the store holds is a runtime error rather than a
+  queued op, so an assistant cannot claim success over mail that never
+  moved. The archive and trash destinations resolve the way the app layer
+  resolves them (`astra-app/src/mail_writes.rs`): the SPECIAL-USE role,
+  else a conventional folder name, else for Archive the `\All` mailbox; the
+  two crates do not depend on each other, so the resolution is spelled
+  twice and pinned by both test suites, the closed action set's own
+  precedent.
+- **The act verbs answer the durable op.** Every edit queues through the
+  engine's outbox first: the answer says `applied` when the provider leg
+  took it and `queued` when the op waits for the app's drain, the drafts
+  verbs' own two-state answer. Offline the answer is always `queued`, and a
+  keyword change shows in the store from that moment.
 - **The body comes from one source.** `--plain`, `--file`, or stdin; two at
   once is a usage error.
 - **The store verbs answer without the engine.** `rules`, `ai`,
@@ -193,10 +217,11 @@ store (`astra.sqlite`, the same file the app opens) and the AI ledger
 **The second-writer seam, stated honestly.** The CLI runs beside a live
 app against the same engine store. The store is WAL-mode SQLite with a
 five-second busy timeout, and every CLI write goes through the engine's own
-`put_draft` and `delete_draft` under the outbox's lease and resource
-serialisation, so two writers cannot corrupt one another. But the app is
-not pushed: it learns a CLI-written draft through its outbox surface and
-its next sync or refresh, exactly as it learns a parked save of its own.
+`put_draft`, `delete_draft`, and `edit_mail` under the outbox's lease and
+resource serialisation, so two writers cannot corrupt one another. But the
+app is not pushed: it learns a CLI-written draft or edit through its outbox
+surface and its next sync or refresh, exactly as it learns a parked save of
+its own.
 The CLI's reads see the last synced state and never ask a server for more.
 One deviation from a pure reader stands: the engine's `open` creates and
 migrates the store even on a read path, so a first CLI run against a data
@@ -210,8 +235,8 @@ known interaction, not a gap to close.
 
 | Rule | Status | Where |
 |---|---|---|
-| Twenty-six verbs with the pinned envelope | ✅ | `cli/src/verbs` |
-| `--preview` on every mutating verb (drafts, rules, knowledge, and snippets), one shared builder each | ✅ | `cli/src/verbs/{drafts,rules,knowledge,snippets}.rs` |
+| Thirty-one verbs with the pinned envelope | ✅ | `cli/src/verbs` |
+| `--preview` on every mutating verb (messages act, drafts, rules, knowledge, and snippets), one shared builder each | ✅ | `cli/src/verbs/{messages,drafts,rules,knowledge,snippets}.rs` and `message_writes.rs` |
 | Every invocation audited with a correlation id | ✅ | `cli/src/audit.rs`, `cli/src/verbs/mod.rs` |
 | Send-class verbs parsed and refused, exit 3 | ✅ | `cli/src/verbs/mod.rs` |
 | Model-class verbs (`ai style rebuild`, `ai digest generate`, `ai report generate`, `knowledge extract`, `snippets search`) parsed and refused, exit 3 | ✅ | `cli/src/verbs/{ai,knowledge,snippets}.rs` |
@@ -221,8 +246,9 @@ known interaction, not a gap to close.
 | `--json` on every verb of a versioned schema | ✅ | schema pinned at 1 |
 | The CLI generates rules or dials a model | N/A | the generation seam: the agent composes, the CLI stores |
 | Send-class verbs beyond refusal (none ship) | N/A | the send class is the refusal |
-| Archive and label verbs | ⬜ | arrive with their slices |
-| Virtual permission tools over the verbs | ⬜ | the sidecar's bridge, SPA0 later tasks |
+| The mail action verbs (mark-read, set-flagged, archive, trash) with the MCP search contract's scoping | ✅ | `cli/src/verbs/{message_writes,messages}.rs` |
+| A permanent-delete verb (never ships; the row's trash is the ceiling) | N/A | the app layer's delete stays unexposed |
+| Virtual permission tools over the verbs | ✅ | the sidecar's bridge and tool surface, gated per row |
 
 Known gaps, recorded rather than left silent:
 

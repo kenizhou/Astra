@@ -13,7 +13,8 @@ use astra_ai::{AiDocumentKind, AiStore};
 use engine_api::AccountId;
 use serde_json::{json, Value};
 
-use super::Answer;
+use super::parse;
+use super::{Answer, ParseFailure, Verb};
 use crate::envelope::Code;
 
 /// The cold stage's word in the results table.
@@ -244,4 +245,96 @@ fn rows_for(
                 format!("the results store could not be read: {err}"),
             )
         })
+}
+/// `ai style`'s grammar: one account, or the refused `rebuild` spelling
+/// alone. Any further word is a usage error, so the tight grammar every
+/// ai verb carries holds for the style pair too.
+pub(super) fn style_verb(positionals: &[&str]) -> Result<Verb, ParseFailure> {
+    match (positionals.get(2).copied(), positionals.len()) {
+        (None, _) => Err(parse::usage("ai style wants an account (or `rebuild`)")),
+        (Some("rebuild"), 3) => Ok(Verb::AiStyleRebuild),
+        (Some("rebuild"), _) => Err(parse::usage(
+            "ai style rebuild wants no further words: the verb refuses whatever follows",
+        )),
+        (Some(account), 3) => Ok(Verb::AiStyle {
+            account: (*account).to_owned(),
+        }),
+        (Some(_), _) => Err(parse::usage("ai style takes one account and no keys")),
+    }
+}
+
+/// `ai digest` and `ai report`'s grammar: one account, or the refused
+/// `generate` spelling alone, the style pair's own shape (the account
+/// read beside the model work's refusal). Any further word is a usage
+/// error, so the tight grammar every ai verb carries holds here too.
+pub(super) fn document_verb(positionals: &[&str], sub: &str) -> Result<Verb, ParseFailure> {
+    match (positionals.get(2).copied(), positionals.len()) {
+        (None, _) => Err(parse::usage(&format!(
+            "ai {sub} wants an account (or `generate`)"
+        ))),
+        (Some("generate"), 3) => Ok(if sub == "digest" {
+            Verb::AiDigestGenerate
+        } else {
+            Verb::AiReportGenerate
+        }),
+        (Some("generate"), _) => Err(parse::usage(&format!(
+            "ai {sub} generate wants no further words: the verb refuses whatever follows"
+        ))),
+        (Some(account), 3) => Ok(if sub == "digest" {
+            Verb::AiDigest {
+                account: (*account).to_owned(),
+            }
+        } else {
+            Verb::AiReport {
+                account: (*account).to_owned(),
+            }
+        }),
+        (Some(_), _) => Err(parse::usage(&format!(
+            "ai {sub} takes one account and no keys"
+        ))),
+    }
+}
+
+/// The account positional the `ai` verbs take: the third word, after the
+/// verb and its subverb.
+pub(super) fn positional_account(positionals: &[&str], verb: &str) -> Result<String, ParseFailure> {
+    positionals
+        .get(2)
+        .map(|word| (*word).to_owned())
+        .ok_or_else(|| parse::usage(&format!("{verb} wants an account and at least one key")))
+}
+
+/// The key positionals the `ai` verbs take: every word after the account,
+/// at least one.
+pub(super) fn positional_keys(positionals: &[&str]) -> Result<Vec<String>, ParseFailure> {
+    let keys = positionals
+        .iter()
+        .skip(3)
+        .map(|word| (*word).to_owned())
+        .collect::<Vec<_>>();
+    if keys.is_empty() {
+        return Err(parse::usage("at least one key is required"));
+    }
+    Ok(keys)
+}
+
+/// The positional words of an `ai` line, flag values excluded. Unlike the
+/// mail verbs, whose arguments all ride named flags, the ai verbs take
+/// their account and keys as bare positionals, so the value of a
+/// value-taking flag (`--correlation-id` is the one the CLI defines)
+/// must not leak into them.
+pub(super) fn ai_positionals(args: &[String]) -> Vec<&str> {
+    let mut words = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        if args[index] == "--correlation-id" {
+            index += 2;
+            continue;
+        }
+        if !args[index].starts_with('-') {
+            words.push(args[index].as_str());
+        }
+        index += 1;
+    }
+    words
 }
