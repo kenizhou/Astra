@@ -35,6 +35,9 @@ tauri-plugin-notification = "2"
 # The app core the host boots and the command surface drives: dispatch, the
 # surfaced snapshots, and the boot sequence the host hands its pieces to.
 astra-app = { path = "../../crates/astra-app" }
+# The composer document types the resume view carries: the pre-attached rows
+# the drafts reopen hands the webview, in the document wire own shape.
+astra-composer = { path = "../../crates/astra-composer" }
 # The account layer the host dials through: the stored config's TOML form, the
 # IMAP connections, and the setup builder behind the connection test.
 astra-account = { path = "../../crates/astra-account" }
@@ -110,9 +113,6 @@ url.workspace = true
 time.workspace = true
 
 [dev-dependencies]
-# The composer document the drafts intents carry; the command-surface fakes
-# render the saved document to the plain text a stored draft resumes as.
-astra-composer = { path = "../../crates/astra-composer" }
 # The echo plugin's loop, driven in-process over duplex streams by the gate
 # tests (the worker host's custom spawn path).
 astra-plugin-echo = { path = "../../plugins/echo" }

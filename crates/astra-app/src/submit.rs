@@ -61,6 +61,24 @@ impl<P: Provider> App<P> {
     /// will not build) sends nothing and queues nothing: the honest answer over
     /// a blank message. Whatever the attempt came to, the queue holds it and
     /// the sending snapshot published below is what tells the user.
+    /// Renders the composer's document and submits it through the account's
+    /// durable outbox, then drains the account so the send and anything else
+    /// due happens in this gesture rather than at the next refresh.
+    ///
+    /// A refusal before the queue (no account, no recipient, a document that
+    /// will not build) sends nothing and queues nothing: the honest answer over
+    /// a blank message. Whatever the attempt came to, the queue holds it and
+    /// the sending snapshot published below is what tells the user.
+    ///
+    /// A composition the submit names may hold files a resume pre-attached: their
+    /// rows stand in the document behind `carry:` handles, and the bytes resolve
+    /// here core-side, off the record the resume parked them on, so the bytes
+    /// never cross the host boundary at all. The bytes park at the resume rather
+    /// than resolving off the stored copy at submit because the composer's own
+    /// saves supersede that copy (three of four adapters move its key), so by the
+    /// time a send happens the resume-time key names nothing; a part whose handle
+    /// names no parked bytes refuses the send, the same discipline a host blob
+    /// that is missing serves.
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn submit_rich_mail(
         &self,
@@ -72,6 +90,7 @@ impl<P: Provider> App<P> {
         document: ComposerDocument,
         blobs: Vec<ComposerBlob>,
         crypto: CryptoFlags,
+        composition: Option<crate::CompositionId>,
     ) {
         let Some(handle) = self.account_handle(&from).await else {
             log::warn!("send: the account to send from is no longer configured");
@@ -81,6 +100,38 @@ impl<P: Provider> App<P> {
             log::warn!("send: the account has no provider to send through");
             return;
         };
+        let mut blobs = blobs;
+        if let Some(composition) = &composition {
+            let parked = self.carried_parts(composition);
+            let ids: Vec<u32> = parked.iter().map(|part| part.id).collect();
+            for id in carry::standing(&ids, &document) {
+                let Some(part) = parked.iter().find(|part| part.id == id) else {
+                    continue;
+                };
+                blobs.push(ComposerBlob {
+                    handle: DraftBlobHandle::new(carry::handle_of(id))
+                        .expect("a minted carry handle is never empty"),
+                    bytes: part.bytes.clone(),
+                });
+            }
+            let parked_handles: Vec<String> = parked
+                .iter()
+                .map(|part| carry::handle_of(part.id))
+                .collect();
+            if document.attachments.iter().any(|row| {
+                row.blob.as_ref().is_some_and(|handle| {
+                    handle.as_str().starts_with("carry:")
+                        && !parked_handles
+                            .iter()
+                            .any(|parked| parked == handle.as_str())
+                })
+            }) {
+                log::warn!(
+                    "send: the resumed draft carries no such attachment to send; nothing was queued"
+                );
+                return;
+            }
+        }
         let identity = self.send_identity(&handle);
         let Some(draft) = submit_draft(&identity, &to, &cc, &bcc, &subject, &document, &blobs)
         else {

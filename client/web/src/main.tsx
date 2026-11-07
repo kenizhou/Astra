@@ -4,14 +4,15 @@
 // window's own root over the composition it names, the reading window's
 // root over the message it names, the print surface over the same message,
 // with the mailto prefill, the share hand-off's pending set, the
-// transfer's resume account, and the folder the message was opened from
-// riding the URL beside them.
+// transfer's resume account, the draft row's key, and the folder the
+// message was opened from riding the URL beside them.
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 import { ComposerWindow } from './features/composer/ComposerWindow';
 import {
   readComposerParam,
+  readDraftParam,
   readPrefillParam,
   readResumeParam,
   readShareParam,
@@ -23,6 +24,7 @@ import './styles/globals.css';
 
 const composition = readComposerParam(window.location.search);
 const resumeAccount = readResumeParam(window.location.search);
+const draftKey = readDraftParam(window.location.search);
 const prefill = readPrefillParam(window.location.search);
 const shares = readShareParam(window.location.search);
 const messageWindow = readMessageWindowParams(window.location.search);
@@ -41,6 +43,7 @@ createRoot(document.getElementById('root')!).render(
       <ComposerWindow
         composition={composition}
         resumeAccount={resumeAccount}
+        draftKey={draftKey}
         prefill={prefill}
         shares={shares}
       />

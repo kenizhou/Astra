@@ -182,9 +182,20 @@ impl<P: Provider> App<P> {
                 document,
                 blobs,
                 crypto,
+                composition,
             } => {
-                self.submit_rich_mail(from, to, cc, bcc, subject, document, blobs, crypto)
-                    .await;
+                self.submit_rich_mail(
+                    from,
+                    to,
+                    cc,
+                    bcc,
+                    subject,
+                    document,
+                    blobs,
+                    crypto,
+                    composition,
+                )
+                .await;
             }
             Intent::SubmitRichReply {
                 from,

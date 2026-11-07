@@ -168,9 +168,10 @@ describe('the send button', () => {
     });
     expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
       '{"submit_rich_mail":{"from":"work","to":"you@test.local","cc":"","bcc":"","subject":"Launch",' +
-        `"document":{"blocks":[{"Paragraph":{"content":[${plainRun('Sent words')}]}}],"attachments":[]},"blobs":[]}}`,
+        `"document":{"blocks":[{"Paragraph":{"content":[${plainRun('Sent words')}]}}],"attachments":[]},"blobs":[],"composition":"${composition}"}}`,
     );
-    // The submit carries no composition id, so the stored draft goes too.
+    // The submit names its composition; the stored draft still goes with an
+    // explicit discard.
     await act(async () => {
       await Promise.resolve();
     });

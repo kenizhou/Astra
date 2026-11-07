@@ -33,6 +33,10 @@ const PREFILL_PARAM = 'prefill';
 /** The query parameter a share window carries its pending set in, encoded. */
 const SHARE_PARAM = 'share';
 
+/** The query parameter a draft row window carries the provider key of the
+ *  stored copy it resumes in, beside the resume account. */
+const DRAFT_PARAM = 'draft';
+
 /** The composition id a composer window's URL names; null for the main window. */
 export function readComposerParam(search: string): CompositionId | null {
   const id = new URLSearchParams(search).get(COMPOSER_PARAM);
@@ -44,6 +48,13 @@ export function readComposerParam(search: string): CompositionId | null {
 export function readResumeParam(search: string): string | null {
   const account = new URLSearchParams(search).get(RESUME_PARAM);
   return account === null || account === '' ? null : account;
+}
+
+/** The provider key of the stored copy a draft row window resumes; null for
+ *  a plain pop-out and for a transfer, whose resume reads the latest. */
+export function readDraftParam(search: string): string | null {
+  const key = new URLSearchParams(search).get(DRAFT_PARAM);
+  return key === null || key === '' ? null : key;
 }
 
 /**
@@ -110,14 +121,15 @@ export function readShareParam(search: string): SharedFile[] | null {
 /**
  * The URL a composer window loads: the bundle with the composition id, the
  * resume marker when the dock's draft transfers, the prefill when a
- * mailto link opened the window, and the pending share set when a share
- * hand-off opened it.
+ * mailto link opened the window, the pending share set when a share
+ * hand-off opened it, and the draft key when a Drafts row opened it.
  */
 export function composerWindowUrl(
   composition: CompositionId,
   resumeAccount?: string,
   prefill?: MailtoOpen,
   shares?: SharedFile[],
+  draftKey?: string,
 ): string {
   const base = `index.html?${COMPOSER_PARAM}=${encodeURIComponent(composition)}`;
   const withResume =
@@ -128,9 +140,13 @@ export function composerWindowUrl(
     prefill === undefined
       ? withResume
       : `${withResume}&${PREFILL_PARAM}=${encodeURIComponent(JSON.stringify(prefill))}`;
-  return shares === undefined
-    ? withPrefill
-    : `${withPrefill}&${SHARE_PARAM}=${encodeURIComponent(JSON.stringify(shares))}`;
+  const withShares =
+    shares === undefined
+      ? withPrefill
+      : `${withPrefill}&${SHARE_PARAM}=${encodeURIComponent(JSON.stringify(shares))}`;
+  return draftKey === undefined
+    ? withShares
+    : `${withShares}&${DRAFT_PARAM}=${encodeURIComponent(draftKey)}`;
 }
 
 /** The window label a composition's pop-out takes, under the composer-* capability. */
@@ -143,9 +159,11 @@ export function composerWindowLabel(composition: CompositionId): string {
  * (the bundle draws its own title bar), centred, resizable down to the
  * composer's minimum. The window hydrates itself from the host; nothing but
  * the id crosses the URL, plus the resume marker for a dock-to-window
- * transfer and the prefill for a mailto open. A dock-to-window transfer
- * marks the resume account on the URL, so the window resumes the draft the
- * dock just saved rather than opening blank.
+ * transfer, the prefill for a mailto open, and the draft key for a Drafts
+ * row open. A dock-to-window transfer marks the resume account on the URL,
+ * so the window resumes the draft the dock just saved rather than opening
+ * blank; a Drafts row open marks the key beside it, so the window resumes
+ * the copy the row names.
  */
 export async function openComposerWindow(
   composition: CompositionId,
@@ -153,10 +171,11 @@ export async function openComposerWindow(
   resumeAccount?: string,
   prefill?: MailtoOpen,
   shares?: SharedFile[],
+  draftKey?: string,
 ): Promise<void> {
   const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
   const webview = new WebviewWindow(composerWindowLabel(composition), {
-    url: composerWindowUrl(composition, resumeAccount, prefill, shares),
+    url: composerWindowUrl(composition, resumeAccount, prefill, shares, draftKey),
     title,
     width: 720,
     height: 640,

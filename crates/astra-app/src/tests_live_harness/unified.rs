@@ -50,6 +50,7 @@ async fn the_unified_list_holds_both_accounts_inbox_rows_newest_first() {
         document: proof::document(WORDS),
         blobs: Vec::new(),
         crypto: crate::crypto::CryptoFlags::default(),
+        composition: None,
     })
     .await
     .unwrap();

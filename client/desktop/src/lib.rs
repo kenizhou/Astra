@@ -122,6 +122,7 @@ pub fn run() {
             commands::eml::eml_save,
             commands::drafts::draft_status,
             commands::drafts::draft_resume,
+            commands::drafts::draft_resume_by_key,
             commands::sending::sending,
             commands::compose::compose_request,
             commands::compose::take_compose_request,

@@ -9,6 +9,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const ipc = vi.hoisted(() => ({ dispatch: vi.fn() }));
 const window = vi.hoisted(() => ({ openMessageWindow: vi.fn() }));
+const draftOpen = vi.hoisted(() => ({
+  openDraftRow: vi.fn(),
+  openDraftRowWindow: vi.fn(),
+}));
 
 vi.mock('@/services/ipc', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -17,6 +21,11 @@ vi.mock('@/services/ipc', async (importOriginal) => ({
 
 vi.mock('@/features/reader/readerWindows', () => ({
   openMessageWindow: window.openMessageWindow,
+}));
+
+vi.mock('@/features/composer/draftOpen', () => ({
+  openDraftRow: draftOpen.openDraftRow,
+  openDraftRowWindow: draftOpen.openDraftRowWindow,
 }));
 
 import { buildDraftMenu, buildRowMenu, type RowAccountContext } from './rowMenu';
@@ -63,6 +72,8 @@ beforeEach(() => {
   ipc.dispatch.mockReset();
   window.openMessageWindow.mockReset();
   window.openMessageWindow.mockResolvedValue(undefined);
+  draftOpen.openDraftRow.mockReset();
+  draftOpen.openDraftRowWindow.mockReset();
 });
 
 // The confirm spy restores after each test, so a refused click in one
@@ -351,13 +362,52 @@ describe('buildRowMenu', () => {
 });
 
 describe('buildDraftMenu', () => {
-  it('holds Open, Open in New Window, and a dangerous Delete, all placeholders', () => {
-    const items = buildDraftMenu();
+  const d1 = row({ message: { account: 'work', key: 'd-1' } }, { subject: 'The half' });
+
+  it('holds Open, Open in New Window, and a dangerous Delete Draft, no placeholders', () => {
+    const items = buildDraftMenu([d1]);
     expect(labels(items)).toEqual(['Open', 'Open in New Window', '|', 'Delete Draft']);
     for (const item of items.filter((entry) => !entry.separator)) {
-      expect(item.disabled).toBe(true);
-      expect(item.title).toContain('future slice');
+      expect(item.disabled).toBeUndefined();
+      expect(item.title).toBeUndefined();
     }
     expect(items.find((item) => item.label === 'Delete Draft')!.danger).toBe(true);
+  });
+
+  it('opens the draft row into the composer by key', () => {
+    buildDraftMenu([d1]).find((item) => item.label === 'Open')!.onSelect!();
+    expect(draftOpen.openDraftRow).toHaveBeenCalledTimes(1);
+    expect(draftOpen.openDraftRow).toHaveBeenCalledWith({ account: 'work', key: 'd-1' });
+  });
+
+  it('opens the draft row in its own window', () => {
+    buildDraftMenu([d1])
+      .find((item) => item.label === 'Open in New Window')!
+      .onSelect!();
+    expect(draftOpen.openDraftRowWindow).toHaveBeenCalledTimes(1);
+    expect(draftOpen.openDraftRowWindow).toHaveBeenCalledWith(
+      { account: 'work', key: 'd-1' },
+      'The half',
+    );
+  });
+
+  it('deletes the draft by key through the stored discard intent', () => {
+    buildDraftMenu([d1]).find((item) => item.label === 'Delete Draft')!.onSelect!();
+    expect(ipc.dispatch).toHaveBeenCalledTimes(1);
+    expect(ipc.dispatch).toHaveBeenCalledWith({
+      drafts: { discard_stored: { message: { account: 'work', key: 'd-1' } } },
+    });
+  });
+
+  it('disables every verb on a batch with the reason', () => {
+    const items = buildDraftMenu([m1, m2]);
+    for (const item of items.filter((entry) => !entry.separator)) {
+      expect(item.disabled).toBe(true);
+      expect(item.title).toBe('Pick one draft for this');
+      item.onSelect?.();
+    }
+    expect(ipc.dispatch).not.toHaveBeenCalled();
+    expect(draftOpen.openDraftRow).not.toHaveBeenCalled();
+    expect(draftOpen.openDraftRowWindow).not.toHaveBeenCalled();
   });
 });

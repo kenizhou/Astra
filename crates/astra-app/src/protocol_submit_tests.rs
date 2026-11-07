@@ -8,7 +8,7 @@
 use astra_composer::{Block, ComposerDocument, DraftBlobHandle, InlineContent, Paragraph, TextRun};
 use engine_api::{AccountId, MessageIdHeader};
 
-use super::{ComposerBlob, Intent};
+use super::{ComposerBlob, CompositionId, Intent};
 
 /// A well-formed account id, the way every test names one.
 fn account(value: &str) -> AccountId {
@@ -115,6 +115,50 @@ fn submit_rich_forward_carries_no_threading_header() {
             r#""font_size":null,"color":null,"highlight":null,"link":null}}]}}],"#,
             r#""attachments":[]},"blobs":[],"crypto":{}}}"#
         ),
+    );
+}
+
+#[test]
+fn submit_rich_mail_carries_the_composition_and_the_old_shape_still_crosses() {
+    // A composer that names its composition (a resumed draft's send) carries
+    // it beside the document, so the core can resolve the carried rows.
+    round_trips(
+        &Intent::SubmitRichMail {
+            from: account("work"),
+            to: "you@test.local".to_owned(),
+            cc: String::new(),
+            bcc: String::new(),
+            subject: "The half".to_owned(),
+            document: document("Resumed words"),
+            blobs: Vec::new(),
+            crypto: crate::crypto::CryptoFlags::default(),
+            composition: Some(CompositionId::new("compose-9").unwrap()),
+        },
+        concat!(
+            r#"{"submit_rich_mail":{"from":"work","to":"you@test.local","#,
+            r#""cc":"","bcc":"","subject":"The half","#,
+            r#""document":{"blocks":[{"Paragraph":{"content":"#,
+            r#"[{"Text":{"text":"Resumed words","bold":false,"italic":false,"underline":false,"#,
+            r#""font_size":null,"color":null,"highlight":null,"link":null}}]}}],"#,
+            r#""attachments":[]},"blobs":[],"crypto":{},"composition":"compose-9"}}"#
+        ),
+    );
+    // A sender that names no composition crosses as it always did.
+    let old = concat!(
+        r#"{"submit_rich_mail":{"from":"work","to":"you@test.local","#,
+        r#""cc":"","bcc":"","subject":"On its way","#,
+        r#""document":{"blocks":[{"Paragraph":{"content":"#,
+        r#"[{"Text":{"text":"Sent words","bold":false,"italic":false,"underline":false,"#,
+        r#""font_size":null,"color":null,"highlight":null,"link":null}}]}}],"#,
+        r#""attachments":[]},"blobs":[],"crypto":{}}}"#
+    );
+    let back: Intent = serde_json::from_str(old).expect("the old shape still crosses");
+    let Intent::SubmitRichMail { composition, .. } = back else {
+        panic!("the plain submit deserialises");
+    };
+    assert_eq!(
+        composition, None,
+        "an absent composition reads as no record"
     );
 }
 

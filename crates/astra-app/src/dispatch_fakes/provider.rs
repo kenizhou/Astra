@@ -195,6 +195,13 @@ impl Provider for FakeProvider {
     /// Removes a stored draft from the server's mailbox along with its source, the way a
     /// real Drafts folder would, so a later pass reconciles it away.
     async fn delete_draft(&self, _account: &AccountId, draft: &ProviderKey) -> ProviderResult<()> {
+        {
+            let mut left = self.delete_refusals.lock().unwrap();
+            if *left > 0 {
+                *left -= 1;
+                return Err(ProviderError::retryable("no route to host"));
+            }
+        }
         self.draft_deletes.lock().unwrap().push(draft.clone());
         self.messages
             .lock()

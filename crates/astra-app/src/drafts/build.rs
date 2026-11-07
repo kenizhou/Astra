@@ -16,16 +16,18 @@ use engine_api::{Draft, EmailAddress, MessageIdHeader};
 use crate::list_rows::format_instant;
 use engine_api::UtcDateTime;
 
-use super::HeldSave;
+use super::{CarriedPart, HeldSave};
 
 /// Renders the composer's content into the draft to store: the same deterministic
 /// renderer a send will use, so a stored draft and a sent message built from one
-/// document are byte-identical. An empty recipient list is fine: a draft is unfinished
-/// by definition.
+/// document are byte-identical. The carried parts still standing in the document
+/// stamp into the stored copy, so the next reopen of the draft keeps its files.
+/// An empty recipient list is fine: a draft is unfinished by definition.
 pub(super) fn build_draft(
     message_id: &MessageIdHeader,
     identity: &EmailAddress,
     held: &HeldSave,
+    carried: &[CarriedPart],
 ) -> Option<Draft> {
     let output = render(&held.document).ok()?;
     let mut draft = Draft::new(
@@ -38,6 +40,13 @@ pub(super) fn build_draft(
     .with_cc(parse_addresses(&held.cc))
     .with_bcc(parse_addresses(&held.bcc));
     draft.html_body = Some(output.html);
+    for part in carried {
+        draft = draft.with_attachment(engine_api::DraftAttachment::attachment(
+            part.file_name.clone(),
+            part.media_type.clone(),
+            part.bytes.clone(),
+        ));
+    }
     Some(draft)
 }
 

@@ -7,7 +7,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 
-import type { ComposerDocument } from './composerDocument';
+import type { ComposerDocument, DraftAttachment } from './composerDocument';
 import { composeIntents } from './composeRequest';
 import type {
   ComposeIntent,
@@ -138,7 +138,8 @@ export interface DraftSave {
 export type DraftsIntent =
   | { save: DraftSave }
   | { discard: { composition: CompositionId } }
-  | { close: { composition: CompositionId } };
+  | { close: { composition: CompositionId } }
+  | { discard_stored: { message: MessageRef } };
 
 /**
  * One host intent: the single inbound channel of the unidirectional loop. A
@@ -344,7 +345,7 @@ export interface DraftStatusSnapshot {
 
 /**
  * A stored draft, as the composer that resumes it needs to open: the fields to
- * hydrate and the body as plain text.
+ * hydrate, the body as plain text, and the carried files as pre-attached rows.
  */
 export interface ResumeView {
   /** The account whose Drafts folder the draft was in. */
@@ -359,6 +360,9 @@ export interface ResumeView {
   subject: string;
   /** The body as plain text: what a composer opens without a markup parser. */
   body_text: string;
+  /** The files the stored draft carries, as the document's pre-attached rows:
+   *  metadata only, never bytes and never a data URI. */
+  attachments: DraftAttachment[];
 }
 
 /** One smart-reply chip: the whole drafted reply beside its one-line preview. */

@@ -16,4 +16,10 @@ describe('writeIntents', () => {
       '{"delete_message":{"row":{"thread":{"account":"work","thread_id":"th-7"}}}}',
     );
   });
+
+  it('carries the message reference with the stored draft discard', () => {
+    expect(
+      JSON.stringify(writeIntents.discardStored({ account: 'work', key: 'd-1' })),
+    ).toBe('{"drafts":{"discard_stored":{"message":{"account":"work","key":"d-1"}}}}');
+  });
 });

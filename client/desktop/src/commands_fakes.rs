@@ -10,11 +10,15 @@
 // every test module's `commands_fakes::…` paths unchanged.
 mod snapshots;
 
-// The fake's whole AppPort impl beside the A3 assist pulls' seeds, its
-// own child for the same limit (one trait impl for the one fake, so the
-// block cannot split); the re-export keeps the seeds' type nameable
-// through the paths the tests already use.
+// The fake's whole AppPort impl, its own child for the same limit (one
+// trait impl for the one fake, so the block cannot split); the re-export
+// keeps the seeds' type nameable through the paths the tests already use.
 mod port;
+
+// The assist pulls' seed records, their own child beside the port module
+// so that file stays under the same limit beside the trait impl that serves
+// them.
+mod seeds;
 
 // The MCP host fixture (an empty backend over the in-memory ledger in a
 // per-test scratch directory), its own child for the same limit, for
@@ -49,7 +53,7 @@ use crate::{
 
 pub(crate) use snapshots::{compose_prefill, open_snapshot};
 
-pub(crate) use port::{AssistSeeds, BriefSeeds, DocsSeeds};
+pub(crate) use seeds::{AssistSeeds, BriefSeeds, DocsSeeds};
 
 /// A scratch directory for one test's account index.
 pub(crate) fn scratch(name: &str) -> PathBuf {
@@ -113,6 +117,10 @@ pub(crate) struct FakeApp {
     /// The (account, composition) pairs the resume was asked to open, so a test
     /// can assert the command hands the webview's ids through to the core.
     pub(crate) resumed_into: Mutex<Vec<(String, String)>>,
+    /// The (account, key, composition) triples the by-key resume was asked to
+    /// open, so a test can assert the command hands the webview's row
+    /// reference through to the core.
+    pub(crate) resumed_keys: Mutex<Vec<(String, String, String)>>,
     /// The sending snapshot the pull answers with: what the fake's submit and
     /// outbox dispatches last published over its own op counter.
     pub(crate) sending: Mutex<SendingQueue>,
@@ -216,6 +224,7 @@ impl FakeApp {
             mailto_into: Mutex::new(Vec::new()),
             stored_draft: Mutex::new(None),
             resumed_into: Mutex::new(Vec::new()),
+            resumed_keys: Mutex::new(Vec::new()),
             sending: Mutex::new(SendingQueue::default()),
             chips: Mutex::new(Vec::new()),
             chips_into: Mutex::new(Vec::new()),
@@ -274,6 +283,7 @@ impl FakeApp {
                     bcc: bcc.clone(),
                     subject: subject.clone(),
                     body_text,
+                    attachments: Vec::new(),
                 });
                 let saving = DraftStatusSnapshot {
                     composition: composition.as_str().to_owned(),
@@ -297,6 +307,11 @@ impl FakeApp {
             DraftsIntent::Discard { .. } => {
                 *self.stored_draft.lock().unwrap() = None;
                 *self.draft_status.lock().unwrap() = None;
+            }
+            // The row's own verb: the stored copy goes with no composition
+            // to forget, so the hint stands.
+            DraftsIntent::DiscardStored { .. } => {
+                *self.stored_draft.lock().unwrap() = None;
             }
             DraftsIntent::Close { .. } => {
                 *self.draft_status.lock().unwrap() = None;

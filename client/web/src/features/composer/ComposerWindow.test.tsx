@@ -21,24 +21,39 @@ vi.hoisted(() => {
   Object.assign(Element.prototype, { getClientRects: empty, getBoundingClientRect: zero });
 });
 
-const ipc = vi.hoisted(() => ({
-  dispatch: vi.fn(),
-  mailboxList: vi.fn(),
-  settings: vi.fn(),
-  draftStatus: vi.fn(),
-  draftResume: vi.fn(),
-  takeComposeRequest: vi.fn(),
-}));
+const ipc = vi.hoisted(() => {
+  // The by-key read's staged answer; unstaged, every host command refuses,
+  // the plain-browser shape the rest of the tree expects.
+  const byKey = { staged: false, view: null as unknown };
+  return {
+    byKey,
+    dispatch: vi.fn(),
+    invoke: vi.fn((cmd: string) => {
+      if (cmd === 'draft_resume_by_key' && byKey.staged) {
+        return Promise.resolve(byKey.view);
+      }
+      return Promise.reject(new Error('the test host serves no commands'));
+    }),
+    mailboxList: vi.fn(),
+    settings: vi.fn(),
+    draftStatus: vi.fn(),
+    draftResume: vi.fn(),
+    takeComposeRequest: vi.fn(),
+  };
+});
 
 vi.mock('@/services/ipc', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   dispatch: ipc.dispatch,
+  invoke: ipc.invoke,
   mailboxList: ipc.mailboxList,
   settings: ipc.settings,
   draftStatus: ipc.draftStatus,
   draftResume: ipc.draftResume,
   takeComposeRequest: ipc.takeComposeRequest,
 }));
+
+vi.mock('@tauri-apps/api/core', () => ({ invoke: ipc.invoke }));
 
 vi.mock('@/events/surfaceEvents', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -106,6 +121,9 @@ function resetStores(): void {
 }
 
 beforeEach(() => {
+  ipc.byKey.staged = false;
+  ipc.byKey.view = null;
+  ipc.invoke.mockClear();
   ipc.dispatch.mockReset();
   ipc.dispatch.mockResolvedValue(undefined);
   ipc.mailboxList.mockReset();
@@ -189,6 +207,7 @@ describe('the window hydration', () => {
       bcc: '',
       subject: 'Re: Quarterly report',
       body_text: 'The numbers are in.',
+      attachments: [],
     });
     render(<ComposerWindow composition="compose-47" resumeAccount="work" />);
 
@@ -203,6 +222,54 @@ describe('the window hydration', () => {
     expect(state.to).toBe('ada@example.test');
     expect(state.subject).toBe('Re: Quarterly report');
     expect(screen.getByText('Re: Quarterly report')).toBeTruthy();
+  });
+
+  it('resumes the draft row copy the URL names, with its carried rows', async () => {
+    ipc.byKey.staged = true;
+    ipc.byKey.view = {
+      account: 'work',
+      to: 'ada@example.test',
+      cc: '',
+      bcc: '',
+      subject: 'The half',
+      body_text: 'Half written',
+      attachments: [
+        {
+          id: 'carry-0',
+          blob: 'carry:0',
+          file_name: 'report.pdf',
+          media_type: 'application/pdf',
+          size: 3,
+          disposition: 'Attachment',
+          data_url: null,
+        },
+      ],
+    };
+    render(<ComposerWindow composition="compose-48" resumeAccount="work" draftKey="d-1" />);
+
+    await settle();
+
+    expect(ipc.invoke).toHaveBeenCalledWith('draft_resume_by_key', {
+      message: { account: 'work', key: 'd-1' },
+      composition: 'compose-48',
+    });
+    expect(ipc.takeComposeRequest).not.toHaveBeenCalled();
+    const state = useComposerStore.getState();
+    expect(state.open).toBe(true);
+    expect(state.composition).toBe('compose-48');
+    expect(state.subject).toBe('The half');
+    expect(state.editor.attachments).toEqual([
+      {
+        id: 'carry-0',
+        blob: 'carry:0',
+        file_name: 'report.pdf',
+        media_type: 'application/pdf',
+        size: 3,
+        disposition: 'Attachment',
+        data_url: null,
+      },
+    ]);
+    expect(screen.getByText('The half')).toBeTruthy();
   });
 
   it('seeds the prefilled new message the URL carries, never asking the take', async () => {

@@ -374,7 +374,7 @@ export function MessageList() {
           y={menu.state.y}
           items={
             draftFolder
-              ? buildDraftMenu()
+              ? buildDraftMenu(menuTargets.current)
               : buildRowMenu(menuTargets.current, viewMode, accountContextOf(menuTargets.current))
           }
           onClose={menu.close}

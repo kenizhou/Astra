@@ -222,6 +222,7 @@ async fn the_inbox_watch_answers_changed_and_its_pass_lands_the_mail() {
         document: document(IDLE_WORDS),
         blobs: Vec::new(),
         crypto: crate::crypto::CryptoFlags::default(),
+        composition: None,
     })
     .await
     .unwrap();
@@ -331,6 +332,7 @@ async fn a_poll_arm_pass_lands_the_delivered_mail_and_the_queue_holds_it() {
         document: document(POLL_WORDS),
         blobs: Vec::new(),
         crypto: crate::crypto::CryptoFlags::default(),
+        composition: None,
     })
     .await
     .unwrap();

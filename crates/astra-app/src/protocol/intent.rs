@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 use crate::reference::{FolderRef, MessageRef, RowRef};
 
 use super::{
-    CalendarIntent, ComposeIntent, ComposerBlob, DraftsIntent, OutboxIntent, PeopleIntent,
-    SettingsIntent,
+    CalendarIntent, ComposeIntent, ComposerBlob, CompositionId, DraftsIntent, OutboxIntent,
+    PeopleIntent, SettingsIntent,
 };
 
 /// How the mailbox list is grouped.
@@ -265,6 +265,12 @@ pub enum Intent {
         /// both on.
         #[serde(default)]
         crypto: crate::crypto::CryptoFlags,
+        /// The composition the send belongs to, when the composer names one: a
+        /// resumed draft's send resolves its pre-attached rows' bytes off the
+        /// composition's own record, core-side. Absent for a sender that does
+        /// not name a composition, whose document carries nothing to resolve.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        composition: Option<CompositionId>,
     },
     /// Send the composer's rich document as a reply: the same durable-outbox
     /// discipline as [`Intent::SubmitRichMail`], with the threading the reply

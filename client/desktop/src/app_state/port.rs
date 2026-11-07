@@ -85,6 +85,14 @@ impl AppPort for App<HostProvider> {
         App::resume_latest_draft(self, account, composition).await
     }
 
+    async fn resume_draft_by_key(
+        &self,
+        message: &astra_app::MessageRef,
+        composition: CompositionId,
+    ) -> Option<DraftResume> {
+        App::resume_draft_by_key(self, message, composition).await
+    }
+
     async fn add_new_account_deferred(&self, account: HostAccount) {
         App::add_new_account_deferred(self, account).await;
     }

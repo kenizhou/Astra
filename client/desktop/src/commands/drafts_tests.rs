@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use astra_viewmodel::{DraftSaveState, DraftStatusSnapshot};
 
-use super::{draft_resume_of, draft_status_of, ResumeView};
+use super::{draft_resume_by_key_of, draft_resume_of, draft_status_of, ResumeView};
 use crate::app_state::AppState;
 use crate::commands_fakes::{state, FakeApp, FakeStore};
 
@@ -110,6 +110,7 @@ fn the_resume_read_answers_the_stored_draft_and_none_after_a_discard() {
             bcc: String::new(),
             subject: "Later".to_owned(),
             body_text: "Half written".to_owned(),
+            attachments: Vec::new(),
         }),
         "the resume answers with the stored draft, document rendered to plain text",
     );
@@ -141,6 +142,7 @@ fn the_resume_view_crosses_as_one_flat_record() {
         bcc: String::new(),
         subject: "Later".to_owned(),
         body_text: "Half written".to_owned(),
+        attachments: Vec::new(),
     };
     let wire = serde_json::to_value(&view).expect("the view serialises");
     assert_eq!(
@@ -151,7 +153,106 @@ fn the_resume_view_crosses_as_one_flat_record() {
             "cc": "",
             "bcc": "",
             "subject": "Later",
-            "body_text": "Half written"
+            "body_text": "Half written",
+            "attachments": []
         }),
     );
+}
+
+#[test]
+fn the_resume_view_carries_the_rows_as_metadata_only() {
+    let view: ResumeView = serde_json::from_value(serde_json::json!({
+        "account": "work",
+        "to": "you@test.local",
+        "cc": "",
+        "bcc": "",
+        "subject": "Later",
+        "body_text": "Half written",
+        "attachments": [{
+            "id": "carry-0",
+            "blob": "carry:0",
+            "file_name": "report.pdf",
+            "media_type": "application/pdf",
+            "size": 3,
+            "disposition": "Attachment",
+            "data_url": null
+        }]
+    }))
+    .expect("the view with rows deserialises");
+    let wire = serde_json::to_value(&view).expect("the view serialises");
+    let row = &wire["attachments"][0];
+    assert_eq!(row["blob"], "carry:0", "the row names its part's handle");
+    assert_eq!(
+        row["data_url"],
+        serde_json::Value::Null,
+        "no data URI rides"
+    );
+    assert!(
+        !wire.to_string().contains("bytes"),
+        "the wire carries metadata only, never attachment bytes"
+    );
+}
+
+#[test]
+fn the_by_key_resume_read_hands_the_row_reference_to_the_core() {
+    let app = FakeApp::new();
+    let state = state("drafts-by-key", Arc::clone(&app), FakeStore::accepting());
+
+    // A stored draft to resume: the save has to land before the read runs.
+    crate::commands::dispatch_intent(&state, save_json()).expect("the save dispatches");
+    let saved = DraftStatusSnapshot {
+        composition: "compose-1".to_owned(),
+        state: DraftSaveState::Saved,
+        saved_at: "2026-10-09T08:30:00Z".to_owned(),
+    };
+    wait_for_status(&state, Some(&saved));
+
+    let message =
+        astra_app::MessageRef::from_parts("work", "draft-1".to_owned()).expect("a message ref");
+    let composition = astra_app::CompositionId::new("compose-9").expect("a composition id");
+    let resumed = state
+        .runtime
+        .block_on(|| draft_resume_by_key_of(&state, &message, composition.clone()));
+    assert_eq!(
+        resumed,
+        Some(ResumeView {
+            account: "work".to_owned(),
+            to: "you@test.local".to_owned(),
+            cc: String::new(),
+            bcc: String::new(),
+            subject: "Later".to_owned(),
+            body_text: "Half written".to_owned(),
+            attachments: Vec::new(),
+        }),
+        "the by-key read answers with the stored draft",
+    );
+    assert_eq!(
+        app.resumed_keys.lock().unwrap().as_slice(),
+        [(
+            "work".to_owned(),
+            "draft-1".to_owned(),
+            "compose-9".to_owned()
+        )]
+        .as_slice(),
+        "the command hands the webview's row reference and composition to the core",
+    );
+}
+
+#[test]
+fn the_by_key_resume_read_answers_none_where_the_core_refuses() {
+    let app = FakeApp::new();
+    app.stored_draft.lock().unwrap().take();
+    let state = state(
+        "drafts-by-key-none",
+        Arc::clone(&app),
+        FakeStore::accepting(),
+    );
+
+    let message =
+        astra_app::MessageRef::from_parts("work", "gone-1".to_owned()).expect("a message ref");
+    let composition = astra_app::CompositionId::new("compose-9").expect("a composition id");
+    let resumed = state
+        .runtime
+        .block_on(|| draft_resume_by_key_of(&state, &message, composition));
+    assert_eq!(resumed, None, "a key the core cannot open answers null");
 }

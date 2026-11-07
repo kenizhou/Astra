@@ -30,6 +30,7 @@ import { useSettingsStore } from '@/features/settings/settingsStore';
 import { ComposerPane } from './Composer';
 import { ComposerTitleBar } from './ComposerTitleBar';
 import { defaultSendAccount } from './composeWindow';
+import { draftResumeByKey } from './draftOpen';
 import { useComposerStore, type MailtoOpen } from './composerStore';
 import type { SharedFile } from './shareOpen';
 import { fromLabelFor } from './useComposeRequest';
@@ -38,12 +39,13 @@ import { fromLabelFor } from './useComposeRequest';
 // second run finds the session already taken and returns.
 let hydratedFor: CompositionId | null = null;
 
-/** Opens the window's composition: the transfer's resumed draft, the
- *  URL's mailto prefill, the pending request's, the URL share set's, or a
- *  blank one. */
+/** Opens the window's composition: the draft row's resumed copy, the
+ *  transfer's resumed draft, the URL's mailto prefill, the pending
+ *  request's, the URL share set's, or a blank one. */
 async function openComposerSession(
   composition: CompositionId,
   resumeAccount: string | null,
+  draftKey: string | null,
   prefill: MailtoOpen | null,
   shares: SharedFile[] | null,
 ): Promise<void> {
@@ -72,6 +74,27 @@ async function openComposerSession(
     useAccountStore.getState().applySnapshot(accountsSnapshot);
     useSettingsStore.getState().applySnapshot(preferences);
     useDraftStore.getState().applySnapshot(hint);
+    if (resumeAccount !== null && draftKey !== null) {
+      // A Drafts row's open: the window resumes exactly the copy the row
+      // names, not the account's latest, with the files it carries as
+      // pre-attached rows. A null answer (the copy moved or was deleted
+      // between the click and the open) falls through to the blank tail
+      // rather than stranding the window on its placeholder.
+      const view = await draftResumeByKey(
+        { account: resumeAccount, key: draftKey },
+        composition,
+      );
+      if (view !== null) {
+        useComposerStore
+          .getState()
+          .hydrate(
+            view,
+            { id: view.account, label: fromLabelFor(view.account) },
+            composition,
+          );
+        return;
+      }
+    }
     if (resumeAccount !== null) {
       // The dock-to-window transfer: the dock saved its draft and closed
       // behind it, so the resume reads exactly those words back. The wire
@@ -131,8 +154,10 @@ async function openComposerSession(
 interface ComposerWindowProps {
   /** The composition this window holds, from the URL. */
   composition: CompositionId;
-  /** The account a transfer resumes the latest draft of, from the URL. */
+  /** The account a transfer or a draft row open resumes from, from the URL. */
   resumeAccount?: string | null;
+  /** The stored copy's key a draft row open resumes, from the URL. */
+  draftKey?: string | null;
   /** The mailto prefill this window opens from, from the URL. */
   prefill?: MailtoOpen | null;
   /** The pending share set this window opens with, from the URL. */
@@ -142,6 +167,7 @@ interface ComposerWindowProps {
 export function ComposerWindow({
   composition,
   resumeAccount = null,
+  draftKey = null,
   prefill = null,
   shares = null,
 }: ComposerWindowProps) {
@@ -149,8 +175,8 @@ export function ComposerWindow({
   const subject = useComposerStore((s) => s.subject);
 
   useEffect(() => {
-    void openComposerSession(composition, resumeAccount, prefill, shares);
-  }, [composition, resumeAccount, prefill, shares]);
+    void openComposerSession(composition, resumeAccount, draftKey, prefill, shares);
+  }, [composition, resumeAccount, draftKey, prefill, shares]);
 
   // The save hint's surface, the one live feed the window needs.
   useEffect(() => {

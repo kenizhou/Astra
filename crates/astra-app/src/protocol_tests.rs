@@ -334,6 +334,7 @@ fn submit_rich_mail_carries_the_recipients_the_document_and_the_blobs() {
             document: document("Sent words"),
             blobs: Vec::new(),
             crypto: crate::crypto::CryptoFlags::default(),
+            composition: None,
         },
         concat!(
             r#"{"submit_rich_mail":{"from":"work","to":"you@test.local","#,
@@ -358,6 +359,7 @@ fn submit_rich_mail_carries_the_recipients_the_document_and_the_blobs() {
                 vec![1, 2, 3],
             )],
             crypto: crate::crypto::CryptoFlags::default(),
+            composition: None,
         },
         concat!(
             r#"{"submit_rich_mail":{"from":"work","to":"you@test.local","#,

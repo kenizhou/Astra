@@ -117,6 +117,9 @@ pub(super) struct FakeProvider {
     /// Draft saves left to refuse as retryable ("no route to host"), so a test can model
     /// an outage the outbox rides out.
     offline_saves: Mutex<u32>,
+    /// Draft removals left to refuse as retryable, so a test can model the queued
+    /// discard.
+    delete_refusals: Mutex<u32>,
     /// Whether the adapter can change the account's folder tree (the
     /// capability); `with_tree_writes` is the shape a folder-edit test drives.
     pub(super) tree_writes: bool,
@@ -187,6 +190,7 @@ impl FakeProvider {
             name_refusals: Mutex::new(0),
             send_script: Mutex::new(Vec::new()),
             offline_saves: Mutex::new(0),
+            delete_refusals: Mutex::new(0),
             tree_writes: false,
             report_controls: None,
             reports: Arc::new(Mutex::new(Vec::new())),
@@ -261,6 +265,20 @@ impl FakeProvider {
         let provider = Self::with(vec![inbox()]);
         *provider.offline_saves.lock().unwrap() = saves;
         provider
+    }
+
+    /// Scripts the next `saves` draft saves to fail retryably on this provider's own
+    /// tree and mail, so a fixture with a standing Drafts folder can model the outage.
+    pub(super) fn offlining_saves(self, saves: u32) -> Self {
+        *self.offline_saves.lock().unwrap() = saves;
+        self
+    }
+
+    /// Scripts the next `deletes` draft removals to fail retryably, so a test can
+    /// model the queued discard.
+    pub(super) fn refusing_draft_deletes(self, deletes: u32) -> Self {
+        *self.delete_refusals.lock().unwrap() = deletes;
+        self
     }
 
     /// Every recorded draft save, each `(draft, replacing)`, for the contract assertions.

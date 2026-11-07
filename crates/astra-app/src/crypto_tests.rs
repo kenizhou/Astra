@@ -64,6 +64,7 @@ fn send(text: &str, crypto: CryptoFlags) -> Intent {
         document: document(text),
         blobs: Vec::new(),
         crypto,
+        composition: None,
     }
 }
 
