@@ -41,7 +41,8 @@ pub(super) fn utc_in_days(days: i64, hour: u8, minute: u8) -> String {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .expect("the clock reads after the epoch")
-        .as_secs() as i64;
+        .as_secs();
+    let secs = i64::try_from(secs).expect("the clock reads within i64");
     let day = secs.div_euclid(86_400) + days;
     let z = day + 719_468;
     let era = z.div_euclid(146_097);

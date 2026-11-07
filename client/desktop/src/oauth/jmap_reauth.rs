@@ -252,7 +252,7 @@ pub(crate) fn jmap_reauth_begin(
         let _ = app.emit(
             JMAP_REAUTH_RESULT_EVENT,
             JmapReauthResult {
-                account: account.to_owned(),
+                account: account.clone(),
                 outcome: result.outcome,
             },
         );
