@@ -11,7 +11,14 @@ use std::{
 
 use async_trait::async_trait;
 
-use super::{calendar_refresh_interval, parse_calendar_refresh_limit, CalendarTimer, TimerHost};
+use super::{calendar_refresh_interval, CalendarTimer, TimerHost};
+
+// Each override helper joins its source's gate: the parser is debug-only,
+// and the release-only assertion is the limit read's only user.
+#[cfg(not(debug_assertions))]
+use super::calendar_refresh_limit;
+#[cfg(debug_assertions)]
+use super::parse_calendar_refresh_limit;
 
 /// One recorded action of the fake host, the log the assertions read.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -129,14 +136,21 @@ fn the_limit_stops_the_timer_after_its_ticks() {
 }
 
 #[test]
+fn the_standing_limit_is_none_and_the_cadence_constant_is_five_minutes() {
+    // The constant, not the interval fn: a test process that exported the
+    // debug override would otherwise fail the five-minute pin.
+    assert_eq!(super::CALENDAR_REFRESH_TICK, Duration::from_secs(300));
+    #[cfg(not(debug_assertions))]
+    {
+        assert_eq!(calendar_refresh_limit(), None, "release holds no limit");
+    }
+}
+
+#[cfg(debug_assertions)]
+#[test]
 fn the_refresh_limit_accepts_only_a_positive_integer() {
     assert_eq!(parse_calendar_refresh_limit(Some("2")), Some(2));
     assert_eq!(parse_calendar_refresh_limit(Some("0")), None);
     assert_eq!(parse_calendar_refresh_limit(Some("many")), None);
     assert_eq!(parse_calendar_refresh_limit(None), None);
-}
-
-#[test]
-fn the_interval_defaults_to_five_minutes() {
-    assert_eq!(calendar_refresh_interval(), Duration::from_secs(300));
 }
