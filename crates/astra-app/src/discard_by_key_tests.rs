@@ -195,3 +195,34 @@ async fn the_row_discard_withdraws_a_save_still_waiting_for_a_network() {
         "the named copy itself is still removed"
     );
 }
+
+#[tokio::test]
+async fn the_row_discard_waits_on_the_save_gate() {
+    let provider = attached_provider();
+    let deletes = provider.draft_deletes();
+    let app = app_over(provider).await;
+
+    // A save stands mid-flight, holding the gate the composition discard
+    // serialises on: the row's discard must queue behind it, or its
+    // withdrawal and delete could slip between the save's steps and leave
+    // the put storing a copy over the removal.
+    let gate = Arc::clone(&app.save_gate);
+    let saving = gate.lock().await;
+    let discard = app.dispatch(Intent::Drafts(DraftsIntent::DiscardStored {
+        message: draft_ref("d-1"),
+    }));
+    let mut pending = std::pin::pin!(discard);
+    let raced = tokio::time::timeout(std::time::Duration::from_millis(50), pending.as_mut()).await;
+    assert!(
+        raced.is_err(),
+        "the row's discard waits on the save gate, never racing a save"
+    );
+    drop(saving);
+    pending.await.unwrap();
+
+    assert_eq!(
+        deletes.lock().unwrap().as_slice(),
+        [ProviderKey::new("d-1").unwrap()].as_slice(),
+        "the removal lands once the gate opens"
+    );
+}

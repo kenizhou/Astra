@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! The fake app's [`AppPort`] impl and the A3 assist pulls' seeds, split
-//! out of the fixture root so that root stays under the 500-line limit:
-//! one trait impl for the one fake, the inherited contract beside the
-//! assist answers, everything the command tests seed or assert in one
-//! place behind the fake's own locks.
+//! The fake app's [`AppPort`] impl, split out of the fixture root so that
+//! root stays under the 500-line limit: one trait impl for the one fake,
+//! the inherited contract beside the assist answers, everything the
+//! command tests seed or assert in one place behind the fake's own locks.
+//! The seed records the assist answers read sit in the sibling `seeds`.
 
 use astra_ai::{AiDocumentKind, KnowledgeId};
 use astra_app::{

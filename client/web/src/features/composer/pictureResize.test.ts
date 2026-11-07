@@ -211,6 +211,25 @@ describe('the grips', () => {
     expect(overlay().hidden).toBe(true);
   });
 
+  it('follow the applied width when React lands it on the picture', async () => {
+    press(image, 'pointermove', 200, 150);
+    const corner = grip(3);
+    press(corner, 'pointerdown', 400, 300);
+    press(corner, 'pointermove', 440, 330);
+    press(document, 'pointerup', 440, 330);
+
+    // The applied width reaches the picture as a React style update AFTER
+    // the drag's own handler returns, so the re-place the handler scheduled
+    // measured the stale rect; the watcher owes the overlay a second place
+    // over the fresh one, or the grips sit off the corner until the next
+    // interaction.
+    image.getBoundingClientRect = () => rect(440, 330);
+    image.setAttribute('style', 'width: 440px');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(overlay().style.width).toBe('440px');
+  });
+
   it('stop listening when the surface unmounts', () => {
     const second = installPictureResize(host, () => undefined);
     const before = document.querySelectorAll('.astra-picture-resize').length;

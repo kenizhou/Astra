@@ -78,8 +78,10 @@ async function openComposerSession(
       // A Drafts row's open: the window resumes exactly the copy the row
       // names, not the account's latest, with the files it carries as
       // pre-attached rows. A null answer (the copy moved or was deleted
-      // between the click and the open) falls through to the blank tail
-      // rather than stranding the window on its placeholder.
+      // between the click and the open) opens the blank tail below the
+      // arms this open never owed: the latest-entry read would silently
+      // edit the account's newest words under the clicked row's name, and
+      // the take would spend a request this open never asked for.
       const view = await draftResumeByKey(
         { account: resumeAccount, key: draftKey },
         composition,
@@ -94,6 +96,11 @@ async function openComposerSession(
           );
         return;
       }
+      const account = defaultSendAccount();
+      if (account !== undefined) {
+        useComposerStore.getState().newMessage(account, composition);
+      }
+      return;
     }
     if (resumeAccount !== null) {
       // The dock-to-window transfer: the dock saved its draft and closed

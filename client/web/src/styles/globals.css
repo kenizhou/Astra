@@ -118,3 +118,58 @@ body,
     transition-duration: 0.01ms !important;
   }
 }
+
+/* The picture resize overlay: a sibling in the body, placed over the
+   picture from its viewport rect (the composer's pictureResize.ts), so
+   left/top only bite on a fixed box and the grips inherit their corners.
+   Ported from mail-calendar's clients/composer/src/editor.css, the reach
+   inset matching the gesture's GRIP_REACH_PX constant. Below the toolbar
+   and its popovers: the clip keeps the grips inside the editor's own box,
+   and a popover that opens over it still wins. */
+.astra-picture-resize {
+  position: fixed;
+  z-index: 1;
+  pointer-events: none;
+  outline: 1px solid var(--primary);
+}
+
+.astra-picture-resize[hidden] {
+  display: none;
+}
+
+.astra-picture-resize .grip {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  margin: -6px;
+  border: 1px solid var(--primary);
+  border-radius: 50%;
+  background: var(--background);
+  box-shadow: 0 1px 3px rgba(21, 35, 48, 0.3);
+  pointer-events: auto;
+  /* The gesture is the grip's from the first touch: without this a finger
+     on one scrolls the message instead of resizing the picture. */
+  touch-action: none;
+}
+
+/* A finger needs a larger target than the dot a mouse aims at, and growing
+   the dot would hide the corner it marks. A transparent extension is
+   hit-tested with its parent, so the reach grows and the picture stays
+   visible. */
+.astra-picture-resize .grip::after {
+  content: "";
+  position: absolute;
+  inset: -9px;
+}
+
+@media (pointer: coarse) {
+  .astra-picture-resize .grip {
+    width: 18px;
+    height: 18px;
+    margin: -9px;
+  }
+
+  .astra-picture-resize .grip::after {
+    inset: -12px;
+  }
+}

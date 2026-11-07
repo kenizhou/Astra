@@ -272,10 +272,43 @@ describe('the window hydration', () => {
     expect(screen.getByText('The half')).toBeTruthy();
   });
 
+  it('opens the blank tail when the named copy is gone, never the latest draft', async () => {
+    ipc.byKey.staged = true;
+    ipc.byKey.view = null;
+    // The latest-entry read stands ready with a different draft: a
+    // refused row open must never fall into it and silently edit the
+    // account's newest words under the clicked row's name.
+    ipc.draftResume.mockResolvedValue({
+      account: 'work',
+      to: 'someone@example.test',
+      cc: '',
+      bcc: '',
+      subject: 'The latest words',
+      body_text: 'Not the row you clicked.',
+      attachments: [],
+    });
+    render(<ComposerWindow composition="compose-53" resumeAccount="work" draftKey="d-1" />);
+
+    await settle();
+
+    expect(ipc.invoke).toHaveBeenCalledWith('draft_resume_by_key', {
+      message: { account: 'work', key: 'd-1' },
+      composition: 'compose-53',
+    });
+    expect(ipc.draftResume).not.toHaveBeenCalled();
+    expect(ipc.takeComposeRequest).not.toHaveBeenCalled();
+    const state = useComposerStore.getState();
+    expect(state.open).toBe(true);
+    expect(state.composition).toBe('compose-53');
+    expect(state.subject).toBe('');
+    expect(state.request).toBeNull();
+    expect(screen.getByText('New message')).toBeTruthy();
+  });
+
   it('seeds the prefilled new message the URL carries, never asking the take', async () => {
     render(
       <ComposerWindow
-        composition="compose-49"
+        composition="compose-52"
         prefill={{
           from: 'work',
           to: 'ada@example.test',
@@ -292,7 +325,7 @@ describe('the window hydration', () => {
     expect(ipc.takeComposeRequest).not.toHaveBeenCalled();
     const state = useComposerStore.getState();
     expect(state.open).toBe(true);
-    expect(state.composition).toBe('compose-49');
+    expect(state.composition).toBe('compose-52');
     expect(state.from).toBe('work');
     expect(state.fromLabel).toBe('Work');
     expect(state.to).toBe('ada@example.test');

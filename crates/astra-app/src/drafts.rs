@@ -358,12 +358,16 @@ impl<P: Provider> App<P> {
     }
 
     /// Removes one stored draft the Drafts row names: the row's own Delete verb,
-    /// with no composition to forget. A save still waiting for a network under the
-    /// same `Message-ID` is withdrawn first, the same guard the composition discard
-    /// runs, or the parked words would store a draft the user just deleted; then the
-    /// named copy goes through the engine's outbox, so a refusal keeps the removal
-    /// queued rather than dropping it.
+    /// with no composition to forget. The whole verb runs under the save gate,
+    /// exactly the composition discard's own guard, so a save mid-flight cannot
+    /// slip its put between the withdrawal and the delete and store a copy over
+    /// the removal. A save still waiting for a network under the same
+    /// `Message-ID` is withdrawn first, or the parked words would store a draft
+    /// the user just deleted; then the named copy goes through the engine's
+    /// outbox, so a refusal keeps the removal queued rather than dropping it.
     async fn discard_stored_draft(&self, message: &crate::reference::MessageRef) {
+        let gate = Arc::clone(&self.save_gate);
+        let _discarding = gate.lock().await;
         // The parked-save guard names its op by the copy's `Message-ID`, so the copy
         // is resolved first. A copy that no longer resolves still gets its removal:
         // the engine settles a removal of what is gone as done.

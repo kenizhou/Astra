@@ -61,14 +61,6 @@ impl<P: Provider> App<P> {
     /// will not build) sends nothing and queues nothing: the honest answer over
     /// a blank message. Whatever the attempt came to, the queue holds it and
     /// the sending snapshot published below is what tells the user.
-    /// Renders the composer's document and submits it through the account's
-    /// durable outbox, then drains the account so the send and anything else
-    /// due happens in this gesture rather than at the next refresh.
-    ///
-    /// A refusal before the queue (no account, no recipient, a document that
-    /// will not build) sends nothing and queues nothing: the honest answer over
-    /// a blank message. Whatever the attempt came to, the queue holds it and
-    /// the sending snapshot published below is what tells the user.
     ///
     /// A composition the submit names may hold files a resume pre-attached: their
     /// rows stand in the document behind `carry:` handles, and the bytes resolve

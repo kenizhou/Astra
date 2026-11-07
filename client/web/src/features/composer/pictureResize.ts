@@ -304,9 +304,17 @@ export function installPictureResize(host: HTMLElement, apply: ApplyWidth): () =
   // The surface's tree is React's: the pictures come and go with the
   // blocks they render, so the watcher is the deletion catch (the
   // reference listens for the editor's own input event for the same
-  // reason).
+  // reason). The style filter catches the applied width landing: React
+  // writes it as a style update after the drag's own handler returned, so
+  // the re-place the handler scheduled measured the stale rect and this
+  // watcher owes the overlay a second place over the fresh one.
   const watcher = new MutationObserver(() => place());
-  watcher.observe(host, { childList: true, subtree: true });
+  watcher.observe(host, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['style'],
+  });
   const onScroll = (): void => place();
   host.addEventListener('scroll', onScroll, { passive: true });
   view.addEventListener('scroll', onScroll, { passive: true });
