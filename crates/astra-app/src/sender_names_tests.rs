@@ -324,3 +324,35 @@ async fn without_a_stored_name_the_from_line_is_the_bare_address() {
     assert_eq!(submits[0].from.name, None);
     assert_eq!(submits[0].from.email, "me@work.local");
 }
+
+#[tokio::test]
+async fn a_stored_name_survives_the_boot_s_re_adoption() {
+    // The slow join path runs at every launch for every stored account:
+    // a typed answer standing over the provider's stale copy is the
+    // answer that must survive the restart, so the adoption stands down
+    // wherever a name is already stored.
+    let surfaces = Arc::new(Mutex::new(Vec::new()));
+    let provider = fakes::FakeProvider::with(vec![fakes::inbox()])
+        .with_writable_identities(vec![own_identity(Some("Provider Old"))]);
+    let writes = provider.name_writes();
+    let app = fakes::app(vec![fakes::account("work", provider)], &surfaces);
+
+    set_name(&app, "work", "Grace Hopper").await;
+
+    // The boot's shape: the join path re-runs over the standing answer.
+    app.sync_added_account(&account("work")).await;
+    refresh(&app).await;
+
+    let row = &app.settings().accounts[0];
+    assert_eq!(
+        row.display_name, "Grace Hopper",
+        "the typed name stands; the provider's stale copy does not revert it"
+    );
+    let writes = writes.lock().unwrap();
+    assert_eq!(
+        writes.len(),
+        1,
+        "only the set's own push: the re-adoption wrote nothing and pushed nothing"
+    );
+    assert_eq!(writes[0].1, "Grace Hopper");
+}

@@ -64,7 +64,15 @@ impl<P: Provider> App<P> {
     /// ask standing and nothing else waits on this. The adoption is local
     /// only, because the name came from the provider whose copy a push
     /// would write.
+    ///
+    /// An account with a name already stored is never re-asked and never
+    /// re-adopted: the slow join path runs at every launch, and a person's
+    /// typed answer (or a deliberate bare-address answer) standing over a
+    /// provider's stale copy is the answer that must survive the restart.
     pub(crate) async fn adopt_sender_name(&self, account: &AccountId) {
+        if self.stored_sender_name(account).is_some() {
+            return;
+        }
         let Some(handle) = self.account_handle(account).await else {
             return;
         };
