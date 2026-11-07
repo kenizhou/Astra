@@ -212,6 +212,8 @@ mod reply;
 mod search;
 #[path = "tests_live_harness/send.rs"]
 mod send;
+#[path = "tests_live_harness/sender_identity.rs"]
+mod sender_identity;
 #[path = "tests_live_harness/settings.rs"]
 mod settings;
 #[path = "tests_live_harness/settings_proof.rs"]

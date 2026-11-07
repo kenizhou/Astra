@@ -13,7 +13,9 @@ view, the next-device account list) is recorded as decided out: the
 reference code is licence-barred from reuse in another product
 (LicenseRef-Allodia-1.0 §4.2) and the service behind it is the vendor's
 own, so those rows are marked N/A in the capabilities list rather than
-left standing as unstarted.
+left standing as unstarted. The identity round trip (the read of the
+account's own identity, the write landing and reading back, the adoption
+at the join) is proven live against the harness's JMAP.
 
 Platforms: desktop
 Bump: minor

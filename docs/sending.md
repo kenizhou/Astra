@@ -258,11 +258,14 @@ INBOX the three seeded notes and astra2 empty.
   name where its identities answer one when the account joins, stores the name
   the person sets beside the account (the From line every send carries, pushed
   best-effort to the provider where the account holder owns its copy), and
-  answers the ask-once state; and the wizard's ask step, the settings
-  card, the picker showing the name beside the address, and the pane rows
-  all ship, so this contract is complete (the one exception: the iTIP
-  scheduling reply sends From the bare matched ATTENDEE address, the
-  RFC 6047 rule the calendar surface documents).
+  answers the ask-once state; the wizard's ask step, the settings card, the
+  picker showing the name beside the address, and the pane rows all ship, so
+  this contract is complete. The name never validates client-side beyond the
+  engine's own bound, two rules not one: control characters and a 128-codepoint
+  length, refused at the setting (the difference between a settings field that
+  says no and a mailbox that cannot send), the refusal never echoing the name.
+  The one send-side exception: the iTIP scheduling reply sends From the bare
+  matched ATTENDEE address, the RFC 6047 rule the calendar surface documents.
 - **A resumed reply degrades to plain mail.** The compose request is session
   state and the draft save carries no threading, so a reply resumed after an app
   restart sends as a new message, its quote flattened back in as plain words.
