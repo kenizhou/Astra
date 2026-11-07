@@ -29,14 +29,24 @@ export interface SenderNameCardProps {
 
 /** The outgoing-name card: the ask once, then the three controls. */
 export function SenderNameCard({ row }: SenderNameCardProps) {
+  // The field seeds from the row and RESEEDS when the ask state turns, so
+  // a late adoption (the join's identity read landing while the page
+  // stands) cannot leave an empty field over an adopted name: one
+  // unthinking Save would clobber the adopted name to the bare address.
+  const asked = row.needs_sender_name === true;
+  const [askSeen, setAskSeen] = useState(asked);
   const [name, setName] = useState(() =>
     row.display_name === row.address ? '' : (row.display_name ?? ''),
   );
+  if (askSeen && !asked) {
+    setAskSeen(false);
+    setName(row.display_name === row.address ? '' : (row.display_name ?? ''));
+  }
   const control = row.sender_name_control ?? 'local';
 
   // The ask-once state: no answer stands, not even the deliberate empty
   // one. The ask leaves with the snapshot that carries the answer.
-  if (row.needs_sender_name === true) {
+  if (asked) {
     return (
       <div
         role="group"

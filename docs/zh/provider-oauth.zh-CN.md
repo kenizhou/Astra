@@ -450,8 +450,10 @@ harness（docker/harness）把 Stalwart 的 JMAP 监听器以纯 HTTP 发布在
   在登录时索取；被拒绝的日历是拨号的错误），所以横幅是 Graph 自己的
   表面。过期登录行横跨每一个家族：拒绝映射按 id 为键、与提供商无关，
   死 google 授予经 google kind 渲染该行，其“再次登录”指向 google
-  流程，而 JMAP（SP2o）与 IMAP/SMTP（SP2v）的行指名被拒凭据，补救
-  是重新连接账户，直到就地授予落地。
+  流程，JMAP（SP2o）的行经其存储的授予就地重授权（SP2w），而
+  IMAP/SMTP（SP2v）的行指名被拒凭据、补救是重新连接账户：邮件授权
+  不与 JMAP 重授权臂共享（它们以 JMAP 节定类型），因此它自己的臂是
+  后续切片。
 - **Microsoft 账户不保存服务器端草稿。** 刷新包装器刻意不声明引擎的
   服务器端草稿能力，所以撰写器只把 Microsoft 草稿留在应用里，直到
   草稿切片接上 Graph 的草稿文件夹。Google 包装器以同一理由做同一裁剪。

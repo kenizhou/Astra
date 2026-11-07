@@ -38,6 +38,18 @@ use super::jmap_commands::{JmapCompletion, JmapSignInOutcome, JmapSignInResult};
 /// row subscribes to.
 pub(crate) const JMAP_REAUTH_RESULT_EVENT: &str = "jmap_reauth_result";
 
+/** The re-grant result the completion event carries: the outcome beside
+ * the account it belongs to, so a refusal lands its sentence beside its
+ * own row and never another's (tokens from one provider tend to die
+ * together, and every JMAP row hears this one event). */
+#[derive(Clone, serde::Serialize)]
+pub(crate) struct JmapReauthResult {
+    /// The account the re-grant ran for, the row it names.
+    pub(crate) account: String,
+    /// How the flow ended.
+    pub(crate) outcome: JmapSignInOutcome,
+}
+
 /// The begin seam: the stored section in, the minted authorization start
 /// out. The production seam is [`astra_account::begin_jmap_reauth`],
 /// which makes no network calls and re-registers nothing.
@@ -237,7 +249,13 @@ pub(crate) fn jmap_reauth_begin(
         .map_err(|err| OAuthCommandError::NoGrant(err.to_string()))?;
     let emit = move |result: JmapSignInResult| {
         use tauri::Emitter;
-        let _ = app.emit(JMAP_REAUTH_RESULT_EVENT, result);
+        let _ = app.emit(
+            JMAP_REAUTH_RESULT_EVENT,
+            JmapReauthResult {
+                account: account.to_owned(),
+                outcome: result.outcome,
+            },
+        );
     };
     let wiring = super::jmap_add::JmapAccountWiring::from_state(&state, &state.runtime);
     let dial = super::jmap_add::production_jmap_dial();
