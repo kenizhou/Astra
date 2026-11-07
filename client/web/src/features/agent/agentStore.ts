@@ -25,17 +25,13 @@ import {
   chatRename,
   permissionResponse,
   type AgentStreamEvent,
-  type ChatMessage,
   type ChatSummary,
   type PendingApproval,
 } from '@/services/agent';
 
-/** One chat log entry: who said it and what. */
-export interface AgentMessage {
-  id: string;
-  role: 'user' | 'assistant' | 'note';
-  text: string;
-}
+import { rowEntries, type AgentMessage, type ToolCard } from './chatRows';
+
+export type { AgentMessage, ToolCard } from './chatRows';
 
 /** The session id a chat's turns ride, the host derivation mirrored. */
 export function sessionOf(chatId: string | null): string {
@@ -55,27 +51,6 @@ const settledPrompts = new Set<string>();
 function messageId(): string {
   nextMessageId += 1;
   return `m-${nextMessageId}`;
-}
-
-/** One message row as log entries: the row's parts in order, the same
- *  shapes the live fold produces, so a reloaded turn paints what the
- *  live turn rendered. */
-function rowEntries(row: ChatMessage): AgentMessage[] {
-  const entries: AgentMessage[] = [];
-  for (const [at, part] of row.parts.entries()) {
-    if (part.kind === 'text') {
-      entries.push({
-        id: `row-${row.id}-${at}`,
-        role: row.role === 'user' ? 'user' : 'assistant',
-        text: part.text ?? '',
-      });
-    } else if (part.kind === 'tool') {
-      entries.push({ id: `row-${row.id}-${at}`, role: 'note', text: `${part.name}: ${part.status}` });
-    } else if (part.kind === 'note') {
-      entries.push({ id: `row-${row.id}-${at}`, role: 'note', text: part.text ?? '' });
-    }
-  }
-  return entries;
 }
 
 interface AgentStoreState {
@@ -305,19 +280,54 @@ export const useAgentStore = create<AgentStoreState>((set, get) => ({
           return foldLive(state, session, next, visible);
         }
         case 'tool_call':
-          return foldLive(state, session, [
-            ...live,
-            { id: messageId(), role: 'note' as const, text: `called ${event.event.name}` },
-          ], visible);
-        case 'tool_result':
+          // The card opens at the call and runs until its result envelope
+          // answers: one entry per call, completed in place.
           return foldLive(state, session, [
             ...live,
             {
               id: messageId(),
-              role: 'note' as const,
-              text: `${event.event.name}: ${event.event.status}`,
+              role: 'tool' as const,
+              text: '',
+              toolCallId: event.event.tool_call_id,
+              tool: {
+                name: event.event.name,
+                args: event.event.args,
+                status: 'running',
+              },
             },
           ], visible);
+        case 'tool_result': {
+          // The result completes the card its call id opened; a result
+          // nothing open answers (a late or foreign envelope) still lands
+          // its completed card, never a silent drop.
+          const { tool_call_id, name, status, output } = event.event;
+          const open = live.findIndex(
+            (entry) =>
+              entry.role === 'tool' &&
+              entry.toolCallId === tool_call_id &&
+              entry.tool?.status === 'running',
+          );
+          const card = live[open];
+          if (open >= 0 && card !== undefined) {
+            const next = [...live];
+            next[open] = {
+              ...card,
+              tool: {
+                name,
+                args: card.tool?.args,
+                status,
+                ...(output !== undefined ? { output } : {}),
+              },
+            };
+            return foldLive(state, session, next, visible);
+          }
+          const tool: ToolCard = { name, status };
+          if (output !== undefined) tool.output = output;
+          return foldLive(state, session, [
+            ...live,
+            { id: messageId(), role: 'tool' as const, text: '', tool },
+          ], visible);
+        }
         case 'done': {
           // The fold point: the host has recorded the row this buffer
           // became. The buffer lets go; a visible thread keeps its entries

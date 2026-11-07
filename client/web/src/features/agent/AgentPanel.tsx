@@ -13,6 +13,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { sessionOf, useAgentStore, type AgentMessage } from './agentStore';
+import { Markdown } from './Markdown';
 import { AgentIcon, CloseIcon } from '@/components/icons';
 import { RAIL_BUTTON_CLASS, railButtonColours } from '@/components/layout/railButton';
 import { useUiStore } from '@/stores/uiStore';
@@ -21,28 +22,93 @@ import type { ChatSummary, PendingApproval } from '@/services/agent';
 const actionClass =
   'rounded-[var(--radius-xs)] px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
-/** One chat log entry: a user bubble, an assistant bubble, or a note line. */
+/** The status word's colour: the running card is quiet, the audited
+ *  outcomes carry their own weight. */
+function statusClass(status: string): string {
+  if (status === 'ok') {
+    return 'text-[11px] text-success';
+  }
+  if (status === 'error') {
+    return 'text-[11px] text-destructive';
+  }
+  return 'text-[11px] text-muted-foreground';
+}
+
+/** One chat log entry: a user bubble, an assistant bubble (markdown), a
+ *  tool card, or a note line. */
 function LogEntry({ message }: { message: AgentMessage }) {
   if (message.role === 'note') {
     return <p className="px-1 text-[11px] italic text-muted-foreground">{message.text}</p>;
   }
+  if (message.role === 'tool') {
+    return <ToolCardLine message={message} />;
+  }
   const own = message.role === 'user';
+  const bubble =
+    'rounded-[var(--radius-xs)] px-2 py-1 text-xs text-foreground ' +
+    (own ? 'ml-6 bg-hover' : 'mr-6 bg-surface');
+  if (own) {
+    // The user's own words stay plain: what the person typed is theirs,
+    // and the renderer is for the assistant's answers.
+    return <p className={bubble}>{message.text}</p>;
+  }
   return (
-    <p
-      className={
-        own
-          ? 'ml-6 rounded-[var(--radius-xs)] bg-hover px-2 py-1 text-xs text-foreground'
-          : 'mr-6 rounded-[var(--radius-xs)] bg-surface px-2 py-1 text-xs text-foreground'
-      }
+    <div className={`${bubble} space-y-1`}>
+      <Markdown text={message.text} />
+    </div>
+  );
+}
+
+/** One tool card: the call's name, its argument summary, its status, and
+ *  its output truncated for display (the whole output rides the title). */
+function ToolCardLine({ message }: { message: AgentMessage }) {
+  const tool = message.tool;
+  if (tool === undefined) {
+    return null;
+  }
+  return (
+    <article
+      aria-label={`Tool ${tool.name}`}
+      className="mr-6 rounded-[var(--radius-xs)] border border-border bg-surface px-2 py-1.5"
     >
-      {message.text}
-    </p>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-xs font-medium text-foreground">{tool.name}</span>
+        <span className={statusClass(tool.status)}>{tool.status}</span>
+      </div>
+      {tool.args !== undefined && (
+        <p
+          className="mt-0.5 truncate text-[11px] text-muted-foreground"
+          title={argsPreview(tool.args)}
+        >
+          {argsPreview(tool.args)}
+        </p>
+      )}
+      {tool.output !== undefined && (
+        <p
+          className="mt-0.5 truncate text-[11px] text-muted-foreground"
+          title={tool.output}
+        >
+          {outputPreview(tool.output)}
+        </p>
+      )}
+    </article>
   );
 }
 
 /** The tool's arguments as the card shows them: one compact JSON line. */
-function argsPreview(args: Record<string, unknown>): string {
-  return JSON.stringify(args);
+function argsPreview(args: unknown): string {
+  return JSON.stringify(args) ?? '';
+}
+
+/** How much of a tool's output the card shows; the whole text stays one
+ *  hover away. */
+const OUTPUT_PREVIEW_CHARS = 160;
+
+/** The card's output line: the first characters, an ellipsis when cut. */
+function outputPreview(output: string): string {
+  return output.length <= OUTPUT_PREVIEW_CHARS
+    ? output
+    : `${output.slice(0, OUTPUT_PREVIEW_CHARS)}…`;
 }
 
 /** One asked permission, with the answer the host routes back. */

@@ -14,6 +14,12 @@ use astra_ai::{ChatId, ChatRole};
 use super::SidecarRelay;
 use crate::agent::StreamPayload;
 
+/// The assistant chat's pipeline version, the AI rules' bump pin: every
+/// behaviour change to the chat pipeline (prompts, the tool surface, the
+/// fold the rows record) bumps this and lands its eval in the same
+/// change. Every run stamps it into its chat row's metadata.
+pub(crate) const AGENT_PIPELINE_VERSION: &str = "1";
+
 /// How a turn settled, as the run metadata's finish reason records it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TurnFinish {
@@ -235,6 +241,7 @@ impl SidecarRelay {
             return;
         }
         let mut metadata = serde_json::json!({
+            "pipeline": AGENT_PIPELINE_VERSION,
             "finish_reason": finish.word(turn.aborted),
             "tool_calls": turn.tool_calls,
             "correlation": turn.correlation,

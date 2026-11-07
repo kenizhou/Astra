@@ -35,6 +35,13 @@ mod messaging;
 mod runtime;
 mod threads;
 
+/// The assistant chat's pipeline version, stamped into every recorded
+/// run's metadata by the thread fold ([`threads`]); re-exported for the
+/// tests that pin the stamp (test-only: the fold itself reads the
+/// constant where it lives).
+#[cfg(test)]
+pub(crate) use threads::AGENT_PIPELINE_VERSION;
+
 /// How long [`SidecarRelay::ensure_started`] waits for the ready
 /// handshake.
 const READY_TIMEOUT: Duration = Duration::from_secs(5);

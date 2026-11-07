@@ -183,6 +183,16 @@ scenarios fails the offline suite. The AI rule this enforces: an AI
 behaviour change requires an eval run in the same change and a pipeline
 version bump.
 
+The assistant chat carries its own pipeline version,
+`AGENT_PIPELINE_VERSION` (`client/desktop/src/agent/relay/threads.rs`):
+the whole chat pipeline (prompts, the tool surface, the fold the rows
+record) versions together, and every run stamps it into its chat row's
+`metadata.pipeline` at the relay's fold point, so a stored thread names
+the pipeline that produced it without a ledger column. The desktop
+relay's chat tests pin the stamp; the chat's eval scenarios (the budget
+and agent-tool fixtures the sidecar's `src/evals.test.ts` drives) pin no
+prompt constant of their own because no prompt text rides them.
+
 **`JUDGE_TEMPLATES_VERSION` in the ledger: ruled out for now.** Carrying
 the prompt version inside each `llm_calls` row needs a schema change to
 the ledger and every writer (host client, sidecar relay, CLI) moved in

@@ -13,6 +13,10 @@ const args = process.argv.slice(2);
 // ASTRA_STUB_PAD grows the stdout document by that many characters, so a
 // test can drive an output past a tool's truncation bound. It rides the
 // safeExec ASTRA_* passthrough; unset or zero prints exactly the old shape.
+// ASTRA_STUB_PAGE replaces the echo with that JSON document verbatim, so
+// an eval can seed the page a real CLI verb would answer (a search page,
+// say) and pin the model receiving the page shape. Both ride the same
+// passthrough; unset keeps exactly the old shape.
 const pad = Number(process.env.ASTRA_STUB_PAD ?? 0);
 fs.appendFileSync(
   'stub-captures.jsonl',
@@ -23,6 +27,10 @@ fs.appendFileSync(
     cwd: process.cwd(),
   }) + '\n',
 );
+if (process.env.ASTRA_STUB_PAGE !== undefined) {
+  process.stdout.write(process.env.ASTRA_STUB_PAGE);
+  process.exit(0);
+}
 process.stdout.write(
   JSON.stringify({
     script,

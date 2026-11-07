@@ -81,7 +81,13 @@ describe('the thread list', () => {
               role: 'assistant',
               parts: [
                 { kind: 'text', text: 'Draft saved.' },
-                { kind: 'tool', name: 'save_draft', status: 'ok' },
+                {
+                  kind: 'tool',
+                  name: 'save_draft',
+                  status: 'ok',
+                  args: { account: 'work', subject: 'Re: Friday' },
+                  output: '{"queued":true}',
+                },
                 { kind: 'note', text: 'the tool budget is spent; the assistant finishes in text' },
               ],
               metadata: { model: 'mock-1', finish_reason: 'done', tool_calls: 1 },
@@ -126,7 +132,14 @@ describe('the thread list', () => {
     const log = screen.getByRole('log', { name: 'Agent conversation' });
     expect(within(log).getByText('draft the reply')).toBeTruthy();
     expect(within(log).getByText('Draft saved.')).toBeTruthy();
-    expect(within(log).getByText('save_draft: ok')).toBeTruthy();
+    // A loaded thread paints its tool calls as the same cards the live
+    // fold renders, straight from the stored parts.
+    const card = within(log).getByRole('article', { name: 'Tool save_draft' });
+    expect(within(card).getByText('save_draft')).toBeTruthy();
+    expect(within(card).getByText('ok')).toBeTruthy();
+    expect(within(card).getByText(/"account":"work"/)).toBeTruthy();
+    expect(within(card).getByText('{"queued":true}')).toBeTruthy();
+    // The old note parts still render as note lines.
     expect(
       within(log).getByText('the tool budget is spent; the assistant finishes in text'),
     ).toBeTruthy();

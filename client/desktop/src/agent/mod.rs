@@ -38,6 +38,10 @@ mod relay_tests;
 mod relay_chat_tests;
 
 #[cfg(test)]
+#[path = "policy_tests.rs"]
+mod policy_tests;
+
+#[cfg(test)]
 #[path = "supervisor_tests.rs"]
 mod supervisor_tests;
 

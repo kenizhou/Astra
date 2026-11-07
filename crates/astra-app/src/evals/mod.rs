@@ -120,6 +120,13 @@ pub enum Feature {
     /// `src/evals.test.ts` drives these fixtures over the built bundle),
     /// so this battery pin-checks them and moves on.
     Budget,
+    /// The assistant chat's tool surface: the search riding its auto
+    /// policy, the act verbs through the confirm gate (both answers), and
+    /// the read's truncation bound. No prompt text rides, so no version
+    /// is pinned; the runner lives beside the seam it exercises (the
+    /// sidecar's `src/evals.test.ts` drives these fixtures over the built
+    /// bundle), so this battery pin-checks them and moves on.
+    AgentTools,
 }
 
 impl Feature {
@@ -144,6 +151,7 @@ impl Feature {
             "split" => Ok(Self::Split),
             "meeting-brief" => Ok(Self::MeetingBrief),
             "budget" => Ok(Self::Budget),
+            "agent-tools" => Ok(Self::AgentTools),
             _ => Err(format!("unknown feature {word:?}")),
         }
     }
@@ -160,7 +168,7 @@ impl Feature {
             Self::Cold => Some((COLD_JUDGE_VERSION, "COLD_JUDGE_VERSION")),
             Self::Match => Some((RULES_MATCH_VERSION, "RULES_MATCH_VERSION")),
             Self::JudgeTemplate => Some((JUDGE_TEMPLATES_VERSION, "JUDGE_TEMPLATES_VERSION")),
-            Self::Redaction | Self::Budget => None,
+            Self::Redaction | Self::Budget | Self::AgentTools => None,
             Self::Draft => Some((DRAFT_REPLY_PROMPT_VERSION, "DRAFT_REPLY_PROMPT_VERSION")),
             Self::Summarise => Some((SUMMARISE_PROMPT_VERSION, "SUMMARISE_PROMPT_VERSION")),
             Self::Gate => Some((GATE_JUDGE_VERSION, "GATE_JUDGE_VERSION")),
@@ -310,7 +318,8 @@ async fn offline_scenarios_run_green_and_every_scenario_pins_its_version() {
             // dispatch: its scenarios run beside that seam (the sidecar's
             // own test battery drives every evals/budget-*.json over the
             // built bundle), so this loop pin-checks them and moves on.
-            if scenario.feature == Feature::Budget {
+            // The agent tool surface rides the same sidecar runner.
+            if matches!(scenario.feature, Feature::Budget | Feature::AgentTools) {
                 continue;
             }
             runner::offline(scenario)

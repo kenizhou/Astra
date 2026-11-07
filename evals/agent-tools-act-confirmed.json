@@ -1,0 +1,19 @@
+{
+  "id": "agent-tools-act-confirmed",
+  "feature": "agent-tools",
+  "mode": "offline",
+  "inputs": {
+    "tool_budget_ms": 600000,
+    "chunks": ["marking"],
+    "chunk_delay_ms": 1,
+    "tool_call": { "name": "mark_read", "args": { "account": "acct-1", "key": "msg-1", "read": true } },
+    "policy": { "mark_read": { "level": "confirm" } }
+  },
+  "expected": {
+    "permission_ask": { "tool": "mark_read", "level": "confirm" },
+    "answer": true,
+    "tool_result": { "tool": "mark_read", "status": "ok" },
+    "cli_captured_verb": "mark-read",
+    "done": true
+  }
+}

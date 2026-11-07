@@ -139,6 +139,13 @@ fn a_prompt_naming_a_chat_rides_its_session_and_records_its_rows() {
     assert_eq!(metadata["finish_reason"], "done");
     assert_eq!(metadata["tool_calls"], 0);
     assert_eq!(metadata["correlation"], "corr-42");
+    // Every run stamps the assistant chat's pipeline version: the AI
+    // rules' bump contract needs the stamp on the row a later diff reads.
+    assert_eq!(
+        metadata["pipeline"],
+        super::relay::AGENT_PIPELINE_VERSION,
+        "the run carries the pipeline version: {metadata}"
+    );
 }
 
 #[test]

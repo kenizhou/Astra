@@ -1,13 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-only
 /**
- * The budget eval runner: the scenarios under the repository's evals/
- * directory (feature "budget"), driven over the BUILT bundle exactly as
- * the astra-app harness drives its own: the runner lives beside the seam
- * it exercises, and the budget's seam is the sidecar's stdio loop. Each
+ * The sidecar eval runner: the scenarios under the repository's evals/
+ * directory whose seams live in this sidecar (features "budget" and
+ * "agent-tools"), driven over the BUILT bundle exactly as the astra-app
+ * harness drives its own: the runner lives beside the seam it exercises.
+ * The budget's seam is the stdio loop's clock (a past-budget tool call
+ * answers skipped, the watchdog lands done, the budget-spent state event
+ * crosses); the agent tool surface's seam is the same loop's gate (a
+ * search riding its auto policy answers its page with no ask, an act
+ * verb through the confirm gate runs only on the host's yes, and the
+ * read's four-thousand-character bound cuts with its marker). Each
  * scenario spawns dist/index.cjs under the mock harness with the budget
- * env overrides its inputs carry, speaks JSONL, and asserts the wire:
- * a past-budget tool call answers skipped, the watchdog lands done, and
- * the budget-spent state event crosses. Run `npm run build` first.
+ * env overrides its inputs carry, speaks JSONL, and asserts the wire.
+ * Run `npm run build` first.
  *
  * The astra-app eval harness (crates/astra-app/src/evals) parses every
  * file in evals/ and pin-checks these scenarios but does not drive them;
@@ -33,19 +38,42 @@ interface ScenarioInputs {
   chunk_delay_ms?: number;
   tool_call?: { name: string; args: unknown };
   policy?: Record<string, { level: string }>;
+  /** The JSON document the stub CLI answers instead of its echo: the
+   *  seeded page a real verb would print (a search page, say). */
+  cli_page?: unknown;
+  /** Grows the stub CLI's stdout by this many characters, past a tool's
+   *  truncation bound. */
+  stub_pad?: number;
 }
 
 interface ScenarioExpected {
   budget_event?: boolean | { session_id: string; state: string };
   no_budget_event?: boolean;
-  tool_result?: { tool: string; status: string; output_includes?: string };
+  tool_result?: {
+    tool: string;
+    status: string;
+    output_includes?: string;
+    truncated_at?: number;
+  };
   max_text_deltas?: number;
   done?: boolean;
+  /** The search leg: no permission ask may cross, and the model receives
+   *  exactly the seeded page. */
+  no_permission_ask?: boolean;
+  output_equals_page?: boolean;
+  /** The confirm legs: the ask crosses with this shape and this answer
+   *  goes back. */
+  permission_ask?: { tool: string; level: string };
+  answer?: boolean;
+  /** The approved leg: the CLI ran, its capture naming this verb word. */
+  cli_captured_verb?: string;
+  /** The rejected leg: the CLI never ran at all. */
+  cli_never_ran?: boolean;
 }
 
 interface Scenario {
   id: string;
-  feature: 'budget';
+  feature: 'budget' | 'agent-tools';
   mode: 'offline';
   inputs: ScenarioInputs;
   expected: ScenarioExpected;
@@ -64,25 +92,26 @@ after(() => {
   }
 });
 
-/** Every budget scenario fixture in evals/, file name order: the list this
- *  runner drives, so a fixture landing there without a home here fails on
- *  the wire, never silently. */
-function budgetScenarios(): Scenario[] {
+/** Every scenario fixture in evals/ carrying the feature word, file name
+ *  order: the list this runner drives, so a fixture landing there without
+ *  a home here fails on the wire, never silently. */
+function scenariosFor(feature: 'budget' | 'agent-tools'): Scenario[] {
+  const prefix = feature === 'budget' ? 'budget-' : 'agent-tools-';
   const names = fs
     .readdirSync(EVALS_DIR)
-    .filter((n) => n.startsWith('budget-') && n.endsWith('.json'))
+    .filter((n) => n.startsWith(prefix) && n.endsWith('.json'))
     .sort();
-  assert.ok(names.length > 0, 'evals/ must hold budget scenarios');
+  assert.ok(names.length > 0, `evals/ must hold ${feature} scenarios`);
   return names.map((name) => {
     const text = fs.readFileSync(path.join(EVALS_DIR, name), 'utf8');
     const parsed = JSON.parse(text) as Scenario;
-    assert.equal(parsed.feature, 'budget', `${name} must carry the budget feature word`);
+    assert.equal(parsed.feature, feature, `${name} must carry the ${feature} feature word`);
     return parsed;
   });
 }
 
 /** A temp data dir with the stub CLI under the verb words, so a tool the
- *  budget lets through really executes. */
+ *  budget or policy lets through really executes. */
 function stubDataDir(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'astra-budget-evals-'));
   tmpDirs.push(dir);
@@ -134,8 +163,13 @@ function spawnSidecar(env: NodeJS.ProcessEnv): Spawned {
 }
 
 /** Drive one scenario over the wire: init under the mock harness with the
- *  fixture its inputs describe, one prompt, every envelope up to its done. */
-async function driveScenario(s: Scenario): Promise<Record<string, unknown>[]> {
+ *  fixture its inputs describe, one prompt, every envelope up to its done.
+ *  A permission ask the scenario expects is answered as its fixture says;
+ *  the stub data dir rides back for the executed-or-not assertions. */
+async function driveScenario(
+  s: Scenario,
+): Promise<{ envelopes: Record<string, unknown>[]; dataDir: string }> {
+  const dataDir = stubDataDir();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'astra-budget-eval-'));
   tmpDirs.push(dir);
   const fixturePath = path.join(dir, 'fixture.json');
@@ -153,13 +187,19 @@ async function driveScenario(s: Scenario): Promise<Record<string, unknown>[]> {
   if (s.inputs.budget_grace_ms !== undefined) {
     env.ASTRA_AGENT_TOOL_BUDGET_GRACE_MS = String(s.inputs.budget_grace_ms);
   }
+  if (s.inputs.cli_page !== undefined) {
+    env.ASTRA_STUB_PAGE = JSON.stringify(s.inputs.cli_page);
+  }
+  if (s.inputs.stub_pad !== undefined) {
+    env.ASTRA_STUB_PAD = String(s.inputs.stub_pad);
+  }
 
   const sidecar = spawnSidecar(env);
   const init: Record<string, unknown> = {
     type: 'init',
     harness: 'mock',
     cli_path: process.execPath,
-    data_dir: stubDataDir(),
+    data_dir: dataDir,
     mock_fixture: fixturePath,
   };
   if (s.inputs.policy !== undefined) init.policy = s.inputs.policy;
@@ -178,9 +218,21 @@ async function driveScenario(s: Scenario): Promise<Record<string, unknown>[]> {
   for (;;) {
     const envLine = await sidecar.nextLine();
     envelopes.push(envLine);
+    if (envLine.type === 'permission_request') {
+      assert.ok(
+        s.expected.permission_ask !== undefined,
+        `scenario ${s.id}: an ask crossed the wire the scenario never expected`,
+      );
+      sidecar.send({
+        type: 'permission_response',
+        id: envLine.id,
+        approved: s.expected.answer ?? false,
+        always_allow: false,
+      });
+    }
     if (envLine.type === 'done') break;
   }
-  return envelopes;
+  return { envelopes, dataDir };
 }
 
 function isStateEvent(e: Record<string, unknown>, state: string): boolean {
@@ -189,8 +241,20 @@ function isStateEvent(e: Record<string, unknown>, state: string): boolean {
   return event?.kind === 'state' && event.state === state;
 }
 
+/** The stub CLI's captured invocations, if any: the proof an approved act
+ *  really reached the CLI and a rejected one never did. */
+function stubCaptures(dataDir: string): Array<{ argv: string[] }> {
+  const file = path.join(dataDir, 'stub-captures.jsonl');
+  if (!fs.existsSync(file)) return [];
+  return fs
+    .readFileSync(file, 'utf8')
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .map((line) => JSON.parse(line) as { argv: string[] });
+}
+
 /** Assert one scenario's expected outcomes against its collected wire. */
-function assertExpected(s: Scenario, envelopes: Record<string, unknown>[]): void {
+function assertExpected(s: Scenario, envelopes: Record<string, unknown>[], dataDir: string): void {
   const spentEvents = envelopes.filter((e) => isStateEvent(e, 'budget-spent'));
 
   if (s.expected.budget_event !== undefined) {
@@ -219,6 +283,21 @@ function assertExpected(s: Scenario, envelopes: Record<string, unknown>[]): void
     );
   }
 
+  const asks = envelopes.filter((e) => e.type === 'permission_request');
+  if (s.expected.no_permission_ask) {
+    assert.equal(
+      asks.length,
+      0,
+      `scenario ${s.id}: an auto-policy read asks nobody: ${JSON.stringify(asks)}`,
+    );
+  }
+  if (s.expected.permission_ask !== undefined) {
+    const want = s.expected.permission_ask;
+    assert.equal(asks.length, 1, `scenario ${s.id}: the confirm gate asks once`);
+    assert.equal(asks[0]!.tool, want.tool, `scenario ${s.id}: the ask names its tool`);
+    assert.equal(asks[0]!.level, want.level, `scenario ${s.id}: the ask carries its level`);
+  }
+
   if (s.expected.tool_result !== undefined) {
     const want = s.expected.tool_result;
     const tr = envelopes.find((e) => e.type === 'tool_result');
@@ -232,6 +311,42 @@ function assertExpected(s: Scenario, envelopes: Record<string, unknown>[]): void
         `scenario ${s.id}: the model is told why`,
       );
     }
+    if (want.truncated_at !== undefined) {
+      const marker = `[truncated at ${want.truncated_at} characters]`;
+      const output = String(tr.output ?? '');
+      assert.equal(
+        output.length,
+        want.truncated_at + marker.length,
+        `scenario ${s.id}: the read is cut exactly at its bound with the marker`,
+      );
+      assert.ok(
+        output.endsWith(marker),
+        `scenario ${s.id}: the cut names its bound: ${output.slice(-60)}`,
+      );
+    }
+  }
+
+  if (s.expected.output_equals_page) {
+    const tr = envelopes.find((e) => e.type === 'tool_result');
+    assert.ok(tr, `scenario ${s.id}: the search's page must cross the wire`);
+    assert.deepEqual(
+      JSON.parse(String(tr!.output ?? '')),
+      s.inputs.cli_page,
+      `scenario ${s.id}: the model receives the seeded page shape verbatim`,
+    );
+  }
+
+  if (s.expected.cli_captured_verb !== undefined) {
+    const verb = s.expected.cli_captured_verb;
+    const ran = stubCaptures(dataDir).some((capture) => capture.argv.includes(verb));
+    assert.ok(ran, `scenario ${s.id}: the approved act really reached the CLI (${verb})`);
+  }
+  if (s.expected.cli_never_ran) {
+    assert.equal(
+      stubCaptures(dataDir).length,
+      0,
+      `scenario ${s.id}: a rejected act executes nothing, not one CLI spawn`,
+    );
   }
 
   if (s.expected.max_text_deltas !== undefined) {
@@ -252,9 +367,9 @@ function assertExpected(s: Scenario, envelopes: Record<string, unknown>[]): void
   }
 }
 
-for (const scenario of budgetScenarios()) {
+for (const scenario of [...scenariosFor('budget'), ...scenariosFor('agent-tools')]) {
   test(`eval scenario ${scenario.id} holds over the built bundle`, async () => {
-    const envelopes = await driveScenario(scenario);
-    assertExpected(scenario, envelopes);
+    const { envelopes, dataDir } = await driveScenario(scenario);
+    assertExpected(scenario, envelopes, dataDir);
   });
 }

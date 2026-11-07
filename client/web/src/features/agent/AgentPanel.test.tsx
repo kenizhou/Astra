@@ -95,17 +95,17 @@ describe('the status toggle', () => {
 });
 
 describe('the chat log', () => {
-  it('renders the streamed turn: the user bubble, the streaming assistant bubble, and the tool notes', async () => {
+  it('renders the streamed turn: the user bubble, the markdown assistant bubble, and the tool card', async () => {
     await act(async () => {
       await useAgentStore.getState().sendPrompt('summarise the inbox');
     });
     act(() => {
       const store = useAgentStore.getState();
       store.applyStreamEvent({ session_id: 'agent:chat:chat-1', event: { kind: 'text_delta', text: 'Hello' } });
-      store.applyStreamEvent({ session_id: 'agent:chat:chat-1', event: { kind: 'text_delta', text: ' there' } });
+      store.applyStreamEvent({ session_id: 'agent:chat:chat-1', event: { kind: 'text_delta', text: ' **there**' } });
       store.applyStreamEvent({
         session_id: 'agent:chat:chat-1',
-        event: { kind: 'tool_call', name: 'list_messages', args: {}, tool_call_id: 'c1' },
+        event: { kind: 'tool_call', name: 'list_messages', args: { account: 'work' }, tool_call_id: 'c1' },
       });
       store.applyStreamEvent({
         session_id: 'agent:chat:chat-1',
@@ -117,9 +117,94 @@ describe('the chat log', () => {
 
     const log = screen.getByRole('log', { name: 'Agent conversation' });
     expect(within(log).getByText('summarise the inbox')).toBeTruthy();
-    expect(within(log).getByText('Hello there')).toBeTruthy();
-    expect(within(log).getByText('called list_messages')).toBeTruthy();
-    expect(within(log).getByText('list_messages: ok')).toBeTruthy();
+    // The assistant bubble renders as markdown: the streamed emphasis
+    // lands as a real element, never literal stars.
+    const bold = within(log).getByText('there');
+    expect(bold.tagName).toBe('STRONG');
+    expect(within(log).queryByText('Hello **there**')).toBeNull();
+    const card = within(log).getByRole('article', { name: 'Tool list_messages' });
+    expect(within(card).getByText('list_messages')).toBeTruthy();
+    expect(within(card).getByText('ok')).toBeTruthy();
+    expect(within(card).getByText(/"account":"work"/)).toBeTruthy();
+  });
+
+  it('completes one tool card in place, never two note lines', async () => {
+    await act(async () => {
+      await useAgentStore.getState().sendPrompt('search the inbox');
+    });
+    act(() => {
+      const store = useAgentStore.getState();
+      store.applyStreamEvent({
+        session_id: 'agent:chat:chat-1',
+        event: {
+          kind: 'tool_call',
+          name: 'search_messages',
+          args: { query: 'from:boss' },
+          tool_call_id: 'c2',
+        },
+      });
+    });
+    expect(useAgentStore.getState().messages.filter((m) => m.role === 'tool').length).toBe(1);
+    expect(useAgentStore.getState().messages.find((m) => m.role === 'tool')?.tool?.status).toBe(
+      'running',
+    );
+
+    act(() => {
+      useAgentStore.getState().applyStreamEvent({
+        session_id: 'agent:chat:chat-1',
+        event: {
+          kind: 'tool_result',
+          tool_call_id: 'c2',
+          name: 'search_messages',
+          status: 'ok',
+          output: '{"rows":[],"total":0,"has_more":false}',
+        },
+      });
+    });
+    const cards = useAgentStore.getState().messages.filter((m) => m.role === 'tool');
+    expect(cards.length).toBe(1);
+    expect(cards[0]?.tool?.status).toBe('ok');
+    expect(cards[0]?.tool?.output).toBe('{"rows":[],"total":0,"has_more":false}');
+
+    useUiStore.getState().setAgentOpen(true);
+    render(<AgentPanel />);
+    const log = screen.getByRole('log', { name: 'Agent conversation' });
+    const card = within(log).getByRole('article', { name: 'Tool search_messages' });
+    expect(within(card).getByText(/"rows":\[\]/)).toBeTruthy();
+    // The user's bubble stays plain text, untouched by the renderer.
+    expect(within(log).getByText('search the inbox').tagName).toBe('P');
+  });
+
+  it('truncates a long tool output on the card, keeping the whole under the title', async () => {
+    await act(async () => {
+      await useAgentStore.getState().sendPrompt('read the message');
+    });
+    act(() => {
+      const store = useAgentStore.getState();
+      store.applyStreamEvent({
+        session_id: 'agent:chat:chat-1',
+        event: { kind: 'tool_call', name: 'read_message', args: { keys: ['k1'] }, tool_call_id: 'c3' },
+      });
+      store.applyStreamEvent({
+        session_id: 'agent:chat:chat-1',
+        event: {
+          kind: 'tool_result',
+          tool_call_id: 'c3',
+          name: 'read_message',
+          status: 'ok',
+          output: 'x'.repeat(400),
+        },
+      });
+    });
+    useUiStore.getState().setAgentOpen(true);
+    render(<AgentPanel />);
+
+    const card = screen.getByRole('article', { name: 'Tool read_message' });
+    const shown = within(card).getByText(/x{3}/).textContent ?? '';
+    expect(shown.length).toBeLessThan(400);
+    expect(shown.endsWith('…')).toBe(true);
+    const line = within(card).getByText(/x{3}/);
+    expect(line.getAttribute('title')).toBe('x'.repeat(400));
   });
 
   it('folds a turn that ends in error into a note and clears the live turn', async () => {

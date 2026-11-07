@@ -1,0 +1,18 @@
+{
+  "id": "agent-tools-read-truncation",
+  "feature": "agent-tools",
+  "mode": "offline",
+  "inputs": {
+    "tool_budget_ms": 600000,
+    "chunks": ["reading"],
+    "chunk_delay_ms": 1,
+    "tool_call": { "name": "read_message", "args": { "account": "acct-1", "keys": ["msg-1"] } },
+    "policy": { "read_message": { "level": "auto" } },
+    "stub_pad": 6000
+  },
+  "expected": {
+    "no_permission_ask": true,
+    "tool_result": { "tool": "read_message", "status": "ok", "truncated_at": 4000 },
+    "done": true
+  }
+}
