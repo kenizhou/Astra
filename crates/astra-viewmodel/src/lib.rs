@@ -50,4 +50,4 @@ pub use settings::{
 pub use sync_progress::{
     AccountSyncProgress, AccountSyncState, DeliveryState, SyncProgressSnapshot,
 };
-pub use view::MailboxListSnapshot;
+pub use view::{ListScope, MailboxListSnapshot};

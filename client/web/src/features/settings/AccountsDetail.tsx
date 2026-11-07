@@ -14,6 +14,7 @@ import type { AccountKind } from '@/services/ipc';
 import { AccountSyncEditor } from './AccountSyncEditor';
 import { DavEditor } from './DavEditor';
 import { ExpiredSignInRow, ReconnectBanner } from './GrantRefusals';
+import { SenderNameCard } from './SenderNameCard';
 import { useSettingsStore } from './settingsStore';
 
 /** The kind words the rows show. */
@@ -79,8 +80,20 @@ export function AccountsDetail() {
                 }}
                 className="flex flex-col items-start gap-0.5 rounded-[var(--radius-xs)] border border-border px-3 py-2 text-left transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
-                <span className="text-xs font-medium text-foreground">{account.address}</span>
+                <span className="text-xs font-medium text-foreground">
+                  {account.display_name ?? account.address}
+                </span>
                 <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  {/* The address stands beside the name only where a name
+                      stands over it; an unnamed row already names the
+                      address as its title. */}
+                  {account.display_name !== undefined &&
+                    account.display_name !== account.address && (
+                      <>
+                        <span>{account.address}</span>
+                        <span aria-hidden="true">·</span>
+                      </>
+                    )}
                   <span>{KIND_LABELS[account.kind]}</span>
                   <span aria-hidden="true">·</span>
                   <span>{legsOf(account.legs)}</span>
@@ -124,6 +137,10 @@ export function AccountsDetail() {
           {row.refresh_error}
         </p>
       )}
+      {/* The outgoing name: the ask once, then the three controls the
+          sender-name governance answers. Keyed by the account so one
+          account's edit never carries into another's page. */}
+      <SenderNameCard key={`name:${row.account}`} row={row} />
       {/* Keyed by the account: the form seeds once per account, so moving
           between pages never carries one account's edits into another. */}
       <DavEditor

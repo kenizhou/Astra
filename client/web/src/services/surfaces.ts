@@ -121,6 +121,16 @@ export interface SearchState {
   depth_months: number;
 }
 
+/**
+ * Whose mail the list is standing in, as the snapshot's header carries
+ * it: the unified view, one account's whole mailbox (the switcher's
+ * selection), or one folder of one account. Crosses with a `kind` tag.
+ */
+export type ListScope =
+  | { kind: 'all_inboxes' }
+  | { kind: 'account'; account: string }
+  | { kind: 'folder'; account: string; key: string };
+
 /** The mailbox-list snapshot the panes render after every pull. */
 export interface MailboxListSnapshot {
   /** Every account's sorted folder list, one entry per configured account. */
@@ -135,6 +145,11 @@ export interface MailboxListSnapshot {
   view_mode?: ViewMode;
   /** The search state; absent at rest, while no search is running. */
   search?: SearchState;
+  /**
+   * Whose mail the list is standing in; absent on a wire from a build
+   * before the field, which reads as no scope named.
+   */
+  selected_scope?: ListScope;
 }
 
 /** One account's position between sync passes, crossing as a snake_case word. */

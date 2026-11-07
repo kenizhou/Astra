@@ -100,7 +100,7 @@ impl<P: Provider> App<P> {
     ) -> MailboxListSnapshot {
         let ids: Vec<AccountId> = handles.iter().map(|account| account.id.clone()).collect();
         let trees = self.load_rows(&ids).await;
-        let account_folders = account_folder_rows(handles, &trees, limit);
+        let account_folders = account_folder_rows(self, handles, &trees, limit);
         let started = Instant::now();
         let outcome = self
             .run_search(query, scope, live, mode, &ids, &trees)
@@ -114,6 +114,7 @@ impl<P: Provider> App<P> {
         MailboxListSnapshot {
             account_folders,
             rows: Vec::new(),
+            selected_scope: Some(super::snapshot::list_scope(live)),
             selection: None,
             visible_limit: u32::try_from(limit).unwrap_or(u32::MAX),
             view_mode: mode,

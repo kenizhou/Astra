@@ -3,12 +3,21 @@
 // the folder the user opened, or the account whose outbox the list shows
 // instead. Expansion state deliberately lives in the core, not here; the store
 // only mirrors what each pull brought back, so the tree never disagrees with
-// itself across surfaces or across a restart.
+// itself across surfaces or across a restart. The standing scope mirrors the
+// snapshot's own word for whose mail the list is in (the switcher's label and
+// highlight read it), refreshed by every pull and moved optimistically by each
+// selection, so a relaunch and a second surface label the same scope the core
+// holds.
 
 import { create } from 'zustand';
 
 import type { FolderRef } from '@/services/ipc';
-import type { AccountFolderRow, FolderRow, MailboxListSnapshot } from '@/services/surfaces';
+import type {
+  AccountFolderRow,
+  FolderRow,
+  ListScope,
+  MailboxListSnapshot,
+} from '@/services/surfaces';
 
 interface FolderStoreState {
   /** Every account group with its sorted folder rows, in snapshot order. */
@@ -19,6 +28,9 @@ interface FolderStoreState {
   outboxAccount: string | null;
   /** Whether the unified all-inboxes view leads the list. */
   unified: boolean;
+  /** Whose mail the list stands in, the snapshot's own word for it; null
+   *  before the first pull names one. */
+  scope: ListScope | null;
   /** Replaces the tree from a fresh mailbox-list snapshot. */
   applySnapshot: (snapshot: MailboxListSnapshot) => void;
   /** Records a folder selection the surface just dispatched. */
@@ -27,6 +39,8 @@ interface FolderStoreState {
   selectOutbox: (account: string) => void;
   /** Records the unified selection the surface just dispatched. */
   selectUnified: () => void;
+  /** Records the account selection the switcher just dispatched. */
+  selectAccount: (account: string) => void;
 }
 
 export const useFolderStore = create<FolderStoreState>((set) => ({
@@ -34,16 +48,31 @@ export const useFolderStore = create<FolderStoreState>((set) => ({
   selected: null,
   outboxAccount: null,
   unified: false,
+  scope: null,
 
-  applySnapshot: (snapshot) => set({ accounts: snapshot.account_folders }),
+  applySnapshot: (snapshot) =>
+    set((state) => ({
+      accounts: snapshot.account_folders,
+      scope: snapshot.selected_scope ?? state.scope,
+    })),
 
-  // A folder, an outbox, and the unified view never lead at once: each
-  // selection clears the others.
-  select: (folder) => set({ selected: folder, outboxAccount: null, unified: false }),
+  // A folder, an outbox, the unified view, and one account never lead at
+  // once: each selection clears the others.
+  select: (folder) =>
+    set({
+      selected: folder,
+      outboxAccount: null,
+      unified: false,
+      scope: { kind: 'folder', account: folder.account, key: folder.key },
+    }),
 
   selectOutbox: (account) => set({ outboxAccount: account, selected: null, unified: false }),
 
-  selectUnified: () => set({ unified: true, selected: null, outboxAccount: null }),
+  selectUnified: () =>
+    set({ unified: true, selected: null, outboxAccount: null, scope: { kind: 'all_inboxes' } }),
+
+  selectAccount: (account) =>
+    set({ scope: { kind: 'account', account }, selected: null, outboxAccount: null, unified: false }),
 }));
 
 /**

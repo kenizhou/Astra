@@ -1,20 +1,34 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The grant refusal surfaces on the accounts page: the reconnect banner
 // for a Microsoft account whose calendar permission went missing (one
-// tap re-runs the sign-in with the account's address as the login hint)
-// and the expired-sign-in row for a dead grant (the sentence names the
-// sign-in, never a server outage; the action the same re-grant). A
-// healthy account renders neither.
+// tap re-runs the sign-in with the account's address as the login hint),
+// the expired-sign-in row for a dead grant (the sentence names the
+// sign-in, never a server outage; the action the same re-grant), and the
+// JMAP family's row whose action is the in-place re-grant over the
+// stored grant. A healthy account renders neither.
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const ipc = vi.hoisted(() => ({ dispatch: vi.fn(), oauthBegin: vi.fn() }));
+vi.hoisted(() => {
+  // The Tauri sentinel: the jmap row registers its re-grant result
+  // listener only inside Tauri, so the jsdom test stands in as one.
+  (globalThis as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+});
+
+const ipc = vi.hoisted(() => ({
+  dispatch: vi.fn(),
+  oauthBegin: vi.fn(),
+  jmapReauthBegin: vi.fn(),
+  onJmapReauthResult: vi.fn(),
+}));
 
 vi.mock('@/services/ipc', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   dispatch: ipc.dispatch,
   oauthBegin: ipc.oauthBegin,
+  jmapReauthBegin: ipc.jmapReauthBegin,
+  onJmapReauthResult: ipc.onJmapReauthResult,
 }));
 
 import { AccountsDetail } from './AccountsDetail';
@@ -54,6 +68,10 @@ beforeEach(() => {
   ipc.dispatch.mockResolvedValue(undefined);
   ipc.oauthBegin.mockReset();
   ipc.oauthBegin.mockResolvedValue({ provider: 'microsoft' });
+  ipc.jmapReauthBegin.mockReset();
+  ipc.jmapReauthBegin.mockResolvedValue(undefined);
+  ipc.onJmapReauthResult.mockReset();
+  ipc.onJmapReauthResult.mockResolvedValue(() => {});
   useSettingsStore.getState().applySnapshot(snapshot([row()]));
 });
 
@@ -168,10 +186,37 @@ describe('the expired-sign-in row', () => {
     expect(ipc.oauthBegin).toHaveBeenCalledWith('google', 'ada@gmail.example');
   });
 
-  it('a jmap expired row names the credential and never begins a microsoft flow', () => {
-    // The JMAP family has no integrated provider flow to re-grant with:
-    // the row states the credential was refused and points at
-    // reconnecting the account, and no Sign in again button renders.
+  it('a jmap expired row re-grants in place over its stored grant', () => {
+    // The JMAP family's remedy is the re-grant: the row's action re-runs
+    // the SAME authorization against the persisted grant, and the account
+    // keeps its mail, folders, and settings. No integrated provider flow
+    // begins.
+    useSettingsStore.getState().applySnapshot(
+      snapshot([
+        row({
+          account: 'ada@example.test@jmap:mail.example.test',
+          address: 'ada@example.test',
+          kind: 'jmap',
+          grant: 'sign_in_expired',
+        }),
+      ]),
+    );
+    render(<AccountsDetail />);
+
+    const sentence = screen.getByRole('status', { name: 'Sign-in expired' });
+    expect(sentence.textContent).toContain('ada@example.test');
+    expect(sentence.textContent).toMatch(/sign-in expired or was withdrawn/);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in again as ada@example.test' }));
+
+    expect(ipc.jmapReauthBegin).toHaveBeenCalledWith('ada@example.test@jmap:mail.example.test');
+    expect(ipc.oauthBegin).not.toHaveBeenCalled();
+  });
+
+  it('a refused jmap re-grant begin surfaces its sentence beside the row', async () => {
+    ipc.jmapReauthBegin.mockRejectedValue(
+      'this account has no stored sign-in to re-run: a password account'
+    );
     useSettingsStore.getState().applySnapshot(
       snapshot([
         row({
@@ -184,18 +229,46 @@ describe('the expired-sign-in row', () => {
     );
     render(<AccountsDetail />);
 
-    const sentence = screen.getByRole('status', { name: 'Sign-in expired' });
-    expect(sentence.textContent).toContain('ada@example.test');
-    expect(sentence.textContent).toMatch(/credential was refused/);
-    expect(
-      screen.queryByRole('button', { name: /Sign in again/ }),
-      'no microsoft or google flow begins for a jmap row'
-    ).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Reconnect' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in again as ada@example.test' }));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open ada@example.test' }));
+    expect(await screen.findByRole('alert')).toBeTruthy();
+    expect(screen.getByRole('alert').textContent).toContain('no stored sign-in to re-run');
+  });
 
-    expect(screen.getByRole('button', { name: 'Remove account' })).toBeTruthy();
+  it('a refused jmap re-grant completion surfaces its sentence beside the row', async () => {
+    const handlers: Array<(result: unknown) => void> = [];
+    ipc.onJmapReauthResult.mockImplementation(async (handler: (result: unknown) => void) => {
+      handlers.push(handler);
+      return () => {};
+    });
+    useSettingsStore.getState().applySnapshot(
+      snapshot([
+        row({
+          account: 'jmap',
+          address: 'ada@example.test',
+          kind: 'jmap',
+          grant: 'sign_in_expired',
+        }),
+      ]),
+    );
+    render(<AccountsDetail />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in again as ada@example.test' }));
+    await act(async () => {
+      for (const handler of handlers) {
+        handler({
+          outcome: {
+            refused: {
+              refusal: 'indeterminate',
+              detail: 'that sign-in is for a different account than the one being reconnected',
+            },
+          },
+        });
+      }
+    });
+
+    expect(await screen.findByRole('alert')).toBeTruthy();
+    expect(screen.getByRole('alert').textContent).toContain('different account');
   });
 
   it('an imap_smtp expired row names the refused credential and points at reconnecting', () => {

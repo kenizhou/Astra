@@ -237,6 +237,23 @@ describe('the settings intent wire', () => {
       '{"settings":{"set_signature":{"account":"work","reply":true,"signature":null}}}',
     );
   });
+
+  it('carries the sender name, the empty name among the answers', () => {
+    expect(JSON.stringify(settingsIntents.setSenderName('work', 'Ada Lovelace'))).toBe(
+      '{"settings":{"set_sender_name":{"account":"work","name":"Ada Lovelace"}}}',
+    );
+    expect(JSON.stringify(settingsIntents.setSenderName('work', ''))).toBe(
+      '{"settings":{"set_sender_name":{"account":"work","name":""}}}',
+    );
+  });
+
+  it('carries the sender-name row fields additively', () => {
+    const row = (fixtureJson as SettingsSnapshot).accounts![0]!;
+    expect(row.display_name).toBe('Ada Lovelace');
+    expect(row.sender_name_control).toBe('writable');
+    expect(row.needs_sender_name).toBeUndefined();
+    expect(row.sender_name_error).toBeUndefined();
+  });
 });
 
 // The platform arms the Diagnostics, Privacy, language, and device-zone

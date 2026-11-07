@@ -44,9 +44,21 @@ function deliver(result: JmapSignInResult) {
   });
 }
 
+/** The name asks the form handed up, as the flow's step reads them. */
+const nameAsks: Array<{ account?: string; address: string }> = [];
+
 /** Renders the form as the flow does, on the seed a recommendation carries. */
 function renderForm(seed: { email: string; serverUrl: string }) {
-  render(<JmapForm seed={seed} onClose={() => useUiStore.getState().setAccountSetupOpen(false)} />);
+  render(
+    <JmapForm
+      seed={seed}
+      onClose={() => useUiStore.getState().setAccountSetupOpen(false)}
+      onNameAsk={(ask) => {
+        nameAsks.push(ask);
+        useUiStore.getState().setAccountSetupOpen(false);
+      }}
+    />,
+  );
 }
 
 beforeEach(() => {
@@ -57,6 +69,7 @@ beforeEach(() => {
     account_id: 'user@example.test@jmap:mail.example.test',
     email: 'user@example.test',
   });
+  nameAsks.length = 0;
   ipc.jmapOauthOffered.mockReset();
   ipc.jmapOauthOffered.mockResolvedValue(false);
   ipc.jmapOauthBegin.mockReset();
@@ -117,6 +130,26 @@ describe('the jmap form', () => {
     );
     expect(ipc.dispatch).toHaveBeenCalled();
     await waitFor(() => expect(useUiStore.getState().accountSetupOpen).toBe(false));
+    expect(nameAsks).toEqual([
+      { account: 'user@example.test@jmap:mail.example.test', address: 'user@example.test' },
+    ]);
+  });
+
+  it('a completed password add asks the outgoing name once instead of closing', async () => {
+    // The ask-once step follows the join: the form hands the added
+    // account up to the flow's step rather than closing the wizard.
+    renderForm({ email: 'user@example.test', serverUrl: 'https://mail.example.test' });
+    fireEvent.change(screen.getByLabelText('Password or API token'), {
+      target: { value: 'an-api-token' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add account' }));
+
+    await waitFor(() => expect(nameAsks.length).toBe(1));
+    expect(nameAsks[0]).toEqual({
+      account: 'user@example.test@jmap:mail.example.test',
+      address: 'user@example.test',
+    });
   });
 
   it('surfaces the host add failure beside the field without closing', async () => {
@@ -220,6 +253,7 @@ describe('a begun jmap sign-in', () => {
 
     await waitFor(() => expect(useUiStore.getState().accountSetupOpen).toBe(false));
     expect(ipc.dispatch).toHaveBeenCalled();
+    expect(nameAsks).toEqual([{ address: 'user@example.test' }]);
   });
 
   it('a refused completion shows the typed sentence beside the buttons', async () => {

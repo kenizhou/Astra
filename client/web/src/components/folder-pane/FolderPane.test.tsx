@@ -33,7 +33,13 @@ const fixture = fixtureJson as MailboxListSnapshot;
 beforeEach(() => {
   ipc.dispatch.mockReset();
   ipc.dispatch.mockResolvedValue(undefined);
-  useFolderStore.setState({ accounts: [], selected: null, outboxAccount: null });
+  useFolderStore.setState({
+    accounts: [],
+    selected: null,
+    outboxAccount: null,
+    scope: null,
+    unified: false,
+  });
   useFolderStore.getState().applySnapshot(fixture);
   useSendingStore.getState().applySnapshot({ rows: [] });
 });
@@ -409,5 +415,48 @@ describe('the folder context menu', () => {
     });
     // The row closes on the dispatch's settlement, never before.
     await waitFor(() => expect(screen.queryByLabelText('New folder name')).toBeNull());
+  });
+});
+
+describe('the account switcher', () => {
+  it("selects the account's scope from its name row, keeping the chevron for expansion", () => {
+    render(<FolderPane />);
+
+    // The name row selects the account's scope: the header's own name,
+    // not the chevron beside it.
+    fireEvent.click(screen.getByRole('button', { name: /work@example.net's mail/i }));
+
+    expect(ipc.dispatch).toHaveBeenCalledWith({ select_account: 'work' });
+    expect(useFolderStore.getState().scope).toEqual({ kind: 'account', account: 'work' });
+    expect(useFolderStore.getState().selected).toBeNull();
+    expect(useFolderStore.getState().unified).toBe(false);
+
+    // The chevron still owns expansion, not selection.
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse work@example.net' }));
+    expect(ipc.dispatch).toHaveBeenCalledWith({
+      set_account_expanded: { account: 'work', expanded: false },
+    });
+    expect(useFolderStore.getState().scope).toEqual({ kind: 'account', account: 'work' });
+  });
+
+  it('marks the standing account scope selected on its header', () => {
+    act(() => {
+      useFolderStore.setState({ scope: { kind: 'account', account: 'work' } });
+    });
+    render(<FolderPane />);
+
+    const name = screen.getByRole('button', { name: /work@example.net's mail/i });
+    expect(name.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('reads the standing scope off the snapshot, so a relaunch labels it too', () => {
+    act(() => {
+      useFolderStore.getState().applySnapshot({
+        ...fixture,
+        selected_scope: { kind: 'account', account: 'home' },
+      });
+    });
+
+    expect(useFolderStore.getState().scope).toEqual({ kind: 'account', account: 'home' });
   });
 });

@@ -138,6 +138,9 @@ impl<P: Provider> App<P> {
             .lock()
             .expect("settings mutex poisoned")
             .error = save_failed.then_some(SettingsError::PersistFailed);
+        // The pane's account rows and the From picker carry the name, so a
+        // set republishes the list beside the settings row that answers it.
+        self.rebuild_snapshot().await;
         self.rebuild_settings().await;
     }
 

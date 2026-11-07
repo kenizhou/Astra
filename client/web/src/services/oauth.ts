@@ -209,3 +209,35 @@ export function onImapSignInResult(
     handler(event.payload);
   });
 }
+
+/**
+ * Begins one JMAP re-grant for a stored account: the host mints the
+ * authorization URL from the account's persisted grant (no
+ * re-discovery, no re-registration), opens the system browser, and this
+ * resolves once the browser opened. The completion swaps the fresh grant
+ * in place (the account keeps its mail, folders, and settings) and
+ * arrives later, through {@link onJmapReauthResult}. Refuses for an
+ * account that stores no OAuth grant: a password account has no sign-in
+ * to re-run.
+ */
+export function jmapReauthBegin(account: string): Promise<void> {
+  return invoke('jmap_reauth_begin', { account });
+}
+
+/** The JMAP re-grant completion event's payload: how the flow ended. */
+export interface JmapReauthResult {
+  /** The outcome, the JMAP sign-in's own words: re-granted or refused. */
+  outcome: JmapSignInOutcome;
+}
+
+/**
+ * Subscribes to the JMAP re-grant completion notification and resolves
+ * its unlistener; the subscription discipline is the sign-in flows' own.
+ */
+export function onJmapReauthResult(
+  handler: (result: JmapReauthResult) => void,
+): Promise<() => void> {
+  return listen<JmapReauthResult>('jmap_reauth_result', (event) => {
+    handler(event.payload);
+  });
+}

@@ -299,9 +299,11 @@ pub struct AccountSettingsRow {
     /// the accounts page's ask-state; the settled state crosses no key.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub needs_sender_name: bool,
-    /// Why the account's last name push was refused or failed, when it was:
-    /// the local name stands (it is the From line's source) and this names
-    /// why the provider's copy did not move. Absent crosses no key.
+    /// Why the account's last name write was refused, when it was: a name
+    /// that cannot go in a header (too long, or carrying a control
+    /// character; nothing stores) or a provider's refusal of the push
+    /// while the local name stood (it is the From line's source, and this
+    /// names why the provider's copy did not move). Absent crosses no key.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sender_name_error: Option<String>,
 }

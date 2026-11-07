@@ -356,3 +356,33 @@ async fn a_stored_name_survives_the_boot_s_re_adoption() {
     );
     assert_eq!(writes[0].1, "Grace Hopper");
 }
+
+#[tokio::test]
+async fn the_pane_rows_carry_the_name_the_from_line_carries() {
+    // The snapshot's account rows are the From picker's and the folder
+    // pane's one source: the stored name is the label both render, and
+    // the address answers only while no name stands.
+    let surfaces = Arc::new(Mutex::new(Vec::new()));
+    let app = fakes::app(
+        vec![fakes::account(
+            "work",
+            fakes::FakeProvider::with(vec![fakes::inbox()]),
+        )],
+        &surfaces,
+    );
+    app.dispatch(Intent::RefreshMail).await.unwrap();
+
+    assert_eq!(
+        app.mailbox_list().account_folders[0].display_name,
+        "me@work.local",
+        "an unnamed account's label is its address"
+    );
+
+    set_name(&app, "work", "Grace Hopper").await;
+
+    assert_eq!(
+        app.mailbox_list().account_folders[0].display_name,
+        "Grace Hopper",
+        "the stored name is the pane row's label"
+    );
+}

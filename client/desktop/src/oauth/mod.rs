@@ -95,6 +95,10 @@ pub(crate) mod jmap_add;
 /// The JMAP sign-in command surface: the advertise-gated offer, the
 /// begin over the standards discovery, and the completion event.
 pub(crate) mod jmap_commands;
+/// The JMAP re-grant command surface: the expired grant's own remedy,
+/// re-running the stored authorization and swapping the fresh grant in
+/// place.
+pub(crate) mod jmap_reauth;
 /// The Google Desktop flow's loopback capture: the listener the redirect
 /// lands on, bound before the authorization URL mints.
 pub(crate) mod loopback;

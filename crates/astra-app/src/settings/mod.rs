@@ -80,10 +80,12 @@ pub(crate) struct SettingsState {
     /// The per-account crypto-method write failures, shown on the
     /// account's row. Absent for an account whose last write landed.
     pub(crate) crypto_errors: BTreeMap<AccountId, String>,
-    /// The per-account sender-name push failures, shown on the account's
-    /// row: the sentence of a provider that refused the write while the
-    /// local name stood. Absent for an account whose last push landed or
-    /// was never attempted.
+    /// The per-account sender-name refusals, shown on the account's row:
+    /// the sentence of a name that cannot go in a header (too long, or
+    /// carrying a control character; nothing stores) or of a provider
+    /// that refused the write while the local name stood. Absent for an
+    /// account whose last write landed, was never attempted, or pushed
+    /// clean.
     pub(crate) name_errors: BTreeMap<AccountId, String>,
     /// Why the newest settings write was refused or failed, when it was.
     /// `None` is the state of every write that landed.

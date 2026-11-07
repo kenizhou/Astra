@@ -190,6 +190,56 @@ async fn select_account_scopes_the_list_and_resets_the_selected_folder() {
 }
 
 #[tokio::test]
+async fn the_snapshot_names_whose_mail_the_list_stands_in() {
+    let surfaces = Arc::new(Mutex::new(Vec::new()));
+    let app = app(
+        vec![
+            account(
+                "work",
+                fakes::FakeProvider::with(vec![inbox(), folder("archive", "Archive")]),
+            ),
+            account("home", fakes::FakeProvider::with(vec![inbox()])),
+        ],
+        &surfaces,
+    );
+    app.dispatch(Intent::RefreshMail).await.unwrap();
+
+    // The unified view stands until a selection names another scope.
+    assert_eq!(
+        app.mailbox_list().selected_scope,
+        Some(astra_viewmodel::ListScope::AllInboxes),
+        "the unified view is a scope the header can name"
+    );
+
+    app.dispatch(Intent::SelectAccount(Some(
+        AccountId::try_from("home").unwrap(),
+    )))
+    .await
+    .unwrap();
+    assert_eq!(
+        app.mailbox_list().selected_scope,
+        Some(astra_viewmodel::ListScope::Account {
+            account: AccountId::try_from("home").unwrap()
+        }),
+        "the switcher's selection crosses on the snapshot"
+    );
+
+    app.dispatch(Intent::SelectFolder {
+        folder: FolderRef::from_parts("work", "archive".to_owned()).unwrap(),
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        app.mailbox_list().selected_scope,
+        Some(astra_viewmodel::ListScope::Folder {
+            account: AccountId::try_from("work").unwrap(),
+            key: key("archive").to_string(),
+        }),
+        "a folder selection names the folder the list stands in"
+    );
+}
+
+#[tokio::test]
 async fn expansion_intents_write_through_to_the_pane_and_the_preferences_file() {
     let dir = scratch("expansion");
     let prefs_path = dir.join("preferences.toml");
