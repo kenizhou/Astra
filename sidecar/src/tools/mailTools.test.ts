@@ -18,6 +18,7 @@
  */
 import type { PermissionBridge, PermissionPolicy } from '../permissions/bridge.ts';
 import type { MailToolDetails } from './mailTools.ts';
+import type { BudgetView } from '../budget.ts';
 
 const { test, before, after }: typeof import('node:test') = require('node:test');
 const assert: typeof import('node:assert/strict') = require('node:assert/strict');
@@ -47,6 +48,7 @@ type Deps = {
   cliPath: () => string | null;
   dataDir?: () => string | null;
   correlationId: () => string | null;
+  budget?: () => BudgetView | null;
 };
 
 let createMailTools: (deps: Deps) => Tool[];
@@ -145,16 +147,20 @@ function captureCount(): number {
   return fs.readFileSync(p, 'utf8').trim().split('\n').filter((l) => l.length > 0).length;
 }
 
-function makeTools(policy: Record<string, PermissionPolicy>, sent: Env[] = [], nextId?: () => string): Tool[] {
+function makeTools(
+  policy: Record<string, PermissionPolicy>,
+  sent: Env[] = [],
+  budget?: () => BudgetView | null,
+): Tool[] {
   return createMailTools({
     bridge: new BridgeCtor({
       policy: () => policy,
-      ...(nextId ? { nextId } : {}),
       write: (e) => sent.push(e as Env),
     }) as never,
     cliPath: () => process.execPath,
     dataDir: () => dataDir,
     correlationId: () => 'turn-42',
+    ...(budget ? { budget } : {}),
   });
 }
 
@@ -429,4 +435,58 @@ test('a missing correlation id omits the flag pair; the CLI mints its own', asyn
   const cap = lastCapture();
   assert.deepEqual(cap.argv, ['folders', 'list', '--json', '--account', 'acct-1']);
   assert.equal(cap.correlation_id, null, 'no ASTRA_CORRELATION_ID without a turn id');
+});
+
+test('a spent budget answers skipped before the gate asks or executes', async () => {
+  const sent: Env[] = [];
+  const tools = makeTools(READS_AUTO, sent, () => ({ spent: () => true }));
+  const before = captureCount();
+  const r = await call(toolNamed(tools, 'list_folders'), { account: 'acct-1' });
+  assert.equal(r.details.status, 'skipped', 'past the bound the model is told no');
+  assert.match(r.details.output!, /budget/, 'the reason names the budget');
+  assert.equal(sent.length, 0, 'a spent budget never opens an ask');
+  assert.equal(captureCount(), before, 'nothing executed past the bound');
+});
+
+test('a spent budget skips a confirm-gated tool without opening the card', async () => {
+  const sent: Env[] = [];
+  let n = 0;
+  const bridge = new BridgeCtor({
+    policy: () => READS_AUTO,
+    nextId: () => `perm-${++n}`,
+    write: (e) => sent.push(e as Env),
+  });
+  const tools = createMailTools({
+    bridge: bridge as never,
+    cliPath: () => process.execPath,
+    dataDir: () => dataDir,
+    correlationId: () => 'turn-42',
+    budget: () => ({ spent: () => true }),
+  });
+  const before = captureCount();
+  const p = call(toolNamed(tools, 'save_draft'), {
+    account: 'acct-1',
+    from: 'a@example.com',
+    to: ['b@example.com'],
+    subject: 's',
+    body: 'b',
+  });
+  // A run that wrongly opens the ask suspends; answer it so this test
+  // fails on the assertions instead of hanging.
+  await new Promise((r) => setTimeout(r, 50));
+  if (sent.length > 0) {
+    bridge.respond(String((sent[0]! as Env).id), false, false);
+  }
+  const r = await p;
+  assert.equal(r.details.status, 'skipped');
+  assert.match(r.details.output!, /budget/);
+  assert.equal(sent.length, 0, 'the bound outranks the permission ask');
+  assert.equal(captureCount(), before, 'nothing executed');
+});
+
+test('a standing budget lets the same tool run', async () => {
+  const tools = makeTools(READS_AUTO, [], () => ({ spent: () => false }));
+  const r = await call(toolNamed(tools, 'list_folders'), { account: 'acct-1' });
+  assert.equal(r.details.status, 'ok');
+  assert.equal(lastCapture().argv[0], 'folders', 'the CLI ran as usual');
 });

@@ -37,6 +37,9 @@ interface AgentStoreState {
   status: string;
   /** The live turn's prompt id, or null between turns. */
   turn: string | null;
+  /** Whether the live turn's tool budget is spent: the bound has bitten,
+   *  the assistant keeps streaming but its tool calls answer skipped. */
+  budgetSpent: boolean;
   /** The chat log, oldest first. */
   messages: AgentMessage[];
   /** The approvals awaiting a decision, oldest first. */
@@ -65,6 +68,7 @@ interface AgentStoreState {
 export const useAgentStore = create<AgentStoreState>((set, get) => ({
   status: 'down',
   turn: null,
+  budgetSpent: false,
   messages: [],
   approvals: [],
 
@@ -89,7 +93,7 @@ export const useAgentStore = create<AgentStoreState>((set, get) => ({
     set((state) => ({ messages: [...state.messages, userMessage] }));
     try {
       const turn = await agentPrompt(trimmed);
-      set({ turn });
+      set({ turn, budgetSpent: false });
     } catch (err) {
       set((state) => ({
         messages: [
@@ -166,16 +170,32 @@ export const useAgentStore = create<AgentStoreState>((set, get) => ({
             ],
           };
         case 'done':
-          return { turn: null };
+          return { turn: null, budgetSpent: false };
         case 'error':
           return {
             turn: null,
+            budgetSpent: false,
             messages: [
               ...state.messages,
               { id: messageId(), role: 'note' as const, text: event.event.message },
             ],
           };
         case 'state':
+          // Only the budget's word surfaces: the harness's own states
+          // (thinking, done-streaming) stay noise the log does not need.
+          if (event.event.state === 'budget-spent') {
+            return {
+              budgetSpent: true,
+              messages: [
+                ...state.messages,
+                {
+                  id: messageId(),
+                  role: 'note' as const,
+                  text: 'the tool budget is spent; the assistant finishes in text',
+                },
+              ],
+            };
+          }
           return state;
         default:
           return state;
@@ -195,5 +215,5 @@ export const useAgentStore = create<AgentStoreState>((set, get) => ({
       approvals: state.approvals.filter((existing) => existing.id !== id),
     })),
 
-  reset: () => set({ status: 'down', turn: null, messages: [], approvals: [] }),
+  reset: () => set({ status: 'down', turn: null, budgetSpent: false, messages: [], approvals: [] }),
 }));

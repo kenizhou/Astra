@@ -99,6 +99,14 @@ pub async fn drive(
         Feature::MeetingBrief => {
             drive_docs::meeting_brief_scenario(scenario, complete, &correlation).await
         }
+        // Unreachable through the offline battery (the loop in evals/mod.rs
+        // routes budget scenarios to the sidecar's runner); the arm exists
+        // so the match stays exhaustive and a future caller learns where
+        // these scenarios belong.
+        Feature::Budget => Err(
+            "the budget scenarios run beside the sidecar seam (sidecar/src/evals.test.ts)"
+                .to_string(),
+        ),
     }
 }
 

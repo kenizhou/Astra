@@ -84,6 +84,7 @@ export function AgentPanel() {
   const open = useUiStore((s) => s.agentOpen);
   const status = useAgentStore((s) => s.status);
   const turn = useAgentStore((s) => s.turn);
+  const budgetSpent = useAgentStore((s) => s.budgetSpent);
   const messages = useAgentStore((s) => s.messages);
   const approvals = useAgentStore((s) => s.approvals);
   const sendPrompt = useAgentStore((s) => s.sendPrompt);
@@ -153,7 +154,7 @@ export function AgentPanel() {
         </ol>
         {turn !== null && (
           <p className="mt-1 px-1 text-[11px] text-muted-foreground" aria-live="polite">
-            thinking
+            {budgetSpent ? 'finishing in text' : 'thinking'}
           </p>
         )}
         <div ref={logEnd} />

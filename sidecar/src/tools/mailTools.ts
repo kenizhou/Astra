@@ -27,6 +27,7 @@ import { Type, type TSchema } from 'typebox';
 import type { AgentToolResult, ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { PermissionBridge } from '../permissions/bridge';
 import type { ToolResultStatus } from '../harness/types';
+import type { BudgetView } from '../budget';
 import { runSafeExec } from '../exec/safeExec';
 
 /** The argv prefix token every tool's command starts with; the logical
@@ -59,13 +60,24 @@ export interface MailToolDeps {
   /** Live view of the current turn's correlation id, set by the stdio loop
    *  before a prompt runs; it rides the argv flag and the spawn env. */
   correlationId: () => string | null;
+  /** Live view of the current turn's tool budget. The deadline reaches the
+   *  gate as this view handed over at construction, never a clock threaded
+   *  through every call: the tools are built once and shared by every
+   *  session, so the live view is the one seam that stays per-turn. A null
+   *  view (between turns) or an absent dep (unit constructions) means no
+   *  clock stands and the gate never skips for budget. */
+  budget?: () => BudgetView | null;
 }
 
 function textResult(text: string, details: MailToolDetails): AgentToolResult<MailToolDetails> {
   return { content: [{ type: 'text', text }], details };
 }
 
-/** Gate plus outcome mapping shared by all five tools. */
+/** Gate plus outcome mapping shared by all five tools. The tool budget is
+ *  the first gate: past the bound the model is told no (the skipped outcome
+ *  the harness already reports, its audit row landing exactly as a refused
+ *  tool's does through the same tool_result envelope), never a silent
+ *  drop, and no permission card opens for a call that cannot run. */
 async function runGated(
   deps: MailToolDeps,
   toolCallId: string,
@@ -73,6 +85,14 @@ async function runGated(
   args: Record<string, unknown>,
   exec: () => Promise<string>,
 ): Promise<AgentToolResult<MailToolDetails>> {
+  const budget = deps.budget?.() ?? null;
+  if (budget !== null && budget.spent()) {
+    const msg = "the turn's tool budget is spent";
+    return textResult(`${tool}: skipped (${msg}; finish in text)`, {
+      status: 'skipped',
+      output: msg,
+    });
+  }
   if (deps.bridge.check(tool) === 'needs-approval') {
     let outcome: { approved: boolean };
     try {

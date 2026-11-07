@@ -26,6 +26,8 @@ const LATE_LLM_CALL: &str =
     include_str!("../../../../sidecar/src/fixtures/protocol/out-llm-call.json");
 const LIVE_EVENT: &str =
     include_str!("../../../../sidecar/src/fixtures/protocol/out-event-text-delta.json");
+const BUDGET_SPENT_EVENT: &str =
+    include_str!("../../../../sidecar/src/fixtures/protocol/out-event-budget-spent.json");
 
 /// One test's runtime, built the way the host builds its own.
 fn runtime() -> crate::runtime::AppRuntime {
@@ -458,6 +460,27 @@ fn stale_generation_lines_are_dropped_everywhere() {
         matches!(&events[0].event, StreamPayload::TextDelta { text } if text == "Hello"),
         "the current generation's line streams: {events:?}"
     );
+}
+
+#[test]
+fn a_budget_spent_state_event_crosses_to_the_stream() {
+    let runtime = runtime();
+    let (relay, sink, _data) = stub_relay("budget-cross", "echo", 5, 10_000);
+    runtime
+        .block_on(|| async { relay.ensure_started().await })
+        .expect("the handshake completes");
+
+    // The sidecar's budget announces itself as a state event; the host has
+    // no business interpreting it, only crossing it whole so the panel can
+    // say why the assistant's tools stopped.
+    let generation = runtime.block_on(|| async { relay.generation().await });
+    runtime.block_on(|| async { relay.handle_line(BUDGET_SPENT_EVENT, generation).await });
+    let events = runtime.block_on(|| async { sink.await_events(1).await });
+    assert!(
+        matches!(&events[0].event, StreamPayload::State { state } if state == "budget-spent"),
+        "the budget's state word crosses to the panel: {events:?}"
+    );
+    assert_eq!(events[0].session_id, "agent:main");
 }
 
 #[test]

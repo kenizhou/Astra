@@ -236,6 +236,73 @@ describe('the approval card', () => {
   });
 });
 
+describe('the tool budget', () => {
+  it('folds the budget-spent state into a bound note and the status line', async () => {
+    await act(async () => {
+      await useAgentStore.getState().sendPrompt('clean the inbox');
+    });
+    act(() => {
+      useAgentStore.getState().applyStreamEvent({
+        session_id: 'agent:main',
+        event: { kind: 'state', state: 'budget-spent' },
+      });
+    });
+    useUiStore.getState().setAgentOpen(true);
+    render(<AgentPanel />);
+
+    const log = screen.getByRole('log', { name: 'Agent conversation' });
+    expect(
+      within(log).getByText('the tool budget is spent; the assistant finishes in text'),
+    ).toBeTruthy();
+    expect(screen.getByText('finishing in text')).toBeTruthy();
+    expect(useAgentStore.getState().budgetSpent).toBe(true);
+  });
+
+  it('clears the spent word when the turn ends, so the next turn thinks again', async () => {
+    await act(async () => {
+      await useAgentStore.getState().sendPrompt('clean the inbox');
+    });
+    act(() => {
+      useAgentStore.getState().applyStreamEvent({
+        session_id: 'agent:main',
+        event: { kind: 'state', state: 'budget-spent' },
+      });
+      useAgentStore.getState().applyStreamEvent({
+        session_id: 'agent:main',
+        event: { kind: 'done', prompt_id: 'p-1' },
+      });
+    });
+    expect(useAgentStore.getState().budgetSpent).toBe(false);
+
+    await act(async () => {
+      await useAgentStore.getState().sendPrompt('what changed');
+    });
+    useUiStore.getState().setAgentOpen(true);
+    render(<AgentPanel />);
+
+    expect(screen.getByText('thinking')).toBeTruthy();
+    expect(screen.queryByText('finishing in text')).toBeNull();
+  });
+
+  it('leaves the harness state words unfolded', async () => {
+    await act(async () => {
+      await useAgentStore.getState().sendPrompt('hello');
+    });
+    act(() => {
+      useAgentStore.getState().applyStreamEvent({
+        session_id: 'agent:main',
+        event: { kind: 'state', state: 'thinking' },
+      });
+    });
+    useUiStore.getState().setAgentOpen(true);
+    render(<AgentPanel />);
+
+    const log = screen.getByRole('log', { name: 'Agent conversation' });
+    expect(within(log).getAllByText('hello').length).toBe(1);
+    expect(useAgentStore.getState().messages.length).toBe(1);
+  });
+});
+
 describe('the relay status', () => {
   it('renders the lifecycle word in the header', () => {
     act(() => {
