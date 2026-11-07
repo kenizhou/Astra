@@ -75,9 +75,11 @@ const TOOL_BUDGET_MS = resolveToolBudgetMs(process.env);
 const TOOL_BUDGET_GRACE_MS = resolveToolBudgetGraceMs(process.env);
 
 /** Live view of the current turn's tool budget; null between turns. One
- *  live turn at a time (the host's panel sends one), the same single-slot
- *  shape the correlation holder uses; the runner's cleanup only clears its
- *  own turn's view. */
+ *  live turn at a time, enforced by the runner's refusal below: the view
+ *  is single-slot, the same shape the correlation holder uses, and both
+ *  are safe only while one prompt runs (a second live prompt would reset
+ *  the first's clock and capture its correlation id). The runner's
+ *  cleanup only clears its own turn's view. */
 const turnBudget: { current: TurnBudget | null } = { current: null };
 
 /** The five mail tools, shared by both harnesses (pi mounts them as
@@ -216,6 +218,15 @@ class PromptRunner {
     entry.cancelWatchdog();
     entry.session.abort();
   }
+
+  /** Whether a prompt is still running. The turn invariant: the budget and
+   *  correlation holders are single-slot module state, safe only while one
+   *  turn is live, so the command loop refuses a second prompt while this
+   *  answers true rather than letting it reset the live turn's clock or
+   *  bounce its pending approval. */
+  hasLive(): boolean {
+    return this.byPromptId.size > 0;
+  }
 }
 
 const runner = new PromptRunner();
@@ -252,6 +263,19 @@ async function handleCommand(cmd: InCommand): Promise<void> {
     case 'prompt': {
       if (!harness) {
         writeEnvelope({ type: 'error', id: cmd.id, message: 'prompt before init' });
+        return;
+      }
+      // The turn invariant, enforced here: one live turn per sidecar. A
+      // second prompt (per-chat sessions make overlapping prompts
+      // reachable) is refused with an honest error envelope BEFORE any
+      // single-slot state is touched, so the live turn keeps its budget
+      // clock, its correlation id, and its pending approval.
+      if (runner.hasLive()) {
+        writeEnvelope({
+          type: 'error',
+          id: cmd.id,
+          message: 'a turn is already live; wait for its done or abort it before prompting again',
+        });
         return;
       }
       // The correlation holder is set BEFORE the prompt runs so every tool

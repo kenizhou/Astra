@@ -5,10 +5,12 @@
 // handshake and echoes a prompt back with a state event, a text delta, an
 // llm_call envelope, and done; ask suspends the prompt on a
 // permission_request until a permission_response arrives; hang streams one
-// delta and settles only on abort; die exits at once (the supervisor's death
-// path); die-after-ready answers the handshake first. The ping command
-// reports the environment variable names the host left in the spawn, so a
-// test can prove the scrub.
+// delta and settles only on abort; one-live mirrors the real runner's turn
+// invariant (the first prompt streams one delta and hangs, a second prompt
+// while one is live answers the honest refusal, an abort settles the live
+// one); die exits at once (the supervisor's death path); die-after-ready
+// answers the handshake first. The ping command reports the environment
+// variable names the host left in the spawn, so a test can prove the scrub.
 'use strict';
 
 const readline = require('node:readline');
@@ -21,6 +23,9 @@ if (mode === 'die') {
 
 let ready = false;
 const pendingAsks = new Map();
+// one-live mode's live prompt id: the turn invariant the real runner
+// enforces, mirrored here (null when no prompt is live).
+let livePrompt = null;
 
 function writeLine(value) {
   try {
@@ -131,6 +136,14 @@ function handleCommand(cmd) {
         writeLine({ type: 'error', id: cmd.id, message: 'prompt before init' });
         break;
       }
+      if (mode === 'one-live' && livePrompt !== null) {
+        writeLine({
+          type: 'error',
+          id: cmd.id,
+          message: 'a turn is already live; wait for its done or abort it before prompting again',
+        });
+        break;
+      }
       if (mode === 'ask') {
         runAskPrompt(cmd);
       } else if (mode === 'hang') {
@@ -146,12 +159,20 @@ function handleCommand(cmd) {
           event: { kind: 'text_delta', text: 'cut short' },
         });
         process.exit(0);
+      } else if (mode === 'one-live') {
+        livePrompt = cmd.id;
+        writeLine({
+          type: 'event',
+          session_id: cmd.session_id,
+          event: { kind: 'text_delta', text: 'thinking aloud' },
+        });
       } else {
         runEchoPrompt(cmd);
       }
       break;
     case 'abort':
-      if (mode === 'hang') {
+      if (mode === 'hang' || (mode === 'one-live' && cmd.id === livePrompt)) {
+        livePrompt = null;
         writeLine({ type: 'done', id: cmd.id });
       }
       break;

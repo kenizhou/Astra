@@ -109,6 +109,7 @@ pub(crate) fn assemble(
     Ok(AppState {
         app: app as Arc<dyn crate::app_state::AppPort>,
         agent,
+        ai_store,
         mcp,
         plugins,
         llm: None,

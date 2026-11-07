@@ -33,6 +33,7 @@ use super::{
 
 mod messaging;
 mod runtime;
+mod threads;
 
 /// How long [`SidecarRelay::ensure_started`] waits for the ready
 /// handshake.
@@ -156,6 +157,10 @@ pub(crate) struct SidecarRelay {
     /// In-flight commands by id, for the same reason.
     commands:
         Mutex<HashMap<String, tokio::sync::oneshot::Sender<Result<serde_json::Value, String>>>>,
+    /// The chat turns being folded into rows, keyed by prompt id. Plain
+    /// sync state (never held across an await) so the line router folds
+    /// each event without queueing on the async locks.
+    turns: std::sync::Mutex<threads::TurnBook>,
     state_tx: watch::Sender<RelayState>,
     /// Single-flight guard for ensure_started: two concurrent callers must
     /// not both spawn.
@@ -200,6 +205,7 @@ impl SidecarRelay {
             })),
             pending: Mutex::new(HashMap::new()),
             commands: Mutex::new(HashMap::new()),
+            turns: std::sync::Mutex::new(threads::TurnBook::default()),
             state_tx,
             start_lock: Mutex::new(()),
             me: me.clone(),
@@ -377,6 +383,17 @@ impl SidecarRelay {
             .values()
             .find(|p| p.session_id == session_id)
             .map(|p| p.correlation.clone())
+    }
+
+    /// The live prompt id of a session's in-flight turn, so the line
+    /// router folds each event into the turn that owns it.
+    async fn prompt_of_session(&self, session_id: &str) -> Option<String> {
+        self.pending
+            .lock()
+            .await
+            .iter()
+            .find(|(_, p)| p.session_id == session_id)
+            .map(|(id, _)| id.clone())
     }
 
     /// The correlation id of any in-flight prompt, for the permission asks

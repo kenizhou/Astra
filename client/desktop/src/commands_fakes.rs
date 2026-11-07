@@ -462,10 +462,12 @@ pub(crate) fn crypto_store() -> Arc<astra_crypto_store::CryptoStore> {
 }
 
 pub(crate) fn state(name: &str, app: Arc<FakeApp>, store: Arc<FakeStore>) -> AppState {
-    let (relay, _sink, _data) = crate::agent::testkit::stub_relay(name, "echo", 3, 50);
+    let (relay, _sink, _data, ai_store) =
+        crate::agent::testkit::stub_relay_with_store(name, &["echo"], &[], 3, 50);
     AppState {
         app,
         agent: relay,
+        ai_store,
         mcp: mcp_host::host(name),
         plugins: Arc::new(crate::plugin::PluginRegistry::new(
             scratch(name).join("plugins"),

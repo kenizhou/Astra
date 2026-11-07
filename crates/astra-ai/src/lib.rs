@@ -29,6 +29,7 @@
 mod ai_documents;
 mod ai_results;
 mod analytics_events;
+mod chats;
 mod chip_dismissals;
 mod correlation;
 mod dlp;
@@ -50,6 +51,8 @@ mod use_case;
 mod ai_documents_tests;
 #[cfg(test)]
 mod ai_results_tests;
+#[cfg(test)]
+mod chats_tests;
 #[cfg(test)]
 mod chip_dismissals_tests;
 #[cfg(test)]
@@ -82,6 +85,7 @@ mod use_case_tests;
 pub use ai_documents::{AiDocumentKind, AiDocumentRow, NewAiDocument};
 pub use ai_results::{AiResultRow, NewAiResult};
 pub use analytics_events::{AnalyticsEventRow, NewAnalyticsEvent};
+pub use chats::{ChatId, ChatMessageRow, ChatRole, ChatRow, NewChat};
 pub use correlation::CorrelationId;
 pub use dlp::{apply, redact, DlpError, DlpOutcome, DlpPolicy};
 pub use draft_pool::{DraftPoolRow, NewDraftPoolRow, StyleProfileRow};

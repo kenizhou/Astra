@@ -4,9 +4,10 @@
 //! closes every death and restart path settles through, the manual
 //! restart, and the deliberate shutdown.
 
-use astra_ai::CorrelationId;
+use astra_ai::{ChatId, ChatRole, CorrelationId};
 
-use super::{next_id, PendingPrompt, RelayState, SidecarRelay, StreamPayload};
+use super::{next_id, threads::TurnFinish, PendingPrompt, RelayState, SidecarRelay, StreamPayload};
+use crate::agent::chats::session_for;
 use crate::agent::protocol::{InCommand, MAIN_SESSION_ID};
 use crate::agent::PermissionResolved;
 
@@ -21,6 +22,14 @@ impl SidecarRelay {
     /// sidecar can answer within the same tick), writes the envelope, and
     /// returns the prompt id. The stream arrives through the sink.
     ///
+    /// A prompt that names a chat rides the chat's own session
+    /// (`agent:chat:<id>`) and records both sides of its turn: the user's
+    /// row here at dispatch (before the run, the reference's order), the
+    /// assistant's at the turn's settle. A prompt with no chat rides the
+    /// fixed main session and records nothing: that boundary belongs to
+    /// the callers that want the ephemeral conversation (the tests, the
+    /// headless paths).
+    ///
     /// # Errors
     /// Whatever [`SidecarRelay::ensure_started`] or the envelope write
     /// reported; a failed write removes the pending turn again.
@@ -28,6 +37,7 @@ impl SidecarRelay {
         &self,
         text: &str,
         correlation: Option<CorrelationId>,
+        chat: Option<&ChatId>,
     ) -> Result<String, String> {
         let arc = self
             .me
@@ -36,16 +46,29 @@ impl SidecarRelay {
         arc.ensure_started().await?;
         let id = next_id("p");
         let correlation = correlation.unwrap_or_else(CorrelationId::generate);
+        let session_id = chat.map_or_else(|| MAIN_SESSION_ID.to_string(), session_for);
+        if let Some(chat) = chat {
+            let parts = serde_json::json!([{ "kind": "text", "text": text }]);
+            if let Err(e) = self
+                .store
+                .insert_chat_message(chat, ChatRole::User, &parts, None)
+            {
+                log::warn!("agent: the chat's user row failed: {e}");
+            }
+        }
         self.pending.lock().await.insert(
             id.clone(),
             PendingPrompt {
-                session_id: MAIN_SESSION_ID.to_string(),
+                session_id: session_id.clone(),
                 correlation: correlation.as_str().to_owned(),
             },
         );
+        if let Some(chat) = chat {
+            self.turn_open(&id, chat.clone(), correlation.as_str(), &session_id);
+        }
         let command = InCommand::Prompt {
             id: id.clone(),
-            session_id: MAIN_SESSION_ID.to_string(),
+            session_id,
             text: text.to_owned(),
             correlation_id: correlation.as_str().to_owned(),
         };
@@ -153,18 +176,22 @@ impl SidecarRelay {
 
     /// Cancels one prompt: best effort on the wire, and fail-closes every
     /// pending approval so a suspended tool call cannot outlive the turn
-    /// the user cancelled.
+    /// the user cancelled. The abort envelope names the turn's own
+    /// session, and the turn records its abort as the finish reason.
     ///
     /// The fail-close is deliberately cross-session today (one abort
-    /// settles every session's asks): SPA0 chat is the single
-    /// `agent:main` session, so the blast radius is the whole bridge by
-    /// construction. When sessions multiply, this narrows to the aborted
-    /// turn's session, matching the sidecar's own abort-side
-    /// `rejectAll` scope.
+    /// settles every session's asks): the runner's turn invariant keeps
+    /// one live turn, so the blast radius is that turn's asks by
+    /// construction.
     pub(crate) async fn abort(&self, prompt_id: &str) {
+        self.turn_mark_aborted(prompt_id);
+        let session_id = self.pending.lock().await.get(prompt_id).map_or_else(
+            || MAIN_SESSION_ID.to_string(),
+            |prompt| prompt.session_id.clone(),
+        );
         let command = InCommand::Abort {
             id: prompt_id.to_owned(),
-            session_id: MAIN_SESSION_ID.to_string(),
+            session_id,
         };
         if let Err(e) = self.write_command(&command).await {
             log::debug!("agent: the abort write failed (the sidecar is likely gone): {e}");
@@ -173,7 +200,9 @@ impl SidecarRelay {
     }
 
     /// Settles every pending prompt so the UI never sticks on thinking:
-    /// optionally an interrupted state, then always a done.
+    /// optionally an interrupted state, then always a done. Each drained
+    /// turn folds what rendered into its chat's row before its done
+    /// crosses, the same settle order the envelope paths keep.
     pub(crate) async fn drain_pending(&self, interrupted: bool) {
         let drained: Vec<(String, PendingPrompt)> = {
             let mut pending = self.pending.lock().await;
@@ -189,6 +218,7 @@ impl SidecarRelay {
                     },
                 );
             }
+            self.turn_close(&id, TurnFinish::Interrupted);
             self.emit_event(
                 &prompt.session_id,
                 Some(prompt.correlation),

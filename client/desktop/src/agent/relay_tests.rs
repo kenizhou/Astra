@@ -60,51 +60,11 @@ fn the_init_handshake_reaches_ready() {
 }
 
 #[test]
-fn a_prompt_streams_its_events_and_lands_its_ledger_row() {
-    let runtime = runtime();
-    let (relay, sink, data) = stub_relay("prompt", "echo", 3, 50);
-    let id = runtime
-        .block_on(|| async {
-            relay
-                .prompt(
-                    "summarise the inbox",
-                    Some(CorrelationId::new("corr-42".to_owned())),
-                )
-                .await
-        })
-        .expect("the prompt is sent");
-
-    // state, text delta, done: the llm_call row bypasses the stream.
-    let events = runtime.block_on(|| async { sink.await_events(3).await });
-    assert_eq!(
-        events.len(),
-        3,
-        "the stream holds exactly the turn: {events:?}"
-    );
-    for event in &events {
-        assert_eq!(event.session_id, "agent:main");
-        assert_eq!(event.correlation.as_deref(), Some("corr-42"));
-    }
-    assert!(matches!(&events[0].event, StreamPayload::State { state } if state == "thinking"));
-    assert!(
-        matches!(&events[1].event, StreamPayload::TextDelta { text } if text == "echo: summarise the inbox")
-    );
-    assert!(matches!(&events[2].event, StreamPayload::Done { prompt_id } if prompt_id == &id));
-
-    let rows = llm_rows(&data);
-    assert_eq!(rows.len(), 1, "one ledger row per sidecar call");
-    assert_eq!(rows[0].0, "corr-42");
-    assert_eq!(rows[0].1, "stub-1");
-    assert_eq!(rows[0].2, "chat");
-    assert_eq!(rows[0].3, "assistant_chat");
-}
-
-#[test]
 fn a_prompt_without_a_correlation_generates_one() {
     let runtime = runtime();
     let (relay, sink, data) = stub_relay("generate", "echo", 3, 50);
     runtime
-        .block_on(|| async { relay.prompt("hello", None).await })
+        .block_on(|| async { relay.prompt("hello", None, None).await })
         .expect("the prompt is sent");
     let events = runtime.block_on(|| async { sink.await_events(3).await });
 
@@ -133,6 +93,7 @@ fn a_permission_ask_round_trips_through_the_bridge() {
                 .prompt(
                     "draft a reply",
                     Some(CorrelationId::new("corr-7".to_owned())),
+                    None,
                 )
                 .await
         })
@@ -195,6 +156,7 @@ fn a_refused_permission_settles_the_turn_without_the_tool() {
                 .prompt(
                     "draft a reply",
                     Some(CorrelationId::new("corr-8".to_owned())),
+                    None,
                 )
                 .await
         })
@@ -225,7 +187,7 @@ fn an_abort_settles_a_hanging_prompt() {
     let runtime = runtime();
     let (relay, sink, _data) = stub_relay("abort", "hang", 3, 50);
     let id = runtime
-        .block_on(|| async { relay.prompt("count every message", None).await })
+        .block_on(|| async { relay.prompt("count every message", None, None).await })
         .expect("the prompt is sent");
 
     let events = runtime.block_on(|| async { sink.await_events(1).await });
@@ -279,6 +241,7 @@ fn a_death_mid_prompt_drains_the_turn() {
                 .prompt(
                     "keep talking",
                     Some(CorrelationId::new("corr-9".to_owned())),
+                    None,
                 )
                 .await
         })
@@ -348,7 +311,11 @@ fn a_restart_returns_to_ready_and_answers_prompts_again() {
     runtime
         .block_on(|| async {
             relay
-                .prompt("again", Some(CorrelationId::new("corr-10".to_owned())))
+                .prompt(
+                    "again",
+                    Some(CorrelationId::new("corr-10".to_owned())),
+                    None,
+                )
                 .await
         })
         .expect("the prompt is sent after the restart");

@@ -12,6 +12,10 @@ const ipc = vi.hoisted(() => ({
   agentAbort: vi.fn(),
   agentStatus: vi.fn(),
   permissionResponse: vi.fn(),
+  chatList: vi.fn(),
+  chatLoad: vi.fn(),
+  chatRename: vi.fn(),
+  chatDelete: vi.fn(),
 }));
 
 vi.mock('@/services/agent', async (importOriginal) => ({
@@ -20,6 +24,10 @@ vi.mock('@/services/agent', async (importOriginal) => ({
   agentAbort: ipc.agentAbort,
   agentStatus: ipc.agentStatus,
   permissionResponse: ipc.permissionResponse,
+  chatList: ipc.chatList,
+  chatLoad: ipc.chatLoad,
+  chatRename: ipc.chatRename,
+  chatDelete: ipc.chatDelete,
 }));
 
 import type { PendingApproval } from '@/services/agent';
@@ -33,10 +41,18 @@ function reset(): void {
   ipc.agentAbort.mockReset();
   ipc.agentStatus.mockReset();
   ipc.permissionResponse.mockReset();
-  ipc.agentPrompt.mockResolvedValue('p-1');
+  ipc.chatList.mockReset();
+  ipc.chatLoad.mockReset();
+  ipc.chatRename.mockReset();
+  ipc.chatDelete.mockReset();
+  ipc.agentPrompt.mockResolvedValue({ prompt_id: 'p-1', chat_id: 'chat-1' });
   ipc.agentAbort.mockResolvedValue(undefined);
   ipc.agentStatus.mockResolvedValue({ state: 'down', model: null });
   ipc.permissionResponse.mockResolvedValue(undefined);
+  ipc.chatList.mockResolvedValue([]);
+  ipc.chatLoad.mockResolvedValue({ chat: { id: 'chat-1', title: 'Thread one', created_at: 1, last_touched_at: 2 }, messages: [] });
+  ipc.chatRename.mockResolvedValue(true);
+  ipc.chatDelete.mockResolvedValue(true);
   useAgentStore.getState().reset();
   useUiStore.getState().setAgentOpen(false);
 }
@@ -79,21 +95,20 @@ describe('the status toggle', () => {
 });
 
 describe('the chat log', () => {
-  it('renders the streamed turn: the user bubble, the streaming assistant bubble, and the tool notes', () => {
-    act(() => {
-      const store = useAgentStore.getState();
-      store.sendPrompt('summarise the inbox');
+  it('renders the streamed turn: the user bubble, the streaming assistant bubble, and the tool notes', async () => {
+    await act(async () => {
+      await useAgentStore.getState().sendPrompt('summarise the inbox');
     });
     act(() => {
       const store = useAgentStore.getState();
-      store.applyStreamEvent({ session_id: 'agent:main', event: { kind: 'text_delta', text: 'Hello' } });
-      store.applyStreamEvent({ session_id: 'agent:main', event: { kind: 'text_delta', text: ' there' } });
+      store.applyStreamEvent({ session_id: 'agent:chat:chat-1', event: { kind: 'text_delta', text: 'Hello' } });
+      store.applyStreamEvent({ session_id: 'agent:chat:chat-1', event: { kind: 'text_delta', text: ' there' } });
       store.applyStreamEvent({
-        session_id: 'agent:main',
+        session_id: 'agent:chat:chat-1',
         event: { kind: 'tool_call', name: 'list_messages', args: {}, tool_call_id: 'c1' },
       });
       store.applyStreamEvent({
-        session_id: 'agent:main',
+        session_id: 'agent:chat:chat-1',
         event: { kind: 'tool_result', tool_call_id: 'c1', name: 'list_messages', status: 'ok' },
       });
     });
@@ -113,7 +128,7 @@ describe('the chat log', () => {
     });
     act(() => {
       useAgentStore.getState().applyStreamEvent({
-        session_id: 'agent:main',
+        session_id: 'agent:chat:chat-1',
         event: { kind: 'error', message: 'prompt before init' },
       });
     });
@@ -137,7 +152,7 @@ describe('the input', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     });
 
-    expect(ipc.agentPrompt).toHaveBeenCalledWith('summarise today');
+    expect(ipc.agentPrompt).toHaveBeenCalledWith('summarise today', undefined, undefined);
     expect(useAgentStore.getState().turn).toBe('p-1');
     expect(useAgentStore.getState().messages[0]).toMatchObject({
       role: 'user',
@@ -243,7 +258,7 @@ describe('the tool budget', () => {
     });
     act(() => {
       useAgentStore.getState().applyStreamEvent({
-        session_id: 'agent:main',
+        session_id: 'agent:chat:chat-1',
         event: { kind: 'state', state: 'budget-spent' },
       });
     });
@@ -264,11 +279,11 @@ describe('the tool budget', () => {
     });
     act(() => {
       useAgentStore.getState().applyStreamEvent({
-        session_id: 'agent:main',
+        session_id: 'agent:chat:chat-1',
         event: { kind: 'state', state: 'budget-spent' },
       });
       useAgentStore.getState().applyStreamEvent({
-        session_id: 'agent:main',
+        session_id: 'agent:chat:chat-1',
         event: { kind: 'done', prompt_id: 'p-1' },
       });
     });
@@ -290,7 +305,7 @@ describe('the tool budget', () => {
     });
     act(() => {
       useAgentStore.getState().applyStreamEvent({
-        session_id: 'agent:main',
+        session_id: 'agent:chat:chat-1',
         event: { kind: 'state', state: 'thinking' },
       });
     });
@@ -326,3 +341,4 @@ describe('the relay status', () => {
     expect(screen.getByText('restarting')).toBeTruthy();
   });
 });
+

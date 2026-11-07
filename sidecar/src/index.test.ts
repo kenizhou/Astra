@@ -440,3 +440,4 @@ test('an act tool asks over the wire, approves, and runs its verb', async () => 
   assert.deepEqual(out.argv.slice(-4), ['--account', 'acct-1', '--key', 'msg-7']);
   await until(s, 'done', seen);
 });
+

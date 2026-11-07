@@ -52,9 +52,51 @@ export interface AgentStatus {
   model: string | null;
 }
 
-/** Sends one prompt; resolves to the prompt id its events carry. */
-export function agentPrompt(prompt: string, correlation?: string): Promise<string> {
-  return invoke('agent_prompt', { prompt, correlation });
+/** What one accepted prompt answers: the id its events carry and the chat
+ *  its turn records into. A prompt sent without a chat id mints one. */
+export interface AgentPromptReceipt {
+  prompt_id: string;
+  chat_id: string;
+}
+
+/** One chat thread as the list holds it (the store's row). */
+export interface ChatSummary {
+  id: string;
+  title: string;
+  created_at: number;
+  last_touched_at: number;
+}
+
+/** One rendered part of a message row: a text run, a completed tool call,
+ *  or a note. The recorder's vocabulary; unknown kinds render as nothing. */
+export interface ChatPart {
+  kind: string;
+  text?: string;
+  name?: string;
+  status?: string;
+  args?: unknown;
+  output?: string;
+}
+
+/** One message row of a loaded thread (the store's row). */
+export interface ChatMessage {
+  id: number;
+  chat_id: string;
+  role: string;
+  parts: ChatPart[];
+  metadata?: Record<string, unknown> | null;
+  created_at: number;
+}
+
+/** One loaded thread: the chat's row beside its messages, oldest first. */
+export interface ChatLoad {
+  chat: ChatSummary;
+  messages: ChatMessage[];
+}
+
+/** Sends one prompt; resolves to the receipt its events and its chat carry. */
+export function agentPrompt(prompt: string, correlation?: string, chatId?: string): Promise<AgentPromptReceipt> {
+  return invoke('agent_prompt', { prompt, correlation, chatId });
 }
 
 /** Cancels the prompt: the turn settles with a done event. */
@@ -74,4 +116,25 @@ export function permissionResponse(
   alwaysAllow: boolean,
 ): Promise<void> {
   return invoke('permission_response', { id, approved, alwaysAllow });
+}
+
+/** Lists the chat threads, the most recently touched first. */
+export function chatList(): Promise<ChatSummary[]> {
+  return invoke('chat_list');
+}
+
+/** Loads one thread's messages, oldest first: the rows the visible log
+ *  paints from, the one source of truth. */
+export function chatLoad(chatId: string): Promise<ChatLoad> {
+  return invoke('chat_load', { chatId });
+}
+
+/** Renames one thread. */
+export function chatRename(chatId: string, title: string): Promise<boolean> {
+  return invoke('chat_rename', { chatId, title });
+}
+
+/** Deletes one thread with its messages. */
+export function chatDelete(chatId: string): Promise<boolean> {
+  return invoke('chat_delete', { chatId });
 }

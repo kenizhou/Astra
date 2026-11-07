@@ -4,12 +4,16 @@
 //! answers back, and the frontend event seam everything streams through.
 //!
 //! Ported from the kylins agent module, trimmed to SPA0's chat: no
-//! conversation mirror, no background drafting, no compaction. The relay
-//! owns the process; [`supervisor`] owns the restart policy; the commands
-//! live in [`commands`].
+//! background drafting. The conversation mirror SP2y reopens is the
+//! chat-thread store ([`chats`]): every chat's turns record as rows and
+//! the store's rows are the one source of truth for the visible log;
+//! compaction and memory extraction stay out (the spec's named
+//! remainder). The relay owns the process; [`supervisor`] owns the
+//! restart policy; the commands live in [`commands`].
 
 // The command surface is declared `pub(crate)` only so the shell's invoke
 // handler can name its handlers; its logic is the crate's own.
+mod chats;
 pub(crate) mod commands;
 mod node;
 mod permissions;
@@ -28,6 +32,10 @@ mod e2e_tests;
 #[cfg(test)]
 #[path = "relay_tests.rs"]
 mod relay_tests;
+
+#[cfg(test)]
+#[path = "relay_chat_tests.rs"]
+mod relay_chat_tests;
 
 #[cfg(test)]
 #[path = "supervisor_tests.rs"]

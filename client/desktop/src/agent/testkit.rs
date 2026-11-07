@@ -107,7 +107,27 @@ pub(crate) fn stub_relay(
     restart_max: u32,
     backoff_base_ms: u64,
 ) -> (Arc<SidecarRelay>, Arc<CollectingSink>, std::path::PathBuf) {
-    stub_relay_with(name, &[mode], &[], restart_max, backoff_base_ms)
+    let (relay, sink, data, _store) =
+        stub_relay_with_store(name, &[mode], &[], restart_max, backoff_base_ms);
+    (relay, sink, data)
+}
+
+/// The full build: the relay, its sink, its data dir, and the store the
+/// relay's ledgers and chat rows land in (the same instance a state's
+/// chat commands must read).
+pub(crate) fn stub_relay_with_store(
+    name: &str,
+    modes: &[&str],
+    model_configs: &[(String, ModelConfig)],
+    restart_max: u32,
+    backoff_base_ms: u64,
+) -> (
+    Arc<SidecarRelay>,
+    Arc<CollectingSink>,
+    std::path::PathBuf,
+    Arc<AiStore>,
+) {
+    stub_relay_with_inner(name, modes, model_configs, restart_max, backoff_base_ms)
 }
 
 /// A relay whose init envelope carries `model_configs`, running the stub's
@@ -130,6 +150,24 @@ pub(crate) fn stub_relay_with(
     restart_max: u32,
     backoff_base_ms: u64,
 ) -> (Arc<SidecarRelay>, Arc<CollectingSink>, std::path::PathBuf) {
+    let (relay, sink, data, _store) =
+        stub_relay_with_inner(name, modes, model_configs, restart_max, backoff_base_ms);
+    (relay, sink, data)
+}
+
+/// The shared builder every stub form above delegates to.
+fn stub_relay_with_inner(
+    name: &str,
+    modes: &[&str],
+    model_configs: &[(String, ModelConfig)],
+    restart_max: u32,
+    backoff_base_ms: u64,
+) -> (
+    Arc<SidecarRelay>,
+    Arc<CollectingSink>,
+    std::path::PathBuf,
+    Arc<AiStore>,
+) {
     let data_dir = scratch(name);
     let node = find_node().expect("a node >= 22 is on PATH for the agent tests");
     let script = stub_script();
@@ -168,9 +206,9 @@ pub(crate) fn stub_relay_with(
             spawn,
         },
         sink.clone(),
-        store,
+        store.clone(),
     );
-    (relay, sink, data_dir)
+    (relay, sink, data_dir, store)
 }
 
 /// Reads the audit rows the relay's decisions and tool results wrote, in

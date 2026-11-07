@@ -2,19 +2,21 @@
 // The agent panel: the chat log with its streaming assistant turn, the
 // input that sends prompts, one approval card per asked permission with
 // the answer dispatched straight back, and the abort button for the live
-// turn. Streamed events arrive through the agent store (the host's
-// `agent:event` emissions, folded in by the app root's listener); the
-// status word beside the title says where the relay stands. The panel
-// docks as the mail row's resizable right column; the tool rail's toggle
-// opens and shuts it.
+// turn. The thread strip above the log keeps the assistant's chats: it
+// paints the store's rows, selects, renames, and deletes them, and the
+// new-chat gesture starts a fresh thread. Streamed events arrive through
+// the agent store (the host's `agent:event` emissions, folded in by the
+// app root's listener); the status word beside the title says where the
+// relay stands. The panel docks as the mail row's resizable right column;
+// the tool rail's toggle opens and shuts it.
 
 import { useEffect, useRef, useState } from 'react';
 
-import { useAgentStore, type AgentMessage } from './agentStore';
+import { sessionOf, useAgentStore, type AgentMessage } from './agentStore';
 import { AgentIcon, CloseIcon } from '@/components/icons';
 import { RAIL_BUTTON_CLASS, railButtonColours } from '@/components/layout/railButton';
 import { useUiStore } from '@/stores/uiStore';
-import type { PendingApproval } from '@/services/agent';
+import type { ChatSummary, PendingApproval } from '@/services/agent';
 
 const actionClass =
   'rounded-[var(--radius-xs)] px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
@@ -79,17 +81,106 @@ function ApprovalCard({ approval }: { approval: PendingApproval }) {
   );
 }
 
+/** One thread row of the strip: the title selects, the affordances rename
+ *  and delete. A rename in flight swaps the title for a one-line input. */
+function ThreadRow({
+  chat,
+  selected,
+  renaming,
+  onRename,
+}: {
+  chat: ChatSummary;
+  selected: boolean;
+  renaming: boolean;
+  onRename: (id: string | null) => void;
+}) {
+  const selectChat = useAgentStore((s) => s.selectChat);
+  const renameChat = useAgentStore((s) => s.renameChat);
+  const deleteChat = useAgentStore((s) => s.deleteChat);
+  const [draft, setDraft] = useState(chat.title);
+
+  if (renaming) {
+    return (
+      <form
+        className="flex shrink-0 items-center gap-1"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const title = draft.trim();
+          if (title !== '' && title !== chat.title) {
+            void renameChat(chat.id, title);
+          }
+          onRename(null);
+        }}
+      >
+        <input
+          aria-label="Rename thread"
+          className="w-28 rounded-[var(--radius-xs)] border border-border bg-surface px-1.5 py-0.5 text-[11px] text-foreground focus-visible:outline-none focus-visible:border-primary"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              onRename(null);
+            }
+          }}
+          autoFocus
+        />
+        <button type="submit" className={actionClass}>
+          Save
+        </button>
+      </form>
+    );
+  }
+  return (
+    <span className="flex shrink-0 items-center gap-0.5">
+      <button
+        type="button"
+        aria-current={selected ? 'true' : undefined}
+        title={chat.title}
+        className={`max-w-36 truncate rounded-[var(--radius-xs)] px-1.5 py-0.5 text-[11px] transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+          selected ? 'bg-hover text-foreground' : 'text-muted-foreground'
+        }`}
+        onClick={() => void selectChat(chat.id)}
+      >
+        {chat.title}
+      </button>
+      <button
+        type="button"
+        aria-label={`Rename ${chat.title}`}
+        className={actionClass}
+        onClick={() => {
+          setDraft(chat.title);
+          onRename(chat.id);
+        }}
+      >
+        Rename
+      </button>
+      <button
+        type="button"
+        aria-label={`Delete ${chat.title}`}
+        className={actionClass}
+        onClick={() => void deleteChat(chat.id)}
+      >
+        Delete
+      </button>
+    </span>
+  );
+}
+
 /** The agent panel, docked in the mail row; renders nothing when shut. */
 export function AgentPanel() {
   const open = useUiStore((s) => s.agentOpen);
   const status = useAgentStore((s) => s.status);
   const turn = useAgentStore((s) => s.turn);
+  const turnSession = useAgentStore((s) => s.turnSession);
+  const currentChatId = useAgentStore((s) => s.currentChatId);
   const budgetSpent = useAgentStore((s) => s.budgetSpent);
   const messages = useAgentStore((s) => s.messages);
+  const chats = useAgentStore((s) => s.chats);
   const approvals = useAgentStore((s) => s.approvals);
   const sendPrompt = useAgentStore((s) => s.sendPrompt);
   const abort = useAgentStore((s) => s.abort);
   const [draft, setDraft] = useState('');
+  const [renaming, setRenaming] = useState<string | null>(null);
   const logEnd = useRef<HTMLDivElement>(null);
   const draftRef = useRef<HTMLTextAreaElement>(null);
 
@@ -100,11 +191,12 @@ export function AgentPanel() {
   }, [messages]);
 
   useEffect(() => {
-    // Opening the panel asks the host where the relay stands: the events
-    // announce ready and lost, but the words between them (restarting,
-    // starting) only the status pull knows.
+    // Opening the panel asks the host where the relay stands and which
+    // threads exist: the events announce ready and lost, but the words
+    // between them and the store's rows only the pulls know.
     if (open) {
       void useAgentStore.getState().refreshStatus();
+      void useAgentStore.getState().refreshChats();
     }
   }, [open]);
 
@@ -121,6 +213,8 @@ export function AgentPanel() {
     }
   };
 
+  const turnHere = turn !== null && turnSession === sessionOf(currentChatId);
+
   return (
     <section
       aria-label="Agent"
@@ -131,15 +225,43 @@ export function AgentPanel() {
           Agent
           <span className="text-[11px] text-muted-foreground">{status}</span>
         </span>
-        <button
-          type="button"
-          aria-label="Close agent"
-          onClick={() => useUiStore.getState().setAgentOpen(false)}
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-text transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <CloseIcon size={14} />
-        </button>
+        <span className="flex items-center gap-1">
+          <button
+            type="button"
+            aria-label="New chat"
+            className={actionClass}
+            onClick={() => void useAgentStore.getState().selectChat(null)}
+          >
+            New chat
+          </button>
+          <button
+            type="button"
+            aria-label="Close agent"
+            onClick={() => useUiStore.getState().setAgentOpen(false)}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-text transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <CloseIcon size={14} />
+          </button>
+        </span>
       </div>
+      {chats.length > 0 && (
+        <div
+          role="list"
+          aria-label="Agent threads"
+          className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-2 py-1"
+        >
+          {chats.map((chat) => (
+            <div role="listitem" key={chat.id} className="flex shrink-0">
+              <ThreadRow
+                chat={chat}
+                selected={chat.id === currentChatId}
+                renaming={renaming === chat.id}
+                onRename={setRenaming}
+              />
+            </div>
+          ))}
+        </div>
+      )}
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
         <ol
           role="log"
@@ -152,7 +274,7 @@ export function AgentPanel() {
             </li>
           ))}
         </ol>
-        {turn !== null && (
+        {turnHere && (
           <p className="mt-1 px-1 text-[11px] text-muted-foreground" aria-live="polite">
             {budgetSpent ? 'finishing in text' : 'thinking'}
           </p>

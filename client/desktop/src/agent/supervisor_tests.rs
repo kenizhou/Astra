@@ -156,7 +156,11 @@ fn a_lost_relay_recovers_through_a_fresh_start() {
     let id = runtime
         .block_on(|| async {
             relay
-                .prompt("back again", Some(CorrelationId::new("corr-11".to_owned())))
+                .prompt(
+                    "back again",
+                    Some(CorrelationId::new("corr-11".to_owned())),
+                    None,
+                )
                 .await
         })
         .expect("the fresh start recovers");
