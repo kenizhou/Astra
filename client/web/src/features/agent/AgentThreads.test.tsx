@@ -218,6 +218,46 @@ describe('the live turn and the threads', () => {
     expect(ipc.agentPrompt).toHaveBeenCalledWith('and the next', undefined, 'chat-minted');
   });
 
+  it('never adopts a turn that settled before the receipt resolved', async () => {
+    let resolveReceipt!: (receipt: { prompt_id: string; chat_id: string }) => void;
+    ipc.agentPrompt.mockReturnValue(
+      new Promise((resolve) => {
+        resolveReceipt = resolve;
+      }),
+    );
+    const sent = useAgentStore.getState().sendPrompt('quick question');
+
+    // The whole turn settles while the receipt is still in flight: the
+    // done folds the live buffer away before any turn id exists to clear.
+    act(() => {
+      const store = useAgentStore.getState();
+      store.applyStreamEvent({
+        session_id: 'agent:chat:chat-1',
+        event: { kind: 'text_delta', text: 'answered already' },
+      });
+      store.applyStreamEvent({
+        session_id: 'agent:chat:chat-1',
+        event: { kind: 'done', prompt_id: 'p-1' },
+      });
+    });
+    await act(async () => {
+      resolveReceipt({ prompt_id: 'p-1', chat_id: 'chat-1' });
+      await sent;
+    });
+
+    const store = useAgentStore.getState();
+    expect(store.turn).toBeNull();
+    expect(store.currentChatId).toBe('chat-1');
+    expect(store.messages.map((entry) => entry.text)).toContain('quick question');
+
+    // No turn is wedged: the next send runs.
+    ipc.agentPrompt.mockResolvedValue({ prompt_id: 'p-2', chat_id: 'chat-1' });
+    await act(async () => {
+      await useAgentStore.getState().sendPrompt('follow up');
+    });
+    expect(useAgentStore.getState().turn).toBe('p-2');
+  });
+
   it('keeps a background turn out of the current log and shows it on return', async () => {
     await act(async () => {
       await useAgentStore.getState().sendPrompt('long question');

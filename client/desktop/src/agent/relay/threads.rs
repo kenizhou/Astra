@@ -170,6 +170,16 @@ impl SidecarRelay {
         Some((turn.session.clone(), turn.correlation.clone()))
     }
 
+    /// The turn that staged a tool call, without completing it: the ask
+    /// that arrives while the call waits routes through the same ownership
+    /// the result envelope does. A call nothing staged answers `None`.
+    pub(crate) fn turn_owning_call(&self, tool_call_id: &str) -> Option<(String, String)> {
+        let book = self.turns.lock().expect("the turn book is not poisoned");
+        let prompt_id = book.tool_owners.get(tool_call_id)?;
+        let turn = book.turns.get(prompt_id)?;
+        Some((turn.session.clone(), turn.correlation.clone()))
+    }
+
     /// Notes the run's model and tier from the turn's llm_call rows: the
     /// last call's pair is what the metadata records.
     pub(crate) fn turn_note_llm(&self, correlation: Option<&str>, model: &str, tier: &str) {

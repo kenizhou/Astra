@@ -32,7 +32,8 @@ impl SidecarRelay {
     ///
     /// # Errors
     /// Whatever [`SidecarRelay::ensure_started`] or the envelope write
-    /// reported; a failed write removes the pending turn again.
+    /// reported; a failed write removes the pending turn and closes its
+    /// book entry again.
     pub(crate) async fn prompt(
         &self,
         text: &str,
@@ -78,6 +79,9 @@ impl SidecarRelay {
         let generation = self.inner.lock().await.generation;
         if let Err(e) = self.write_command(&command).await {
             self.pending.lock().await.remove(&id);
+            // The opened turn leaves with its prompt: a leaked entry would
+            // outlive every settle path (the drain only walks pending).
+            self.turn_close(&id, TurnFinish::Interrupted);
             arc.on_connection_dead(generation).await;
             return Err(e);
         }
@@ -85,13 +89,10 @@ impl SidecarRelay {
     }
 
     /// Sends one command envelope and resolves its `result` (or `error`).
-    /// The tests drive the stub's `ping` through it; the first session
-    /// command that needs it arrives with a later slice.
     ///
     /// # Errors
-    /// The start or write failure, or the error envelope the sidecar
-    /// answered with.
-    #[cfg(test)]
+    /// The start or write failure, the error envelope the sidecar answered
+    /// with, or the interrupted wait when the sidecar died first.
     pub(crate) async fn command(
         &self,
         name: &str,
@@ -119,6 +120,21 @@ impl SidecarRelay {
         receiver
             .await
             .map_err(|_| format!("the agent command {name} was interrupted"))?
+    }
+
+    /// Disposes a deleted chat's session in the sidecar, so the sessions
+    /// kept resident there never outlive the thread list. Best effort by
+    /// construction: a sidecar that is not running holds no sessions (the
+    /// map dies with the process), so nothing is spawned for the dispose
+    /// and a failure only logs.
+    pub(crate) async fn dispose_session(&self, session_id: &str) {
+        if self.status() != RelayState::Ready {
+            return;
+        }
+        let args = serde_json::json!({ "session_id": session_id });
+        if let Err(e) = self.command("dispose_session", args).await {
+            log::debug!("agent: the session dispose failed (the sidecar is likely gone): {e}");
+        }
     }
 
     /// The UI's answer to one pending approval. The bridge consumes the

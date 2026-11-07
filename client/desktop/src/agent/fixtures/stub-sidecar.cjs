@@ -183,6 +183,14 @@ function handleCommand(cmd) {
           id: cmd.id,
           value: { ok: true, env: Object.keys(process.env).sort() },
         });
+      } else if (cmd.name === 'dispose_session') {
+        // The real runner's dispose verb, mirrored: the session drops from
+        // the resident map and the command answers result.
+        writeLine({
+          type: 'result',
+          id: cmd.id,
+          value: { ok: true, disposed: true },
+        });
       } else {
         writeLine({
           type: 'error',

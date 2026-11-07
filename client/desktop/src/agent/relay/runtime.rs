@@ -104,7 +104,15 @@ impl SidecarRelay {
                 args,
                 preview,
             } => {
-                let correlation = self.any_correlation().await;
+                // The ask routes through the turn that staged its tool
+                // call, the same ownership the result envelope rides: an
+                // arbitrary in-flight prompt (a refused one sitting in the
+                // window) must never lend the ask its correlation. An ask
+                // nothing staged falls back to any live turn.
+                let correlation = match self.turn_owning_call(&tool_call_id) {
+                    Some((_session, correlation)) => Some(correlation),
+                    None => self.any_correlation().await,
+                };
                 let approval = PendingApproval {
                     id,
                     tool_call_id,
@@ -204,8 +212,9 @@ impl SidecarRelay {
         let correlation = correlation.map_or_else(CorrelationId::generate, |id| {
             CorrelationId::new(id.to_owned())
         });
-        let mut arg_preview = output.unwrap_or_default().to_string();
-        arg_preview.truncate(200);
+        // The cap counts characters, never bytes: a multibyte output whose
+        // byte 200 lands inside a character must not panic the router.
+        let arg_preview: String = output.unwrap_or_default().chars().take(200).collect();
         let row = AuditRow {
             correlation,
             verb: tool.to_string(),

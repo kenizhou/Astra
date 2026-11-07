@@ -208,6 +208,50 @@ test('an unknown command answers an error envelope with the id; ping answers res
   assert.equal(r.id, 'cmd-2');
 });
 
+test('the dispose_session command drops a chat session and answers result', async () => {
+  const s = spawnSidecar();
+  s.send({
+    type: 'init',
+    harness: 'mock',
+    cli_path: '',
+    data_dir: stubDataDir(),
+    mock_fixture: path.resolve(__dirname, 'fixtures', 'mock-reply.json'),
+  });
+  await s.nextLine(); // ready
+  // A prompt mints the chat's session; its done leaves it resident.
+  s.send({
+    type: 'prompt',
+    id: 'turn-gone',
+    session_id: 'agent:chat:gone',
+    text: 'hello',
+    correlation_id: 'corr-gone',
+  });
+  for (;;) {
+    const env = await s.nextLine();
+    if (env.type === 'done') break;
+  }
+
+  // The dispose drops the resident session: the first call reports it
+  // disposed, the second finds nothing left.
+  s.send({ type: 'command', id: 'cmd-d1', name: 'dispose_session', args: { session_id: 'agent:chat:gone' } });
+  const first = await s.nextLine();
+  assert.equal(first.type, 'result');
+  assert.equal(first.id, 'cmd-d1');
+  assert.equal((first.value as Record<string, unknown>).disposed, true);
+
+  s.send({ type: 'command', id: 'cmd-d2', name: 'dispose_session', args: { session_id: 'agent:chat:gone' } });
+  const second = await s.nextLine();
+  assert.equal(second.type, 'result');
+  assert.equal((second.value as Record<string, unknown>).disposed, false);
+
+  // A missing session_id is the typed error, never a silent guess.
+  s.send({ type: 'command', id: 'cmd-d3', name: 'dispose_session', args: {} });
+  const third = await s.nextLine();
+  assert.equal(third.type, 'error');
+  assert.equal(third.id, 'cmd-d3');
+  assert.match(String(third.message), /session_id/);
+});
+
 test('a prompt before init answers an error envelope carrying the id', async () => {
   const s = spawnSidecar();
   s.send({ type: 'prompt', id: 'turn-early', session_id: 'agent:main', text: 'hi', correlation_id: 'c' });

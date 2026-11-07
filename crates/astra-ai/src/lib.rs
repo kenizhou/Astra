@@ -14,8 +14,8 @@
 //! 0006, the knowledge entries of 0007, the snippet library of 0008, the
 //! text cache of 0009, and the AI documents of 0010, and the MCP
 //! tool-call
-//! ledger of 0011, and the analytics events of 0012), the
-//! prompt-injection
+//! ledger of 0011, and the analytics events of 0012, and the chat threads
+//! of 0013), the prompt-injection
 //! hardening wrapper ([`tag_untrusted`]), the active data loss
 //! prevention gate ([`DlpPolicy`] with its [`redact`] and [`apply`]),
 //! the structured output [`repair_json`] helper every structured caller

@@ -355,7 +355,10 @@ fn the_chat_commands_rename_and_delete_round_trip() {
     assert!(!unknown_rename, "an unknown chat reports no row");
 
     assert!(
-        chat_delete_with(&app_state, &id).expect("the delete runs"),
+        app_state
+            .runtime
+            .block_on(|| async { chat_delete_with(&app_state, &id).await })
+            .expect("the delete runs"),
         "a known chat deletes"
     );
     assert!(

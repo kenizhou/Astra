@@ -75,11 +75,13 @@ const TOOL_BUDGET_MS = resolveToolBudgetMs(process.env);
 const TOOL_BUDGET_GRACE_MS = resolveToolBudgetGraceMs(process.env);
 
 /** Live view of the current turn's tool budget; null between turns. One
- *  live turn at a time, enforced by the runner's refusal below: the view
- *  is single-slot, the same shape the correlation holder uses, and both
- *  are safe only while one prompt runs (a second live prompt would reset
- *  the first's clock and capture its correlation id). The runner's
- *  cleanup only clears its own turn's view. */
+ *  live turn at a time, enforced by the command loop's gate (after the
+ *  session lookup, so no await stands between its check and the runner's
+ *  synchronous registration): the view is single-slot, the same shape the
+ *  correlation holder uses, and both are safe only while one prompt runs
+ *  (a second live prompt would reset the first's clock and capture its
+ *  correlation id). The runner's cleanup only clears its own turn's
+ *  view. */
 const turnBudget: { current: TurnBudget | null } = { current: null };
 
 /** The five mail tools, shared by both harnesses (pi mounts them as
@@ -265,6 +267,19 @@ async function handleCommand(cmd: InCommand): Promise<void> {
         writeEnvelope({ type: 'error', id: cmd.id, message: 'prompt before init' });
         return;
       }
+      // Resolve the session BEFORE the turn gate: creating one takes
+      // genuinely awaited work (the pi adapter touches disk), and the gate
+      // holds only while no await stands between its check and runPrompt's
+      // synchronous registration in byPromptId. A session created for a
+      // subsequently refused prompt is harmless: sessions are per-chat and
+      // reusable.
+      let session = sessions.get(cmd.session_id);
+      if (!session) {
+        session = await harness.createSession({
+          harnessOptions: { sessionId: cmd.session_id },
+        });
+        sessions.set(cmd.session_id, session);
+      }
       // The turn invariant, enforced here: one live turn per sidecar. A
       // second prompt (per-chat sessions make overlapping prompts
       // reachable) is refused with an honest error envelope BEFORE any
@@ -281,13 +296,6 @@ async function handleCommand(cmd: InCommand): Promise<void> {
       // The correlation holder is set BEFORE the prompt runs so every tool
       // spawn of the turn stamps the id.
       correlation.current = cmd.correlation_id;
-      let session = sessions.get(cmd.session_id);
-      if (!session) {
-        session = await harness.createSession({
-          harnessOptions: { sessionId: cmd.session_id },
-        });
-        sessions.set(cmd.session_id, session);
-      }
       // Deliberately not awaited: stdin must keep reading while a prompt
       // runs (abort lines can only arrive that way).
       void runner.runPrompt(session, cmd);
@@ -306,14 +314,31 @@ async function handleCommand(cmd: InCommand): Promise<void> {
       // Every command gets an answer: result on success, an error envelope
       // carrying the command id on failure; the host never hangs waiting.
       try {
-        if (cmd.name !== 'ping') {
+        if (cmd.name === 'ping') {
+          writeEnvelope({
+            type: 'result',
+            id: cmd.id,
+            value: { ok: true, harness: harness?.id ?? null },
+          });
+        } else if (cmd.name === 'dispose_session') {
+          const sessionId = cmd.args.session_id;
+          if (typeof sessionId !== 'string') {
+            throw new Error('dispose_session requires a string session_id');
+          }
+          // A deleted chat's session leaves with the chat: dispose (the
+          // harness's own teardown) and drop the map entry, so the
+          // resident set never outlives the thread list.
+          const session = sessions.get(sessionId);
+          sessions.delete(sessionId);
+          if (session) await session.dispose();
+          writeEnvelope({
+            type: 'result',
+            id: cmd.id,
+            value: { ok: true, disposed: session !== undefined },
+          });
+        } else {
           throw new Error(`unknown command: ${cmd.name}`);
         }
-        writeEnvelope({
-          type: 'result',
-          id: cmd.id,
-          value: { ok: true, harness: harness?.id ?? null },
-        });
       } catch (e) {
         writeEnvelope({ type: 'error', id: cmd.id, message: String(e) });
       }

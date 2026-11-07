@@ -80,8 +80,14 @@ function stubDataDir(): string {
   return dir;
 }
 
-/** A mock transcript fixture carrying a confirm-gated tool call. */
-function toolCallFixture(dir: string, name: string, args: unknown): string {
+/** A mock transcript fixture carrying a confirm-gated tool call, optionally
+ *  holding each session's creation open for the given delay. */
+function toolCallFixture(
+  dir: string,
+  name: string,
+  args: unknown,
+  createSessionDelayMs = 0,
+): string {
   const fixturePath = path.join(dir, 'fixture.json');
   fs.writeFileSync(
     fixturePath,
@@ -89,6 +95,7 @@ function toolCallFixture(dir: string, name: string, args: unknown): string {
       chunks: ['working on it'],
       chunk_delay_ms: 1,
       tool_call: { name, args },
+      create_session_delay_ms: createSessionDelayMs,
     }),
   );
   return fixturePath;
@@ -182,4 +189,66 @@ test('a second prompt while one is live is refused and never disturbs the live t
   s.send({ type: 'permission_response', id: ask.id, approved: false, always_allow: false });
   const doneAfter = await until(s, 'done', seenAfter);
   assert.equal(doneAfter.id, 'turn-after');
+});
+
+test('a prompt arriving inside another prompt\'s session-creation window is refused', async () => {
+  const dir = stubDataDir();
+  // The slow creation holds every session open for a moment, so the second
+  // prompt arrives while the first is still inside createSession: exactly
+  // the window where a gate that checks before creating lets both through.
+  const fixture = toolCallFixture(
+    dir,
+    'save_draft',
+    {
+      account: 'acct-1',
+      from: 'ada@example.com',
+      to: ['bob@example.com'],
+      subject: 'Re: Friday',
+      body: 'See you then.',
+    },
+    250,
+  );
+  const s = spawnSidecar();
+  s.send({
+    type: 'init',
+    harness: 'mock',
+    cli_path: process.execPath,
+    data_dir: dir,
+    mock_fixture: fixture,
+    policy: { save_draft: { level: 'confirm' } },
+  });
+  await s.nextLine();
+  s.send({
+    type: 'prompt',
+    id: 'turn-window-a',
+    session_id: 'agent:chat:win-a',
+    text: 'draft a reply',
+    correlation_id: 'corr-win-1',
+  });
+  // The second prompt, for a session that also needs creating, arrives
+  // inside the first prompt's creation window.
+  s.send({
+    type: 'prompt',
+    id: 'turn-window-b',
+    session_id: 'agent:chat:win-b',
+    text: 'meanwhile',
+    correlation_id: 'corr-win-2',
+  });
+  const seen: string[] = [];
+  const refusal = await until(s, 'error', seen);
+  assert.equal(refusal.id, 'turn-window-b');
+  assert.match(String(refusal.message), /live/i, 'the refusal names the live turn');
+
+  // The first turn keeps its correlation id and its budget: its ask
+  // answers, its ledger row and its done all carry its own turn.
+  const req = await until(s, 'permission_request', seen);
+  s.send({ type: 'permission_response', id: req.id, approved: true, always_allow: false });
+  const llm = await until(s, 'llm_call', seen);
+  assert.equal(
+    (llm.call as Record<string, unknown>).correlation_id,
+    'corr-win-1',
+    'the live turn keeps its correlation id through the window',
+  );
+  const done = await until(s, 'done', seen);
+  assert.equal(done.id, 'turn-window-a');
 });

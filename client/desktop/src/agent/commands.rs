@@ -113,12 +113,24 @@ pub(crate) fn chat_rename_with(
     chats::chat_rename_of(&state.ai_store, chat_id, title)
 }
 
-/// Deletes one chat together with its messages.
+/// Deletes one chat together with its messages, then disposes the chat's
+/// sidecar session best effort so it does not stay resident.
 ///
 /// # Errors
 /// Returns [`CommandError::Agent`] when the store write fails.
-pub(crate) fn chat_delete_with(state: &AppState, chat_id: &str) -> Result<bool, CommandError> {
-    chats::chat_delete_of(&state.ai_store, chat_id)
+pub(crate) async fn chat_delete_with(
+    state: &AppState,
+    chat_id: &str,
+) -> Result<bool, CommandError> {
+    let deleted = chats::chat_delete_of(&state.ai_store, chat_id)?;
+    if deleted {
+        let chat = astra_ai::ChatId::new(chat_id.to_owned());
+        state
+            .agent
+            .dispose_session(&chats::session_for(&chat))
+            .await;
+    }
+    Ok(deleted)
 }
 
 /// Cancels the prompt: best effort on the wire, and every approval the
@@ -266,11 +278,11 @@ pub(crate) fn chat_rename(
 // Tauri's command macro hands `State` by value; the wrapper only reads through it.
 #[allow(clippy::needless_pass_by_value)]
 #[tauri::command]
-pub(crate) fn chat_delete(
+pub(crate) async fn chat_delete(
     state: State<'_, AppState>,
     chat_id: String,
 ) -> Result<bool, CommandError> {
-    chat_delete_with(&state, &chat_id)
+    chat_delete_with(&state, &chat_id).await
 }
 
 /// The host's model config for the sidecar's chat tier, built from the

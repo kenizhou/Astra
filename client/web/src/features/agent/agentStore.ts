@@ -45,6 +45,12 @@ export function sessionOf(chatId: string | null): string {
 /** The store's message id counter, so entries key stably across renders. */
 let nextMessageId = 0;
 
+/** The prompt ids whose settle event already crossed, in any order. A
+ *  settle can beat its own receipt across the IPC boundary; adopting that
+ *  receipt's turn afterwards would wedge the input on a prompt no future
+ *  event ever names again. */
+const settledPrompts = new Set<string>();
+
 /** The next message id, module-scoped so every turn's entries stay unique. */
 function messageId(): string {
   nextMessageId += 1;
@@ -213,29 +219,44 @@ export const useAgentStore = create<AgentStoreState>((set, get) => ({
     }
     const userMessage: AgentMessage = { id: messageId(), role: 'user', text: trimmed };
     const chatId = get().currentChatId;
-    set((state) => ({ messages: [...state.messages, userMessage] }));
+    // The user's bubble paints at once and stays painted: a failed send
+    // never produces a live buffer to carry it, so the next fold's
+    // recompute would erase an unpainted bubble.
+    set((state) => ({
+      painted: [...state.painted, userMessage],
+      messages: [...state.messages, userMessage],
+    }));
     try {
       const receipt = await agentPrompt(trimmed, undefined, chatId ?? undefined);
       const session = sessionOf(receipt.chat_id);
       set((state) => {
-        // A minted thread adopts the receipt's id. The user's entry leads
-        // the session's live buffer (any event that crossed before the
-        // receipt still follows it), so the visible log's base-plus-live
-        // shape holds from the turn's first entry.
-        const early = (state.liveBySession[session] ?? []).filter(
-          (entry) => entry.id !== userMessage.id,
-        );
-        const live = [userMessage, ...early];
         const sameChat = receipt.chat_id === state.currentChatId;
-        const painted = sameChat ? state.painted : [];
+        if (settledPrompts.has(receipt.prompt_id)) {
+          // The settle crossed before the receipt resolved: the live
+          // buffer is already folded away and no future event names this
+          // prompt again, so the turn is never adopted (the input never
+          // wedges on it) and the chat keeps the painted bubble alone.
+          const settledPainted = sameChat ? state.painted : [userMessage];
+          return {
+            currentChatId: receipt.chat_id,
+            painted: settledPainted,
+            messages: settledPainted,
+          };
+        }
+        // A minted thread adopts the receipt's id. Events that crossed
+        // before the receipt sit in the session's live buffer above the
+        // painted base, so the visible log's base-plus-live shape holds
+        // from the turn's first entry.
+        const early = state.liveBySession[session] ?? [];
+        const painted = sameChat ? state.painted : [userMessage];
         return {
           currentChatId: receipt.chat_id,
           painted,
           turn: receipt.prompt_id,
           turnSession: session,
           budgetSpent: false,
-          liveBySession: { ...state.liveBySession, [session]: live },
-          messages: sameChat ? [...painted, ...live] : live,
+          liveBySession: { ...state.liveBySession, [session]: early },
+          messages: [...painted, ...early],
         };
       });
       void get().refreshChats();
@@ -301,7 +322,10 @@ export const useAgentStore = create<AgentStoreState>((set, get) => ({
           // The fold point: the host has recorded the row this buffer
           // became. The buffer lets go; a visible thread keeps its entries
           // as the painted base (they mirror the row), a hidden one drops
-          // them (its next load paints the row).
+          // them (its next load paints the row). The id is remembered even
+          // when no turn was adopted yet: its receipt may still be in
+          // flight.
+          settledPrompts.add(event.event.prompt_id);
           const { [session]: settledLive, ...rest } = state.liveBySession;
           const settledTurn =
             event.event.prompt_id === state.turn
@@ -317,6 +341,11 @@ export const useAgentStore = create<AgentStoreState>((set, get) => ({
           };
         }
         case 'error': {
+          if (event.event.prompt_id !== undefined) {
+            // A named failure settles its prompt the way a done does, so
+            // the receipt that is still in flight never adopts it.
+            settledPrompts.add(event.event.prompt_id);
+          }
           const { [session]: failedLive, ...rest } = state.liveBySession;
           // An error naming the live prompt settles it; an error naming no
           // prompt (the sidecar at large) settles it too, the old contract.
@@ -378,7 +407,8 @@ export const useAgentStore = create<AgentStoreState>((set, get) => ({
       approvals: state.approvals.filter((existing) => existing.id !== id),
     })),
 
-  reset: () =>
+  reset: () => {
+    settledPrompts.clear();
     set({
       status: 'down',
       turn: null,
@@ -390,7 +420,8 @@ export const useAgentStore = create<AgentStoreState>((set, get) => ({
       liveBySession: {},
       messages: [],
       approvals: [],
-    }),
+    });
+  },
 }));
 
 /** Writes one folded live list back: the session's buffer always, the

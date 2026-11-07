@@ -193,6 +193,30 @@ describe('the input', () => {
     expect(within(log).getByText('the prompt failed: the agent is unavailable')).toBeTruthy();
     expect(useAgentStore.getState().turn).toBeNull();
   });
+
+  it('keeps a failed send\'s user bubble through a later fold', async () => {
+    ipc.agentPrompt.mockRejectedValue(new Error('the relay is down'));
+    useUiStore.getState().setAgentOpen(true);
+    render(<AgentPanel />);
+
+    const input = screen.getByRole('textbox', { name: 'Message the agent' });
+    fireEvent.change(input, { target: { value: 'lost words' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    });
+
+    // Any later fold recomputes the visible log from the painted base; the
+    // failed send never produced a live buffer to carry its bubble.
+    act(() => {
+      useAgentStore.getState().applyStreamEvent({
+        session_id: 'agent:main',
+        event: { kind: 'text_delta', text: 'elsewhere' },
+      });
+    });
+
+    const log = screen.getByRole('log', { name: 'Agent conversation' });
+    expect(within(log).getByText('lost words')).toBeTruthy();
+  });
 });
 
 describe('the approval card', () => {
@@ -289,6 +313,9 @@ describe('the tool budget', () => {
     });
     expect(useAgentStore.getState().budgetSpent).toBe(false);
 
+    // The host mints a fresh prompt id per send; a settled id never names a
+    // new turn.
+    ipc.agentPrompt.mockResolvedValue({ prompt_id: 'p-2', chat_id: 'chat-1' });
     await act(async () => {
       await useAgentStore.getState().sendPrompt('what changed');
     });
