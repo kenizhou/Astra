@@ -58,10 +58,13 @@ per row through the outbox. The picker honours the move's own constraints:
 ## The trash-versus-delete honesty
 
 Delete in a folder is move-to-trash: the rows land in the account's Trash,
-recoverable from there. Nothing in the list deletes for good. The permanent
-delete is the Trash's own verb (the folder menu inside the Trash and, for
-the mail itself, the Trash folder's rows), behind its own confirm. The bulk
-toolbar's Delete follows the same rule as the row menu's.
+recoverable from there. The permanent delete is the row menu's own item,
+standing anywhere the menu opens: danger-styled, below the ordinary Delete,
+behind its own confirm, and never in a batch loop (one row at a time; a
+multi-selection sees it disabled with its reason). The Trash's bulk delete
+keeps its own surface. Nothing recovers a permanent delete; the engine's
+verb is irreversible. The bulk toolbar's Delete follows the same rule as
+the row menu's.
 
 ## Known gaps
 
