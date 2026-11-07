@@ -99,7 +99,7 @@ belonging to nobody would be the loss.
   session state and the draft save carries no threading, so a reply
   resumed after an app restart sends as a new message; the full shape is
   sending.md's gap, recorded there.
-- **A carried picture row shows a placeholder until it renders.** A
+- **A carried picture row shows a placeholder.** A
   resumed draft's picture rows carry handles, not bytes, so the picture
   surface falls back to its placeholder row for them; the composer
   security document records the edge.
