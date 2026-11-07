@@ -6,11 +6,10 @@
 //! for it, and dispatches an [`Intent`] back; state flows one way and commands the
 //! other. The [`App`] owns one [`engine_api::Engine`] shared across every configured
 //! [`Account`], and [`boot`] assembles the whole sequence over a host-provided runtime.
-//! The crate root holds the runtime's state; the command surface, the projection, the
-//! sync paths, the preferences, the AI rules model with its generation seam, the AI
-//! replies model with its draft pool service, the AI assist services (knowledge,
-//! snippets, autocomplete, translate), and the AI documents services (the digest,
-//! the report, the split) each live in their own module.
+//! The crate root holds the runtime's state; the command surface, the projection,
+//! the sync paths, the preferences, the sender-name service, the AI rules model,
+//! the AI replies model, the AI assist services, and the AI documents services
+//! each live in their own module.
 
 mod accounts;
 mod ai_assist;
@@ -47,6 +46,7 @@ mod report_writes;
 mod row_cache;
 mod sanitise;
 mod search;
+mod sender_names;
 mod settings;
 mod signatures;
 mod snapshot;

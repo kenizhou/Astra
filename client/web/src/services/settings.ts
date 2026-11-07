@@ -129,7 +129,40 @@ export interface AccountSettingsRow {
   signatures?: AccountSignatures;
   /** The account's own sync settings, the effective values; absent is the product defaults. */
   sync?: AccountSyncSettings;
+  /**
+   * The name the account's mail goes out under: the adopted, edited, or
+   * locally stored name, falling back to the address when none stands
+   * (the bare-address send). Absent reads back empty, which renders as
+   * the address.
+   */
+  display_name?: string;
+  /**
+   * How the account's outgoing name is governed: writable (the provider
+   * holds it and the account holder may change it), read_only (the
+   * provider holds it and the account holder may not), or local (the
+   * transport owns none and this app's stored value is the source).
+   * Absent reads back as local.
+   */
+  sender_name_control?: SenderNameControl;
+  /**
+   * Whether the account still needs its name asked for once: no value
+   * stands stored, not even the deliberate empty one. The wizard's and
+   * the accounts page's ask-state.
+   */
+  needs_sender_name?: boolean;
+  /**
+   * Why the account's last name write was refused, when it was: a name
+   * that cannot go in a header, or a provider's refusal of the push
+   * while the local name stood. Absent crosses no key.
+   */
+  sender_name_error?: string;
 }
+
+/**
+ * How the account's outgoing name is governed; crosses as a snake_case
+ * word.
+ */
+export type SenderNameControl = 'writable' | 'read_only' | 'local';
 
 /** The About block: the version and the attributions. */
 export interface AboutBlock {
@@ -204,6 +237,7 @@ export type SettingsIntentBody =
         poll_minutes?: number;
       };
     }
+  | { set_sender_name: { account: string; name: string } }
   | { set_debug_enabled: { enabled: boolean } }
   | { set_analytics_consented: { consented: boolean } }
   | { set_language: { language: string } }
@@ -306,8 +340,17 @@ export const settingsIntents = {
       },
     },
   }),
+  /**
+   * Set the name one account's mail goes out under: the From line's
+   * source, stored locally whatever the provider holds, and pushed to
+   * the provider best-effort where the account holder owns its copy.
+   * The empty name is a real answer, the deliberate bare address.
+   */
+  setSenderName: (account: string, name: string) => ({
+    settings: { set_sender_name: { account, name } },
+  }),
   /** Set whether the log level is debug, the Diagnostics toggle; the logger
-   *  reads the level at boot, so the change lands with the next launch. */
+   *  reads it at boot, so the change lands with the next launch. */
   setDebugEnabled: (enabled: boolean) => ({
     settings: { set_debug_enabled: { enabled } },
   }),

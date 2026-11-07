@@ -56,6 +56,32 @@ function folderDisplayName(
   return account?.folders.find((f) => f.key === selected.key)?.name ?? null;
 }
 
+/** Whose mail the header names: the open folder's name while a folder
+ *  leads, the account's own label while the switcher's scope stands, and
+ *  All Accounts for the unified view. `null` names nothing yet. */
+function scopeTitle(
+  accounts: ReturnType<typeof useFolderStore.getState>['accounts'],
+  selected: ReturnType<typeof useFolderStore.getState>['selected'],
+  scope: ReturnType<typeof useFolderStore.getState>['scope'],
+): string | null {
+  if (selected !== null) {
+    return folderDisplayName(accounts, selected);
+  }
+  if (scope === null) {
+    return null;
+  }
+  switch (scope.kind) {
+    case 'folder':
+      return folderDisplayName(accounts, { account: scope.account, key: scope.key });
+    case 'account':
+      return (
+        accounts.find((account) => account.account_id === scope.account)?.display_name ?? null
+      );
+    case 'all_inboxes':
+      return 'All Accounts';
+  }
+}
+
 interface RowWindowProps {
   /** The items the mode is showing, headers interleaved or flat. */
   items: ListItem[];
@@ -160,6 +186,7 @@ export function MessageList() {
   const openSnapshot = useReadingStore((s) => s.snapshot);
   const accounts = useFolderStore((s) => s.accounts);
   const folder = useFolderStore((s) => s.selected);
+  const scope = useFolderStore((s) => s.scope);
   const outboxAccount = useFolderStore((s) => s.outboxAccount);
   const filter = useListFilterStore((s) => s.filter);
   const menu = useContextMenu();
@@ -304,7 +331,7 @@ export function MessageList() {
       className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-card"
     >
       <ListToolbar
-        folderName={folderDisplayName(accounts, folder)}
+        folderName={scopeTitle(accounts, folder, scope)}
         viewMode={viewMode}
         filter={filter}
         filterCounts={counts}

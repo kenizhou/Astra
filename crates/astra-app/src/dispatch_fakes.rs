@@ -17,8 +17,8 @@ use std::{
 
 use async_trait::async_trait;
 use engine_api::{
-    AccountId, CalendarWrites, Draft, EmailAddress, Engine, Mailbox, MailboxEdit, MailboxId,
-    Message, ProviderKey, SystemKeyword, UtcDateTime,
+    AccountId, CalendarWrites, Draft, EmailAddress, Engine, IdentityControls, Mailbox, MailboxEdit,
+    MailboxId, Message, ProviderKey, SenderIdentity, SenderIdentityId, SystemKeyword, UtcDateTime,
 };
 use engine_provider::{MailEdit, MessageReport, ReportControls, ReportEvidence, ReportVerdicts};
 
@@ -98,6 +98,19 @@ pub(super) struct FakeProvider {
     /// Every submit this provider was asked to deliver, in order: the send
     /// log the outbox assertions read.
     pub(super) submits: Arc<Mutex<Vec<Draft>>>,
+    /// The identity capability the adapter answers with, `None` for a
+    /// provider with no identity object at all (the IMAP shape); the
+    /// sender-name tests' leg.
+    pub(super) identity_controls: Option<IdentityControls>,
+    /// The identities the adapter serves, among them the account's own
+    /// address; behind a mutex so a test can move what the fake holds.
+    pub(super) identities: Arc<Mutex<Vec<SenderIdentity>>>,
+    /// Every `set_sender_name` the adapter was asked to apply: the push log
+    /// the sender-name assertions read.
+    pub(super) name_writes: Arc<Mutex<Vec<(SenderIdentityId, String)>>>,
+    /// Name writes left to refuse permanently, so a test can model a server
+    /// that will not take the change.
+    name_refusals: Mutex<u32>,
     /// How the SMTP leg answers each submit, one entry per attempt in order;
     /// the script runs out into plain delivery.
     send_script: Mutex<Vec<ScriptedSend>>,
@@ -168,6 +181,10 @@ impl FakeProvider {
             draft_puts: Arc::new(Mutex::new(Vec::new())),
             draft_deletes: Arc::new(Mutex::new(Vec::new())),
             submits: Arc::new(Mutex::new(Vec::new())),
+            identity_controls: None,
+            identities: Arc::new(Mutex::new(Vec::new())),
+            name_writes: Arc::new(Mutex::new(Vec::new())),
+            name_refusals: Mutex::new(0),
             send_script: Mutex::new(Vec::new()),
             offline_saves: Mutex::new(0),
             tree_writes: false,
@@ -195,6 +212,34 @@ impl FakeProvider {
             evidence: ReportEvidence::Convention,
         });
         self
+    }
+
+    /// Marks the adapter as one whose identities the account holder may
+    /// change (the JMAP shape), serving `identities`.
+    pub(super) fn with_writable_identities(mut self, identities: Vec<SenderIdentity>) -> Self {
+        self.identity_controls = Some(IdentityControls::Writable);
+        *self.identities.lock().unwrap() = identities;
+        self
+    }
+
+    /// Marks the adapter as one whose identities are the directory's, not
+    /// the account holder's (the Graph shape), serving `identities`.
+    pub(super) fn with_read_only_identities(mut self, identities: Vec<SenderIdentity>) -> Self {
+        self.identity_controls = Some(IdentityControls::ReadOnly);
+        *self.identities.lock().unwrap() = identities;
+        self
+    }
+
+    /// Scripts the next `refusals` name writes to fail permanently, the
+    /// best-effort push's refused shape.
+    pub(super) fn refusing_name_writes(self, refusals: u32) -> Self {
+        *self.name_refusals.lock().unwrap() = refusals;
+        self
+    }
+
+    /// Every recorded name write, for the push assertions.
+    pub(super) fn name_writes(&self) -> Arc<Mutex<Vec<(SenderIdentityId, String)>>> {
+        Arc::clone(&self.name_writes)
     }
 
     /// Scripts the SMTP leg's answers to the next submits, one entry per

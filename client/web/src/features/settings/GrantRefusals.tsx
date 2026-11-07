@@ -8,15 +8,17 @@
 // settings snapshot's account rows carry; a healthy account renders
 // neither. The expired row is the cross-family surface: its action
 // targets the family the grant belongs to, google for a Google account
-// as microsoft for a Microsoft one, while the jmap and imap_smtp
-// families have no integrated provider flow to re-run: their rows name
-// the refused credential and point at reconnecting the account. The
-// banner stays Microsoft-only (Google has no calendar re-auth).
+// as microsoft for a Microsoft one, while the jmap family's action is
+// its own in-place re-grant over the stored grant (the account keeps
+// its mail, folders, and settings) and the imap_smtp password family's
+// remedy stays reconnecting the account. The banner stays
+// Microsoft-only (Google has no calendar re-auth).
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
-import { oauthBegin } from '@/services/ipc';
+import { jmapReauthBegin, oauthBegin, onJmapReauthResult } from '@/services/ipc';
 import type { AccountKind, AccountSettingsRow } from '@/services/ipc';
+import { isTauri } from '@/events/surfaceEvents';
 import type { OAuthProvider } from '@/services/oauth';
 
 
@@ -36,6 +38,48 @@ function useRegrant() {
       setSentence(String(err));
     });
   };
+  return { sentence, begin };
+}
+
+/** The JMAP re-grant: the begin over the stored grant, its refusal
+ * sentences surfaced, and the completion watched for a refusal the row
+ * should say out loud (a granted one clears the row itself, through the
+ * settings republish). */
+function useJmapRegrant(account: string, armed: boolean) {
+  const [sentence, setSentence] = useState<string | null>(null);
+  const begin = (): void => {
+    jmapReauthBegin(account).catch((err: unknown) => {
+      setSentence(String(err));
+    });
+  };
+  useEffect(() => {
+    if (!armed || !isTauri) {
+      return;
+    }
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    onJmapReauthResult((result) => {
+      if ('refused' in result.outcome) {
+        setSentence(result.outcome.refused.detail);
+      }
+    }).then(
+      (teardown) => {
+        if (disposed) {
+          teardown();
+        } else {
+          unlisten = teardown;
+        }
+      },
+      () => {
+        /* a listener that cannot register hears nothing */
+      },
+    );
+    return () => {
+      disposed = true;
+      unlisten?.();
+      unlisten = null;
+    };
+  }, [armed]);
   return { sentence, begin };
 }
 
@@ -96,10 +140,11 @@ export function ReconnectBanner({ rows }: { rows: AccountSettingsRow[] }) {
 /** The expired-sign-in row: a dead grant renders its own card, because a
  * sign-in button inside the open-button row is markup no screen reader
  * tolerates. The sentence names the sign-in, never an outage, and its
- * action is the same re-grant. The jmap and imap_smtp families have no
- * integrated provider flow to re-run: their rows name the refused
- * credential and their remedy is reconnecting the account here, until
- * an in-place grant ships. */
+ * action is the same re-grant. The jmap family's action is its own
+ * in-place re-grant over the stored grant; the imap_smtp password
+ * family's credential has no browser flow to re-run, so its row names
+ * the refused credential and its remedy stays reconnecting the
+ * account. */
 export function ExpiredSignInRow({
   row,
   onOpen,
@@ -108,7 +153,8 @@ export function ExpiredSignInRow({
   onOpen: () => void;
 }) {
   const regrant = useRegrant();
-  const namedCredential = row.kind === 'jmap' || row.kind === 'imap_smtp';
+  const jmap = useJmapRegrant(row.account, row.kind === 'jmap');
+  const passwordCredential = row.kind === 'imap_smtp';
   return (
     <div
       role="status"
@@ -117,12 +163,21 @@ export function ExpiredSignInRow({
     >
       <p className="text-xs font-medium text-foreground">{row.address}</p>
       <p className="text-xs text-muted-foreground">
-        {namedCredential
+        {passwordCredential
           ? 'This account\u2019s credential was refused. Remove the account and connect it again to update it.'
           : 'The sign-in expired or was withdrawn. Sign in again to reconnect this account.'}
       </p>
       <div className="flex gap-2 pt-1">
-        {!namedCredential && (
+        {row.kind === 'jmap' ? (
+          <button
+            type="button"
+            aria-label={`Sign in again as ${row.address}`}
+            onClick={jmap.begin}
+            className="rounded-[var(--radius)] bg-secondary px-2.5 py-1 text-xs text-secondary-foreground transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[var(--hit)]"
+          >
+            Sign in again
+          </button>
+        ) : !passwordCredential ? (
           <button
             type="button"
             aria-label={`Sign in again as ${row.address}`}
@@ -131,16 +186,16 @@ export function ExpiredSignInRow({
           >
             Sign in again
           </button>
-        )}
-        {regrant.sentence !== null && (
+        ) : null}
+        {(row.kind === 'jmap' ? jmap.sentence : regrant.sentence) !== null && (
           <p role="alert" className="text-xs text-muted-foreground">
-            {regrant.sentence}
+            {row.kind === 'jmap' ? jmap.sentence : regrant.sentence}
           </p>
         )}
         <button
           type="button"
-            aria-label={`Open ${row.address}`}
-            onClick={onOpen}
+          aria-label={`Open ${row.address}`}
+          onClick={onOpen}
           className="rounded-[var(--radius)] border border-border px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[var(--hit)]"
         >
           Open

@@ -583,9 +583,11 @@ once registrations exist.
   The expired-sign-in row crosses every family: the refusal map is
   id-keyed and provider-neutral, a dead google grant renders the row
   over the google kind with its Sign in again targeting the google
-  flow, and the JMAP (SP2o) and IMAP/SMTP (SP2v) rows name the refused
-  credential with reconnecting the account as the remedy, until
-  in-place grants ship.
+  flow, the JMAP (SP2o) row re-grants in place from its stored grant
+  (SP2w), and the IMAP/SMTP (SP2v) row names the refused credential
+  with reconnecting the account as the remedy: the mail grant does not
+  share the JMAP re-authorisation arms (they are typed over the JMAP
+  section), so its own arm is a later slice.
 - **A Microsoft account keeps no server-side draft.** The refreshing
   wrapper deliberately does not advertise the engine's server-side drafts
   capability, so the composer holds a Microsoft draft in the app alone

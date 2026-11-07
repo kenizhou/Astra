@@ -92,6 +92,8 @@ beforeEach(() => {
     accounts: (fixtureJson as MailboxListSnapshot).account_folders,
     selected: { account: 'work', key: 'INBOX' },
     outboxAccount: null,
+    scope: { kind: 'folder', account: 'work', key: 'INBOX' },
+    unified: false,
   });
   useListStore.setState({
     rows: [],
@@ -478,3 +480,4 @@ describe('the list filter', () => {
     expect(screen.getByRole('button', { name: 'Show more' })).toBeTruthy();
   });
 });
+

@@ -102,8 +102,9 @@ export interface ImapAuthCardProps {
   password: string;
   /** Hands a password edit back to the flow. */
   onPasswordChange: (value: string) => void;
-  /** A completed sign-in added the account: the wizard closes on it. */
-  onAdded: () => void;
+  /** A completed sign-in added the account: its address crosses up, so
+   *  the flow's ask-once name step can follow the join. */
+  onAdded: (address: string) => void;
 }
 
 export function ImapAuthCard({
@@ -211,11 +212,11 @@ export function ImapAuthCard({
   }, []);
 
   // A completed sign-in added the account: the first sync runs in the
-  // background and the wizard closes on it.
+  // background and the added address crosses up for the name ask.
   useEffect(() => {
     if (flow.status === 'result' && 'added' in flow.outcome) {
       void dispatch(intents.refreshMail());
-      onAdded();
+      onAdded(flow.outcome.added.address);
     }
   }, [flow, onAdded]);
 

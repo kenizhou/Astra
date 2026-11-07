@@ -16,6 +16,7 @@ const ipc = vi.hoisted(() => ({
   detectAccountSettings: vi.fn(),
   oauthOffer: vi.fn(),
   imapAuthOffer: vi.fn(),
+  settings: vi.fn(),
 }));
 
 vi.mock('@/services/ipc', async (importOriginal) => ({
@@ -25,6 +26,8 @@ vi.mock('@/services/ipc', async (importOriginal) => ({
 
 import { AccountSetupFlow } from './AccountSetupFlow';
 import { useUiStore } from '@/stores/uiStore';
+import { useSettingsStore } from '@/features/settings/settingsStore';
+import type { SettingsSnapshot } from '@/services/ipc';
 
 const rejectedCertificate = {
   server_name: 'mail.example.net',
@@ -36,6 +39,32 @@ const rejectedCertificate = {
   not_before: null,
   not_after: null,
 };
+
+/** The settings pull the ask step reads, holding the added account's row
+ *  in whichever ask state a test needs. */
+function settingsSnapshot(needsName: boolean): SettingsSnapshot {
+  return {
+    settings: {
+      theme: 'follow_host',
+      twenty_four_clock: false,
+      zone: 'Etc/UTC',
+      first_day_of_week: 'mo',
+      horizon_days: 42,
+      quote_below: true,
+      view_mode: 'flat',
+    },
+    accounts: [
+      {
+        account: 'work',
+        address: 'work@example.net',
+        kind: 'imap_smtp',
+        legs: { calendar: false, contacts: false },
+        needs_sender_name: needsName,
+      },
+    ],
+    about: { version: '0.1.0' },
+  };
+}
 
 async function fillForm() {
   fireEvent.change(screen.getByLabelText('Mail server'), {
@@ -70,6 +99,9 @@ beforeEach(() => {
   ipc.oauthOffer.mockResolvedValue({ providers: [] });
   ipc.imapAuthOffer.mockReset();
   ipc.imapAuthOffer.mockResolvedValue('password');
+  ipc.settings.mockReset();
+  ipc.settings.mockResolvedValue(settingsSnapshot(true));
+  useSettingsStore.setState({ accounts: [], revision: 0 });
   useUiStore.setState({ accountSetupOpen: true });
 });
 
@@ -142,7 +174,7 @@ describe('the manual setup flow', () => {
     expect(ipc.addAccount).not.toHaveBeenCalled();
   });
 
-  it('a passing test carries through add account and the first refresh, then closes', async () => {
+  it('a passing test carries through add account, the first refresh, and the name ask', async () => {
     ipc.imapTestConnection.mockResolvedValue({ ok: { account_id: 'work' } });
     ipc.addAccount.mockResolvedValue({ account_id: 'work', email: 'work@example.net' });
     render(<AccountSetupFlow />);
@@ -153,7 +185,9 @@ describe('the manual setup flow', () => {
     const add = await screen.findByRole('button', { name: 'Add account' });
     fireEvent.click(add);
 
-    await waitFor(() => expect(useUiStore.getState().accountSetupOpen).toBe(false));
+    // The ask-once step follows the join: the wizard stays open and asks
+    // the name the account's mail goes out under.
+    const nameField = await screen.findByLabelText(/what name/i);
     expect(ipc.addAccount).toHaveBeenCalledTimes(1);
     const toml = ipc.addAccount.mock.calls[0]![0] as string;
     expect(toml).toContain('addr = "imap.example.net:993"');
@@ -162,10 +196,76 @@ describe('the manual setup flow', () => {
     expect(toml).toContain('password = "secret"');
     expect(toml).not.toContain('certificate_exception');
     expect(ipc.dispatch).toHaveBeenCalledWith('refresh_mail');
+
+    fireEvent.change(nameField, { target: { value: 'Grace Hopper' } });
+    fireEvent.click(screen.getByRole('button', { name: /continue/i }));
+    expect(ipc.dispatch).toHaveBeenCalledWith({
+      settings: { set_sender_name: { account: 'work', name: 'Grace Hopper' } },
+    });
+    await waitFor(() => expect(useUiStore.getState().accountSetupOpen).toBe(false));
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
+  it('the name ask never draws where the join adopted a name', async () => {
+    // The adoption rides the spawned sync: where the provider already
+    // answered a name, the account joins with the ask spent, and the
+    // step closes the wizard without asking anything.
+    ipc.settings.mockResolvedValue(settingsSnapshot(false));
+    ipc.imapTestConnection.mockResolvedValue({ ok: { account_id: 'work' } });
+    ipc.addAccount.mockResolvedValue({ account_id: 'work', email: 'work@example.net' });
+    render(<AccountSetupFlow />);
+    fireEvent.click(screen.getByRole('button', { name: 'Set up manually' }));
+    await fillForm();
+    fireEvent.click(screen.getByRole('button', { name: 'Test connection' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Add account' }));
+
+    await waitFor(() => expect(useUiStore.getState().accountSetupOpen).toBe(false));
+    expect(screen.queryByLabelText(/name/i)).toBeNull();
+    expect(
+      ipc.dispatch.mock.calls.some((call) => {
+        const intent = call[0] as { settings?: { set_sender_name?: unknown } };
+        return intent?.settings?.set_sender_name !== undefined;
+      }),
+      'an adopted name spends the ask: nothing sets a sender name'
+    ).toBe(false);
+  });
+
+  it('a late adoption closes the name ask cleanly and never spends it twice', async () => {
+    // The ask reads the CURRENT needs state when the step renders and
+    // again when it settles: a provider-known name can arrive mid-step
+    // (the adoption rides the spawned sync), and the step must close on
+    // it rather than overwrite the adopted name with a typed one.
+    const { act } = await import('@testing-library/react');
+    ipc.imapTestConnection.mockResolvedValue({ ok: { account_id: 'work' } });
+    ipc.addAccount.mockResolvedValue({ account_id: 'work', email: 'work@example.net' });
+    render(<AccountSetupFlow />);
+    fireEvent.click(screen.getByRole('button', { name: 'Set up manually' }));
+    await fillForm();
+    fireEvent.click(screen.getByRole('button', { name: 'Test connection' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Add account' }));
+
+    await screen.findByLabelText(/name/i);
+
+    // The adoption lands mid-step, the way the settings republish carries
+    // it: the step reads the current needs state and closes.
+    act(() => {
+      useSettingsStore.getState().applySnapshot(settingsSnapshot(false));
+    });
+
+    await waitFor(() => expect(useUiStore.getState().accountSetupOpen).toBe(false));
+    expect(
+      ipc.dispatch.mock.calls.some((call) => {
+        const intent = call[0] as { settings?: { set_sender_name?: unknown } };
+        return intent?.settings?.set_sender_name !== undefined;
+      }),
+      'the late adoption spent the ask: the step never writes a name over it'
+    ).toBe(false);
+  });
+
   it('shows the fingerprint of a rejected certificate and accepts it on retry', async () => {
+    // The retry's add joins a provider that already answered a name, so
+    // the ask-once step never draws and the wizard closes on the add.
+    ipc.settings.mockResolvedValue(settingsSnapshot(false));
     ipc.imapTestConnection.mockResolvedValueOnce({
       rejected_certificate: {
         certificate: rejectedCertificate,

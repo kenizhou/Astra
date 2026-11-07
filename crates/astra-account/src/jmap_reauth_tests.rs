@@ -110,3 +110,58 @@ async fn reauth_swaps_the_grant_only_for_the_same_mailbox() {
         "the refusal must say which way it went wrong: {err}",
     );
 }
+
+#[tokio::test]
+async fn a_fresh_reauth_section_serialises_as_the_document_the_swap_consumes() {
+    // The host's in-place swap consumes whole documents, exactly the shape
+    // the wizard's first sign-in answers, so the fresh section the
+    // re-authentication mints crosses as one: a loadable `[jmap]` document
+    // carrying the grant and nothing beside it.
+    let (base, _seen) = discovery_server(full_chain);
+    let pending = PendingJmapLogin {
+        email: "alice@example.net".to_owned(),
+        base_url: base.clone(),
+        client_id: "client-xyz".to_owned(),
+        client_secret: None,
+        authorize_endpoint: format!("{base}/oauth/authorize"),
+        token_endpoint: format!("{base}/token"),
+        redirect_uri: REDIRECT_URI.to_owned(),
+        scopes: vec!["offline_access".to_owned()],
+        resource: Some(format!("{base}/jmap/session")),
+        issuer: Some(base.clone()),
+        state: "state-1".to_owned(),
+        verifier: "verifier".to_owned(),
+    };
+    let stored: JmapAccount = stored_oauth_account("alice@example.net", &base);
+    let encoded = serde_json::to_string(&pending).expect("serialisable");
+    let iss = format!("&iss={}", base.replace(':', "%3A").replace('/', "%2F"));
+    let fresh = complete_jmap_reauth(
+        &stored,
+        &encoded,
+        &format!("{REDIRECT_URI}?code=c1&state=state-1{iss}"),
+        now(),
+    )
+    .await
+    .expect("the same mailbox");
+
+    let document = super::jmap_reauth_document(&fresh).expect("a document for the swap");
+    let section = load_str(&document)
+        .expect("the document loads")
+        .jmap
+        .expect("the document is a jmap one");
+    assert_eq!(section.email, "alice@example.net");
+    assert_eq!(
+        section
+            .oauth
+            .as_ref()
+            .expect("the grant crossed")
+            .refresh_token
+            .expose(),
+        "rt-1",
+        "the fresh grant is the document's one credential"
+    );
+    assert!(
+        section.password.is_none(),
+        "a grant-carrying document holds no password"
+    );
+}

@@ -314,3 +314,134 @@ describe('the remove confirmation', () => {
     expect(screen.getByRole('alert').textContent).toContain('could not be removed');
   });
 });
+
+describe('the outgoing name', () => {
+  it('carries the display name beside the address on the row', () => {
+    useSettingsStore
+      .getState()
+      .applySnapshot(snapshot([row({ display_name: 'Ada Lovelace' })]));
+    render(<AccountsDetail />);
+
+    const open = screen.getByRole('button', { name: 'Open ada@example.test' });
+    expect(open.textContent).toContain('Ada Lovelace');
+    expect(open.textContent).toContain('ada@example.test');
+  });
+
+  it('asks once on the page for an account whose name is unanswered', () => {
+    useSettingsStore
+      .getState()
+      .applySnapshot(snapshot([row({ needs_sender_name: true })]));
+    render(<AccountsDetail />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open ada@example.test' }));
+
+    const ask = screen.getByRole('group', { name: /outgoing name/i });
+    expect(ask.textContent).toContain('ada@example.test');
+    fireEvent.change(screen.getByLabelText(/what name/i), {
+      target: { value: 'Ada Lovelace' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /set the name/i }));
+
+    expect(ipc.dispatch).toHaveBeenCalledWith({
+      settings: { set_sender_name: { account: 'work', name: 'Ada Lovelace' } },
+    });
+
+    // The answered ask leaves with the snapshot that carries the answer.
+    act(() => {
+      useSettingsStore.getState().applySnapshot(snapshot([row()]));
+    });
+    expect(screen.queryByLabelText(/what name/i)).toBeNull();
+  });
+
+  it('the ask offers the address alone as a real answer', () => {
+    useSettingsStore
+      .getState()
+      .applySnapshot(snapshot([row({ needs_sender_name: true })]));
+    render(<AccountsDetail />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open ada@example.test' }));
+
+    fireEvent.click(screen.getByRole('button', { name: /use the address alone/i }));
+
+    expect(ipc.dispatch).toHaveBeenCalledWith({
+      settings: { set_sender_name: { account: 'work', name: '' } },
+    });
+  });
+
+  it('a writable card edits the name, shows the refusal, and clears it when the push lands', () => {
+    useSettingsStore.getState().applySnapshot(
+      snapshot([row({ display_name: 'Ada Lovelace', sender_name_control: 'writable' })]),
+    );
+    render(<AccountsDetail />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open ada@example.test' }));
+
+    const field = screen.getByLabelText(/the name on the from line/i);
+    expect((field as HTMLInputElement).value).toBe('Ada Lovelace');
+    fireEvent.change(field, { target: { value: 'Augusta Ada King' } });
+    fireEvent.click(screen.getByRole('button', { name: /save the name/i }));
+    expect(ipc.dispatch).toHaveBeenCalledWith({
+      settings: { set_sender_name: { account: 'work', name: 'Augusta Ada King' } },
+    });
+
+    act(() => {
+      useSettingsStore.getState().applySnapshot(
+        snapshot([
+          row({
+            display_name: 'Augusta Ada King',
+            sender_name_control: 'writable',
+            sender_name_error: 'the server refused the write',
+          }),
+        ]),
+      );
+    });
+    expect(screen.getByRole('alert').textContent).toContain('the server refused the write');
+
+    act(() => {
+      useSettingsStore.getState().applySnapshot(
+        snapshot([row({ display_name: 'Augusta Ada King', sender_name_control: 'writable' })]),
+      );
+    });
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('a read-only card shows the name with its reason and offers no field', () => {
+    useSettingsStore.getState().applySnapshot(
+      snapshot([row({ display_name: 'Ada Lovelace', sender_name_control: 'read_only' })]),
+    );
+    render(<AccountsDetail />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open ada@example.test' }));
+
+    const card = screen.getByRole('group', { name: /outgoing name/i });
+    expect(card.textContent).toContain('Ada Lovelace');
+    expect(card.textContent).toMatch(/cannot be changed here/i);
+    expect(screen.queryByLabelText(/the name on the from line/i)).toBeNull();
+    expect(ipc.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('a local card edits the name and says where it lives', () => {
+    useSettingsStore.getState().applySnapshot(
+      snapshot([row({ display_name: 'Ada Lovelace', sender_name_control: 'local' })]),
+    );
+    render(<AccountsDetail />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open ada@example.test' }));
+
+    const card = screen.getByRole('group', { name: /outgoing name/i });
+    expect(card.textContent).toMatch(/kept in Astra Mail/i);
+    fireEvent.change(screen.getByLabelText(/the name on the from line/i), {
+      target: { value: 'Grace Hopper' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /save the name/i }));
+    expect(ipc.dispatch).toHaveBeenCalledWith({
+      settings: { set_sender_name: { account: 'work', name: 'Grace Hopper' } },
+    });
+  });
+
+  it('the edit field seeds empty where the account sends as the bare address', () => {
+    useSettingsStore.getState().applySnapshot(
+      snapshot([row({ display_name: 'ada@example.test', sender_name_control: 'local' })]),
+    );
+    render(<AccountsDetail />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open ada@example.test' }));
+
+    const field = screen.getByLabelText(/the name on the from line/i) as HTMLInputElement;
+    expect(field.value).toBe('');
+  });
+});

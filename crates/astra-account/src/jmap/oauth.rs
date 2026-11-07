@@ -39,7 +39,7 @@
 mod discovery;
 mod reauth;
 
-pub use reauth::{begin_jmap_reauth, complete_jmap_reauth};
+pub use reauth::{begin_jmap_reauth, complete_jmap_reauth, jmap_reauth_document};
 
 use std::sync::Arc;
 

@@ -114,8 +114,8 @@ async fn the_invitation_answers_over_the_route_stalwart_serves() {
     let request = request_ics(
         &uid,
         &summary,
-        "DTSTART:20261104T150000Z",
-        "DTEND:20261104T160000Z",
+        &format!("DTSTART:{}", super::calendar_proof::utc_in_days(7, 15, 0)),
+        &format!("DTEND:{}", super::calendar_proof::utc_in_days(7, 16, 0)),
         "astra2@example.test",
         "astra1@example.test",
     );

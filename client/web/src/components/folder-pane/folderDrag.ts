@@ -7,6 +7,7 @@
 
 import type { FolderRow, RowKey } from '@/services/surfaces';
 import type { MessageRef } from '@/services/ipc';
+import { ROWS_DRAG_TYPE } from '@/components/message-list/MessageRow';
 
 /** What the dragged folder was dropped on. */
 export type FolderDropTarget =
@@ -67,4 +68,22 @@ export function insideTrash(key: string, rows: FolderRow[]): boolean {
  *  constraint, one message per row. */
 export function messageRefsOf(keys: RowKey[]): MessageRef[] {
   return keys.flatMap((key) => ('message' in key ? [key.message] : []));
+}
+
+/** The row keys a dropped selection carried, keys only, thread keys
+ *  included: the drop site decides what a batch can name. */
+export function droppedRowKeys(read: (type: string) => string): RowKey[] {
+  try {
+    const raw = read(ROWS_DRAG_TYPE);
+    if (raw === '') {
+      return [];
+    }
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed as RowKey[];
+  } catch {
+    return [];
+  }
 }

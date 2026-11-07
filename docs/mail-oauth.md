@@ -191,8 +191,10 @@ with its classification word, never as silence.
 At launch the boot dial classifies a dead grant into the expired-sign-in
 state for the account it then skips: the accounts page renders the
 imap_smtp family's row naming the refused credential (never an outage
-badge), and its remedy is reconnecting the account, the same shape the
-JMAP family's row carries, until an in-place grant ships.
+badge), and its remedy is reconnecting the account: the mail grant does not
+share the JMAP family's re-authorisation arms (those are typed over
+the JMAP section and its grant shape), so the mail family's own
+re-grant arm is a deliberate later slice, not an expectation.
 
 ## What is deliberately not done
 

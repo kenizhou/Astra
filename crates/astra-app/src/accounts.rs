@@ -97,9 +97,13 @@ impl<P: Provider> App<P> {
     /// Syncs a just-added account's mail and rebuilds the snapshot so its folders
     /// appear. The host registers the account first (via
     /// [`add_new_account_deferred`](Self::add_new_account_deferred)), then spawns this
-    /// in the background: the install is instant and this is the slow half. A no-op for
-    /// an unknown account id.
+    /// in the background: the install is instant and this is the slow half. The
+    /// join's identity half rides at the head: the provider's own name, where
+    /// it holds one, is adopted before the sync so the ask-once step the
+    /// wizard draws needs nothing from the network. A no-op for an unknown
+    /// account id.
     pub async fn sync_added_account(&self, id: &AccountId) {
+        self.adopt_sender_name(id).await;
         self.sync_account(id).await;
         self.rebuild_snapshot().await;
     }

@@ -149,6 +149,13 @@ pub struct Preferences {
     /// the product defaults.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub sync: BTreeMap<engine_api::AccountId, AccountSyncSettings>,
+    /// The name each account's outgoing mail goes out under, by account
+    /// id. An entry (the empty string among them, the deliberate bare
+    /// address) is the ask-once latch: an account with a row here has
+    /// answered the name question, adopted or typed, and no entry is an
+    /// account whose name has never been asked for.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub sender_names: BTreeMap<engine_api::AccountId, String>,
     /// Whether the log level is debug, the Diagnostics toggle. Off by
     /// default: the log runs at info until the person raises it, and the
     /// logger reads the level at boot, so the change lands with the next
@@ -210,6 +217,7 @@ impl Default for Preferences {
             plugins_enabled: true,
             notifications_enabled: true,
             sync: BTreeMap::new(),
+            sender_names: BTreeMap::new(),
             debug_enabled: false,
             analytics_consented: false,
             language: default_language(),
@@ -392,6 +400,21 @@ impl Preferences {
         }
     }
 
+    /// Records the name `account`'s outgoing mail goes out under, or the
+    /// empty name for the deliberate bare address. Returns whether anything
+    /// changed, so a re-assert of the standing value costs no disk write.
+    pub fn set_account_sender_name(
+        &mut self,
+        account: &engine_api::AccountId,
+        name: String,
+    ) -> bool {
+        if self.sender_names.get(account) == Some(&name) {
+            return false;
+        }
+        self.sender_names.insert(account.clone(), name);
+        true
+    }
+
     /// Drops every expansion this account holds, its selected folder when the
     /// selection pointed inside it, its own selected view, and its own rows
     /// in the per-account maps (the signatures, the sync settings): used when
@@ -420,7 +443,11 @@ impl Preferences {
             .ok()
             .and_then(|id| self.sync.remove(&id))
             .is_some();
-        tree || folders || selected || viewed || signatures || send_default || sync
+        let name = engine_api::AccountId::try_from(account)
+            .ok()
+            .and_then(|id| self.sender_names.remove(&id))
+            .is_some();
+        tree || folders || selected || viewed || signatures || send_default || sync || name
     }
 }
 

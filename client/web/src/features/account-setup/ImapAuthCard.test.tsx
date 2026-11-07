@@ -344,7 +344,7 @@ describe('a begun mail sign-in', () => {
     ).toBeTruthy();
   });
 
-  it('a completed sign-in dispatches the refresh and closes the wizard', async () => {
+  it('a completed sign-in dispatches the refresh and hands the added address up for the name ask', async () => {
     const onAdded = vi.fn();
     ipc.imapAuthOffer.mockResolvedValue(SIGN_IN);
     renderCard({ onAdded });
@@ -356,7 +356,7 @@ describe('a begun mail sign-in', () => {
     deliver({ outcome: { added: { address: 'ada@example.test' } } });
     await flush();
 
-    expect(onAdded).toHaveBeenCalledTimes(1);
+    expect(onAdded).toHaveBeenCalledWith('ada@example.test');
     expect(ipc.dispatch).toHaveBeenCalledWith('refresh_mail');
   });
 

@@ -25,10 +25,38 @@ use crate::{
 
 use super::{proof, CountingObserver};
 
-pub(super) const DELIVERY_TIMEOUT: Duration = Duration::from_secs(15);
+/// The bounded wait over a scheduling round trip (an answer reaching the
+/// organiser, a withdrawal landing). An anti-hang guard, not a speed
+/// contract: the pin is the route, and Stalwart's scheduler under a
+/// loaded host running the whole gated suite can take past 15 seconds,
+/// so the bound is twice that.
+pub(super) const DELIVERY_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// A unique token for one run: in every UID, title, and subject the run
 /// mints, so reruns converge and cleanup matches only this run's artefacts.
+/** A UTC calendar literal `days` from today: the suite fixtures sit inside
+ *  whatever window the run paints, whatever day it runs (a fixed date ages
+ *  into the past and past-start events do not schedule). */
+pub(super) fn utc_in_days(days: i64, hour: u8, minute: u8) -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("the clock reads after the epoch")
+        .as_secs();
+    let secs = i64::try_from(secs).expect("the clock reads within i64");
+    let day = secs.div_euclid(86_400) + days;
+    let z = day + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    format!("{y:04}{m:02}{d:02}T{hour:02}{minute:02}00Z")
+}
+
 pub(super) fn run_token() -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
     static SEQ: AtomicU64 = AtomicU64::new(0);

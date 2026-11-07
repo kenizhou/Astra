@@ -163,19 +163,12 @@ registration.
 
 ## Known gaps
 
-- **No in-place renewal.** A JMAP account whose stored credential is refused
-  shows the expired-sign-in row naming the credential, and its remedy is
-  removing the account and connecting it again. An in-place re-grant that
-  keeps mail, folders, and settings waits for its slice (the capabilities
-  row is open).
 - **A grant that dies mid-session is unobserved until the next dial.** The
   boot dial classifies a dead grant; nothing watches the session for a
   revocation that lands while the app runs.
 - **Contacts (RFC 9610) ride a later slice.** The engine's JMAP contacts
   face is not yet surfaced in Astra; the session's advertisement of it
   changes nothing the product shows today.
-- **The sender-name write waits for its slice.** The identity verbs the
-  submission capability offers are not yet surfaced for JMAP accounts.
 - **A refused re-consent can roll the dial table back past a landed
   rotation.** The re-authorisation flow's failure path restores the previous
   stored document wholesale; a rotation that landed between the flow's start

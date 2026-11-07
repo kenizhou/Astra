@@ -166,6 +166,7 @@ pub fn run() {
             oauth::commands::oauth_cancel,
             oauth::jmap_commands::jmap_oauth_offered,
             oauth::jmap_commands::jmap_oauth_begin,
+            oauth::jmap_reauth::jmap_reauth_begin,
             oauth::mail_commands::imap_auth_offer,
             oauth::mail_commands::imap_oauth_begin,
             agent::commands::agent_prompt,
