@@ -19,6 +19,7 @@ mod agent;
 mod ai;
 mod app_state;
 mod boot;
+mod calendar_timer;
 mod commands;
 mod credential_store;
 mod crypto_wrapper;

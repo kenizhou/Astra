@@ -253,6 +253,13 @@ fn assemble_for(env: &SliceEnv) -> Result<AppState, String> {
         std::sync::Arc::new(crate::notify::NotifyBridge::logged()),
         &state.runtime,
     );
+    // The periodic calendar refresh rides the headless host too, over the
+    // same change-gated body the windowed boot's timer drives.
+    crate::calendar_timer::spawn(
+        std::sync::Arc::clone(&state.app),
+        std::sync::Arc::clone(&state.connections),
+        &state.runtime,
+    );
     Ok(state)
 }
 

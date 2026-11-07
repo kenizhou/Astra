@@ -174,6 +174,16 @@ pub enum Intent {
         /// The row to trash, bound to its owning account.
         row: RowRef,
     },
+    /// Permanently delete one row's mail, for good: a message in the flat
+    /// list, or a whole conversation in the threaded list. The engine's
+    /// delete edit behind it, through the same outbox discipline
+    /// [`Intent::MoveToTrash`] rides; nothing moves to the trash and nothing
+    /// recovers. The row menu gates the verb behind its own confirm, and one
+    /// row names it: the verb never rides a batch loop.
+    DeleteMessage {
+        /// The row to delete, bound to its owning account.
+        row: RowRef,
+    },
     /// Move a set of messages to one folder of their own account. Every row
     /// must belong to the destination folder's account, the row's own
     /// constraint; a move to the folder a row already sits in is a no-op the

@@ -173,6 +173,34 @@ function messageRefs(targets: MessageRowView[]): MessageRef[] {
   return targets.flatMap((row) => ('message' in row.key ? [row.key.message] : []));
 }
 
+/** The permanent delete: the irreversible verb behind its own confirm, the
+ *  sentence the Trash folder delete's own confirm shaped. Stands anywhere
+ *  the menu opens, danger-styled, below the ordinary Delete (which stays
+ *  the move-to-trash), and only ever names one row: the verb never rides a
+ *  batch loop, so a multi-selection stands disabled with the reason. */
+function permanentDeleteItem(targets: MessageRowView[]): ContextMenuItem {
+  const reason = targets.length > 1 ? 'Pick one row for this' : undefined;
+  const noun = targets.length === 1 && 'thread' in targets[0]!.key ? 'conversation' : 'message';
+  return {
+    label: 'Delete Permanently',
+    icon: TrashIcon,
+    danger: true,
+    disabled: reason !== undefined ? true : undefined,
+    title: reason,
+    description: reason,
+    onSelect: () => {
+      if (reason !== undefined) {
+        return;
+      }
+      const question = `Permanently delete this ${noun}? This cannot be undone.`;
+      if (!window.confirm(question)) {
+        return;
+      }
+      void dispatch(intents.deleteMessage(targets[0]!.key));
+    },
+  };
+}
+
 /** The menu one message row (or a batch of them) opens. */
 export function buildRowMenu(
   targets: MessageRowView[],
@@ -242,6 +270,7 @@ export function buildRowMenu(
       danger: true,
       onSelect: () => forEach(targets, (row) => void dispatch(intents.moveToTrash(row.key))),
     },
+    permanentDeleteItem(targets),
     {
       label: multi ? `Archive ${targets.length} ${noun}` : 'Archive',
       icon: ArchiveIcon,

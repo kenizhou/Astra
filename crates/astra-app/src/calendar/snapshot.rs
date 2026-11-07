@@ -180,6 +180,16 @@ impl<P: Provider> App<P> {
     /// and that account contributes nothing, because a snapshot half-built
     /// from a failed read is a diary that lies about being empty.
     pub(crate) async fn rebuild_calendar(&self) {
+        let snapshot = self.build_calendar_snapshot().await;
+        self.calendar.publish(snapshot);
+    }
+
+    /// Builds the calendar snapshot the rebuild publishes, without
+    /// publishing it: the change-gated cadence compares this value against
+    /// the published one, so a tick that changed nothing signals nothing
+    /// while the rebuild itself stays the unconditional form every intent
+    /// rides.
+    pub(crate) async fn build_calendar_snapshot(&self) -> CalendarSnapshot {
         let inputs = self.calendar_inputs();
         let mut calendars = Vec::new();
         let mut occurrences = Vec::new();
@@ -203,7 +213,7 @@ impl<P: Provider> App<P> {
                 b.event.as_str(),
             ))
         });
-        self.calendar.publish(CalendarSnapshot {
+        CalendarSnapshot {
             calendars,
             occurrences,
             write_states: inputs.writes,
@@ -213,7 +223,7 @@ impl<P: Provider> App<P> {
                 zone: inputs.zone.as_str().to_owned(),
             }),
             shape: Some(inputs.shape),
-        });
+        }
     }
 
     /// One account's calendar rows and joined occurrence rows over the window.

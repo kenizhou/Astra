@@ -93,6 +93,10 @@ impl AppPort for App<HostProvider> {
         App::sync_added_account(self, id).await;
     }
 
+    async fn refresh_calendars_if_changed(&self) {
+        App::refresh_calendars_if_changed(self).await;
+    }
+
     async fn draft_chips(&self, account: &AccountId, key: &ProviderKey) -> Vec<Chip> {
         App::draft_chips(self, account, key).await
     }

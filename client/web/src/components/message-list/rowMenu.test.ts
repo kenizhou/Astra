@@ -5,7 +5,7 @@
 // message only) and the spam report (offered only where the account can
 // report).
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const ipc = vi.hoisted(() => ({ dispatch: vi.fn() }));
 const window = vi.hoisted(() => ({ openMessageWindow: vi.fn() }));
@@ -65,6 +65,12 @@ beforeEach(() => {
   window.openMessageWindow.mockResolvedValue(undefined);
 });
 
+// The confirm spy restores after each test, so a refused click in one
+// leaves the next its own answer.
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe('buildRowMenu', () => {
   it('holds the ported order', () => {
     expect(labels(buildRowMenu([m1], 'flat', accountCtx))).toEqual([
@@ -80,6 +86,7 @@ describe('buildRowMenu', () => {
       'Mark as spam',
       '|',
       'Delete',
+      'Delete Permanently',
       'Archive',
       '|',
       'Copy Subject',
@@ -271,6 +278,54 @@ describe('buildRowMenu', () => {
     expect(ipc.dispatch).toHaveBeenCalledWith({ move_to_trash: { row: m1.key } });
     expect(ipc.dispatch).toHaveBeenCalledWith({ move_to_trash: { row: th.key } });
     expect(ipc.dispatch).toHaveBeenCalledWith({ archive_message: { row: m2.key } });
+  });
+
+  it('offers the permanent delete below the ordinary Delete, danger-styled', () => {
+    const items = buildRowMenu([m1], 'flat', accountCtx);
+    const positions = labels(items);
+    expect(positions.indexOf('Delete Permanently')).toBe(positions.indexOf('Delete') + 1);
+    expect(items.find((item) => item.label === 'Delete Permanently')!.danger).toBe(true);
+    expect(items.find((item) => item.label === 'Delete Permanently')!.disabled).toBeUndefined();
+  });
+
+  it('asks the cannot-be-undone confirm, then dispatches the delete intent', () => {
+    vi.spyOn(globalThis, 'confirm').mockReturnValue(true);
+    const items = buildRowMenu([m1], 'flat', accountCtx);
+
+    items.find((item) => item.label === 'Delete Permanently')!.onSelect!();
+
+    expect(globalThis.confirm).toHaveBeenCalledWith('Permanently delete this message? This cannot be undone.');
+    expect(ipc.dispatch).toHaveBeenCalledTimes(1);
+    expect(ipc.dispatch).toHaveBeenCalledWith({ delete_message: { row: m1.key } });
+  });
+
+  it('words the confirm for a conversation row', () => {
+    vi.spyOn(globalThis, 'confirm').mockReturnValue(true);
+    const items = buildRowMenu([th], 'threaded', accountCtx);
+
+    items.find((item) => item.label === 'Delete Permanently')!.onSelect!();
+
+    expect(globalThis.confirm).toHaveBeenCalledWith('Permanently delete this conversation? This cannot be undone.');
+    expect(ipc.dispatch).toHaveBeenCalledWith({ delete_message: { row: th.key } });
+  });
+
+  it('keeps the mail when the permanent delete confirm is refused', () => {
+    vi.spyOn(globalThis, 'confirm').mockReturnValue(false);
+    const items = buildRowMenu([m1], 'flat', accountCtx);
+
+    items.find((item) => item.label === 'Delete Permanently')!.onSelect!();
+
+    expect(globalThis.confirm).toHaveBeenCalled();
+    expect(ipc.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('never offers the permanent delete as a batch loop', () => {
+    const items = buildRowMenu([m1, m2], 'flat', accountCtx);
+    const permanent = items.find((item) => item.label === 'Delete Permanently')!;
+    expect(permanent.disabled).toBe(true);
+    expect(permanent.title).toBe('Pick one row for this');
+    permanent.onSelect?.();
+    expect(ipc.dispatch).not.toHaveBeenCalled();
   });
 
   it('counts flat-mode batches as messages', () => {

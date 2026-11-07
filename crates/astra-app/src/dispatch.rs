@@ -106,6 +106,14 @@ impl<P: Provider> App<P> {
                     log::warn!("trash: {err}");
                 }
             }
+            // The permanent delete rides the same discard-and-resync
+            // discipline over the engine's irreversible delete edit. The
+            // confirm is the surface's own; nothing here second-guesses it.
+            Intent::DeleteMessage { row } => {
+                if let Err(err) = self.delete_message(row).await {
+                    log::warn!("delete: {err}");
+                }
+            }
             // The move-to-folder batch: the same discard-and-resync discipline
             // the single-row moves ride, looped over the row set.
             Intent::MoveMessages { rows, folder } => {

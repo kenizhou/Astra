@@ -344,6 +344,14 @@ pub(crate) fn setup_host(app: &mut tauri::App) -> Result<(), Box<dyn std::error:
         Arc::new(crate::notify::NotifyBridge::windowed(app.handle().clone())),
         &state.runtime,
     );
+    // The periodic calendar refresh rides the same lifetime: one timer over
+    // the core's change-gated body, gated on the dial table the delivery
+    // supervisor reads, holding nothing the state's drop order depends on.
+    crate::calendar_timer::spawn(
+        Arc::clone(&state.app),
+        Arc::clone(&state.connections),
+        &state.runtime,
+    );
     let accounts = state.connections.ids().len();
     let handle = app.handle().clone();
     app.manage(state);

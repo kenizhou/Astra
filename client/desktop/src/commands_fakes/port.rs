@@ -246,6 +246,11 @@ impl AppPort for FakeApp {
         self.synced.lock().unwrap().push(id.as_str().to_owned());
     }
 
+    async fn refresh_calendars_if_changed(&self) {
+        // The command surface never drives the periodic refresh; the timer
+        // host owns it, so the fake answers the empty visit.
+    }
+
     fn drain_new_mail(&self) -> NewMailBatch {
         let batch = self.batches.lock().unwrap().pop_front().unwrap_or_default();
         self.drained

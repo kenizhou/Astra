@@ -140,6 +140,12 @@ pub(crate) trait AppPort: Send + Sync {
     /// install.
     async fn sync_added_account(&self, id: &AccountId);
 
+    /// Runs the periodic calendar refresh: every account's calendars synced
+    /// and the diary republished only when it moved, so the host's standing
+    /// tick signals on change alone. Never the intent: a tick that changed
+    /// nothing must signal nothing.
+    async fn refresh_calendars_if_changed(&self);
+
     /// Takes the new-mail batch the passes have collected and leaves the
     /// queue empty: the delivery loop's drain after each pass it lands, so
     /// the OS notification policy stays in the host where the window state

@@ -20,6 +20,7 @@ import type { MailSubmission, OutboxIntent, SendingSnapshot } from './sending';
 import { foldersIntents } from './folders';
 import type { FolderIntentBody } from './folders';
 import { reportIntents } from './reports';
+import { writeIntents } from './writes';
 import type { CalendarIntentBody, InvitationBlock } from './calendar';
 import { calendarIntents } from './calendar';
 import type { PeopleIntentBody } from './people';
@@ -48,6 +49,10 @@ export * from './folders';
 // The report half (the two spam-report intents' constructors), under the
 // same re-export and split for the cap.
 export * from './reports';
+
+// The message-write half (the permanent delete's constructor), under the
+// same re-export and split out for the cap.
+export * from './writes';
 
 // The account-setup half (the connection and credential vocabulary, the
 // setup form's fields, the detection recommendation views, and the three
@@ -153,6 +158,7 @@ export type Intent =
   | { set_flagged: { row: RowRef; flagged: boolean } }
   | { archive_message: { row: RowRef } }
   | { move_to_trash: { row: RowRef } }
+  | { delete_message: { row: RowRef } }
   | { move_messages: { rows: MessageRef[]; folder: FolderRef } }
   | { mark_junk: { row: RowRef } }
   | { mark_not_junk: { row: RowRef } }
@@ -223,6 +229,9 @@ export const intents = {
   // The report family (the two spam-report verbs), in the enum's own order
   // beside the move batch.
   ...reportIntents,
+  // The message-write family (the permanent delete), in the enum's own
+  // order beside the move batch.
+  ...writeIntents,
   // The calendar family, appended after the search verbs in the enum's own
   // order.
   ...calendarIntents,
