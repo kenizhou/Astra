@@ -37,6 +37,8 @@ mod observer;
 mod platform;
 mod plugin;
 mod share;
+#[cfg(debug_assertions)]
+mod showcase;
 mod window_state;
 
 // The command-surface test fixtures: one compiled copy of the fake app, the
