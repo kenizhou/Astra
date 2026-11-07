@@ -93,6 +93,24 @@ describe('the sandbox', () => {
     expect(container.textContent).toContain('[click me](javascript:alert(1))');
   });
 
+  it('leaves a link carrying a control character as literal text', () => {
+    // The composer allowlist the renderer names rejects control characters
+    // outright; the link grammar alone would admit them.
+    const target = 'https://example.com/a\u0007b';
+    const { container } = render(<Markdown text={`[click](${target})`} />);
+
+    expect(container.querySelector('a')).toBeNull();
+    expect(container.textContent).toContain(`[click](${target})`);
+  });
+
+  it('leaves a link with nothing after its scheme as literal text', () => {
+    const { container } = render(<Markdown text={'[bare](https://) and [mail](mailto:)'} />);
+
+    expect(container.querySelector('a')).toBeNull();
+    expect(container.textContent).toContain('[bare](https://)');
+    expect(container.textContent).toContain('[mail](mailto:)');
+  });
+
   it('leaves an image markdown as literal text, no remote load', () => {
     const { container } = render(<Markdown text={'![pic](https://example.com/x.png)'} />);
 

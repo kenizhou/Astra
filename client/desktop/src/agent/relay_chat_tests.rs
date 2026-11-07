@@ -94,9 +94,12 @@ fn a_prompt_naming_a_chat_rides_its_session_and_records_its_rows() {
         })
         .expect("the prompt is sent");
 
-    // The user's side records at dispatch, before the run answers.
+    // The user's side records at dispatch, before the run answers. The
+    // shape, not the count: under parallel load the stub's done can fold
+    // the assistant row before this thread reads, and row 0 being the user
+    // row is the dispatch-time claim either way.
     let dispatched = store.chat_messages(&chat.id).expect("the messages read");
-    assert_eq!(dispatched.len(), 1, "the user row landed at dispatch");
+    assert!(!dispatched.is_empty(), "the user row landed at dispatch");
     assert_eq!(dispatched[0].role, "user");
 
     let events = runtime.block_on(|| async { sink.await_events(3).await });

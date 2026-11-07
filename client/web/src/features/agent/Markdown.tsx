@@ -30,12 +30,14 @@ type Inline =
   | { inline: 'link'; text: string; href: string };
 
 /** The link shapes the renderer admits: `null` means the whole bracket
- *  text stays literal (the sandbox refuses the scheme, not the words). */
+ *  text stays literal (the sandbox refuses the scheme, not the words). The
+ *  composer allowlist's whole discipline: the two schemes, the 2048 bound,
+ *  no whitespace or control characters, and something after the scheme. */
 function linkHref(href: string): string | null {
-  if (href.length > LINK_MAX || /\s/.test(href)) {
+  if (href.length > LINK_MAX || /[\s\u0000-\u001f\u007f]/.test(href)) {
     return null;
   }
-  if (/^https?:\/\//i.test(href) || isMailtoHref(href)) {
+  if (/^https?:\/\/.+/i.test(href) || /^mailto:.+@.+$/i.test(href)) {
     return href;
   }
   return null;
