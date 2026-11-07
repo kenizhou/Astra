@@ -194,9 +194,13 @@ function assertExpected(s: Scenario, envelopes: Record<string, unknown>[]): void
   const spentEvents = envelopes.filter((e) => isStateEvent(e, 'budget-spent'));
 
   if (s.expected.budget_event !== undefined) {
-    assert.ok(
-      spentEvents.length >= 1,
-      `scenario ${s.id}: the budget-spent state event must cross the wire: ${JSON.stringify(envelopes.map((e) => e.type))}`,
+    // Exactly once, not at least once: the runner's announced flag is the
+    // only guard against a double note in the panel's log, so a regression
+    // to two announcements must fail here.
+    assert.equal(
+      spentEvents.length,
+      1,
+      `scenario ${s.id}: the budget-spent state event crosses the wire exactly once: ${JSON.stringify(envelopes.map((e) => e.type))}`,
     );
     const shape = s.expected.budget_event;
     if (typeof shape === 'object') {
