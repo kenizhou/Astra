@@ -213,4 +213,16 @@ pub enum SettingsIntent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         poll_minutes: Option<u16>,
     },
+    /// Set the name one account's mail goes out under: the From line's
+    /// source, stored locally whatever the provider holds, and pushed to
+    /// the provider best-effort where the account holder owns its copy. The
+    /// empty name is a real answer, the deliberate bare address; the core
+    /// refuses nothing else here except a name that cannot go in a header.
+    SetSenderName {
+        /// The account whose name to write.
+        account: AccountId,
+        /// The name, carried verbatim; the core applies the bound on
+        /// dispatch.
+        name: String,
+    },
 }

@@ -80,6 +80,11 @@ pub(crate) struct SettingsState {
     /// The per-account crypto-method write failures, shown on the
     /// account's row. Absent for an account whose last write landed.
     pub(crate) crypto_errors: BTreeMap<AccountId, String>,
+    /// The per-account sender-name push failures, shown on the account's
+    /// row: the sentence of a provider that refused the write while the
+    /// local name stood. Absent for an account whose last push landed or
+    /// was never attempted.
+    pub(crate) name_errors: BTreeMap<AccountId, String>,
     /// Why the newest settings write was refused or failed, when it was.
     /// `None` is the state of every write that landed.
     pub(crate) error: Option<SettingsError>,
@@ -206,6 +211,9 @@ impl<P: Provider> App<P> {
                 })
                 .await;
             }
+            SettingsIntent::SetSenderName { account, name } => {
+                self.set_sender_name(account, name).await;
+            }
             SettingsIntent::SetDebugEnabled { enabled } => {
                 self.set_setting(|prefs| prefs.debug_enabled = enabled)
                     .await;
@@ -321,6 +329,12 @@ impl<P: Provider> App<P> {
             .expect("settings mutex poisoned")
             .crypto_errors
             .clone();
+        let name_errors = self
+            .settings_state
+            .lock()
+            .expect("settings mutex poisoned")
+            .name_errors
+            .clone();
         let accounts = {
             // The signature assignment each row echoes, projected from the
             // persisted document's own shape into the wire's.
@@ -345,6 +359,7 @@ impl<P: Provider> App<P> {
             let mut accounts = Vec::with_capacity(handles.len());
             for handle in &handles {
                 let info = infos.iter().find(|info| info.id == handle.id);
+                let name = self.sender_name_row(&handle.id, &handle.identity.email);
                 accounts.push(astra_viewmodel::AccountSettingsRow {
                     legs: astra_viewmodel::AccountLegs {
                         calendar: handle
@@ -365,6 +380,12 @@ impl<P: Provider> App<P> {
                     crypto_error: crypto_errors.get(&handle.id).cloned(),
                     signatures: signatures.get(&handle.id).cloned(),
                     sync: Some(self.pane_sync_settings(&handle.id)),
+                    display_name: name.display_name,
+                    sender_name_control: crate::sender_names::sender_name_control(
+                        &handle.providers,
+                    ),
+                    needs_sender_name: name.needs_sender_name,
+                    sender_name_error: name_errors.get(&handle.id).cloned(),
                 });
             }
             // The one exception to the join rule: an account whose grant the
@@ -377,6 +398,7 @@ impl<P: Provider> App<P> {
                     continue;
                 }
                 if let Some(grant) = info.grant {
+                    let name = self.sender_name_row(&info.id, &info.address);
                     accounts.push(astra_viewmodel::AccountSettingsRow {
                         legs: astra_viewmodel::AccountLegs {
                             calendar: false,
@@ -393,6 +415,10 @@ impl<P: Provider> App<P> {
                         crypto_error: crypto_errors.get(&info.id).cloned(),
                         signatures: signatures.get(&info.id).cloned(),
                         sync: Some(self.pane_sync_settings(&info.id)),
+                        display_name: name.display_name,
+                        sender_name_control: astra_viewmodel::SenderNameControl::Local,
+                        needs_sender_name: name.needs_sender_name,
+                        sender_name_error: name_errors.get(&info.id).cloned(),
                     });
                 }
             }

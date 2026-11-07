@@ -81,15 +81,9 @@ impl<P: Provider> App<P> {
             log::warn!("send: the account has no provider to send through");
             return;
         };
-        let Some(draft) = submit_draft(
-            &handle.identity,
-            &to,
-            &cc,
-            &bcc,
-            &subject,
-            &document,
-            &blobs,
-        ) else {
+        let identity = self.send_identity(&handle);
+        let Some(draft) = submit_draft(&identity, &to, &cc, &bcc, &subject, &document, &blobs)
+        else {
             log::warn!("send: the message could not be built for sending");
             return;
         };
@@ -125,8 +119,8 @@ impl<P: Provider> App<P> {
             return;
         };
         let references = self.reply_references(&in_reply_to).await;
-        let Some(draft) = submit_draft(&handle.identity, &to, &cc, "", &subject, &document, &blobs)
-        else {
+        let identity = self.send_identity(&handle);
+        let Some(draft) = submit_draft(&identity, &to, &cc, "", &subject, &document, &blobs) else {
             log::warn!("send: the message could not be built for sending");
             return;
         };
@@ -193,8 +187,8 @@ impl<P: Provider> App<P> {
                 }
             }
         }
-        let Some(draft) = submit_draft(&handle.identity, &to, "", "", &subject, &document, &blobs)
-        else {
+        let identity = self.send_identity(&handle);
+        let Some(draft) = submit_draft(&identity, &to, "", "", &subject, &document, &blobs) else {
             log::warn!("send: the message could not be built for sending");
             return;
         };

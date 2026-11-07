@@ -177,7 +177,8 @@ impl<P: Provider> App<P> {
             log::warn!("drafts: the account has no provider to save a draft through");
             return;
         };
-        let Some(draft) = build_draft(&message_id, &handle.identity, held) else {
+        let identity = self.send_identity(&handle);
+        let Some(draft) = build_draft(&message_id, &identity, held) else {
             log::warn!("drafts: the draft could not be rendered to store");
             return;
         };

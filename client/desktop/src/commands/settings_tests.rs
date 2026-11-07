@@ -7,8 +7,8 @@
 use std::sync::Arc;
 
 use astra_viewmodel::{
-    AboutBlock, AccountKind, AccountLegs, AccountSettingsRow, DavSectionRow, SettingsBlock,
-    SettingsSnapshot, ThemeMode, ViewMode, WeekdayWire,
+    AboutBlock, AccountKind, AccountLegs, AccountSettingsRow, DavSectionRow, SenderNameControl,
+    SettingsBlock, SettingsSnapshot, ThemeMode, ViewMode, WeekdayWire,
 };
 
 use super::settings_of;
@@ -61,6 +61,10 @@ fn the_settings_pull_round_trips_the_published_snapshot() {
             crypto_error: None,
             signatures: None,
             sync: None,
+            display_name: "Ada Lovelace".to_owned(),
+            sender_name_control: SenderNameControl::Local,
+            needs_sender_name: false,
+            sender_name_error: None,
         }],
         about: AboutBlock {
             version: "0.1.0".to_owned(),

@@ -53,6 +53,8 @@ describe('the settings snapshot wire', () => {
         refresh_error:
           'the diary could not be re-expanded under the new zone; set the zone again to retry',
         crypto_method: 'none',
+        display_name: 'Ada Lovelace',
+        sender_name_control: 'writable',
         sync: {
           depth_months: 12,
           body_cap: { bytes: { octets: 1024 } },

@@ -300,6 +300,7 @@ impl PreferencesState {
         on_disk.zone_picked = self.prefs.zone_picked;
         on_disk.signatures.clone_from(&self.prefs.signatures);
         on_disk.sync.clone_from(&self.prefs.sync);
+        on_disk.sender_names.clone_from(&self.prefs.sender_names);
         self.last_save_failed = save_preferences(path, &on_disk).is_err();
     }
 }

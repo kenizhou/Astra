@@ -34,7 +34,43 @@ impl Provider for FakeProvider {
         if let Some(controls) = self.report_controls {
             capabilities = capabilities.with_mail_report(controls);
         }
+        if let Some(controls) = self.identity_controls {
+            capabilities = capabilities.with_sender_identities(controls);
+        }
         ConnectionInfo::new(capabilities)
+    }
+
+    /// Serves the scripted identities verbatim; a capability-checking caller
+    /// finds the account's own by matching the address, never the first.
+    async fn sender_identities(
+        &self,
+        _account: &AccountId,
+    ) -> ProviderResult<Vec<engine_api::SenderIdentity>> {
+        Ok(self.identities.lock().unwrap().clone())
+    }
+
+    /// Records one name write, or refuses it while the script holds, the way
+    /// a server without the settings scope would.
+    async fn set_sender_name(
+        &self,
+        _account: &AccountId,
+        identity: &engine_api::SenderIdentityId,
+        name: &str,
+    ) -> ProviderResult<()> {
+        {
+            let mut left = self.name_refusals.lock().unwrap();
+            if *left > 0 {
+                *left -= 1;
+                return Err(ProviderError::permanent(
+                    "the settings write needs a scope the token lacks",
+                ));
+            }
+        }
+        self.name_writes
+            .lock()
+            .unwrap()
+            .push((identity.clone(), name.to_owned()));
+        Ok(())
     }
 
     async fn sync_mailboxes(

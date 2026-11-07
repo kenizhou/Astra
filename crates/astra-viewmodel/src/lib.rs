@@ -44,8 +44,8 @@ pub use sending::{
 };
 pub use settings::{
     AboutBlock, AccountKind, AccountLegs, AccountSettingsRow, AccountSignatures,
-    AccountSyncSettings, DavSectionRow, DefaultCalendar, GrantState, SettingsBlock, SettingsError,
-    SettingsSnapshot, SyncBodyCap, ThemeMode, WeekdayWire,
+    AccountSyncSettings, DavSectionRow, DefaultCalendar, GrantState, SenderNameControl,
+    SettingsBlock, SettingsError, SettingsSnapshot, SyncBodyCap, ThemeMode, WeekdayWire,
 };
 pub use sync_progress::{
     AccountSyncProgress, AccountSyncState, DeliveryState, SyncProgressSnapshot,

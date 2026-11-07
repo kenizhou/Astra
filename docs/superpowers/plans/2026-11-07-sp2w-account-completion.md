@@ -45,7 +45,7 @@ resolved); the fragment.
 - Spec coverage: D1's core half + D4 (T1), the ask + re-grant + switcher
   surfaces (T2), live + docs (T3).
 - Risks: the identity push is per-family (Google writable, JMAP writable
-  through the refreshing wrapper, Graph read-only, IMAP local-only) —
-  pin each; the re-grant rides the credential transaction (the
+  through the refreshing wrapper, Graph read-only, IMAP local-only): pin
+  each; the re-grant rides the credential transaction (the
   register-before-dial ordering); the switcher must not fight the
   folder selection (two scopes, one verb family).

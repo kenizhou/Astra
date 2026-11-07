@@ -283,6 +283,45 @@ pub struct AccountSettingsRow {
     /// the product defaults.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sync: Option<AccountSyncSettings>,
+    /// The name the account's mail goes out under: the adopted, edited, or
+    /// locally stored name, falling back to the address when none stands
+    /// (the bare-address send). Absent on a wire from a build before the
+    /// field reads back empty, which a surface renders as the address.
+    #[serde(default)]
+    pub display_name: String,
+    /// How the account's outgoing name is governed, off the providers'
+    /// identity capability. Absent on a wire from a build before the field
+    /// reads back `local`, the least claim: the name is this app's to keep.
+    #[serde(default)]
+    pub sender_name_control: SenderNameControl,
+    /// Whether the account still needs its name asked for once: no value
+    /// stands stored, not even the deliberate empty one. The wizard's and
+    /// the accounts page's ask-state; the settled state crosses no key.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub needs_sender_name: bool,
+    /// Why the account's last name push was refused or failed, when it was:
+    /// the local name stands (it is the From line's source) and this names
+    /// why the provider's copy did not move. Absent crosses no key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sender_name_error: Option<String>,
+}
+
+/// How the account's outgoing name is governed, as the settings row states
+/// it. Crosses as a snake_case word.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SenderNameControl {
+    /// The provider holds the name and the account holder may change it
+    /// (JMAP, Google): a change is pushed back best-effort.
+    Writable,
+    /// The provider holds the name and the account holder may not (a
+    /// directory a tenant administrator owns): the card shows it and offers
+    /// no field.
+    ReadOnly,
+    /// The transport owns no name at all (IMAP/SMTP): the app's own stored
+    /// value is the From line's source.
+    #[default]
+    Local,
 }
 
 /// Why a Microsoft account's grant needs the person to act, as the

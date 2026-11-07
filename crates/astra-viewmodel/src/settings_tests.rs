@@ -9,8 +9,8 @@ use astra_composer::Signature;
 
 use crate::{
     AboutBlock, AccountKind, AccountLegs, AccountSettingsRow, AccountSignatures, DavSectionRow,
-    DefaultCalendar, GrantState, SettingsBlock, SettingsError, SettingsSnapshot, SyncBodyCap,
-    ThemeMode, ViewMode, WeekdayWire,
+    DefaultCalendar, GrantState, SenderNameControl, SettingsBlock, SettingsError, SettingsSnapshot,
+    SyncBodyCap, ThemeMode, ViewMode, WeekdayWire,
 };
 
 /// A well-formed account id, the way every settings test names one.
@@ -76,6 +76,10 @@ fn the_snapshot_crosses_its_full_shape_and_reads_back() {
                 reply: None,
             }),
             sync: None,
+            display_name: "Ada Lovelace".to_owned(),
+            sender_name_control: SenderNameControl::Writable,
+            needs_sender_name: false,
+            sender_name_error: None,
         }],
         about: AboutBlock {
             version: "0.1.0".to_owned(),
@@ -120,7 +124,9 @@ fn the_snapshot_crosses_its_full_shape_and_reads_back() {
                     "dav_error": "the re-dial could not reach the origin",
                     "refresh_error": "the diary could not be re-expanded under the new zone; set the zone again to retry",
                     "crypto_method": "none",
-                    "signatures": { "new_mail": { "body_html": "<p>Ada</p>", "body_plain": "Ada" } }
+                    "signatures": { "new_mail": { "body_html": "<p>Ada</p>", "body_plain": "Ada" } },
+                    "display_name": "Ada Lovelace",
+                    "sender_name_control": "writable"
                 }
             ],
             "about": {
@@ -228,23 +234,7 @@ fn the_grant_states_cross_both_ways_and_absent_means_healthy() {
     // A healthy account crosses no grant key at all: the absence is the
     // state, and a snapshot from a build before the field parses as
     // healthy rather than refusing.
-    let mut healthy = AccountSettingsRow {
-        account: account("work"),
-        address: "ada@example.test".to_owned(),
-        kind: AccountKind::Microsoft,
-        legs: AccountLegs {
-            calendar: false,
-            contacts: false,
-        },
-        dav: None,
-        dav_error: None,
-        refresh_error: None,
-        grant: None,
-        signatures: None,
-        crypto_method: "none".to_owned(),
-        crypto_error: None,
-        sync: None,
-    };
+    let mut healthy = row_fixture();
     let wire = serde_json::to_value(&healthy).expect("the healthy row serialises");
     assert!(
         wire.get("grant").is_none(),
@@ -273,28 +263,18 @@ fn the_grant_states_cross_both_ways_and_absent_means_healthy() {
 fn a_row_s_dav_echo_never_carries_the_password_back() {
     // The row answers whether a password is stored; the credential itself has
     // no field to cross, whatever the stored section holds.
-    let row = AccountSettingsRow {
-        account: account("work"),
-        address: "ada@example.test".to_owned(),
-        kind: AccountKind::Jmap,
-        legs: AccountLegs {
-            calendar: true,
-            contacts: true,
-        },
-        dav: Some(DavSectionRow {
-            caldav_url: Some("https://dav.example.test".to_owned()),
-            carddav_url: Some("https://dav.example.test".to_owned()),
-            username: "ada@example.test".to_owned(),
-            dav_password_set: true,
-        }),
-        dav_error: None,
-        refresh_error: None,
-        grant: None,
-        signatures: None,
-        crypto_method: "none".to_owned(),
-        crypto_error: None,
-        sync: None,
+    let mut row = row_fixture();
+    row.kind = AccountKind::Jmap;
+    row.legs = AccountLegs {
+        calendar: true,
+        contacts: true,
     };
+    row.dav = Some(DavSectionRow {
+        caldav_url: Some("https://dav.example.test".to_owned()),
+        carddav_url: Some("https://dav.example.test".to_owned()),
+        username: "ada@example.test".to_owned(),
+        dav_password_set: true,
+    });
     let wire = serde_json::to_value(&row).expect("the row serialises");
     assert!(
         wire.get("dav")
@@ -422,6 +402,31 @@ fn the_platform_preferences_cross_additively_and_only_when_not_default() {
     assert!(!pre_platform.analytics_consented);
     assert_eq!(pre_platform.language, "en-GB");
     assert!(!pre_platform.zone_offered);
+}
+
+/// An account row at the wired defaults, the base the row tests write over.
+fn row_fixture() -> AccountSettingsRow {
+    AccountSettingsRow {
+        account: account("work"),
+        address: "ada@example.test".to_owned(),
+        kind: AccountKind::Microsoft,
+        legs: AccountLegs {
+            calendar: false,
+            contacts: false,
+        },
+        dav: None,
+        dav_error: None,
+        refresh_error: None,
+        grant: None,
+        signatures: None,
+        crypto_method: "none".to_owned(),
+        crypto_error: None,
+        sync: None,
+        display_name: String::new(),
+        sender_name_control: SenderNameControl::Local,
+        needs_sender_name: false,
+        sender_name_error: None,
+    }
 }
 
 /// A settings block at the shipped defaults, the base the platform

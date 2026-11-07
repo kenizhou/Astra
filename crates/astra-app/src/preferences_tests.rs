@@ -453,3 +453,45 @@ fn an_older_file_without_the_shape_fields_loads_the_defaults_for_them() {
     assert_eq!(prefs.calendar_view, CalendarViewWire::Month);
     assert_eq!(prefs.calendar_anchor, None);
 }
+
+#[test]
+fn the_sender_names_round_trip_and_an_account_s_goes_with_it_on_removal() {
+    let work = engine_api::AccountId::try_from("work").unwrap();
+    let mut prefs = Preferences::default();
+    assert!(
+        prefs.sender_names.is_empty(),
+        "no account is asked before it joins"
+    );
+    assert!(
+        prefs.set_account_sender_name(&work, "Ada Lovelace".to_owned()),
+        "a first name changes the document"
+    );
+    assert!(
+        !prefs.set_account_sender_name(&work, "Ada Lovelace".to_owned()),
+        "re-asserting the standing name changes nothing"
+    );
+    assert_eq!(
+        prefs.sender_names.get(&work).map(String::as_str),
+        Some("Ada Lovelace")
+    );
+    // The empty name is a stored answer, distinct from never having asked.
+    assert!(prefs.set_account_sender_name(&work, String::new()));
+    assert!(prefs.sender_names.contains_key(&work));
+
+    let dir = scratch("sender-names-file");
+    let path = preferences_path(&dir);
+    prefs.set_account_sender_name(&work, "Ada Lovelace".to_owned());
+    save_preferences(&path, &prefs).unwrap();
+    let back = load_preferences(&path);
+    assert_eq!(
+        back.sender_names.get(&work).map(String::as_str),
+        Some("Ada Lovelace"),
+        "the name round trips through the file"
+    );
+
+    assert!(prefs.remove_account("work"));
+    assert!(
+        prefs.sender_names.is_empty(),
+        "a re-added account inherits no name the person set for another mailbox"
+    );
+}

@@ -288,6 +288,7 @@ impl<P: Provider> App<P> {
             let mut state = self.settings_state.lock().expect("settings mutex poisoned");
             state.dav_errors.remove(&account);
             state.refresh_errors.remove(&account);
+            state.name_errors.remove(&account);
         }
         self.forget_domains(
             &account,
