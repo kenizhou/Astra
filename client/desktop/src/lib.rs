@@ -19,6 +19,7 @@ mod agent;
 mod ai;
 mod app_state;
 mod boot;
+mod calendar_timer;
 mod commands;
 mod credential_store;
 mod crypto_wrapper;
@@ -36,6 +37,8 @@ mod observer;
 mod platform;
 mod plugin;
 mod share;
+#[cfg(debug_assertions)]
+mod showcase;
 mod window_state;
 
 // The command-surface test fixtures: one compiled copy of the fake app, the
@@ -121,6 +124,7 @@ pub fn run() {
             commands::eml::eml_save,
             commands::drafts::draft_status,
             commands::drafts::draft_resume,
+            commands::drafts::draft_resume_by_key,
             commands::sending::sending,
             commands::compose::compose_request,
             commands::compose::take_compose_request,

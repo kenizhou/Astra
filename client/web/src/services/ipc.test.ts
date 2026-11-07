@@ -460,7 +460,7 @@ describe('the draft status wire', () => {
 describe('the resume wire', () => {
   it('mirrors the stored draft as one flat record', () => {
     const wire = JSON.parse(
-      '{"account":"work","to":"you@test.local","cc":"","bcc":"","subject":"Later","body_text":"Half written"}',
+      '{"account":"work","to":"you@test.local","cc":"","bcc":"","subject":"Later","body_text":"Half written","attachments":[]}',
     ) as ResumeView;
 
     expect(wire.account).toBe('work');

@@ -48,6 +48,7 @@ import {
   openComposerWindow,
   openNewMessageComposer,
   readComposerParam,
+  readDraftParam,
   readPrefillParam,
   readResumeParam,
   readShareParam,
@@ -100,6 +101,18 @@ describe('the resume query param', () => {
     expect(readResumeParam('')).toBeNull();
     expect(readResumeParam('?composer=compose-9')).toBeNull();
     expect(readResumeParam('?composer=compose-9&resume=')).toBeNull();
+  });
+});
+
+describe('the draft query param', () => {
+  it('reads the key a draft row window resumes', () => {
+    expect(readDraftParam('?composer=compose-9&resume=work&draft=d-1')).toBe('d-1');
+  });
+
+  it('reads nothing for a plain pop-out', () => {
+    expect(readDraftParam('')).toBeNull();
+    expect(readDraftParam('?composer=compose-9')).toBeNull();
+    expect(readDraftParam('?composer=compose-9&draft=')).toBeNull();
   });
 });
 
@@ -172,6 +185,12 @@ describe('the window address', () => {
     );
   });
 
+  it('names the draft key beside the resume account for a draft row window', () => {
+    expect(composerWindowUrl('compose-9', 'work', undefined, undefined, 'd-1')).toBe(
+      'index.html?composer=compose-9&resume=work&draft=d-1',
+    );
+  });
+
   it('carries the prefill a mailto window opens from', () => {
     expect(composerWindowUrl('compose-9', undefined, prefill)).toBe(
       `index.html?composer=compose-9&prefill=${encodedPrefill}`,
@@ -208,6 +227,15 @@ describe('the window opening', () => {
     const [window] = webviewWindow.instances;
     expect(window?.options).toMatchObject({
       url: 'index.html?composer=compose-9&resume=work',
+    });
+  });
+
+  it('carries the draft key onto the URL for a draft row window', async () => {
+    await openComposerWindow('compose-9', 'The half', 'work', undefined, undefined, 'd-1');
+
+    const [window] = webviewWindow.instances;
+    expect(window?.options).toMatchObject({
+      url: 'index.html?composer=compose-9&resume=work&draft=d-1',
     });
   });
 

@@ -148,3 +148,8 @@ mod people_tests;
 #[cfg(test)]
 #[path = "protocol_settings_tests.rs"]
 mod settings_tests;
+
+// The drafts family's row-keyed arm, split for the same reason.
+#[cfg(test)]
+#[path = "protocol_drafts_tests.rs"]
+mod drafts_tests;

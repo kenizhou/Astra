@@ -85,12 +85,24 @@ impl AppPort for App<HostProvider> {
         App::resume_latest_draft(self, account, composition).await
     }
 
+    async fn resume_draft_by_key(
+        &self,
+        message: &astra_app::MessageRef,
+        composition: CompositionId,
+    ) -> Option<DraftResume> {
+        App::resume_draft_by_key(self, message, composition).await
+    }
+
     async fn add_new_account_deferred(&self, account: HostAccount) {
         App::add_new_account_deferred(self, account).await;
     }
 
     async fn sync_added_account(&self, id: &AccountId) {
         App::sync_added_account(self, id).await;
+    }
+
+    async fn refresh_calendars_if_changed(&self) {
+        App::refresh_calendars_if_changed(self).await;
     }
 
     async fn draft_chips(&self, account: &AccountId, key: &ProviderKey) -> Vec<Chip> {

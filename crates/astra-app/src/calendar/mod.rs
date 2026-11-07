@@ -15,6 +15,7 @@
 
 mod brief;
 mod brief_drive;
+mod cadence;
 mod deposit;
 mod detail;
 mod drag;
@@ -314,27 +315,8 @@ impl<P: Provider> App<P> {
     /// unconfirmed-but-landed write, and a refresh that lands one clears the
     /// row for the account it re-read.
     async fn refresh_calendar(&self) {
-        let zone = self.calendar_inputs().zone;
-        let horizon = self.sync_horizon();
         for handle in self.account_handles().await {
-            let Some(provider) = calendar_provider_of(&handle) else {
-                continue;
-            };
-            let at = self.account_ordinal(&handle.id).await;
-            match self
-                .engine
-                .sync_calendar(provider, &handle.id, horizon, &zone)
-                .await
-            {
-                Ok(_) => {
-                    self.clear_calendar_write(&handle.id);
-                    log::info!("calendar[a{at}]: the calendars synced");
-                }
-                Err(engine_api::ApiError::Busy) => {
-                    log::info!("calendar[a{at}]: another sync holds the calendar; skipped");
-                }
-                Err(err) => log::warn!("calendar[a{at}]: the calendar sync failed: {err}"),
-            }
+            self.sync_account_calendar(&handle).await;
         }
         self.rebuild_calendar().await;
     }
@@ -400,6 +382,10 @@ pub(crate) fn now_utc() -> Option<UtcDateTime> {
 #[cfg(test)]
 #[path = "../calendar_dispatch_tests.rs"]
 mod dispatch_tests;
+
+#[cfg(test)]
+#[path = "../calendar_boot_fetch_tests.rs"]
+mod boot_fetch_tests;
 
 #[cfg(test)]
 #[path = "../calendar_select_tests.rs"]

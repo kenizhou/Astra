@@ -11,6 +11,8 @@ use astra_composer::ComposerDocument;
 use engine_api::AccountId;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use crate::reference::MessageRef;
+
 /// One open composition, named by the host.
 ///
 /// Minted by the client when it opens a composer and kept for as long as that composer
@@ -120,6 +122,14 @@ pub enum DraftsIntent {
     Discard {
         /// The composer whose stored draft to remove.
         composition: CompositionId,
+    },
+    /// Remove one stored draft the Drafts row names, with no composition to forget:
+    /// the row's own Delete verb. The removal rides the same outbox discipline the
+    /// composition discard's does, so a server that cannot be reached keeps the
+    /// removal queued rather than dropping it.
+    DiscardStored {
+        /// The stored copy to remove: the account and provider key the row carries.
+        message: MessageRef,
     },
     /// Save what the composition last handed over, then forget it, leaving what is on
     /// the server alone for the user to find in Drafts.

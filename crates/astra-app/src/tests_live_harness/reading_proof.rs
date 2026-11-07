@@ -376,6 +376,7 @@ async fn a_junk_report_files_the_note_and_the_correction_files_it_back() {
         document: document(JUNK_WORDS),
         blobs: Vec::new(),
         crypto: crate::crypto::CryptoFlags::default(),
+        composition: None,
     })
     .await
     .unwrap();

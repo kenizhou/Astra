@@ -46,6 +46,17 @@ pub(crate) fn assemble_state(
     draft_sink: Arc<dyn astra_app::DraftPoolSink>,
     oauth: Arc<crate::oauth::commands::SignInSurface>,
 ) -> Result<AppState, Box<dyn std::error::Error>> {
+    // The showcase flag chooses the fixture app at assembly, debug builds
+    // alone: the shell stands over recorded answers with no dial and no
+    // engine, and a name no surface answers is refused at the launch.
+    #[cfg(debug_assertions)]
+    match crate::showcase::requested() {
+        Ok(Some(screen)) => return crate::showcase::assemble(data_dir, screen, agent_sink),
+        Ok(None) => {}
+        Err(name) => {
+            return Err(format!("ASTRA_SHOWCASE names an unknown screen: {name}").into());
+        }
+    }
     std::fs::create_dir_all(data_dir)?;
     let runtime = build_runtime()?;
     let credentials: Arc<dyn crate::credential_store::AccountCredentialStore> =
@@ -232,7 +243,7 @@ pub(crate) fn assemble_state(
 
 /// The AI ledgers' file name, under the data directory: the same store the
 /// CLI opens, so both writers land in one ledger.
-const AI_STORE_FILE: &str = "ai.sqlite";
+pub(crate) const AI_STORE_FILE: &str = "ai.sqlite";
 
 /// The crypto store's file name, under the data directory: key material and
 /// trust decisions. Opened before the account dial so every IMAP dial can
@@ -342,6 +353,14 @@ pub(crate) fn setup_host(app: &mut tauri::App) -> Result<(), Box<dyn std::error:
         Arc::clone(&state.app),
         Arc::clone(&state.connections),
         Arc::new(crate::notify::NotifyBridge::windowed(app.handle().clone())),
+        &state.runtime,
+    );
+    // The periodic calendar refresh rides the same lifetime: one timer over
+    // the core's change-gated body, gated on the dial table the delivery
+    // supervisor reads, holding nothing the state's drop order depends on.
+    crate::calendar_timer::spawn(
+        Arc::clone(&state.app),
+        Arc::clone(&state.connections),
         &state.runtime,
     );
     let accounts = state.connections.ids().len();

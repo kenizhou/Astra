@@ -290,6 +290,7 @@ async fn the_from_line_carries_the_stored_name() {
         document: document("On its way"),
         blobs: Vec::new(),
         crypto: crate::crypto::CryptoFlags::default(),
+        composition: None,
     })
     .await
     .unwrap();
@@ -316,6 +317,7 @@ async fn without_a_stored_name_the_from_line_is_the_bare_address() {
         document: document("On its way"),
         blobs: Vec::new(),
         crypto: crate::crypto::CryptoFlags::default(),
+        composition: None,
     })
     .await
     .unwrap();

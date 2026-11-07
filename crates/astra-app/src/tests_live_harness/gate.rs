@@ -73,6 +73,7 @@ async fn a_vetoed_send_never_leaves_until_the_veto_lifts() {
         document: proof::document("Held by the gate, never sent under a veto."),
         blobs: Vec::new(),
         crypto: crate::crypto::CryptoFlags::default(),
+        composition: None,
     })
     .await
     .unwrap();

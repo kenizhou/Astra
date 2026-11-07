@@ -4,7 +4,7 @@
 // standing rows owe the send, and the refusal sentences a submit can
 // answer with. Pure helpers; the store holds the state and the gesture.
 
-import type { ComposerBlob, Intent } from '@/services/ipc';
+import type { ComposerBlob, CompositionId, Intent } from '@/services/ipc';
 import { intents } from '@/services/ipc';
 
 import { editorToDocument, type EditorDocument } from './documentWire';
@@ -42,6 +42,7 @@ export interface SubmitState {
   subject: string;
   editor: EditorDocument;
   files: Record<string, File>;
+  composition: CompositionId | null;
 }
 
 /**
@@ -50,7 +51,9 @@ export interface SubmitState {
  * submit, the reply under its original, the forward answering no one. The
  * threaded wires carry no bcc and the forward's no cc either, so those fields
  * are the plain send's alone. The blobs hold the standing staged rows' bytes,
- * read at click time.
+ * read at click time; the plain submit also names its composition, so a
+ * resumed draft's pre-attached rows resolve against the record the resume
+ * parked host-side.
  */
 export async function submitIntent(state: SubmitState): Promise<Intent> {
   const document = editorToDocument(state.editor);
@@ -64,6 +67,7 @@ export async function submitIntent(state: SubmitState): Promise<Intent> {
       subject: state.subject,
       document,
       blobs,
+      composition: state.composition,
     });
   }
   if (state.request.kind === 'forward') {

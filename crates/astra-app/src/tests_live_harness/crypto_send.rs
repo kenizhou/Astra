@@ -200,6 +200,7 @@ async fn the_crypto_send_rides_the_engine_queue_and_decrypts_for_the_recipient()
         document: document(WORDS),
         blobs: Vec::new(),
         crypto: CryptoFlags::default(),
+        composition: None,
     })
     .await
     .unwrap();
@@ -364,6 +365,7 @@ async fn the_crypto_send_rides_the_engine_queue_and_decrypts_for_the_recipient()
         document: document(WORDS),
         blobs: Vec::new(),
         crypto: CryptoFlags::default(),
+        composition: None,
     })
     .await
     .unwrap();

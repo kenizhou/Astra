@@ -10,6 +10,7 @@
 
 import {
   ArchiveIcon,
+  ComposeIcon,
   FlagIcon,
   ForwardIcon,
   JunkIcon,
@@ -19,9 +20,10 @@ import {
   ReplyIcon,
   TrashIcon,
 } from '@/components/icons';
-import { placeholderItem, type ContextMenuItem } from '@/components/ui/ContextMenu';
+import { type ContextMenuItem } from '@/components/ui/ContextMenu';
 import { dispatch, intents, type MessageRef } from '@/services/ipc';
 import { openMessageWindow } from '@/features/reader/readerWindows';
+import { openDraftRow, openDraftRowWindow } from '@/features/composer/draftOpen';
 import type { FolderRow, MessageRowView, ViewMode } from '@/services/surfaces';
 
 /** The account context the menu holds: the account the picker and the
@@ -173,6 +175,34 @@ function messageRefs(targets: MessageRowView[]): MessageRef[] {
   return targets.flatMap((row) => ('message' in row.key ? [row.key.message] : []));
 }
 
+/** The permanent delete: the irreversible verb behind its own confirm, the
+ *  sentence the Trash folder delete's own confirm shaped. Stands anywhere
+ *  the menu opens, danger-styled, below the ordinary Delete (which stays
+ *  the move-to-trash), and only ever names one row: the verb never rides a
+ *  batch loop, so a multi-selection stands disabled with the reason. */
+function permanentDeleteItem(targets: MessageRowView[]): ContextMenuItem {
+  const reason = targets.length > 1 ? 'Pick one row for this' : undefined;
+  const noun = targets.length === 1 && 'thread' in targets[0]!.key ? 'conversation' : 'message';
+  return {
+    label: 'Delete Permanently',
+    icon: TrashIcon,
+    danger: true,
+    disabled: reason !== undefined ? true : undefined,
+    title: reason,
+    description: reason,
+    onSelect: () => {
+      if (reason !== undefined) {
+        return;
+      }
+      const question = `Permanently delete this ${noun}? This cannot be undone.`;
+      if (!window.confirm(question)) {
+        return;
+      }
+      void dispatch(intents.deleteMessage(targets[0]!.key));
+    },
+  };
+}
+
 /** The menu one message row (or a batch of them) opens. */
 export function buildRowMenu(
   targets: MessageRowView[],
@@ -242,6 +272,7 @@ export function buildRowMenu(
       danger: true,
       onSelect: () => forEach(targets, (row) => void dispatch(intents.moveToTrash(row.key))),
     },
+    permanentDeleteItem(targets),
     {
       label: multi ? `Archive ${targets.length} ${noun}` : 'Archive',
       icon: ArchiveIcon,
@@ -265,16 +296,57 @@ export function buildRowMenu(
   ];
 }
 
-/** The menu a saved-draft row opens; every action is a placeholder until
- *  the host resumes and deletes drafts by key. */
-export function buildDraftMenu(): ContextMenuItem[] {
+/** The menu a saved-draft row opens: the row's own three verbs over its key,
+ *  the resume into the composer (the pane, or its own window), and the
+ *  discard of the stored copy. A batch cannot name one draft, so every verb
+ *  stands disabled with the reason. */
+export function buildDraftMenu(targets: MessageRowView[]): ContextMenuItem[] {
+  const one = single(targets);
+  const oneMessage = singleMessage(targets);
+  const reason = oneMessage !== null ? undefined : 'Pick one draft for this';
+  const disabled = reason !== undefined;
+  const guard = (): MessageRef | null => (reason === undefined ? oneMessage : null);
   return [
-    placeholderItem(
-      'Open',
-      'Opening an individual draft arrives with a future slice; the app start resume opens the latest',
-    ),
-    placeholderItem('Open in New Window', 'Opening a draft in its own window arrives with a future slice'),
+    {
+      label: 'Open',
+      icon: ComposeIcon,
+      disabled: disabled || undefined,
+      title: reason,
+      description: reason,
+      onSelect: () => {
+        const message = guard();
+        if (message !== null) {
+          void openDraftRow(message);
+        }
+      },
+    },
+    {
+      label: 'Open in New Window',
+      icon: PopOutIcon,
+      disabled: disabled || undefined,
+      title: reason,
+      description: reason,
+      onSelect: () => {
+        const message = guard();
+        if (message !== null) {
+          void openDraftRowWindow(message, one?.subject ?? '');
+        }
+      },
+    },
     { separator: true },
-    { ...placeholderItem('Delete Draft', 'Deleting a draft arrives with a future slice'), danger: true },
+    {
+      label: 'Delete Draft',
+      icon: TrashIcon,
+      danger: true,
+      disabled: disabled || undefined,
+      title: reason,
+      description: reason,
+      onSelect: () => {
+        const message = guard();
+        if (message !== null) {
+          void dispatch(intents.discardStored(message));
+        }
+      },
+    },
   ];
 }

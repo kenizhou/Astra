@@ -42,7 +42,7 @@ gap is now ours to close: the standing cadence while the app stays open.
 
 A draft row opens back into the composer over the same copy: a by-key
 `resume_draft` beside the latest-entry (the message reference names the
-account and key; the three refusal gates port — unresolvable, not a
+account and key; the three refusal gates port: unresolvable, not a
 draft, body unreadable), the resume carrying the draft's attachments as
 pre-attached removable rows in the forward's own shape (the carried
 parts ride the core-side part-id carry; the bytes never cross the host
@@ -56,7 +56,7 @@ discard machinery over the row's key, outbox-queued on failure).
 A composer-inserted picture renders (today it stages as a text row with
 a pill): the inline image renders beside the editor as a visible
 picture (the retained-block separation keeps the chrome out of the
-message), and the resize gesture ports — pointer events on a fixed
+message), and the resize gesture ports: pointer events on a fixed
 overlay outside the content, corner grips, the dragged width clamped
 (24px floor, the available width ceiling), the height following only
 where the tag already declares one, and only the WIDTH travelling on

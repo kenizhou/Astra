@@ -198,6 +198,7 @@ describe('the autosave handover', () => {
       bcc: '',
       subject: 'Later',
       body_text: 'Half written',
+      attachments: [],
     };
     act(() => {
       useComposerStore
@@ -361,6 +362,7 @@ describe('the app start resume', () => {
     bcc: 'quiet@test.local',
     subject: 'Later',
     body_text: 'Half written\nSecond line',
+    attachments: [],
   };
 
   it('hydrates the stored draft into the composer once', async () => {
@@ -466,6 +468,7 @@ describe('the app start resume', () => {
     act(() => {
       fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     });
+    const composition = useComposerStore.getState().composition;
 
     // The submit reads the staged bytes before it dispatches, so the intent
     // crosses one microtask after the click.
@@ -476,7 +479,7 @@ describe('the app start resume', () => {
       '{"submit_rich_mail":{"from":"work","to":"you@test.local","cc":"cc@test.local","bcc":"quiet@test.local","subject":"Later",' +
         `"document":{"blocks":[{"Paragraph":{"content":[${plainRun('Half written')}]}},{"Paragraph":{"content":[${plainRun(
           'Second line',
-        )}]}}],"attachments":[]},"blobs":[]}}`,
+        )}]}}],"attachments":[]},"blobs":[],"composition":"${composition}"}}`,
     );
   });
 });

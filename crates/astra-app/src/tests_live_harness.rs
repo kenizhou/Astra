@@ -111,6 +111,19 @@
 //! pixel width into the sanitised html the wrapper clamps. Every proof
 //! withdraws its own mail through the product's delete.
 //!
+//! The gated finisher proofs pin the SP2x rows' verbs over the same wire:
+//! the permanent delete (`delete_proof`) removes a note submitted into the
+//! recipient's INBOX for good (gone from the stored set, no folder holding
+//! it, the harness Trash included, the other note intact); the boot calendar
+//! fetch (`calendar_boot_proof`) lands a seeded event in the engine's store
+//! through the boot's own join with no refresh dispatched, and one plain
+//! refresh paints it; and the drafts reopen (`drafts_reopen_proof`) stores a
+//! draft carrying one attachment through the engine's put path, resumes it
+//! by its row's key with the carried part answering, and shows the adopted
+//! composition's save superseding the stored copy rather than storing a
+//! second beside it. Each proof withdraws what it made, so the harness keeps
+//! the shape the other suites pin.
+//!
 //! The JMAP-detection test cannot dial `https://example.test/.well-known/jmap` (the
 //! harness domain resolves nowhere), so it rebases the probe onto the harness's plain
 //! HTTP JMAP origin (`127.0.0.1:2080`) through the detection crate's dev-harness
@@ -160,6 +173,8 @@ use crate::{reference::MessageRef, App, AppObserver, FolderRef, Intent, RowRef, 
 // fixtures the delivery proofs share; `folder_proof` the folder proofs'.
 #[path = "tests_live_harness/calendar.rs"]
 mod calendar;
+#[path = "tests_live_harness/calendar_boot_proof.rs"]
+mod calendar_boot_proof;
 #[path = "tests_live_harness/calendar_brief.rs"]
 mod calendar_brief;
 #[path = "tests_live_harness/calendar_detail.rs"]
@@ -172,10 +187,14 @@ mod calendar_proof;
 mod composer_proof;
 #[path = "tests_live_harness/crypto_send.rs"]
 mod crypto_send;
+#[path = "tests_live_harness/delete_proof.rs"]
+mod delete_proof;
 #[path = "tests_live_harness/delivery_proof.rs"]
 mod delivery_proof;
 #[path = "tests_live_harness/drafts.rs"]
 mod drafts;
+#[path = "tests_live_harness/drafts_reopen_proof.rs"]
+mod drafts_reopen_proof;
 #[path = "tests_live_harness/folder_proof.rs"]
 mod folder_proof;
 #[path = "tests_live_harness/folders.rs"]

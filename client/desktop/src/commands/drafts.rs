@@ -12,7 +12,7 @@
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use astra_app::{CompositionId, DraftResume};
+use astra_app::{CompositionId, DraftResume, MessageRef};
 use astra_viewmodel::DraftStatusSnapshot;
 use engine_api::AccountId;
 
@@ -20,7 +20,8 @@ use crate::AppState;
 
 /// The stored draft a composer resumes, as the command surface hands it to the
 /// webview: the core's [`DraftResume`] at the IPC's own serialisable shape, one
-/// flat record the composer hydrates its fields and its editor from.
+/// flat record the composer hydrates its fields and its editor from, with the
+/// carried files as metadata rows the composer pre-attaches.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ResumeView {
     /// The account whose Drafts folder the draft was in, and which its saves go
@@ -37,6 +38,9 @@ pub(crate) struct ResumeView {
     /// The body as plain text: what a composer opens without a second markup
     /// parser.
     pub(crate) body_text: String,
+    /// The files the stored draft carries, as the document's pre-attached rows:
+    /// metadata only, never bytes and never a `data:` URI.
+    pub(crate) attachments: Vec<astra_composer::DraftAttachment>,
 }
 
 impl From<DraftResume> for ResumeView {
@@ -48,6 +52,7 @@ impl From<DraftResume> for ResumeView {
             bcc: resumed.bcc,
             subject: resumed.subject,
             body_text: resumed.body_text,
+            attachments: resumed.attachments,
         }
     }
 }
@@ -71,6 +76,23 @@ pub(crate) async fn draft_resume_of(
     state
         .app
         .resume_latest_draft(account, composition)
+        .await
+        .map(ResumeView::from)
+}
+
+/// Opens the Drafts row's named copy into `composition`: the by-key resume the
+/// row's Open verb drives, answering the same record the latest-entry read
+/// does. `None` when the key names nothing the account holds, the message is
+/// not a draft, or its body cannot be read, in which case nothing was adopted
+/// either.
+pub(crate) async fn draft_resume_by_key_of(
+    state: &AppState,
+    message: &MessageRef,
+    composition: CompositionId,
+) -> Option<ResumeView> {
+    state
+        .app
+        .resume_draft_by_key(message, composition)
         .await
         .map(ResumeView::from)
 }
@@ -102,6 +124,25 @@ pub(crate) fn draft_resume(
     state
         .runtime
         .block_on(|| draft_resume_of(&state, &account, composition))
+}
+
+/// Opens the Drafts row's named copy into the composition the webview minted,
+/// and answers the record to hydrate the composer from, or null when there is
+/// no draft to resume. The reference and the composition id are the wire's own
+/// gate: a blank key or composition id is refused before this body runs. The
+/// read runs on the runtime's driver thread, like the latest-entry resume, so
+/// the command waits for it and the composer learns what to open with.
+// Tauri's command macro hands `State` by value; the wrapper reads through it.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) fn draft_resume_by_key(
+    state: State<'_, AppState>,
+    message: MessageRef,
+    composition: CompositionId,
+) -> Option<ResumeView> {
+    state
+        .runtime
+        .block_on(|| draft_resume_by_key_of(&state, &message, composition))
 }
 
 #[cfg(test)]

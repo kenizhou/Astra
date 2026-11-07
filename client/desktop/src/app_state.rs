@@ -132,6 +132,17 @@ pub(crate) trait AppPort: Send + Sync {
         composition: CompositionId,
     ) -> Option<DraftResume>;
 
+    /// Opens the Drafts row's named copy into `composition`, so the composer
+    /// that holds it saves over that copy rather than beside it; the webview's
+    /// by-key resume read. `None` when the key names nothing the account holds,
+    /// the message is not a draft, or its body cannot be read, in which case
+    /// nothing is adopted either.
+    async fn resume_draft_by_key(
+        &self,
+        message: &astra_app::MessageRef,
+        composition: CompositionId,
+    ) -> Option<DraftResume>;
+
     /// Registers a newly added account without syncing, so the pane shows it and the
     /// setup flow can dismiss at once.
     async fn add_new_account_deferred(&self, account: HostAccount);
@@ -139,6 +150,12 @@ pub(crate) trait AppPort: Send + Sync {
     /// Syncs one account's mail in the background; the host spawns this after the
     /// install.
     async fn sync_added_account(&self, id: &AccountId);
+
+    /// Runs the periodic calendar refresh: every account's calendars synced
+    /// and the diary republished only when it moved, so the host's standing
+    /// tick signals on change alone. Never the intent: a tick that changed
+    /// nothing must signal nothing.
+    async fn refresh_calendars_if_changed(&self);
 
     /// Takes the new-mail batch the passes have collected and leaves the
     /// queue empty: the delivery loop's drain after each pass it lands, so

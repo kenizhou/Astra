@@ -70,6 +70,7 @@ async fn the_forward_carries_the_chain_without_answering_and_cleans_up_after_its
         document: document(WORDS),
         blobs: Vec::new(),
         crypto: crate::crypto::CryptoFlags::default(),
+        composition: None,
     })
     .await
     .unwrap();

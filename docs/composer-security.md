@@ -141,6 +141,34 @@ answer stages it: the inline disposition, the cid binding, the removable
 row. No ask stands, because a paste into the message body carries the
 inline intent already. Pasted text is untouched.
 
+## The picture surface and the resize gesture
+
+A composer-inserted picture renders as a visible picture beside the
+editor: the retained image blocks render in staging order below the typed
+words, sourced from the staged bytes, so the picture the person sees is
+the picture that rides the send. A row with no bytes client-side (a
+carried row from a resumed draft) renders its fallback placeholder; the
+send still resolves its bytes core-side.
+
+A corner drag resizes it. The gesture is chrome over content: the grips
+and their overlay are body-level siblings placed over the picture from
+its viewport rect, never nodes inside the editor's own tree, so nothing
+the gesture renders can ride the message or its serialisation. The drag's
+width is measured from the picture as it stood when the drag began (a
+pointer that leaves the window and comes back cannot drift the size),
+projected onto the corner's outward diagonal (a diagonal drag grows the
+picture at the speed of the hand, a drag across the diagonal leaves the
+size alone), and clamped between a 24px floor and the available width.
+
+Only the width travels. The dragged width crosses into the composition's
+document as the image inline's `width_px`, the one wire change, and the
+autosave and the submit carry it with no further shape; the height
+follows the picture's own ratio. Quoted originals keep their own width
+and height attributes (the sanitiser preserves them), and the quoted
+originals' gesture is the row's named remainder: the quote body is
+retained content the editor does not render, so there is no quoted
+picture to grip today.
+
 ## Known gaps
 
 - **Inline images are not preserved across a forward**: the carried parts
@@ -150,8 +178,9 @@ inline intent already. Pasted text is untouched.
   roads are pinned offline at their seams, and a real OS delivery (the
   protocol registration, the cold launch, the second launch's argv) has
   no harness yet.
-- **Image resize** stands as a future row this document will own as it
-  lands.
+- **The quoted originals' resize gesture** rides a later slice: the quote
+  HTML is not rendered, so the drag covers composer-inserted pictures
+  only.
 - **A paste carrying both an image file and text** stages the image and
   drops the text: some office applications produce the pair, and the
   capture listener answers the whole clipboard at once. Paste the text

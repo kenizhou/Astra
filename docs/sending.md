@@ -287,6 +287,9 @@ INBOX the three seeded notes and astra2 empty.
 - **The quote style is a constant.** Every quote opens in the indented style;
   the account preference and the per-message override arrive with the settings
   slice.
-- **A forward does not carry the original's attachments.** The quote is the
-  body's text alone; re-sending received files needs the attachments staging
-  flow, so a forward's document opens with nothing attached.
+- **A forward carries the original's attachments as files, not inline
+  pictures.** The Forward intent names the original's parts, the composer
+  opens holding them as removable rows, and the submit re-reads the bytes
+  off the original and refuses a part that will not come back; the
+  original's inline `cid:` pictures ride as ordinary files, so their inline
+  placement in the body does not survive the forward.

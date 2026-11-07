@@ -271,10 +271,15 @@ export const useComposerStore = create<ComposerStoreState>((set, get) => ({
     // normalise their opening value at seed time, so every supplied address
     // is a finished pill, nothing sits in progress, and the fingerprint
     // compares against the normalised value. A resumed draft owns the
-    // document it comes with, so nothing seeds here.
+    // document it comes with, so nothing seeds here; the files it carries
+    // land as the document's pre-attached rows, removable like any other.
     useComposeRequestStore.getState().dismiss();
     set(() => {
-      const editor = documentToEditor(documentFromPlainText(view.body_text));
+      const document = {
+        ...documentFromPlainText(view.body_text),
+        attachments: view.attachments,
+      };
+      const editor = documentToEditor(document);
       const state = {
         ...closedState,
         open: true,
@@ -468,8 +473,9 @@ export const useComposerStore = create<ComposerStoreState>((set, get) => ({
       (intent) =>
         void dispatch(intent).then(
           () => {
-            // The submit carries no composition id, so the stored draft the
-            // autosave left behind goes with an explicit discard.
+            // The submit names the composition for its carried rows; the
+            // stored draft the autosave left behind still goes with an
+            // explicit discard.
             void dispatch(intents.discardDraft(composition));
             get().closePane();
           },

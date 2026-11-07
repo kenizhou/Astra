@@ -50,7 +50,7 @@ impl<P: Provider> App<P> {
     /// [`MailWriteError::UnknownAccount`] or [`MailWriteError::NoProvider`]
     /// when the row's account can no longer be written to.
     pub async fn mark_read(&self, row: RowRef, read: bool) -> Result<(), MailWriteError> {
-        self.edit_row_keywords(row, |key| MailEdit::mark_seen(key, read))
+        self.edit_row(row, |key| MailEdit::mark_seen(key, read))
             .await
     }
 
@@ -62,7 +62,7 @@ impl<P: Provider> App<P> {
     /// [`MailWriteError::UnknownAccount`] or [`MailWriteError::NoProvider`]
     /// when the row's account can no longer be written to.
     pub async fn set_flagged(&self, row: RowRef, flagged: bool) -> Result<(), MailWriteError> {
-        self.edit_row_keywords(row, |key| MailEdit::set_flagged(key, flagged))
+        self.edit_row(row, |key| MailEdit::set_flagged(key, flagged))
             .await
     }
 
@@ -90,6 +90,20 @@ impl<P: Provider> App<P> {
     /// move to; the account and provider errors of [`App::mark_read`].
     pub async fn move_to_trash(&self, row: RowRef) -> Result<(), MailWriteError> {
         self.move_row_to(row, &MailboxRole::Trash).await
+    }
+
+    /// Permanently deletes one row's mail: a message, or a whole
+    /// conversation's every member. The engine's irreversible delete edit
+    /// through the shared row path the keyword writes and moves ride, so the
+    /// outbox holds it durably first and the republished list tells the user
+    /// when it lands; no destination is resolved, because there is none.
+    ///
+    /// # Errors
+    ///
+    /// [`MailWriteError::UnknownAccount`] or [`MailWriteError::NoProvider`]
+    /// when the row's account can no longer be written to.
+    pub async fn delete_message(&self, row: RowRef) -> Result<(), MailWriteError> {
+        self.edit_row(row, MailEdit::delete).await
     }
 
     /// Moves a set of messages to one folder of their own account: one move
@@ -212,11 +226,12 @@ impl<P: Provider> App<P> {
         Ok(())
     }
 
-    /// Resolves `row` to its member keys, applies one keyword `edit` per key through the
+    /// Resolves `row` to its member keys, applies one `edit` per key through the
     /// engine's outbox, then republishes the list past the row cache: the store shows a
     /// queued keyword change at once, so the rebuild carries the flipped row state
-    /// before any server answer, and a refusal for good is what shows instead.
-    async fn edit_row_keywords(
+    /// before any server answer, and a refusal for good is what shows instead. The
+    /// one shared row path the keyword writes and the permanent delete ride.
+    async fn edit_row(
         &self,
         row: RowRef,
         build: impl Fn(ProviderKey) -> MailEdit,
@@ -377,3 +392,7 @@ fn generated_idempotency() -> String {
 #[cfg(test)]
 #[path = "mail_writes_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "mail_writes_delete_tests.rs"]
+mod delete_tests;
