@@ -442,7 +442,11 @@ async fn a_forward_submit_does_not_read_the_draft_record() {
         .expect("the named draft resumes");
     app.dispatch(Intent::Compose(ComposeIntent::Forward {
         message: draft_ref("d-1"),
-        carry: vec![0],
+        // Part 2 is the pdf's MIME part number (the root is 0, the text 1):
+        // the ordinal 0 this test once carried matched no part, so the
+        // submit never re-read a carried part off the original and the
+        // draft-record hazard the name claims went unexercised.
+        carry: vec![2],
     }))
     .await
     .unwrap();
