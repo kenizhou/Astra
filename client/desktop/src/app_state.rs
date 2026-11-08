@@ -334,6 +334,10 @@ pub(crate) struct AppState {
     /// The agent sidecar relay: prompts, approvals, and the ledger the
     /// sidecar's calls land in.
     pub(crate) agent: Arc<SidecarRelay>,
+    /// The AI store the relay appends to and the chat commands read: the
+    /// same instance the relay holds, so a thread's rows and its turns
+    /// always land in one database.
+    pub(crate) ai_store: Arc<astra_ai::AiStore>,
     /// The MCP listener host: the advanced panel's run/stop seam and
     /// account gate. It carries a runtime of its own, so its drop
     /// carries no ordering constraint against the app runtime below.

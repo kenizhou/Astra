@@ -17,6 +17,12 @@ import {
   type ModelConfig,
   type OutEnvelope,
 } from './protocol';
+import {
+  BUDGET_SPENT_STATE,
+  TurnBudget,
+  resolveToolBudgetGraceMs,
+  resolveToolBudgetMs,
+} from './budget';
 import { MockHarness } from './harness/mock';
 import { PiAdapter } from './harness/pi-adapter';
 import type { AgentHarness, HarnessEvent, HarnessSession } from './harness/types';
@@ -62,14 +68,32 @@ const bridge = new PermissionBridge({ policy: () => policyTable });
  *  BEFORE the prompt runs so every tool spawn of the turn carries it. */
 const correlation: { current: string | null } = { current: null };
 
+/** The tool budget every prompt runs under and the watchdog grace past it,
+ *  resolved once at startup from the environment (the harness and the
+ *  tests arm short budgets there). */
+const TOOL_BUDGET_MS = resolveToolBudgetMs(process.env);
+const TOOL_BUDGET_GRACE_MS = resolveToolBudgetGraceMs(process.env);
+
+/** Live view of the current turn's tool budget; null between turns. One
+ *  live turn at a time, enforced by the command loop's gate (after the
+ *  session lookup, so no await stands between its check and the runner's
+ *  synchronous registration): the view is single-slot, the same shape the
+ *  correlation holder uses, and both are safe only while one prompt runs
+ *  (a second live prompt would reset the first's clock and capture its
+ *  correlation id). The runner's cleanup only clears its own turn's
+ *  view. */
+const turnBudget: { current: TurnBudget | null } = { current: null };
+
 /** The five mail tools, shared by both harnesses (pi mounts them as
  *  customTools; the mock dispatches them for fixture-driven e2e). Deps are
- *  live views, so one instance serves every session. */
+ *  live views, so one instance serves every session, and both harnesses
+ *  gate through the same budget view. */
 const mailTools = createMailTools({
   bridge,
   cliPath: getCliPath,
   dataDir: getDataDir,
   correlationId: () => correlation.current,
+  budget: () => turnBudget.current,
 });
 
 /** One prompt's ledger context while it runs. */
@@ -81,9 +105,16 @@ interface PromptCtx {
 /** Drives prompt commands into a HarnessSession and guarantees every prompt
  *  ends with a done envelope (the finally always sends it: aborts and
  *  exceptions are no exception, so the host never hangs). Inlined from the
- *  kylins runner, chat-only. */
+ *  kylins runner, chat-only. Each turn runs under the wall-clock tool
+ *  budget: the clock starts here at prompt receipt, the budget-spent state
+ *  event crosses at the deadline, and a watchdog aborts the turn at the cap
+ *  (the budget plus a grace) through the same machinery a host abort uses,
+ *  so the done envelope lands on every path, text-only runs included. */
 class PromptRunner {
-  private readonly byPromptId = new Map<string, HarnessSession>();
+  private readonly byPromptId = new Map<string, {
+    session: HarnessSession;
+    cancelWatchdog: () => void;
+  }>();
   private readonly activeCtx = new Map<HarnessSession, PromptCtx>();
   private readonly wired = new WeakSet<HarnessSession>();
 
@@ -135,7 +166,35 @@ class PromptRunner {
       });
       this.wired.add(session);
     }
-    this.byPromptId.set(cmd.id, session);
+    // The budget clock starts at prompt receipt: the view the tool gate
+    // consults, the deadline announcement, and the watchdog cap.
+    const budget = new TurnBudget(TOOL_BUDGET_MS);
+    turnBudget.current = budget;
+    let announcedSpent = false;
+    const announceSpent = (): void => {
+      if (announcedSpent) return;
+      announcedSpent = true;
+      writeEnvelope({
+        type: 'event',
+        session_id: cmd.session_id,
+        event: { kind: 'state', state: BUDGET_SPENT_STATE },
+      });
+    };
+    const deadlineTimer = setTimeout(announceSpent, budget.remainingMs());
+    const capTimer = setTimeout(() => {
+      announceSpent();
+      session.abort();
+      bridge.rejectAll('tool budget cap reached');
+    }, TOOL_BUDGET_MS + TOOL_BUDGET_GRACE_MS);
+    // Unref'd so a pending timer never holds the process open; the turn's
+    // own IO keeps the loop alive while the prompt runs.
+    deadlineTimer.unref();
+    capTimer.unref();
+    const cancelWatchdog = (): void => {
+      clearTimeout(deadlineTimer);
+      clearTimeout(capTimer);
+    };
+    this.byPromptId.set(cmd.id, { session, cancelWatchdog });
     this.activeCtx.set(session, { promptId: cmd.id, correlationId: cmd.correlation_id });
     try {
       await session.prompt(cmd.text, {
@@ -145,6 +204,8 @@ class PromptRunner {
     } catch (e) {
       writeEnvelope({ type: 'error', id: cmd.id, message: String(e) });
     } finally {
+      cancelWatchdog();
+      if (turnBudget.current === budget) turnBudget.current = null;
       this.byPromptId.delete(cmd.id);
       this.activeCtx.delete(session);
       writeEnvelope({ type: 'done', id: cmd.id });
@@ -152,7 +213,21 @@ class PromptRunner {
   }
 
   abort(promptId: string): void {
-    this.byPromptId.get(promptId)?.abort();
+    const entry = this.byPromptId.get(promptId);
+    if (!entry) return;
+    // A host-aborted turn never sees the watchdog's events; the finally in
+    // runPrompt lands the done envelope.
+    entry.cancelWatchdog();
+    entry.session.abort();
+  }
+
+  /** Whether a prompt is still running. The turn invariant: the budget and
+   *  correlation holders are single-slot module state, safe only while one
+   *  turn is live, so the command loop refuses a second prompt while this
+   *  answers true rather than letting it reset the live turn's clock or
+   *  bounce its pending approval. */
+  hasLive(): boolean {
+    return this.byPromptId.size > 0;
   }
 }
 
@@ -192,9 +267,12 @@ async function handleCommand(cmd: InCommand): Promise<void> {
         writeEnvelope({ type: 'error', id: cmd.id, message: 'prompt before init' });
         return;
       }
-      // The correlation holder is set BEFORE the prompt runs so every tool
-      // spawn of the turn stamps the id.
-      correlation.current = cmd.correlation_id;
+      // Resolve the session BEFORE the turn gate: creating one takes
+      // genuinely awaited work (the pi adapter touches disk), and the gate
+      // holds only while no await stands between its check and runPrompt's
+      // synchronous registration in byPromptId. A session created for a
+      // subsequently refused prompt is harmless: sessions are per-chat and
+      // reusable.
       let session = sessions.get(cmd.session_id);
       if (!session) {
         session = await harness.createSession({
@@ -202,6 +280,22 @@ async function handleCommand(cmd: InCommand): Promise<void> {
         });
         sessions.set(cmd.session_id, session);
       }
+      // The turn invariant, enforced here: one live turn per sidecar. A
+      // second prompt (per-chat sessions make overlapping prompts
+      // reachable) is refused with an honest error envelope BEFORE any
+      // single-slot state is touched, so the live turn keeps its budget
+      // clock, its correlation id, and its pending approval.
+      if (runner.hasLive()) {
+        writeEnvelope({
+          type: 'error',
+          id: cmd.id,
+          message: 'a turn is already live; wait for its done or abort it before prompting again',
+        });
+        return;
+      }
+      // The correlation holder is set BEFORE the prompt runs so every tool
+      // spawn of the turn stamps the id.
+      correlation.current = cmd.correlation_id;
       // Deliberately not awaited: stdin must keep reading while a prompt
       // runs (abort lines can only arrive that way).
       void runner.runPrompt(session, cmd);
@@ -220,14 +314,31 @@ async function handleCommand(cmd: InCommand): Promise<void> {
       // Every command gets an answer: result on success, an error envelope
       // carrying the command id on failure; the host never hangs waiting.
       try {
-        if (cmd.name !== 'ping') {
+        if (cmd.name === 'ping') {
+          writeEnvelope({
+            type: 'result',
+            id: cmd.id,
+            value: { ok: true, harness: harness?.id ?? null },
+          });
+        } else if (cmd.name === 'dispose_session') {
+          const sessionId = cmd.args.session_id;
+          if (typeof sessionId !== 'string') {
+            throw new Error('dispose_session requires a string session_id');
+          }
+          // A deleted chat's session leaves with the chat: dispose (the
+          // harness's own teardown) and drop the map entry, so the
+          // resident set never outlives the thread list.
+          const session = sessions.get(sessionId);
+          sessions.delete(sessionId);
+          if (session) await session.dispose();
+          writeEnvelope({
+            type: 'result',
+            id: cmd.id,
+            value: { ok: true, disposed: session !== undefined },
+          });
+        } else {
           throw new Error(`unknown command: ${cmd.name}`);
         }
-        writeEnvelope({
-          type: 'result',
-          id: cmd.id,
-          value: { ok: true, harness: harness?.id ?? null },
-        });
       } catch (e) {
         writeEnvelope({ type: 'error', id: cmd.id, message: String(e) });
       }

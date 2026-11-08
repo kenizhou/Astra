@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! The provider every CLI write and body fetch goes through: it dials
-//! nothing. Draft writes park in the engine's outbox for the app's drain,
-//! and an uncached body is an error rather than a network fetch.
+//! nothing. Draft writes and mail edits park in the engine's outbox for the
+//! app's drain, and an uncached body is an error rather than a network
+//! fetch.
 
 use async_trait::async_trait;
 use engine_api::{
-    AccountId, CalendarWrites, Capabilities, Draft, MailboxWrites, Message, Provider, ProviderKey,
+    AccountId, CalendarWrites, Capabilities, Draft, MailEdit, MailboxWrites, Message, Provider,
+    ProviderKey,
 };
 use engine_core::raw::RawMime;
 use engine_core::sync::{SyncState, SyncWindow};
@@ -61,6 +63,14 @@ impl Provider for Offline {
         _account: &AccountId,
         _draft: &ProviderKey,
     ) -> Result<(), ProviderError> {
+        Err(ProviderError::retryable(OFFLINE))
+    }
+
+    async fn edit_mail(
+        &self,
+        _account: &AccountId,
+        _edit: &MailEdit,
+    ) -> Result<engine_api::MailEditReceipt, ProviderError> {
         Err(ProviderError::retryable(OFFLINE))
     }
 }

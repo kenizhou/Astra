@@ -25,6 +25,9 @@ mod folders_tests;
 pub(crate) mod knowledge;
 #[cfg(test)]
 mod knowledge_tests;
+pub(crate) mod message_writes;
+#[cfg(test)]
+mod message_writes_tests;
 pub(crate) mod messages;
 #[cfg(test)]
 mod messages_tests;
@@ -318,6 +321,71 @@ async fn execute(invocation: &Invocation, data_dir: &Path, store: &AiStore) -> A
             let account = account_id(data_dir, account)?;
             messages::read(&engine, &Offline, &account, keys).await
         }
+        Verb::MessagesSearch {
+            query,
+            account,
+            folder,
+            limit,
+            offset,
+        } => {
+            // The covered set is the whole index unless one account is
+            // named, the MCP search contract's own scoping.
+            let covered = match account {
+                Some(named) => vec![account_id(data_dir, named)?],
+                None => index_accounts(data_dir)?,
+            };
+            let named = account.is_some();
+            messages::search(
+                &engine,
+                &covered,
+                named,
+                folder.as_deref(),
+                query,
+                *offset,
+                *limit,
+            )
+            .await
+        }
+        Verb::MessagesMarkRead {
+            account,
+            key,
+            unread,
+        } => {
+            let account = account_id(data_dir, account)?;
+            message_writes::mark_read(
+                &engine,
+                &Offline,
+                &account,
+                key,
+                !unread,
+                invocation.preview,
+            )
+            .await
+        }
+        Verb::MessagesSetFlagged {
+            account,
+            key,
+            clear,
+        } => {
+            let account = account_id(data_dir, account)?;
+            message_writes::set_flagged(
+                &engine,
+                &Offline,
+                &account,
+                key,
+                !clear,
+                invocation.preview,
+            )
+            .await
+        }
+        Verb::MessagesArchive { account, key } => {
+            let account = account_id(data_dir, account)?;
+            message_writes::archive(&engine, &Offline, &account, key, invocation.preview).await
+        }
+        Verb::MessagesTrash { account, key } => {
+            let account = account_id(data_dir, account)?;
+            message_writes::trash(&engine, &Offline, &account, key, invocation.preview).await
+        }
         Verb::DraftsSave { args } => {
             let account = account_id(data_dir, &args.account)?;
             drafts::save(&engine, &Offline, &account, args, invocation.preview).await
@@ -341,4 +409,21 @@ fn account_id(data_dir: &Path, account: &str) -> Result<AccountId, (Code, String
         )),
         Err(err) => Err((Code::Runtime, err)),
     }
+}
+
+/// Every account the index names, the set an unscoped search covers. A
+/// malformed index id fails loudly rather than silently narrowing the
+/// search.
+fn index_accounts(data_dir: &Path) -> Result<Vec<AccountId>, (Code, String)> {
+    let ids = accounts::index_ids(data_dir).map_err(|err| (Code::Runtime, err))?;
+    ids.iter()
+        .map(|id| {
+            AccountId::try_from(id.as_str()).map_err(|err| {
+                (
+                    Code::Runtime,
+                    format!("the account index holds a malformed id {id}: {err}"),
+                )
+            })
+        })
+        .collect()
 }

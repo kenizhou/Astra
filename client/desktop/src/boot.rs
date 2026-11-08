@@ -223,6 +223,7 @@ pub(crate) fn assemble_state(
     Ok(AppState {
         app: core as Arc<dyn AppPort>,
         agent: agent_relay,
+        ai_store,
         mcp,
         plugins,
         llm,

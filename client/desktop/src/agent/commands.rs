@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! The agent command surface: thin Tauri shells over the relay, following
-//! the host's inner-function convention so the tests drive the same seam
-//! the webview invokes. [`agent_prompt_with`] generates the turn's
-//! correlation id when the caller brought none, and the id echoes on every
-//! event, ledger row, and audit row of the turn.
+//! The agent command surface: thin Tauri shells over the relay and the
+//! chat store, following the host's inner-function convention so the
+//! tests drive the same seam the webview invokes. [`agent_prompt_with`]
+//! generates the turn's correlation id when the caller brought none, and
+//! the id echoes on every event, ledger row, and audit row of the turn.
+//! The chat commands wrap the store reads and writes of
+//! [`crate::agent::chats`]: the rows the panel's thread list paints from.
 
-use astra_ai::{CorrelationId, LlmUseCase};
+use astra_ai::{ChatMessageRow, ChatRow, CorrelationId, LlmUseCase};
 use tauri::State;
 
+use super::chats;
 use crate::{app_state::AppState, commands::CommandError, LlmClient};
 
 /// The relay status as the panel reads it: the state word and the model
@@ -22,24 +25,112 @@ pub(crate) struct AgentStatusView {
     pub(crate) model: Option<String>,
 }
 
-/// Sends one prompt and returns its id. The correlation id is the
+/// What one accepted prompt answers: the id its events carry and the chat
+/// its turn records into. A prompt without a chat id mints one, so the
+/// panel adopts the receipt's chat and keeps riding it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct AgentPromptReceipt {
+    /// The prompt id every event of the turn names.
+    pub(crate) prompt_id: String,
+    /// The chat the turn records into (the minted id when the caller
+    /// brought none).
+    pub(crate) chat_id: String,
+}
+
+/// One loaded thread as the panel reads it: the chat's row beside its
+/// messages, oldest first.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ChatLoadView {
+    /// The chat's own row.
+    pub(crate) chat: ChatRow,
+    /// The chat's message rows, oldest first: the one source of truth the
+    /// visible log paints from.
+    pub(crate) messages: Vec<ChatMessageRow>,
+}
+
+/// Sends one prompt and returns its receipt. The correlation id is the
 /// caller's when it brought one and a fresh uuid otherwise; either way it
-/// rides the prompt envelope and echoes on every event of the turn.
+/// rides the prompt envelope and echoes on every event of the turn. A
+/// caller-named chat id is validated (a deleted chat refuses); an absent
+/// one mints a chat titled from the prompt's first line.
 ///
 /// # Errors
-/// Returns [`CommandError::Agent`] when the sidecar cannot be started or
-/// the prompt envelope cannot be written.
+/// Returns [`CommandError::Agent`] when the named chat is unknown, the
+/// sidecar cannot be started, or the prompt envelope cannot be written.
 pub(crate) async fn agent_prompt_with(
     state: &AppState,
     prompt: &str,
     correlation: Option<String>,
-) -> Result<String, CommandError> {
+    chat_id: Option<String>,
+) -> Result<AgentPromptReceipt, CommandError> {
+    let chat = chats::resolve_chat(&state.ai_store, chat_id.as_deref(), prompt)?;
     let correlation = correlation.map(CorrelationId::new);
-    state
+    let prompt_id = state
         .agent
-        .prompt(prompt, correlation)
+        .prompt(prompt, correlation, Some(&chat))
         .await
-        .map_err(CommandError::Agent)
+        .map_err(CommandError::Agent)?;
+    Ok(AgentPromptReceipt {
+        prompt_id,
+        chat_id: chat.to_string(),
+    })
+}
+
+/// Every chat, the most recently touched first: the panel's thread list.
+///
+/// # Errors
+/// Returns [`CommandError::Agent`] when the store read fails.
+pub(crate) fn chat_list_with(state: &AppState) -> Result<Vec<ChatRow>, CommandError> {
+    chats::chat_list_of(&state.ai_store)
+}
+
+/// One chat's messages, oldest first: the rows a loaded thread paints
+/// from. An unknown chat answers empty (a thread with no turns).
+///
+/// # Errors
+/// Returns [`CommandError::Agent`] when the store read fails.
+pub(crate) fn chat_load_with(
+    state: &AppState,
+    chat_id: &str,
+) -> Result<ChatLoadView, CommandError> {
+    let messages = chats::chat_messages_of(&state.ai_store, chat_id)?;
+    let chat = chats::chat_list_of(&state.ai_store)?
+        .into_iter()
+        .find(|row| row.id.as_str() == chat_id)
+        .ok_or_else(|| CommandError::Agent(format!("no chat is stored under {chat_id}")))?;
+    Ok(ChatLoadView { chat, messages })
+}
+
+/// Rewrites one chat's title.
+///
+/// # Errors
+/// Returns [`CommandError::Agent`] when the store write fails.
+pub(crate) fn chat_rename_with(
+    state: &AppState,
+    chat_id: &str,
+    title: &str,
+) -> Result<bool, CommandError> {
+    chats::chat_rename_of(&state.ai_store, chat_id, title)
+}
+
+/// Deletes one chat together with its messages, then disposes the chat's
+/// sidecar session best effort so it does not stay resident.
+///
+/// # Errors
+/// Returns [`CommandError::Agent`] when the store write fails.
+pub(crate) async fn chat_delete_with(
+    state: &AppState,
+    chat_id: &str,
+) -> Result<bool, CommandError> {
+    let deleted = chats::chat_delete_of(&state.ai_store, chat_id)?;
+    if deleted {
+        let chat = astra_ai::ChatId::new(chat_id.to_owned());
+        state
+            .agent
+            .dispose_session(&chats::session_for(&chat))
+            .await;
+    }
+    Ok(deleted)
 }
 
 /// Cancels the prompt: best effort on the wire, and every approval the
@@ -85,8 +176,8 @@ pub(crate) async fn permission_response_with(
         .map_err(CommandError::Agent)
 }
 
-/// Sends one prompt to the agent, returning the prompt id its events
-/// carry.
+/// Sends one prompt to the agent, returning the receipt its events and
+/// its chat carry.
 ///
 /// # Errors
 /// As [`agent_prompt_with`].
@@ -97,8 +188,9 @@ pub(crate) async fn agent_prompt(
     state: State<'_, AppState>,
     prompt: String,
     correlation: Option<String>,
-) -> Result<String, CommandError> {
-    agent_prompt_with(&state, &prompt, correlation).await
+    chat_id: Option<String>,
+) -> Result<AgentPromptReceipt, CommandError> {
+    agent_prompt_with(&state, &prompt, correlation, chat_id).await
 }
 
 /// Cancels the agent's current prompt.
@@ -137,6 +229,60 @@ pub(crate) async fn permission_response(
     always_allow: bool,
 ) -> Result<(), CommandError> {
     permission_response_with(&state, &id, approved, always_allow).await
+}
+
+/// Lists the chat threads, the most recently touched first.
+///
+/// # Errors
+/// As [`chat_list_with`].
+// Tauri's command macro hands `State` by value; the wrapper only reads through it.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) fn chat_list(state: State<'_, AppState>) -> Result<Vec<ChatRow>, CommandError> {
+    chat_list_with(&state)
+}
+
+/// Loads one chat thread's messages, oldest first.
+///
+/// # Errors
+/// As [`chat_load_with`].
+// Tauri's command macro hands `State` by value; the wrapper only reads through it.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) fn chat_load(
+    state: State<'_, AppState>,
+    chat_id: String,
+) -> Result<ChatLoadView, CommandError> {
+    chat_load_with(&state, &chat_id)
+}
+
+/// Renames one chat thread.
+///
+/// # Errors
+/// As [`chat_rename_with`].
+// Tauri's command macro hands `State` by value; the wrapper only reads through it.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) fn chat_rename(
+    state: State<'_, AppState>,
+    chat_id: String,
+    title: String,
+) -> Result<bool, CommandError> {
+    chat_rename_with(&state, &chat_id, &title)
+}
+
+/// Deletes one chat thread with its messages.
+///
+/// # Errors
+/// As [`chat_delete_with`].
+// Tauri's command macro hands `State` by value; the wrapper only reads through it.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) async fn chat_delete(
+    state: State<'_, AppState>,
+    chat_id: String,
+) -> Result<bool, CommandError> {
+    chat_delete_with(&state, &chat_id).await
 }
 
 /// The host's model config for the sidecar's chat tier, built from the

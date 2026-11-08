@@ -183,6 +183,16 @@ scenarios fails the offline suite. The AI rule this enforces: an AI
 behaviour change requires an eval run in the same change and a pipeline
 version bump.
 
+The assistant chat carries its own pipeline version,
+`AGENT_PIPELINE_VERSION` (`client/desktop/src/agent/relay/threads.rs`):
+the whole chat pipeline (prompts, the tool surface, the fold the rows
+record) versions together, and every run stamps it into its chat row's
+`metadata.pipeline` at the relay's fold point, so a stored thread names
+the pipeline that produced it without a ledger column. The desktop
+relay's chat tests pin the stamp; the chat's eval scenarios (the budget
+and agent-tool fixtures the sidecar's `src/evals.test.ts` drives) pin no
+prompt constant of their own because no prompt text rides them.
+
 **`JUDGE_TEMPLATES_VERSION` in the ledger: ruled out for now.** Carrying
 the prompt version inside each `llm_calls` row needs a schema change to
 the ledger and every writer (host client, sidecar relay, CLI) moved in
@@ -203,6 +213,32 @@ outcomes land in `llm_calls` (sane bounds, never exact pins), the
 live-mode eval scenarios hold against model answers, and one whole
 refresh drives the pass end to end with every stage row under one
 correlation id.
+
+**The chat's own live proof.**
+`client/desktop/src/ai/live_chat_tests.rs` (gated the same way, plus
+`ASTRA_AGENT_TOOL_BUDGET_MS` armed short in the shell; the recorded
+value is 45000) drives one real assistant turn end to end: the real
+sidecar bundle at the pi harness, the live model at the chat tier, and
+the spawned real `astra-cli` against a file-backed engine in the test's
+own data dir, seeded with the proof's distinguishable mail through the
+product's send path. The turn searches the seed, acts on the row
+through its confirm gate (the test answers the card through the relay's
+permission response, approving exactly the acts that name the seeded
+row and refusing anything else, the fail-closed leg), loses its tools
+at the armed budget, and still lands done with both thread rows
+recorded and the run's pipeline stamp in the row's metadata. The proof
+asserts the route facts only: the search's page shape answered over
+the seed, the ask's correlation with its permission, CLI, and tool
+audit rows, the budget-spent note crossing before the done envelope,
+and the ledger's chat-tier row. The wording-dependent behaviours (the
+skipped outcome, the watchdog's done, the search's no-ask read, the
+rejection path, the read's truncation cap) stay with the offline
+evals; the proof adds the one fact only a live model gives, that the
+whole route holds together against real wording and a real clock. A
+model that stops early or a flaky endpoint fails the test; the rerun
+discipline is the operator's, and the opening sweep withdraws a
+previous interrupted run's copies so a fresh invocation starts from a
+known harness.
 
 **One endpoint quirk, seen and recorded.** The verified endpoint serves
 a reasoning model behind the anthropic-compatible wire: its `content`

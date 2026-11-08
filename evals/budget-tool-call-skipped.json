@@ -1,0 +1,18 @@
+{
+  "id": "budget-tool-call-skipped",
+  "feature": "budget",
+  "mode": "offline",
+  "inputs": {
+    "tool_budget_ms": 0,
+    "budget_grace_ms": 10000,
+    "chunks": ["working on it"],
+    "chunk_delay_ms": 1,
+    "tool_call": { "name": "list_folders", "args": { "account": "acct-1" } },
+    "policy": { "list_folders": { "level": "auto" } }
+  },
+  "expected": {
+    "budget_event": true,
+    "tool_result": { "tool": "list_folders", "status": "skipped", "output_includes": "budget" },
+    "done": true
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "id": "budget-event-crosses",
+  "feature": "budget",
+  "mode": "offline",
+  "inputs": {
+    "tool_budget_ms": 0,
+    "budget_grace_ms": 10000,
+    "chunks": ["hello"],
+    "chunk_delay_ms": 1
+  },
+  "expected": {
+    "budget_event": { "session_id": "agent:main", "state": "budget-spent" },
+    "done": true
+  }
+}

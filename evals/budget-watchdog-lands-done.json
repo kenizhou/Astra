@@ -1,0 +1,19 @@
+{
+  "id": "budget-watchdog-lands-done",
+  "feature": "budget",
+  "mode": "offline",
+  "inputs": {
+    "tool_budget_ms": 30,
+    "budget_grace_ms": 30,
+    "chunks": [
+      "a", "b", "c", "d", "e", "f", "g", "h", "i", "j",
+      "k", "l", "m", "n", "o", "p", "q", "r", "s", "t"
+    ],
+    "chunk_delay_ms": 40
+  },
+  "expected": {
+    "budget_event": true,
+    "max_text_deltas": 2,
+    "done": true
+  }
+}
