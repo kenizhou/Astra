@@ -55,6 +55,17 @@ pub(crate) use permissions::PendingApproval;
 pub(crate) use protocol::ModelConfig;
 pub(crate) use relay::SidecarRelay;
 
+// The pieces the ai module's gated live suites name (the chat live proof
+// assembles a relay beside them); test-only because the runtime reaches
+// the same items inside this module, and the pipeline stamp is the chat
+// rows' own pin.
+#[cfg(test)]
+pub(crate) use node::{find_node, resolve_cli_path};
+#[cfg(test)]
+pub(crate) use protocol::PermissionLevel;
+#[cfg(test)]
+pub(crate) use relay::{SidecarConfig, AGENT_PIPELINE_VERSION};
+
 use std::sync::Arc;
 
 use astra_ai::AiStore;
