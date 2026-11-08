@@ -17,6 +17,7 @@ set -euo pipefail
 
 REPO="D:/Projects/mailclient/Astra"
 WT="D:/Projects/mailclient/Astra-vendor-sync"
+GH_REPO="kenizhou/Astra"
 DRY_RUN=0
 [ "${1:-}" = "--dry-run" ] && DRY_RUN=1
 
@@ -139,13 +140,39 @@ git -C "$WT" commit --quiet -m "vendor: upstream $NEW $(date +%F)" -m "$(git -C 
 git -C "$WT" push --quiet origin vendor-sync
 log "pushed vendor-sync at $NEW"
 
-# 7. Open the PR, or leave the open one to its updated diff.
-EXISTING=$(gh pr list --head vendor-sync --state open --json number --jq '.[0].number' 2>/dev/null || true)
+# 7. Open the PR, or leave the open one to its updated diff. Every gh call
+# names the repository: the scheduled shell starts in no repository at all,
+# and gh's own git discovery fails there (the bug that left five revisions
+# pushed with no PR). A range with no security classification opens READY
+# and arms auto-merge (a merge commit, never squash: the branch tip must
+# become an ancestor of main or the conflict-surfacing mechanism dies); a
+# security-classified range opens as a draft and waits for morning review,
+# exactly the 22:00 contract's rule.
+EXISTING=$(gh pr list -R "$GH_REPO" --head vendor-sync --state open --json number --jq '.[0].number' 2>/dev/null || true)
 if [ -n "$EXISTING" ]; then
     log "sync PR #$EXISTING is open and now carries $NEW"
+    PR="$EXISTING"
 else
-    gh pr create --base main --head vendor-sync \
+    if [ -n "$SECURITIES" ]; then
+        gh pr create -R "$GH_REPO" --base main --head vendor-sync \
+            --title "vendor: engine sync ${CUR:0:7}..${NEW:0:7}" \
+            --body "$DIGEST" --draft
+        log "opened the sync PR vendor-sync -> main as a draft (security classified; held for review)"
+        exit 0
+    fi
+    gh pr create -R "$GH_REPO" --base main --head vendor-sync \
         --title "vendor: engine sync ${CUR:0:7}..${NEW:0:7}" \
-        --body "$DIGEST" --draft
-    log "opened the sync PR vendor-sync -> main"
+        --body "$DIGEST"
+    PR=$(gh pr list -R "$GH_REPO" --head vendor-sync --state open --json number --jq '.[0].number' 2>/dev/null || true)
+    log "opened the sync PR vendor-sync -> main as #$PR"
+fi
+# Auto-merge arms only a clean-classified PR (a security range reaching here
+# as an existing non-draft PR keeps its standing state for the morning).
+if [ -z "$SECURITIES" ] && [ -n "$PR" ]; then
+    DRAFT=$(gh pr view -R "$GH_REPO" "$PR" --json isDraft --jq '.isDraft' 2>/dev/null || echo true)
+    if [ "$DRAFT" = "false" ]; then
+        gh pr merge -R "$GH_REPO" "$PR" --auto --merge >/dev/null 2>&1 || \
+            log "auto-merge could not arm on #$PR (morning review takes it)"
+        log "auto-merge armed on sync PR #$PR (merge commit, green gate)"
+    fi
 fi
