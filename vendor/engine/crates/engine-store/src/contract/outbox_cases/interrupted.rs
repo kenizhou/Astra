@@ -112,6 +112,7 @@ pub(in crate::contract) async fn an_op_the_previous_process_left_in_flight_is_re
     let refused = PendingOutcome::Failed {
         class: FailureClass::Permanent,
         retry_after: None,
+        detail: String::new(),
     };
     for lease in [&connecting_lease, &edit_lease] {
         assert_eq!(

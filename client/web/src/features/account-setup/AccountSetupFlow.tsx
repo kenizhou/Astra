@@ -16,27 +16,29 @@ import {
   intents,
   oauthBegin,
   oauthCancel,
-  oauthOffer,
   onOauthSignInResult,
   type AccountSetup,
-  type OAuthProvider,
   type RecommendationView,
   type RejectedCertificateView,
 } from '@/services/ipc';
 import { isTauri } from '@/events/surfaceEvents';
+import type { OAuthProvider } from '@/services/ipc';
 import { useUiStore } from '@/stores/uiStore';
 import { useDialogFocus } from '@/components/ui/useDialogFocus';
 import { buildAccountToml } from './accountToml';
 import { DetectStep } from './DetectStep';
 import { CertificateOffer } from './CertificateOffer';
+import { ImapAuthCard } from './ImapAuthCard';
 import { JmapForm } from './JmapForm';
-import { OAuthOffer, type OAuthFlowState } from './OAuthOffer';
+import { OAuthOffer, useOAuthOffer, type OAuthFlowState } from './OAuthOffer';
 import { RecommendationPanel } from './RecommendationPanel';
+import { SenderNameStep } from './SenderNameStep';
 import {
   buildSetup,
   detectFallbackNote,
   detectWithGuard,
   EMPTY_FIELDS,
+  imapIssuerFrom,
   jmapSeedFrom,
   manualDefaults,
   manualPrefill,
@@ -67,34 +69,12 @@ export function AccountSetupFlow() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [miss, setMiss] = useState<MissReason | null>(null);
-  const [offer, setOffer] = useState<OAuthProvider[]>([]);
+  const offer = useOAuthOffer(open);
   const [oauthFlow, setOauthFlow] = useState<OAuthFlowState>({ status: 'idle' });
   const [jmapSeed, setJmapSeed] = useState<{ email: string; serverUrl: string } | null>(null);
-
-  // The offer is pulled once per open: the providers this build carries a
-  // registration for, and nothing when it carries none. A refused pull
-  // offers nothing rather than failing the wizard.
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-    let live = true;
-    oauthOffer().then(
-      (answered) => {
-        if (live) {
-          setOffer(answered.providers);
-        }
-      },
-      (err) => {
-        console.error('account-setup: the oauth offer failed to pull', err);
-      },
-    );
-    return () => {
-      live = false;
-      setOffer([]);
-      setOauthFlow({ status: 'idle' });
-    };
-  }, [open]);
+  // The ask-once name step's account, once an add path has joined one:
+  // the step follows the join, replacing the wizard's close.
+  const [askName, setAskName] = useState<{ account?: string; address: string } | null>(null);
 
   // The completion subscription stands while the wizard is open, so it
   // is registered before any begin can return and no completion can
@@ -130,6 +110,8 @@ export function AccountSetupFlow() {
       disposed = true;
       unlisten?.();
       unlisten = null;
+      // The wizard closing takes the flow's state home with it.
+      setOauthFlow({ status: 'idle' });
     };
   }, [open]);
 
@@ -160,8 +142,15 @@ export function AccountSetupFlow() {
     setError(null);
     setOauthFlow({ status: 'idle' });
     setJmapSeed(null);
+    setAskName(null);
     useUiStore.getState().setAccountSetupOpen(false);
   };
+
+  // The ask-once step stands in the wizard's place once an add has joined
+  // an account: it closes the wizard itself, whichever way the ask settles.
+  if (askName !== null) {
+    return <SenderNameStep account={askName.account} address={askName.address} onDone={close} />;
+  }
 
   const goManual = (prefill: SetupFields, fallbackNote: string | null) => {
     setFields(prefill);
@@ -299,9 +288,13 @@ export function AccountSetupFlow() {
     setBusy(true);
     setError(null);
     try {
-      await addAccount(buildAccountToml(buildSetup(fields, accepted ?? undefined)));
+      const added = await addAccount(
+        buildAccountToml(buildSetup(fields, accepted ?? undefined)),
+      );
       await dispatch(intents.refreshMail());
-      close();
+      // The ask-once step follows the join: the wizard asks the name
+      // before it closes, unless the join adopted one.
+      setAskName({ account: added.account_id, address: added.email });
     } catch (err) {
       setError(errorText(err));
     } finally {
@@ -357,7 +350,13 @@ export function AccountSetupFlow() {
           />
         )}
 
-        {step === 'jmap' && jmapSeed !== null && <JmapForm seed={jmapSeed} onClose={close} />}
+        {step === 'jmap' && jmapSeed !== null && (
+          <JmapForm
+            seed={jmapSeed}
+            onClose={close}
+            onNameAsk={(ask) => setAskName(ask)}
+          />
+        )}
 
         {step === 'manual' && (
           <>
@@ -419,19 +418,21 @@ export function AccountSetupFlow() {
                   className="rounded-full border border-input bg-background px-3 py-1.5 text-[13px] text-foreground outline-none transition-colors focus-visible:border-primary"
                 />
               </label>
-              <label className="grid gap-1 text-xs text-muted-foreground">
-                Password
-                <input
-                  type="password"
-                  value={fields.password}
-                  onChange={(e) => set('password')(e.target.value)}
-                  autoComplete="new-password"
-                  className="rounded-full border border-input bg-background px-3 py-1.5 text-[13px] text-foreground outline-none transition-colors focus-visible:border-primary"
-                />
-              </label>
-              <p className="-mt-2 text-[11px] text-muted-foreground">
-                Your password goes to the system keychain, never to a log file.
-              </p>
+              {/* The server's own answer to the step's question draws the
+                  sign-in card and gates the password area: standing,
+                  demoted behind a control, or hidden where the server
+                  admits no password. */}
+              <ImapAuthCard
+                host={fields.host}
+                port={fields.port}
+                security={fields.security}
+                username={fields.username}
+                oauthIssuer={imapIssuerFrom(view)}
+                accepted={accepted}
+                password={fields.password}
+                onPasswordChange={set('password')}
+                onAdded={(address) => setAskName({ address })}
+              />
 
               {certificate !== null && <CertificateOffer certificate={certificate} />}
 

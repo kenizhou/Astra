@@ -90,6 +90,43 @@ pub(crate) fn arg_preview(verb: &Verb) -> String {
         | Verb::AiResults { account, keys }
         | Verb::AiDrafts { account, keys }
         | Verb::AiSummary { account, keys } => format!("account={account} keys={}", keys.len()),
+        // The search previews shapes only: the query is caller text, so its
+        // length stands in, the drafts body's own discipline.
+        Verb::MessagesSearch {
+            query,
+            account,
+            folder,
+            limit,
+            offset,
+        } => match (account, folder) {
+            (Some(account), Some(folder)) => format!(
+                "query_chars={} account={account} folder={folder} limit={limit} offset={offset}",
+                query.chars().count(),
+            ),
+            (Some(account), None) => format!(
+                "query_chars={} account={account} limit={limit} offset={offset}",
+                query.chars().count(),
+            ),
+            (None, _) => format!(
+                "query_chars={} limit={limit} offset={offset}",
+                query.chars().count(),
+            ),
+        },
+        // The act verbs preview the account and the key they edit, with the
+        // direction the flags carried.
+        Verb::MessagesMarkRead {
+            account,
+            key,
+            unread,
+        } => format!("account={account} key={key} read={}", !unread),
+        Verb::MessagesSetFlagged {
+            account,
+            key,
+            clear,
+        } => format!("account={account} key={key} flagged={}", !clear),
+        Verb::MessagesArchive { account, key } | Verb::MessagesTrash { account, key } => {
+            format!("account={account} key={key}")
+        }
         Verb::DraftsSave { args } => format!(
             "account={} from=1 to={} cc={} subject_chars={} body_chars={} source={}",
             args.account,

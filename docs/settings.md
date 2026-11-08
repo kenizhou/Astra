@@ -22,13 +22,17 @@ row that renders nothing invites a support answer nobody can give.
 
 | # | Category | What lives in it |
 |---|---|---|
-| 1 | **General** | Appearance (Follow host, Light, Dark) · Clock (24-hour on, 12-hour off) |
+| 1 | **General** | Appearance (Follow host, Light, Dark) · Clock (24-hour on, 12-hour off) · New mail notifications (on by default) · Language (the mechanism, one catalogue today, per timestamps.md) · Default mail app (the re-assertion row, per os-integration.md) |
 | 2 | **Calendar** | Display zone · First day of the week · Horizon · Default calendar |
-| 3 | **Reading** | Conversation grouping (flat or threaded) |
+| 3 | **Reading** | Conversation grouping (flat or threaded) · Swipe actions (one pick per direction, held device-local) |
 | 4 | **Composing** | Quote style (the quoted original below or above the reply) · Default send account (the app-level account the new-message button and the mailto entry open from) · Signatures (rich text, per-account new mail and reply slots, per signatures.md) |
-| 5 | **Accounts** | Every configured account, each opening its own page |
-| 6 | **Advanced** | AI assistant access (the MCP server): the on/off toggle, the per-account allowlist, the client-config snippet |
-| 7 | **About** | The version and the attributions, from the core, not the web's guess |
+| 5 | **Shortcuts** | The static inventory of the shortcuts the shell wires, read-only |
+| 6 | **Accounts** | Every configured account, each opening its own page: the dav editor, the crypto method, and the account's own sync settings |
+| 7 | **Plugins** | Every discovered plugin with its lifecycle, granted permissions, and the enable/disable verb; activated plugins' declared settings sections below |
+| 8 | **Advanced** | AI assistant access (the MCP server): the on/off toggle, the per-account allowlist, the client-config snippet |
+| 9 | **Diagnostics** | The log tail viewer · Copy for support · Export · Debug logging (the next-launch wording, per logging.md) |
+| 10 | **Privacy** | The plain statement (what stays on the device, what the AI features send, what plugins may ask for) · Product analytics (the consent switch, per analytics.md) · The plugin registry link |
+| 11 | **About** | The version and the attributions, from the core, not the web's guess |
 
 **Every control that dispatches an intent reflects the persisted truth,
 never local optimism.** A change dispatches its intent and the control
@@ -116,14 +120,20 @@ change moves the product with no restart and no code path of its own.
 ## What the host chrome consumes
 
 - **The theme follows the host by default and keeps following it
-  live.** Light and Dark are an explicit override; Follow host returns
-  to tracking the desktop's own preference as it changes. The title
-  bar's quick cycle and the General picker are two controls over the one
-  persisted mode, so neither can strand the other.
+  live.** Light and Dark are an explicit override; Follow host returns to
+  tracking the desktop's own preference as it changes. The title bar's quick
+  cycle and the General picker are two controls over the one persisted mode,
+  so neither can strand the other.
 - **The clock** drives how every timestamp the web view renders is
   spelled, 12-hour by default: one field, read wherever a time is
   formatted, so the mail list and the diary cannot disagree about what
   ten past noon looks like.
+- **The new-mail notifications switch** lives in General, on by default.
+  Its category is a recorded judgement: the switch governs how arriving
+  mail announces itself to the desktop, an app-level behaviour, not how a
+  message renders, so General holds it rather than Reading. The host's
+  delivery bridge reads the persisted flag at every delivery, so a person
+  who wants no announcements gets none whatever the window state.
 
 ## The accounts page
 
@@ -147,6 +157,30 @@ installs anything.
   `dav_password_set`, a boolean that answers whether a password is
   stored. The editor's password field therefore starts blank and says
   blank keeps; a typed password replaces the stored one verbatim.
+
+### The per-account sync settings
+
+The account's page carries its own sync section: how far back the account
+syncs, the offline body cap, and the poll cadence. Each control writes
+through the one `set_sync_settings` intent, stating only the field it
+changed: an omitted field crosses no key at all, so an edit of the depth
+leaves the cap and the cadence standing. The row carries the effective
+triple the pass runs with, the product defaults where the account sets
+none (a three-month depth, a 256 MiB per-message cap, and a 30-minute
+cadence), and every control reflects that block rather than local
+optimism.
+
+- **The depth** is months of history, zero the whole mailbox, and it is
+  the same value the search depth note reads, so the list and the search
+  can never disagree about how far back mail goes. Narrowing it narrows
+  what syncs from now on and prunes nothing already stored.
+- **The cap** states the per-message rule the engine enforces: the figure
+  bounds each message body, never the account's offline total. The states
+  are off (metadata only, nothing warms), the 256 MiB default, everything,
+  and a custom figure stated in mebibytes; a message over the figure keeps
+  its list row and loads its body on open.
+- **The cadence** is the poll's own rhythm, 15 to 120 minutes, clamped
+  into its bounds on write; a faster manual refresh is the refresh button.
 
 ### The dav editor's save
 
@@ -184,6 +218,29 @@ app tears both legs down and forgets the store domains they filled (the
 calendar and contacts domains), so the cleared account's diary and
 people views render empty rather than haunting the engine with rows no
 leg will ever refresh.
+
+### The crypto method's save
+
+The Encryption (built-in) switch on the Accounts page writes the
+account's `[crypto] method` (`none | openpgp | smime`) through the same
+seam, under the same ordering contract as the dav save: merge, re-dial,
+persist, swap in. **The re-dial runs before the persist** because the
+method takes effect through the account's connections, not at some later
+read: the merged config dials with the new method's MIME wrapper
+installed (or none once cleared), and only a dial that answered is
+written to the secure store. The app then installs the re-dialled mail
+providers in place, keeping the account's calendar leg. A busy account
+(a dispatch still holding it across an engine call) is probed before the
+host's store moves and the save refuses with nothing host-side changed.
+
+**Fail-closed where no seam can hang.** The engine's wrap seam hangs on
+IMAP accounts today, so a method set on an account without IMAP/SMTP
+submission settings (a Graph/Google/JMAP account, or IMAP without SMTP)
+is refused outright (`encryption needs an IMAP/SMTP account`): the write
+would otherwise stand while sends went out plainly. Clearing a method on
+such an account needs no seam and re-dials nothing. A failed write lands
+on the account's row as `crypto_error`; everything that stood keeps
+standing.
 
 ### Remove account
 
@@ -269,7 +326,7 @@ never the history.
 
 | Surface | Ships |
 |---|---|
-| Desktop | The settings modal from the title strip's gear: the categories above, each control persisting before it answers; the accounts page with the dav editor and the confirmed removal; the Advanced page with the AI assistant access panel (host-side toggle, allowlist, client-config snippet; off and empty at every boot); the theme and clock applying across the chrome; the zone, first day, horizon, default calendar, grouping, and quote style consumed by the diary, the create dialog, the list, and the composer |
+| Desktop | The settings modal from the title strip's gear: the categories above, each control persisting before it answers; the accounts page with the dav editor, the crypto method, the per-account sync section, and the confirmed removal; the General page's notifications switch the delivery bridge reads, its language picker driving the dates, and its default-mail re-assertion; the Diagnostics page (viewer, copy, export, the debug toggle) and the Privacy page (the statement, the analytics switch, the plugin registry link); the Advanced page with the AI assistant access panel (host-side toggle, allowlist, client-config snippet; off and empty at every boot); the theme and clock applying across the chrome; the zone, first day, horizon, default calendar, grouping, and quote style consumed by the diary, the create dialog, the list, and the composer; the per-account sync settings consumed by the pass window, the warm-body cap, the poll cadence, and the search depth |
 
 The live proofs: the gated harness suite drives the seam end to end over
 a scratch config document that mirrors the host store's merge rule and
@@ -288,14 +345,14 @@ seeded artefact is withdrawn at the end.
 
 ## Known gaps
 
-- **The categories that do not ship, by name**: the Allodia account,
-  Signatures, Notifications, Privacy, and Diagnostics are absent, and
-  so are the entries inside shipped categories that mail-calendar
-  carries: the app language and the default mail app (General), swipe
-  actions (Reading), the default send account (Composing), and the
-  reset local database (Advanced, whose MCP panel does ship). Each
-  arrives with the slice that implements it, in the slot the taxonomy
-  gives it.
+- **The categories that do not ship, by name**: the Allodia account
+  and Notifications (its new-mail switch ships in General; the category
+  mail-calendar gives it stays absent) are absent, and so is the entry
+  inside a shipped category that mail-calendar carries: the reset local
+  database (Advanced, whose MCP panel does ship). Each arrives with the
+  slice that implements it, in the slot the taxonomy gives it. Privacy
+  and Diagnostics now ship, as do the app language and the
+  default-mail re-assertion in General.
 - **The client-config snippet names a relay the bundle does not yet
   stage.** The snippet derives the relay binary beside the app, but the
   desktop bundle carries no `astra-mcp-relay` beside the executable
@@ -305,8 +362,9 @@ seeded artefact is withdrawn at the end.
 - **The gear is a text button.** The title strip's entry reads Settings
   and draws no glyph; the icon set arrives with the chrome pass.
 - **The work week's first day is an explicit picker, not a locale
-  default.** Nothing follows the app locale, because the app ships no
-  language setting yet; the weekday labels read English until then.
+  default.** The language setting drives words and dates (timestamps.md)
+  but not the week's anchor; the first day stays a pick the person
+  makes, never an inference from the tag.
 - **The per-message quote override has no web control.** The app default
   ships in Composing; mail-calendar's per-message opt-in is not offered
   in the composer.
@@ -317,6 +375,9 @@ seeded artefact is withdrawn at the end.
 - **The zone picker offers the browser's own list**, so an engine that
   supports a zone the browser does not list can be set by a hand-edited
   file but not through the screen.
-- **No device-zone prompt.** A device whose zone changes is not offered
-  the change; time-zone-aware display with the prompt is the ported row
-  that stays open.
+- **The device-zone offer is once per zone value per process.** The
+  boot resolves the OS zone once and the diary offers it (skippable,
+  never over a picked zone); the OS exposes no change notification a
+  windowless host piece can ride, so no while-running watch stands.
+  Time-zone-aware display for the message timestamps stays the open
+  half, per timestamps.md.

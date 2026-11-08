@@ -78,6 +78,14 @@ fn set_clock_and_set_quote_style_carry_their_flag() {
 }
 
 #[test]
+fn set_notifications_enabled_carries_its_flag() {
+    round_trips(
+        &Intent::Settings(SettingsIntent::SetNotificationsEnabled { enabled: false }),
+        r#"{"settings":{"set_notifications_enabled":{"enabled":false}}}"#,
+    );
+}
+
+#[test]
 fn set_zone_carries_the_zone_verbatim() {
     // The type carries the string; the core validates the id on dispatch,
     // never here, so a host's typo reaches the core as-is to be refused typed
@@ -263,6 +271,43 @@ fn a_malformed_account_id_is_refused_on_the_wire() {
 }
 
 #[test]
+fn the_platform_arms_cross_their_exact_wires() {
+    // The Diagnostics toggle, the Privacy switch, the language tag, and
+    // the device-zone family: each pinned against its exact wire, so a
+    // renamed word can never slip out silently.
+    round_trips(
+        &Intent::Settings(SettingsIntent::SetDebugEnabled { enabled: true }),
+        r#"{"settings":{"set_debug_enabled":{"enabled":true}}}"#,
+    );
+    round_trips(
+        &Intent::Settings(SettingsIntent::SetAnalyticsConsented { consented: true }),
+        r#"{"settings":{"set_analytics_consented":{"consented":true}}}"#,
+    );
+    round_trips(
+        &Intent::Settings(SettingsIntent::SetLanguage {
+            language: "fr-FR".to_owned(),
+        }),
+        r#"{"settings":{"set_language":{"language":"fr-FR"}}}"#,
+    );
+    round_trips(
+        &Intent::Settings(SettingsIntent::ReportDeviceZone {
+            zone: "Europe/Berlin".to_owned(),
+        }),
+        r#"{"settings":{"report_device_zone":{"zone":"Europe/Berlin"}}}"#,
+    );
+    round_trips(
+        &Intent::Settings(SettingsIntent::AcceptDeviceZone {
+            zone: "Europe/Berlin".to_owned(),
+        }),
+        r#"{"settings":{"accept_device_zone":{"zone":"Europe/Berlin"}}}"#,
+    );
+    round_trips(
+        &Intent::Settings(SettingsIntent::DismissDeviceZone),
+        r#"{"settings":"dismiss_device_zone"}"#,
+    );
+}
+
+#[test]
 fn the_settings_surface_crosses_as_its_word() {
     assert_eq!(
         serde_json::to_string(&Surface::Settings).unwrap(),
@@ -271,5 +316,37 @@ fn the_settings_surface_crosses_as_its_word() {
     assert_eq!(
         serde_json::from_str::<Surface>(r#""settings""#).unwrap(),
         Surface::Settings
+    );
+}
+
+#[test]
+fn set_sync_settings_crosses_only_the_named_fields() {
+    use super::SyncBodyCap;
+    round_trips(
+        &Intent::Settings(SettingsIntent::SetSyncSettings {
+            account: account("work"),
+            depth_months: Some(12),
+            body_cap: None,
+            poll_minutes: Some(90),
+        }),
+        r#"{"settings":{"set_sync_settings":{"account":"work","depth_months":12,"poll_minutes":90}}}"#,
+    );
+    round_trips(
+        &Intent::Settings(SettingsIntent::SetSyncSettings {
+            account: account("work"),
+            depth_months: None,
+            body_cap: Some(SyncBodyCap::Bytes { octets: 1024 }),
+            poll_minutes: None,
+        }),
+        r#"{"settings":{"set_sync_settings":{"account":"work","body_cap":{"bytes":{"octets":1024}}}}}"#,
+    );
+    round_trips(
+        &Intent::Settings(SettingsIntent::SetSyncSettings {
+            account: account("work"),
+            depth_months: None,
+            body_cap: Some(SyncBodyCap::Off),
+            poll_minutes: None,
+        }),
+        r#"{"settings":{"set_sync_settings":{"account":"work","body_cap":"off"}}}"#,
     );
 }

@@ -23,6 +23,7 @@ fn week() -> Intent {
     Intent::Calendar(CalendarIntent::SetRange {
         start: utc("2026-10-18T00:00:00Z"),
         days: 14,
+        view: None,
     })
 }
 

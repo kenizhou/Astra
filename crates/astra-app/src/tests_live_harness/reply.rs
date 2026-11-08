@@ -79,6 +79,7 @@ async fn the_reply_threads_under_the_original_and_cleans_up_after_itself() {
         document: document(WORDS),
         blobs: Vec::new(),
         crypto: crate::crypto::CryptoFlags::default(),
+        composition: None,
     })
     .await
     .unwrap();

@@ -2,8 +2,9 @@
 //! The stored-account restore's dial half: the machinery that turns a
 //! registered account document into the host-connected account the app
 //! core boots over, whatever family its grant belongs to (an imap
-//! password, a `[graph]` section, a `[google]` section), and the
-//! on-demand folder binder the app calls back into for a late bind.
+//! password, an `[imap.oauth]` grant, a `[graph]` section, a `[google]`
+//! section), and the on-demand folder binder the app calls back into
+//! for a late bind.
 //!
 //! Split from the boot sequence itself for the file cap: the ordering
 //! the cached-first-paint contract rests on stays in
@@ -13,107 +14,19 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use engine_api::{AccountId, EmailAddress};
-
-use astra_app::MailboxConnector;
 
 use crate::{dial_table::AccountDials, HostAccount, HostProvider};
 
-/// Binds a folder of a registered account on demand: the host's
-/// implementation of the app's [`MailboxConnector`] seam, over the dial
-/// table.
-pub(crate) struct DialConnector {
-    /// The registered accounts.
-    dials: Arc<AccountDials>,
-}
+// The on-demand folder binder (the app's MailboxConnector seam) lives in a
+// sibling file, the same split the file cap forced here.
+mod connector;
 
-impl DialConnector {
-    /// The binder over one dial table.
-    pub(super) fn new(dials: Arc<AccountDials>) -> Self {
-        Self { dials }
-    }
-}
+pub(crate) use connector::DialConnector;
 
-#[async_trait]
-impl MailboxConnector<HostProvider> for DialConnector {
-    async fn connect_folder(&self, account: &AccountId, mailbox_key: &str) -> Option<HostProvider> {
-        let (config, connections) = self.dials.of(account.as_str())?;
-        if let Some(jmap) = config.jmap.as_ref() {
-            // One provider serves the whole JMAP account: the binder
-            // reconnects that account-wide provider, whatever the
-            // mailbox key names, and never mints a per-folder one. The
-            // key is deliberately unread; a grant account dials over a
-            // source minted here whose sink is none on purpose (a late
-            // bind only reads, and the boot's sink-backed source owns
-            // the rotations, exactly the graph arm's rule).
-            let tls = astra_account::account_tls(&config).ok()?;
-            let provider = match jmap.oauth.as_ref() {
-                Some(_) => {
-                    let source = astra_account::jmap_token_source(
-                        jmap,
-                        account.clone(),
-                        None,
-                        astra_account::CredentialOrigin::Stored,
-                    )
-                    .ok()?;
-                    Box::new(
-                        astra_account::dial_jmap_oauth_account(&config, &tls, &source)
-                            .await
-                            .ok()?,
-                    ) as HostProvider
-                }
-                None => Box::new(astra_account::dial_jmap_account(&config, &tls).await.ok()?)
-                    as HostProvider,
-            };
-            return Some(provider);
-        }
-        if let Some(graph) = config.graph.as_ref() {
-            // A Graph account binds folders over its stored grant: a
-            // source minted from the document through the same seam the
-            // completion uses. The sink is none here on purpose: a late
-            // bind only reads, and the boot's sink-backed source owns
-            // the rotations, so this source never writes a document.
-            let source = crate::oauth::graph_add::production_source()(
-                graph.provider_config(),
-                account.clone(),
-                graph.refresh_token.expose().to_owned(),
-                None,
-            )
-            .ok()?;
-            return astra_account::connect_graph_folder(
-                source,
-                mailbox_key,
-                None,
-                &astra_account::account_tls(&config).ok()?,
-            )
-            .map(|provider| provider as HostProvider)
-            .ok();
-        }
-        if let Some(google) = config.google.as_ref() {
-            // A Google account binds folders over its stored grant: a
-            // source minted from the document through the same
-            // constructor the completion uses. The sink is none here on
-            // purpose: a late bind only reads, and the boot's
-            // sink-backed source owns the rotations, so this source never
-            // writes a document. Gmail is account-global, so any mailbox
-            // key binds the one provider.
-            let source = astra_account::google_token_source(
-                google,
-                account.clone(),
-                None,
-                astra_account::CredentialOrigin::FreshSignIn,
-            )
-            .ok()?;
-            let tls = astra_account::account_tls(&config).ok()?;
-            let provider = astra_account::connect_google_folder(source, None, &tls) as HostProvider;
-            return Some(provider);
-        }
-        astra_account::connect_imap_mailbox(&connections, &config, mailbox_key)
-            .await
-            .ok()
-    }
-}
+/// The crypto store as every dial half holds it: the wrapper each IMAP
+/// connect installs reads the one the boot opened.
+pub(super) type SharedCryptoStore = Arc<astra_crypto_store::CryptoStore>;
 
 /// Dials every registered account, mail half first and dav legs beside
 /// it. A mail dial that fails skips the account with a warning: one stale
@@ -128,8 +41,10 @@ impl MailboxConnector<HostProvider> for DialConnector {
 pub(crate) async fn dial_stored(
     dials: &Arc<AccountDials>,
     credentials: &Arc<dyn crate::credential_store::AccountCredentialStore>,
+    crypto_store: &SharedCryptoStore,
     graph_dial: crate::oauth::graph_add::GraphDial,
     google_dial: crate::oauth::google_add::GoogleDial,
+    mail_dial: crate::oauth::mail_add::MailGrantDial,
     refusals: &Arc<crate::oauth::grant_refusals::GrantRefusals>,
 ) -> Vec<Dialled> {
     let mut accounts = Vec::new();
@@ -144,6 +59,13 @@ pub(crate) async fn dial_stored(
                 continue;
             }
         };
+        // A legacy config the fail-closed settings write now refuses: warn,
+        // never fail the boot.
+        if config.crypto.is_some() && (config.imap.is_none() || config.smtp.is_none()) {
+            log::warn!(
+                "boot: an account carries a crypto method but has no IMAP/SMTP submission settings; its sends go out plainly until the method is cleared"
+            );
+        }
         if config.imap.is_none() && config.graph.is_some() {
             match dial_graph_stored(
                 dials,
@@ -227,12 +149,51 @@ pub(crate) async fn dial_stored(
             }
             continue;
         }
+        if config
+            .imap
+            .as_ref()
+            .is_some_and(|imap| imap.oauth.is_some())
+        {
+            match dial_mail_stored(
+                dials,
+                credentials,
+                &mail_dial,
+                &account_id,
+                &config,
+                refusals,
+            )
+            .await
+            {
+                Ok(account) => {
+                    let (account, contacts) = dial_dav(&config, account).await;
+                    accounts.push(Dialled { account, contacts });
+                }
+                // The grant is dead: the account skips, and the refusal
+                // state it leaves behind is the imap_smtp row the
+                // surfaces render, never an outage badge.
+                Err(astra_account::AccountError::SigninRejected(detail)) => {
+                    refusals.record_dead(account_id.as_str());
+                    log::warn!(
+                        "boot: an account's sign-in expired or was withdrawn; it waits to be \
+                         signed in again: {detail}"
+                    );
+                }
+                Err(err) => {
+                    log::warn!("boot: an account could not be connected and was skipped: {err}");
+                }
+            }
+            continue;
+        }
         let email = config
             .imap
             .as_ref()
             .map(|imap| imap.username.clone())
             .unwrap_or_default();
-        match astra_account::connect_mail_providers(&connections, &config, &account_id).await {
+        let wrapper =
+            crate::crypto_wrapper::mime_wrapper_for_config(crypto_store, &config, &account_id);
+        match astra_account::connect_mail_providers(&connections, &config, &account_id, wrapper)
+            .await
+        {
             Ok(providers) => {
                 let account = HostAccount {
                     id: account_id,
@@ -248,6 +209,55 @@ pub(crate) async fn dial_stored(
         }
     }
     accounts
+}
+
+/// Dials one stored mail account whose `[imap]` section carries an
+/// OAuth grant: the sink-backed token source over the stored refresh
+/// token (a rotation a ratcheting server issues at this dial lands in
+/// the entry and the store, the defence without which the account dies
+/// at the next launch), installed into the standing pool so every later
+/// connection of the account presents it, then the shared dial. The
+/// password arm is unchanged: a config without a grant never reaches
+/// here.
+#[allow(clippy::too_many_arguments)]
+async fn dial_mail_stored(
+    dials: &Arc<AccountDials>,
+    credentials: &Arc<dyn crate::credential_store::AccountCredentialStore>,
+    mail_dial: &crate::oauth::mail_add::MailGrantDial,
+    account_id: &AccountId,
+    config: &astra_account::AccountConfig,
+    refusals: &Arc<crate::oauth::grant_refusals::GrantRefusals>,
+) -> Result<HostAccount, astra_account::AccountError> {
+    let section = config
+        .imap
+        .as_ref()
+        .ok_or(astra_account::AccountError::NoImap)?;
+    let grant = section
+        .oauth
+        .as_ref()
+        .ok_or(astra_account::AccountError::NoImap)?;
+    let (standing, connections) = dials
+        .of(account_id.as_str())
+        .ok_or(astra_account::AccountError::NoImap)?;
+    // The stored grant dials through the same sink the sign-in's
+    // completion registers: a rotation at boot lands in the entry and
+    // the store, and a stored source adopts whatever this process
+    // already holds for the account.
+    let sink =
+        crate::oauth::graph_sink::graph_token_sink(Arc::clone(dials), Arc::clone(credentials));
+    let tokens = astra_account::imap_oauth_token_source(
+        grant,
+        account_id.clone(),
+        Some(sink),
+        astra_account::CredentialOrigin::Stored,
+    )?;
+    let providers = mail_dial(account_id, tokens, &standing, &connections).await?;
+    refusals.record_dialled(account_id.as_str(), false);
+    Ok(HostAccount {
+        id: account_id.clone(),
+        providers,
+        identity: EmailAddress::new(section.username.clone()),
+    })
 }
 
 /// Dials one stored Graph account: the sink-backed token source over the

@@ -10,6 +10,14 @@ const fs = require('node:fs');
 const path = require('node:path');
 const script = path.basename(process.argv[1] ?? '');
 const args = process.argv.slice(2);
+// ASTRA_STUB_PAD grows the stdout document by that many characters, so a
+// test can drive an output past a tool's truncation bound. It rides the
+// safeExec ASTRA_* passthrough; unset or zero prints exactly the old shape.
+// ASTRA_STUB_PAGE replaces the echo with that JSON document verbatim, so
+// an eval can seed the page a real CLI verb would answer (a search page,
+// say) and pin the model receiving the page shape. Both ride the same
+// passthrough; unset keeps exactly the old shape.
+const pad = Number(process.env.ASTRA_STUB_PAD ?? 0);
 fs.appendFileSync(
   'stub-captures.jsonl',
   JSON.stringify({
@@ -19,6 +27,10 @@ fs.appendFileSync(
     cwd: process.cwd(),
   }) + '\n',
 );
+if (process.env.ASTRA_STUB_PAGE !== undefined) {
+  process.stdout.write(process.env.ASTRA_STUB_PAGE);
+  process.exit(0);
+}
 process.stdout.write(
   JSON.stringify({
     script,
@@ -27,6 +39,7 @@ process.stdout.write(
     data_dir: process.env.ASTRA_DATA_DIR ?? null,
     correlation_id: process.env.ASTRA_CORRELATION_ID ?? null,
     cwd: process.cwd(),
+    ...(Number.isFinite(pad) && pad > 0 ? { pad: 'x'.repeat(pad) } : {}),
   }),
 );
 process.exit(0);

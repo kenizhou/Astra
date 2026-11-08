@@ -102,3 +102,39 @@ describe('the drop', () => {
     expect(JSON.stringify(document.blocks)).toContain(inlined.id);
   });
 });
+
+// The pending share rows: the OS hand-off's files render by name with a
+// pending marker and their own remove control; the path never renders.
+describe('the pending share rows', () => {
+  it('renders each shared file by name with a pending marker', () => {
+    render(<ComposerAttachments />);
+    act(() => {
+      useComposerStore.getState().seedShares([
+        { name: 'notes.txt', path: 'C:\\Users\\ada\\notes.txt' },
+      ]);
+    });
+
+    expect(screen.getByText('notes.txt')).toBeTruthy();
+    expect(screen.getByText('pending')).toBeTruthy();
+    expect(screen.getByLabelText('Remove pending notes.txt')).toBeTruthy();
+    expect(document.body.textContent).not.toContain('C:\\Users\\ada');
+  });
+
+  it('removes one pending row from the control', () => {
+    render(<ComposerAttachments />);
+    act(() => {
+      useComposerStore.getState().seedShares([
+        { name: 'notes.txt', path: 'C:\\a.txt' },
+        { name: 'photo.png', path: 'C:\\b.png' },
+      ]);
+    });
+
+    fireEvent.click(screen.getByLabelText('Remove pending notes.txt'));
+
+    expect(screen.queryByText('notes.txt')).toBeNull();
+    expect(screen.getByText('photo.png')).toBeTruthy();
+    expect(useComposerStore.getState().pendingShares).toEqual([
+      { name: 'photo.png', path: 'C:\\b.png' },
+    ]);
+  });
+});

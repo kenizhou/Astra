@@ -33,7 +33,8 @@ import {
 import { DENSITY_ROW_PX } from '@/components/message-list/density';
 import { filteredRows, filterCounts } from '@/components/message-list/listFilter';
 import { allKeys, rangeKeys, resolveTargets, toggleKey } from '@/components/message-list/listSelection';
-import { buildDraftMenu, buildRowMenu, type MoveToContext } from '@/components/message-list/rowMenu';
+import { buildDraftMenu, buildRowMenu, type RowAccountContext } from '@/components/message-list/rowMenu';
+import { SwipeToast } from '@/components/message-list/SwipeToast';
 import { sameRowKey } from '@/components/message-list/rowIdentity';
 import { OutboxQueue } from '@/features/outbox/OutboxQueue';
 import { dispatch, intents } from '@/services/ipc';
@@ -53,6 +54,32 @@ function folderDisplayName(
   }
   const account = accounts.find((a) => a.account_id === selected.account);
   return account?.folders.find((f) => f.key === selected.key)?.name ?? null;
+}
+
+/** Whose mail the header names: the open folder's name while a folder
+ *  leads, the account's own label while the switcher's scope stands, and
+ *  All Accounts for the unified view. `null` names nothing yet. */
+function scopeTitle(
+  accounts: ReturnType<typeof useFolderStore.getState>['accounts'],
+  selected: ReturnType<typeof useFolderStore.getState>['selected'],
+  scope: ReturnType<typeof useFolderStore.getState>['scope'],
+): string | null {
+  if (selected !== null) {
+    return folderDisplayName(accounts, selected);
+  }
+  if (scope === null) {
+    return null;
+  }
+  switch (scope.kind) {
+    case 'folder':
+      return folderDisplayName(accounts, { account: scope.account, key: scope.key });
+    case 'account':
+      return (
+        accounts.find((account) => account.account_id === scope.account)?.display_name ?? null
+      );
+    case 'all_inboxes':
+      return 'All Accounts';
+  }
 }
 
 interface RowWindowProps {
@@ -159,6 +186,7 @@ export function MessageList() {
   const openSnapshot = useReadingStore((s) => s.snapshot);
   const accounts = useFolderStore((s) => s.accounts);
   const folder = useFolderStore((s) => s.selected);
+  const scope = useFolderStore((s) => s.scope);
   const outboxAccount = useFolderStore((s) => s.outboxAccount);
   const filter = useListFilterStore((s) => s.filter);
   const menu = useContextMenu();
@@ -265,12 +293,13 @@ export function MessageList() {
       ? viewRows.filter((row) => selectedKeys.some((key) => sameRowKey(key, row.key)))
       : null;
 
-  // The move-to picker's context: the first target's account and its
-  // folders, the sitting folder out; undefined only when the pane holds no
-  // group for that account. A selection that spans accounts still gets its
-  // context, so the item's own one-account gate hides the verb rather than
-  // a placeholder misnaming a shipped feature.
-  const moveToOf = (targets: MessageRowView[]): MoveToContext | undefined => {
+  // The account context the menu asks about: the first target's account and
+  // its folders, the sitting folder out, and the provider's report
+  // capability the spam verb gates on. Undefined only when the pane holds
+  // no group for that account. A selection that spans accounts still gets
+  // its context, so the move item's own one-account gate hides the verb
+  // rather than a placeholder misnaming a shipped feature.
+  const accountContextOf = (targets: MessageRowView[]): RowAccountContext | undefined => {
     if (targets.length === 0) {
       return undefined;
     }
@@ -282,6 +311,7 @@ export function MessageList() {
     return {
       account,
       currentKey: folder !== null && folder.account === account ? folder.key : null,
+      canReportMail: group.can_report_mail === true,
       folders: group.folders,
     };
   };
@@ -298,10 +328,10 @@ export function MessageList() {
     <section
       aria-label="Message list"
       onKeyDown={onKeyDown}
-      className="flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-card"
+      className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-card"
     >
       <ListToolbar
-        folderName={folderDisplayName(accounts, folder)}
+        folderName={scopeTitle(accounts, folder, scope)}
         viewMode={viewMode}
         filter={filter}
         filterCounts={counts}
@@ -344,12 +374,13 @@ export function MessageList() {
           y={menu.state.y}
           items={
             draftFolder
-              ? buildDraftMenu()
-              : buildRowMenu(menuTargets.current, viewMode, moveToOf(menuTargets.current))
+              ? buildDraftMenu(menuTargets.current)
+              : buildRowMenu(menuTargets.current, viewMode, accountContextOf(menuTargets.current))
           }
           onClose={menu.close}
         />
       )}
+      <SwipeToast />
     </section>
   );
 }

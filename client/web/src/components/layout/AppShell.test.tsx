@@ -154,6 +154,7 @@ describe('the shell composer wiring', () => {
       bcc: '',
       subject: 'Later',
       body_text: 'Half written',
+      attachments: [],
     };
     ipc.draftResume.mockResolvedValue(view);
     render(<AppShell />);

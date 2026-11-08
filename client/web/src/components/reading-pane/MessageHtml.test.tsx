@@ -31,7 +31,9 @@ import {
   MessageHtml,
   READING_CSP_GATED,
   READING_CSP_REMOTE,
+  READING_ZOOM_BASE_PX,
   enableRemoteImages,
+  wrapBodyDocument,
 } from './MessageHtml';
 
 /** The sanitised body the Rust gate emits for the rich message: one inline
@@ -44,7 +46,15 @@ const sanitisedHtml =
   '<style>body{background:url(data-astra-style-url:https://x.example/a.png)}</style>';
 
 /** Renders the body with the toggle wired to local state, the store's stand-in. */
-function Harness({ html = sanitisedHtml, count = 2 }: { html?: string; count?: number }) {
+function Harness({
+  html = sanitisedHtml,
+  count = 2,
+  zoom = 'default',
+}: {
+  html?: string;
+  count?: number;
+  zoom?: 'small' | 'default' | 'large';
+}) {
   const [show, setShow] = useState(false);
   return (
     <MessageHtml
@@ -52,6 +62,7 @@ function Harness({ html = sanitisedHtml, count = 2 }: { html?: string; count?: n
       remoteImageCount={count}
       showRemoteImages={show}
       onShowRemoteImages={() => setShow(true)}
+      zoom={zoom}
     />
   );
 }
@@ -74,10 +85,11 @@ beforeEach(() => {
 });
 
 describe('the message body', () => {
-  it('renders the sanitised html untouched in the srcdoc', () => {
+  it('wraps the sanitised html in a full document, the fragment riding verbatim', () => {
     render(<Harness />);
 
-    expect(frameDoc()).toBe(sanitisedHtml);
+    expect(frameDoc()).toContain(sanitisedHtml);
+    expect(frameDoc().startsWith('<!DOCTYPE html>')).toBe(true);
   });
 
   it('locks the iframe down: same-origin but scriptless sandbox, gated csp allowing only data images', () => {
@@ -135,10 +147,10 @@ describe('the message body', () => {
     const hostile = '<p>"> quoted</p><p></iframe><script>never runs</script></p>';
     render(<Harness html={hostile} count={0} />);
 
-    // The doc is the snapshot's sanitised HTML untouched: the attribute value
+    // The fragment rides the wrapper's body untouched: the attribute value
     // carries the quote and the closing tag verbatim, so no client-side
     // escape or breakout creeps in between snapshot and frame.
-    expect(frameDoc()).toBe(hostile);
+    expect(frameDoc()).toContain(hostile);
   });
 
   it('draws no affordance when nothing is blocked', () => {
@@ -160,6 +172,47 @@ describe('the message body', () => {
         '<img src="data:image/png;base64,aGVsbG8=">' +
         '<img src="https://tracker.example/p.png">' +
         '<style>body{background:url(https://x.example/a.png)}</style>',
+    );
+  });
+});
+
+describe('the reading zoom wrapper', () => {
+  it('scales the document base font-size by the standing step', () => {
+    render(<Harness zoom="small" />);
+    expect(frameDoc()).toContain(`html{font-size:${READING_ZOOM_BASE_PX.small}px}`);
+
+    cleanup();
+    render(<Harness zoom="large" />);
+    expect(frameDoc()).toContain(`html{font-size:${READING_ZOOM_BASE_PX.large}px`);
+  });
+
+  it('holds three steps with the default matching the frame document the fragment always rendered as', () => {
+    expect(READING_ZOOM_BASE_PX).toEqual({ small: 13, default: 16, large: 20 });
+  });
+
+  it('carries the viewport meta the sender mobile rules read', () => {
+    render(<Harness />);
+
+    expect(frameDoc()).toContain('<meta name="viewport" content="width=device-width, initial-scale=1">');
+  });
+
+  it('clamps fixed-width content to the viewport so the body reflows at every pane width', () => {
+    render(<Harness />);
+
+    const doc = frameDoc();
+    expect(doc).toContain('body>*{max-width:100% !important}');
+    expect(doc).toContain('img,video,table{max-width:100% !important}');
+    expect(doc).toContain('img,video{height:auto}');
+  });
+
+  it('exposes the wrapper as a pure transform over the sanitised fragment', () => {
+    const doc = wrapBodyDocument('<p>Body.</p>', 'large');
+    expect(doc).toBe(
+      '<!DOCTYPE html><html><head>' +
+        '<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">' +
+        '<style>html{font-size:20px}body{margin:0}body>*{max-width:100% !important}' +
+        'img,video,table{max-width:100% !important}img,video{height:auto}</style>' +
+        '</head><body><p>Body.</p></body></html>',
     );
   });
 });

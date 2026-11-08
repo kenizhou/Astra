@@ -50,6 +50,7 @@ fn submit(subject: &str) -> Intent {
         document: document("On its way"),
         blobs: Vec::new(),
         crypto: crate::crypto::CryptoFlags::default(),
+        composition: None,
     }
 }
 

@@ -167,7 +167,7 @@ describe('the date group headers', () => {
     expect(screen.getByText('Yesterday')).toBeTruthy();
     expect(screen.getByText('Monday')).toBeTruthy();
     expect(
-      screen.getAllByText('30 Sep').some((el) => el.getAttribute('role') === 'presentation'),
+      screen.getAllByText('30 Sept').some((el) => el.getAttribute('role') === 'presentation'),
     ).toBe(true);
     expect(screen.getAllByRole('option')).toHaveLength(4);
   });

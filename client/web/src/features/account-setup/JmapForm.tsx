@@ -43,11 +43,15 @@ function refusalNote(refusal: string): string {
 export interface JmapFormProps {
   /** The seed the flow routed here on: the address and the server URL. */
   seed: { email: string; serverUrl: string };
-  /** Closes the wizard; the form calls it on a successful add. */
+  /** Closes the wizard; the form calls it only for the paths that own no
+   *  added account. */
   onClose: () => void;
+  /** Hands an added account to the flow's ask-once name step: the step
+   *  follows the join and closes the wizard itself. */
+  onNameAsk: (ask: { account?: string; address: string }) => void;
 }
 
-export function JmapForm({ seed, onClose }: JmapFormProps) {
+export function JmapForm({ seed, onNameAsk }: JmapFormProps) {
   const [email] = useState(seed.email);
   // A blank seed URL shows as the domain-derived `https://<domain>`: the
   // display the host re-derives authoritatively at the submit.
@@ -129,22 +133,22 @@ export function JmapForm({ seed, onClose }: JmapFormProps) {
   }, []);
 
   // A completed sign-in added the account: the first sync runs in the
-  // background and the wizard closes on it.
+  // background and the ask-once name step takes the wizard from here.
   useEffect(() => {
     if (flow.status === 'result' && 'added' in flow.outcome) {
       void dispatch(intents.refreshMail());
-      onClose();
+      onNameAsk({ address: flow.outcome.added.address });
     }
-  }, [flow, onClose]);
+  }, [flow, onNameAsk]);
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      await addJmapAccount(email.trim(), url.trim(), password);
+      const added = await addJmapAccount(email.trim(), url.trim(), password);
       await dispatch(intents.refreshMail());
-      onClose();
+      onNameAsk({ account: added.account_id, address: added.email });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {

@@ -9,8 +9,8 @@ use astra_composer::Signature;
 
 use crate::{
     AboutBlock, AccountKind, AccountLegs, AccountSettingsRow, AccountSignatures, DavSectionRow,
-    DefaultCalendar, GrantState, SettingsBlock, SettingsError, SettingsSnapshot, ThemeMode,
-    ViewMode, WeekdayWire,
+    DefaultCalendar, GrantState, SenderNameControl, SettingsBlock, SettingsError, SettingsSnapshot,
+    SyncBodyCap, ThemeMode, ViewMode, WeekdayWire,
 };
 
 /// A well-formed account id, the way every settings test names one.
@@ -40,6 +40,11 @@ fn the_snapshot_crosses_its_full_shape_and_reads_back() {
             }),
             default_send_account: Some(account("work")),
             plugins_enabled: true,
+            notifications_enabled: true,
+            debug_enabled: false,
+            analytics_consented: false,
+            language: "en-GB".to_owned(),
+            zone_offered: false,
         },
         accounts: vec![AccountSettingsRow {
             account: account("work"),
@@ -70,6 +75,11 @@ fn the_snapshot_crosses_its_full_shape_and_reads_back() {
                 }),
                 reply: None,
             }),
+            sync: None,
+            display_name: "Ada Lovelace".to_owned(),
+            sender_name_control: SenderNameControl::Writable,
+            needs_sender_name: false,
+            sender_name_error: None,
         }],
         about: AboutBlock {
             version: "0.1.0".to_owned(),
@@ -80,6 +90,7 @@ fn the_snapshot_crosses_its_full_shape_and_reads_back() {
             ],
         },
         error: Some(SettingsError::PersistFailed),
+        device_zone_offer: Some("Europe/Berlin".to_owned()),
     };
 
     let wire = serde_json::to_value(&snapshot).expect("the snapshot serialises");
@@ -95,6 +106,7 @@ fn the_snapshot_crosses_its_full_shape_and_reads_back() {
                 "quote_below": false,
                 "view_mode": "threaded",
                 "plugins_enabled": true,
+                "notifications_enabled": true,
                 "default_calendar": { "account": "work", "key": "cal-1" },
                 "default_send_account": "work"
             },
@@ -112,14 +124,17 @@ fn the_snapshot_crosses_its_full_shape_and_reads_back() {
                     "dav_error": "the re-dial could not reach the origin",
                     "refresh_error": "the diary could not be re-expanded under the new zone; set the zone again to retry",
                     "crypto_method": "none",
-                    "signatures": { "new_mail": { "body_html": "<p>Ada</p>", "body_plain": "Ada" } }
+                    "signatures": { "new_mail": { "body_html": "<p>Ada</p>", "body_plain": "Ada" } },
+                    "display_name": "Ada Lovelace",
+                    "sender_name_control": "writable"
                 }
             ],
             "about": {
                 "version": "0.1.0",
                 "attributions": ["email-calendar-sync-engine", "pi", "web"]
             },
-            "error": "persist_failed"
+            "error": "persist_failed",
+            "device_zone_offer": "Europe/Berlin"
         }),
     );
 
@@ -137,6 +152,7 @@ fn the_error_words_cross_both_ways_and_absent_states_cross_no_key() {
             r#""horizon_out_of_bounds""#,
         ),
         (SettingsError::RemoveFailed, r#""remove_failed""#),
+        (SettingsError::ZonePicked, r#""zone_picked""#),
     ] {
         assert_eq!(serde_json::to_string(&error).unwrap(), word);
         assert_eq!(serde_json::from_str::<SettingsError>(word).unwrap(), error);
@@ -145,6 +161,10 @@ fn the_error_words_cross_both_ways_and_absent_states_cross_no_key() {
     let wire = serde_json::to_value(&clean).expect("the clean snapshot serialises");
     assert!(wire.get("error").is_none());
     assert!(wire.get("accounts").is_none());
+    assert!(
+        wire.get("device_zone_offer").is_none(),
+        "no standing offer crosses no key: {wire}"
+    );
 }
 
 #[test]
@@ -214,22 +234,7 @@ fn the_grant_states_cross_both_ways_and_absent_means_healthy() {
     // A healthy account crosses no grant key at all: the absence is the
     // state, and a snapshot from a build before the field parses as
     // healthy rather than refusing.
-    let mut healthy = AccountSettingsRow {
-        account: account("work"),
-        address: "ada@example.test".to_owned(),
-        kind: AccountKind::Microsoft,
-        legs: AccountLegs {
-            calendar: false,
-            contacts: false,
-        },
-        dav: None,
-        dav_error: None,
-        refresh_error: None,
-        grant: None,
-        signatures: None,
-        crypto_method: "none".to_owned(),
-        crypto_error: None,
-    };
+    let mut healthy = row_fixture();
     let wire = serde_json::to_value(&healthy).expect("the healthy row serialises");
     assert!(
         wire.get("grant").is_none(),
@@ -258,27 +263,18 @@ fn the_grant_states_cross_both_ways_and_absent_means_healthy() {
 fn a_row_s_dav_echo_never_carries_the_password_back() {
     // The row answers whether a password is stored; the credential itself has
     // no field to cross, whatever the stored section holds.
-    let row = AccountSettingsRow {
-        account: account("work"),
-        address: "ada@example.test".to_owned(),
-        kind: AccountKind::Jmap,
-        legs: AccountLegs {
-            calendar: true,
-            contacts: true,
-        },
-        dav: Some(DavSectionRow {
-            caldav_url: Some("https://dav.example.test".to_owned()),
-            carddav_url: Some("https://dav.example.test".to_owned()),
-            username: "ada@example.test".to_owned(),
-            dav_password_set: true,
-        }),
-        dav_error: None,
-        refresh_error: None,
-        grant: None,
-        signatures: None,
-        crypto_method: "none".to_owned(),
-        crypto_error: None,
+    let mut row = row_fixture();
+    row.kind = AccountKind::Jmap;
+    row.legs = AccountLegs {
+        calendar: true,
+        contacts: true,
     };
+    row.dav = Some(DavSectionRow {
+        caldav_url: Some("https://dav.example.test".to_owned()),
+        carddav_url: Some("https://dav.example.test".to_owned()),
+        username: "ada@example.test".to_owned(),
+        dav_password_set: true,
+    });
     let wire = serde_json::to_value(&row).expect("the row serialises");
     assert!(
         wire.get("dav")
@@ -315,6 +311,11 @@ fn an_unpinned_default_calendar_and_empty_attributions_cross_no_key() {
         default_calendar: None,
         default_send_account: None,
         plugins_enabled: true,
+        notifications_enabled: true,
+        debug_enabled: false,
+        analytics_consented: false,
+        language: "en-GB".to_owned(),
+        zone_offered: false,
     };
     let wire = serde_json::to_value(&block).expect("the block serialises");
     assert!(
@@ -348,4 +349,144 @@ fn the_shared_web_fixture_parses_as_the_snapshot() {
     let wire = serde_json::to_value(&back).expect("the snapshot serialises");
     let raw: serde_json::Value = serde_json::from_str(raw).expect("the fixture is JSON");
     assert_eq!(wire, raw, "the fixture round trips value for value");
+}
+
+#[test]
+fn the_platform_preferences_cross_additively_and_only_when_not_default() {
+    // The four platform fields cross only when they hold a non-default
+    // value, so a snapshot from a build before them parses unchanged and
+    // an old consumer never sees a key it does not know.
+    let block = SettingsBlock {
+        debug_enabled: true,
+        analytics_consented: true,
+        language: "fr-FR".to_owned(),
+        zone_offered: true,
+        ..block_fixture()
+    };
+    let wire = serde_json::to_value(&block).expect("the block serialises");
+    assert_eq!(wire["debug_enabled"], true);
+    assert_eq!(wire["analytics_consented"], true);
+    assert_eq!(wire["language"], "fr-FR");
+    assert_eq!(wire["zone_offered"], true);
+    let back: SettingsBlock = serde_json::from_value(wire).expect("the block reads back");
+    assert_eq!(back, block);
+
+    // At their defaults the four cross no key at all, and a pre-platform
+    // wire parses back with the defaults standing.
+    let defaulted = SettingsBlock {
+        debug_enabled: false,
+        analytics_consented: false,
+        language: "en-GB".to_owned(),
+        zone_offered: false,
+        ..block_fixture()
+    };
+    let wire = serde_json::to_value(&defaulted).expect("the defaulted block serialises");
+    for key in [
+        "debug_enabled",
+        "analytics_consented",
+        "language",
+        "zone_offered",
+    ] {
+        assert!(
+            wire.get(key).is_none(),
+            "the default crosses no key: {wire}"
+        );
+    }
+    let pre_platform = serde_json::from_str::<SettingsBlock>(
+        r#"{"theme":"light","twenty_four_clock":false,"zone":"Etc/UTC",
+            "first_day_of_week":"mo","horizon_days":42,"quote_below":true,
+            "view_mode":"flat"}"#,
+    )
+    .expect("a pre-platform block parses");
+    assert!(!pre_platform.debug_enabled);
+    assert!(!pre_platform.analytics_consented);
+    assert_eq!(pre_platform.language, "en-GB");
+    assert!(!pre_platform.zone_offered);
+}
+
+/// An account row at the wired defaults, the base the row tests write over.
+fn row_fixture() -> AccountSettingsRow {
+    AccountSettingsRow {
+        account: account("work"),
+        address: "ada@example.test".to_owned(),
+        kind: AccountKind::Microsoft,
+        legs: AccountLegs {
+            calendar: false,
+            contacts: false,
+        },
+        dav: None,
+        dav_error: None,
+        refresh_error: None,
+        grant: None,
+        signatures: None,
+        crypto_method: "none".to_owned(),
+        crypto_error: None,
+        sync: None,
+        display_name: String::new(),
+        sender_name_control: SenderNameControl::Local,
+        needs_sender_name: false,
+        sender_name_error: None,
+    }
+}
+
+/// A settings block at the shipped defaults, the base the platform
+/// fields' tests write over.
+fn block_fixture() -> SettingsBlock {
+    SettingsBlock {
+        theme: ThemeMode::Light,
+        twenty_four_clock: false,
+        zone: "Etc/UTC".to_owned(),
+        first_day_of_week: WeekdayWire::Mo,
+        horizon_days: 42,
+        quote_below: true,
+        view_mode: ViewMode::Flat,
+        default_calendar: None,
+        default_send_account: None,
+        plugins_enabled: true,
+        notifications_enabled: true,
+        debug_enabled: false,
+        analytics_consented: false,
+        language: "en-GB".to_owned(),
+        zone_offered: false,
+    }
+}
+
+#[test]
+fn the_sync_settings_cross_with_their_cap_words_and_absent_means_default() {
+    // The three cap words, pinned both ways: the surfaces branch on them,
+    // and a renamed one must never slip out silently.
+    for (cap, word) in [
+        (SyncBodyCap::Off, r#""off""#),
+        (SyncBodyCap::Everything, r#""everything""#),
+        (
+            SyncBodyCap::Bytes { octets: 1024 },
+            r#"{"bytes":{"octets":1024}}"#,
+        ),
+    ] {
+        assert_eq!(serde_json::to_string(&cap).unwrap(), word);
+        assert_eq!(serde_json::from_str::<SyncBodyCap>(word).unwrap(), cap);
+    }
+
+    // A row from a build before the field parses with no sync settings, and
+    // a row that carries them crosses them under the row's own key.
+    let pre_sync = serde_json::from_str::<AccountSettingsRow>(
+        r#"{"account":"work","address":"a@e.test","kind":"microsoft",
+            "legs":{"calendar":false,"contacts":false}}"#,
+    )
+    .expect("a pre-sync row parses");
+    assert!(
+        pre_sync.sync.is_none(),
+        "absent is the defaults, not a refusal"
+    );
+
+    let carried = serde_json::from_str::<AccountSettingsRow>(
+        r#"{"account":"work","address":"a@e.test","kind":"microsoft",
+            "legs":{"calendar":false,"contacts":false},
+            "sync":{"depth_months":12,"body_cap":"everything","poll_minutes":90}}"#,
+    )
+    .expect("the sync block parses");
+    let sync = carried.sync.expect("the settings crossed");
+    assert_eq!(sync.depth_months, 12);
+    assert_eq!(sync.body_cap, SyncBodyCap::Everything);
+    assert_eq!(sync.poll_minutes, 90);
 }

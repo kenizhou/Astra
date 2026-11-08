@@ -49,7 +49,7 @@ impl MailboxConnector<Box<dyn Provider>> for HarnessBinder {
         _account: &AccountId,
         mailbox_key: &str,
     ) -> Option<Box<dyn Provider>> {
-        astra_account::connect_imap_mailbox(&self.connections, &self.config, mailbox_key)
+        astra_account::connect_imap_mailbox(&self.connections, &self.config, mailbox_key, None)
             .await
             .ok()
     }

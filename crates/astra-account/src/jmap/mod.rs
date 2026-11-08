@@ -26,10 +26,16 @@ mod connect;
 mod oauth;
 mod refreshing;
 
+// The scripted authorization server the jmap OAuth tests and the mail
+// OAuth tests share: one discovery chain counterpart, played over
+// loopback.
+#[cfg(test)]
+pub(crate) use oauth::test_support;
+
 pub use connect::{dial_jmap_account, dial_jmap_oauth_account};
 pub use oauth::{
     begin_jmap_login, begin_jmap_reauth, complete_jmap_login, complete_jmap_reauth,
-    jmap_signin_offered, jmap_token_source, JmapLoginStart,
+    jmap_reauth_document, jmap_signin_offered, jmap_token_source, JmapLoginStart,
 };
 pub use refreshing::RefreshingJmapProvider;
 

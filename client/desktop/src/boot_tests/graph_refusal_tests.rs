@@ -23,8 +23,10 @@ fn boot_dials_recording(
         super::super::stored::dial_stored(
             &dials,
             &store,
+            &crate::commands_fakes::crypto_store(),
             dial,
             super::google_boot::unused_dial(),
+            super::unused_mail_dial(),
             &refusals,
         )
         .await

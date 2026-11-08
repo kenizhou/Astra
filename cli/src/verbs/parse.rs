@@ -8,6 +8,7 @@ use std::path::Path;
 
 use astra_ai::CorrelationId;
 
+use super::ai;
 use super::{DraftArgs, Invocation, ParseFailure, SnippetArgs, Verb, DEFAULT_LIMIT, SEND_CLASS};
 use crate::envelope::Code;
 
@@ -55,6 +56,55 @@ pub(super) fn parse(args: &[String], stdin: &mut dyn Read) -> Result<Invocation,
                 keys,
             }
         }
+        (Some("messages"), Some("search")) => {
+            let account = owned_value(args, "--account")?;
+            let folder = owned_value(args, "--folder")?;
+            if account.is_none() && folder.is_some() {
+                return Err(usage(
+                    "the --folder narrows within one account, so it requires --account too",
+                ));
+            }
+            let limit = match one_value(args, "--limit")? {
+                Some(word) => word
+                    .parse::<usize>()
+                    .map_err(|_| usage("the --limit flag wants a number from 1 to 50"))?,
+                None => super::messages::DEFAULT_SEARCH_LIMIT,
+            };
+            if !(1..=super::messages::MAX_SEARCH_LIMIT).contains(&limit) {
+                return Err(usage("the --limit flag wants a number from 1 to 50"));
+            }
+            let offset = match one_value(args, "--offset")? {
+                Some(word) => word
+                    .parse::<usize>()
+                    .map_err(|_| usage("the --offset flag wants a number"))?,
+                None => 0,
+            };
+            Verb::MessagesSearch {
+                query: non_empty(required(args, "--query")?, "--query")?,
+                account,
+                folder,
+                limit,
+                offset,
+            }
+        }
+        (Some("messages"), Some("mark-read")) => Verb::MessagesMarkRead {
+            account: required(args, "--account")?,
+            key: required(args, "--key")?,
+            unread: flag_present(args, "--unread"),
+        },
+        (Some("messages"), Some("set-flagged")) => Verb::MessagesSetFlagged {
+            account: required(args, "--account")?,
+            key: required(args, "--key")?,
+            clear: flag_present(args, "--clear"),
+        },
+        (Some("messages"), Some("archive")) => Verb::MessagesArchive {
+            account: required(args, "--account")?,
+            key: required(args, "--key")?,
+        },
+        (Some("messages"), Some("trash")) => Verb::MessagesTrash {
+            account: required(args, "--account")?,
+            key: required(args, "--key")?,
+        },
         (Some("drafts"), Some("save")) => Verb::DraftsSave {
             args: draft_args(args, stdin)?,
         },
@@ -90,36 +140,36 @@ pub(super) fn parse(args: &[String], stdin: &mut dyn Read) -> Result<Invocation,
         },
         (Some("snippets"), Some("search")) => Verb::SnippetsSearch,
         (Some("ai"), Some("cold")) => {
-            let ai_words = ai_positionals(args);
+            let ai_words = ai::ai_positionals(args);
             Verb::AiCold {
-                account: positional_account(&ai_words, "ai cold")?,
-                keys: positional_keys(&ai_words)?,
+                account: ai::positional_account(&ai_words, "ai cold")?,
+                keys: ai::positional_keys(&ai_words)?,
             }
         }
         (Some("ai"), Some("results")) => {
-            let ai_words = ai_positionals(args);
+            let ai_words = ai::ai_positionals(args);
             Verb::AiResults {
-                account: positional_account(&ai_words, "ai results")?,
-                keys: positional_keys(&ai_words)?,
+                account: ai::positional_account(&ai_words, "ai results")?,
+                keys: ai::positional_keys(&ai_words)?,
             }
         }
         (Some("ai"), Some("drafts")) => {
-            let ai_words = ai_positionals(args);
+            let ai_words = ai::ai_positionals(args);
             Verb::AiDrafts {
-                account: positional_account(&ai_words, "ai drafts")?,
-                keys: positional_keys(&ai_words)?,
+                account: ai::positional_account(&ai_words, "ai drafts")?,
+                keys: ai::positional_keys(&ai_words)?,
             }
         }
         (Some("ai"), Some("summary")) => {
-            let ai_words = ai_positionals(args);
+            let ai_words = ai::ai_positionals(args);
             Verb::AiSummary {
-                account: positional_account(&ai_words, "ai summary")?,
-                keys: positional_keys(&ai_words)?,
+                account: ai::positional_account(&ai_words, "ai summary")?,
+                keys: ai::positional_keys(&ai_words)?,
             }
         }
-        (Some("ai"), Some("style")) => style_verb(&ai_positionals(args))?,
+        (Some("ai"), Some("style")) => ai::style_verb(&ai::ai_positionals(args))?,
         (Some("ai"), Some(sub @ ("digest" | "report"))) => {
-            document_verb(&ai_positionals(args), sub)?
+            ai::document_verb(&ai::ai_positionals(args), sub)?
         }
         (Some(_), Some(_)) => return Err(usage("unknown verb")),
         _ => {
@@ -224,7 +274,7 @@ fn split_addresses(field: &str) -> Vec<String> {
 }
 
 /// A usage failure's constructor.
-fn usage(message: &str) -> ParseFailure {
+pub(super) fn usage(message: &str) -> ParseFailure {
     ParseFailure {
         code: Code::Usage,
         message: message.to_owned(),
@@ -273,95 +323,6 @@ fn rule_actions(args: &[String]) -> Result<Vec<String>, ParseFailure> {
         ));
     }
     Ok(actions)
-}
-
-/// `ai style`'s grammar: one account, or the refused `rebuild` spelling
-/// alone. Any further word is a usage error, so the tight grammar every
-/// ai verb carries holds for the style pair too.
-fn style_verb(positionals: &[&str]) -> Result<Verb, ParseFailure> {
-    match (positionals.get(2).copied(), positionals.len()) {
-        (None, _) => Err(usage("ai style wants an account (or `rebuild`)")),
-        (Some("rebuild"), 3) => Ok(Verb::AiStyleRebuild),
-        (Some("rebuild"), _) => Err(usage(
-            "ai style rebuild wants no further words: the verb refuses whatever follows",
-        )),
-        (Some(account), 3) => Ok(Verb::AiStyle {
-            account: (*account).to_owned(),
-        }),
-        (Some(_), _) => Err(usage("ai style takes one account and no keys")),
-    }
-}
-
-/// `ai digest` and `ai report`'s grammar: one account, or the refused
-/// `generate` spelling alone, the style pair's own shape (the account
-/// read beside the model work's refusal). Any further word is a usage
-/// error, so the tight grammar every ai verb carries holds here too.
-fn document_verb(positionals: &[&str], sub: &str) -> Result<Verb, ParseFailure> {
-    match (positionals.get(2).copied(), positionals.len()) {
-        (None, _) => Err(usage(&format!("ai {sub} wants an account (or `generate`)"))),
-        (Some("generate"), 3) => Ok(if sub == "digest" {
-            Verb::AiDigestGenerate
-        } else {
-            Verb::AiReportGenerate
-        }),
-        (Some("generate"), _) => Err(usage(&format!(
-            "ai {sub} generate wants no further words: the verb refuses whatever follows"
-        ))),
-        (Some(account), 3) => Ok(if sub == "digest" {
-            Verb::AiDigest {
-                account: (*account).to_owned(),
-            }
-        } else {
-            Verb::AiReport {
-                account: (*account).to_owned(),
-            }
-        }),
-        (Some(_), _) => Err(usage(&format!("ai {sub} takes one account and no keys"))),
-    }
-}
-
-/// The account positional the `ai` verbs take: the third word, after the
-/// verb and its subverb.
-fn positional_account(positionals: &[&str], verb: &str) -> Result<String, ParseFailure> {
-    positionals
-        .get(2)
-        .map(|word| (*word).to_owned())
-        .ok_or_else(|| usage(&format!("{verb} wants an account and at least one key")))
-}
-
-/// The key positionals the `ai` verbs take: every word after the account,
-/// at least one.
-fn positional_keys(positionals: &[&str]) -> Result<Vec<String>, ParseFailure> {
-    let keys = positionals
-        .iter()
-        .skip(3)
-        .map(|word| (*word).to_owned())
-        .collect::<Vec<_>>();
-    if keys.is_empty() {
-        return Err(usage("at least one key is required"));
-    }
-    Ok(keys)
-}
-
-/// The positional words of an `ai` line, flag values excluded. Unlike the
-/// mail verbs, whose arguments all ride named flags, the ai verbs take
-/// their account and keys as bare positionals, so the value of a
-/// value-taking flag (`--correlation-id` is the one the CLI defines)
-/// must not leak into them.
-fn ai_positionals(args: &[String]) -> Vec<&str> {
-    let mut words = Vec::new();
-    let mut index = 0;
-    while index < args.len() {
-        if args[index] == "--correlation-id" {
-            index += 2;
-            continue;
-        }
-        if !args[index].starts_with('-') {
-            words.push(args[index].as_str());
-        }
-        index += 1;
-    }
-    words
 }
 
 /// The missing-flag message.
@@ -435,8 +396,26 @@ pub(super) fn correlation_from(args: &[String]) -> CorrelationId {
 /// The subverbs the verbs spell: the CLI's own vocabulary, the only
 /// second positional the ledger may capture beside a verb word.
 const SUBVERBS: &[&str] = &[
-    "list", "read", "save", "discard", "create", "delete", "cold", "results", "drafts", "summary",
-    "style", "digest", "report", "forget", "extract", "search",
+    "list",
+    "read",
+    "save",
+    "discard",
+    "create",
+    "delete",
+    "cold",
+    "results",
+    "drafts",
+    "summary",
+    "style",
+    "digest",
+    "report",
+    "forget",
+    "extract",
+    "search",
+    "mark-read",
+    "set-flagged",
+    "archive",
+    "trash",
 ];
 
 /// The verb word of an unparsable line, best effort: the first positional,

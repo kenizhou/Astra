@@ -24,6 +24,7 @@ import { useSettingsStore } from '@/features/settings/settingsStore';
 import { ComposerActionsRow } from './ComposerActionsRow';
 import { ComposerAttachments } from './ComposerAttachments';
 import { ComposerFields } from './ComposerFields';
+import { ComposerPictures } from './ComposerPictures';
 import { ComposerStatusBar } from './ComposerStatusBar';
 import { Editor } from './Editor';
 import { EditorToolbar } from './EditorToolbar';
@@ -253,6 +254,7 @@ export function ComposerPane({ showClose = false }: ComposerPaneProps) {
           }}
           onPasteImages={(files) => useComposerStore.getState().pasteImages(files)}
         />
+        <ComposerPictures />
         <ComposerAttachments />
       </div>
       <ComposerStatusBar editor={editor} composition={composition} />

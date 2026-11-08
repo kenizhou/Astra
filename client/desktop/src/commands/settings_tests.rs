@@ -7,8 +7,8 @@
 use std::sync::Arc;
 
 use astra_viewmodel::{
-    AboutBlock, AccountKind, AccountLegs, AccountSettingsRow, DavSectionRow, SettingsBlock,
-    SettingsSnapshot, ThemeMode, ViewMode, WeekdayWire,
+    AboutBlock, AccountKind, AccountLegs, AccountSettingsRow, DavSectionRow, SenderNameControl,
+    SettingsBlock, SettingsSnapshot, ThemeMode, ViewMode, WeekdayWire,
 };
 
 use super::settings_of;
@@ -34,6 +34,11 @@ fn the_settings_pull_round_trips_the_published_snapshot() {
             default_calendar: None,
             default_send_account: None,
             plugins_enabled: true,
+            notifications_enabled: true,
+            debug_enabled: false,
+            analytics_consented: false,
+            language: "en-GB".to_owned(),
+            zone_offered: false,
         },
         accounts: vec![AccountSettingsRow {
             account: account(),
@@ -55,12 +60,18 @@ fn the_settings_pull_round_trips_the_published_snapshot() {
             crypto_method: "none".to_owned(),
             crypto_error: None,
             signatures: None,
+            sync: None,
+            display_name: "Ada Lovelace".to_owned(),
+            sender_name_control: SenderNameControl::Local,
+            needs_sender_name: false,
+            sender_name_error: None,
         }],
         about: AboutBlock {
             version: "0.1.0".to_owned(),
             attributions: vec!["email-calendar-sync-engine".to_owned()],
         },
         error: None,
+        device_zone_offer: None,
     };
     *app.settings.lock().unwrap() = snapshot.clone();
     let state = state("settings-pull", Arc::clone(&app), FakeStore::accepting());

@@ -2,11 +2,12 @@
 // The event detail dock: what picking an event in any view opens, the
 // mail-calendar detail conventions as a docked pane. Title, when (in the
 // event's own wall clock under the clock setting, all-day shown as its
-// inclusive days), the owning calendar with its colour, and the recurrence
-// read-back the snapshot carries. Edit opens the event dialog; Delete runs
-// the existing delete flow, asking the one-vs-all question on a series.
-// Both actions stand only where the calendar is writable, and the dock is
-// read-only otherwise.
+// inclusive days), the owning calendar with its colour, the roll-call of
+// who is on the event, and the repeating rule's full read-back sentence,
+// both over the detail read the pick drives. Edit opens the event dialog;
+// Delete runs the existing delete flow, asking the one-vs-all question on a
+// series. Both actions stand only where the calendar is writable, and the
+// dock is read-only otherwise.
 
 import { useState } from 'react';
 
@@ -19,6 +20,7 @@ import { addDays, dayKeyOf, minutesInZone } from './calendarRange';
 import { clockLabel, fullDayLabel } from './dayLabels';
 import { CalendarDot, RepeatGlyph } from './EventMarkers';
 import { DeleteChoice } from './EventDialogSteps';
+import { RollCall, RuleSentence, useEventDetail } from './EventDetailRead';
 import { useSettingsStore } from '@/features/settings/settingsStore';
 
 /** The event's time as one line, in its own wall clock. */
@@ -65,6 +67,7 @@ export function EventDetailDock({
   const nowData = useCalendarStore((s) => s.nowData);
   const clearSelection = useCalendarStore((s) => s.clearSelection);
   const twentyFour = useSettingsStore((s) => s.settings.twenty_four_clock);
+  const detail = useEventDetail(row);
   const [deleteChoice, setDeleteChoice] = useState(false);
 
   if (row === null) {
@@ -126,7 +129,16 @@ export function EventDetailDock({
               {calendar?.name ?? row.calendar}
             </span>
           </Labeled>
-          {row.recurring && <Labeled label="Repeat">Repeats. The series holds its own rule.</Labeled>}
+          {detail !== null && (detail.participants?.length ?? 0) > 0 && (
+            <Labeled label="Attendees">
+              <RollCall detail={detail} />
+            </Labeled>
+          )}
+          {row.recurring && detail?.rule !== undefined && (
+            <Labeled label="Repeat">
+              <RuleSentence detail={detail} />
+            </Labeled>
+          )}
           {writable && (
             <div className="mt-auto flex items-center justify-between gap-2 border-t border-border-subtle pt-3">
               <button

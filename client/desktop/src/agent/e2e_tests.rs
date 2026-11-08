@@ -141,6 +141,7 @@ fn the_agent_loop_runs_offline_end_to_end() {
             .prompt(
                 "Draft a short reply to Bob accepting Friday.",
                 Some(CorrelationId::new(CORR.to_owned())),
+                None,
             )
             .await
             .expect("the prompt is sent");
@@ -285,4 +286,171 @@ fn the_agent_loop_runs_offline_end_to_end() {
 
     runtime.block_on(|| async { relay.shutdown().await });
     assert_eq!(relay.status().as_str(), "down", "the shutdown settles");
+}
+
+#[test]
+fn per_chat_sessions_persist_threads_and_refuse_overlapping_prompts() {
+    let Ok(node) = find_node() else {
+        eprintln!("e2e: skipping the chat-thread loop: no node >= 22 on PATH or ASTRA_AGENT_NODE");
+        return;
+    };
+    let runtime = runtime();
+    let bundle = ensure_bundle(&node);
+    let data_dir = testkit::scratch("agent-e2e-chats");
+    stage_stub_cli(&data_dir);
+    let transcript = sidecar_dir()
+        .join("src")
+        .join("fixtures")
+        .join("mock-save-draft.json");
+
+    let sink = Arc::new(CollectingSink::default());
+    let store = Arc::new(AiStore::open(&data_dir.join("ai.sqlite")).expect("the store opens"));
+    let spawn = spawn_sidecar(node.clone(), bundle.clone(), data_dir.clone(), Vec::new());
+    let relay = SidecarRelay::new(
+        SidecarConfig {
+            node_path: node.clone(),
+            script: bundle,
+            data_dir: data_dir.clone(),
+            cli_path: node.to_string_lossy().into_owned(),
+            harness: "mock".to_string(),
+            mock_fixture: Some(transcript.to_string_lossy().into_owned()),
+            model_configs: std::collections::BTreeMap::new(),
+            policy: default_policy(),
+            restart_max: 3,
+            backoff_base_ms: 50,
+            config_error: None,
+            spawn,
+        },
+        sink.clone(),
+        store.clone(),
+    );
+
+    let chat_a = store
+        .insert_chat(&astra_ai::NewChat {
+            id: astra_ai::ChatId::new("chat-a".to_owned()),
+            title: "Friday's reply".to_owned(),
+        })
+        .expect("the first chat lands");
+    let chat_b = store
+        .insert_chat(&astra_ai::NewChat {
+            id: astra_ai::ChatId::new("chat-b".to_owned()),
+            title: "Second thread".to_owned(),
+        })
+        .expect("the second chat lands");
+
+    runtime.block_on(|| async {
+        // The first turn suspends on its gated save_draft ask.
+        relay
+            .prompt(
+                "Draft a short reply to Bob accepting Friday.",
+                Some(CorrelationId::new("corr-chat-1".to_owned())),
+                Some(&chat_a.id),
+            )
+            .await
+            .expect("the first prompt is sent");
+        assert!(
+            until(|s| !s.requests.lock().unwrap().is_empty(), &sink).await,
+            "the gated save_draft asks before executing"
+        );
+
+        // The overlapping prompt into the second chat: the sidecar's turn
+        // invariant refuses it with an honest error naming why, routed to
+        // the second prompt's id alone; the first turn's ask stays open.
+        relay
+            .prompt(
+                "A different question for another thread.",
+                Some(CorrelationId::new("corr-chat-2".to_owned())),
+                Some(&chat_b.id),
+            )
+            .await
+            .expect("the second prompt envelope is written");
+        assert!(
+            until(
+                |s| s.agent_events.lock().unwrap().iter().any(|event| matches!(
+                    &event.event,
+                    S::Error { message, prompt_id } if prompt_id.is_some()
+                        && message.contains("already live")
+                )),
+                &sink
+            )
+            .await,
+            "the overlapping prompt is refused with the live-turn reason"
+        );
+        assert_eq!(
+            sink.requests.lock().unwrap().len(),
+            1,
+            "the live turn's approval was never bounced"
+        );
+
+        // Answering the ask still runs the turn to its done.
+        let ask = sink.requests.lock().unwrap()[0].clone();
+        relay
+            .respond_permission(&ask.id, true, false)
+            .await
+            .expect("the approval rides back");
+        assert!(
+            until(
+                |s| s
+                    .agent_events
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|event| matches!(&event.event, S::Done { .. })),
+                &sink
+            )
+            .await,
+            "the live turn lands done"
+        );
+    });
+
+    // The one truth of the visible log: the store's rows. The first chat
+    // holds both sides of its turn, the tool part folded at its result's
+    // position and the run metadata beside it; the refused chat holds the
+    // user's side alone (the run never started).
+    let a = store
+        .chat_messages(&chat_a.id)
+        .expect("the first chat reads");
+    assert_eq!(a.len(), 2, "user and assistant rows: {a:?}");
+    assert_eq!(a[0].role, "user");
+    assert_eq!(a[1].role, "assistant");
+    assert_eq!(
+        a[1].parts[0]["kind"], "text",
+        "the streamed text folds first: {}",
+        a[1].parts
+    );
+    assert_eq!(
+        a[1].parts[1]["kind"], "tool",
+        "the completed tool call folds"
+    );
+    assert_eq!(a[1].parts[1]["name"], "save_draft");
+    assert_eq!(a[1].parts[1]["status"], "ok");
+    let metadata = a[1].metadata.as_ref().expect("the run metadata landed");
+    assert_eq!(metadata["model"], "mock-1");
+    assert_eq!(metadata["finish_reason"], "done");
+    assert_eq!(metadata["tool_calls"], 1);
+    assert_eq!(metadata["correlation"], "corr-chat-1");
+
+    let b = store
+        .chat_messages(&chat_b.id)
+        .expect("the second chat reads");
+    assert_eq!(
+        b.len(),
+        1,
+        "the refused prompt records its user side alone: {b:?}"
+    );
+    assert_eq!(b[0].role, "user");
+
+    // The thread list holds both chats. (The recency order itself is the
+    // store suite's own pinned contract; here both touches land within
+    // the same second, whose tie-break no e2e can race against.)
+    let listed = store.list_chats().expect("the list reads");
+    let mut ids: Vec<&str> = listed.iter().map(|row| row.id.as_str()).collect();
+    ids.sort_unstable();
+    assert_eq!(
+        ids,
+        vec!["chat-a", "chat-b"],
+        "both threads stand in the list"
+    );
+
+    runtime.block_on(|| async { relay.shutdown().await });
 }

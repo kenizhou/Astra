@@ -176,10 +176,15 @@ pub(crate) enum OAuthCommandError {
     Capture(String),
     /// The JMAP leg's standards discovery refused or outlived its
     /// bound: the server publishes no discoverable sign-in (or could
-    /// not be asked in time), so no browser opened and nothing stays
-    /// in flight. The password field beside the offer always works.
+    /// not be asked in time), so no browser opened and nothing stays in
+    /// flight. The password field beside the offer always works.
     #[error("this server's sign-in could not be discovered: {0}")]
     Discover(String),
+    /// The account stores no OAuth grant to re-run: a password account
+    /// has no browser flow, and an id the dial table does not hold has
+    /// no account at all. Nothing opened and nothing stands in flight.
+    #[error("this account has no stored sign-in to re-run: {0}")]
+    NoGrant(String),
 }
 
 impl Serialize for OAuthCommandError {

@@ -196,24 +196,36 @@ pub(crate) fn resolve_cli_path() -> String {
     String::new()
 }
 
-/// The sidecar spawn environment: `PATH`, `ASTRA_DATA_DIR`, and Node's
-/// own platform minimums (`SystemRoot` and `SystemDrive` on Windows, whose
-/// crypto stack asserts without them), and nothing else. Names match
-/// case-insensitively on Windows, where the variables arrive in any case
-/// (`SYSTEMROOT` is the common spelling). Taking the parent environment as
-/// an iterable keeps this testable without mutating the process
-/// environment.
+/// The sidecar spawn environment: `PATH`, `ASTRA_DATA_DIR`, the two tool
+/// budget overrides (numbers the harness and the live proofs arm short
+/// budgets with; they carry no secret), and Node's own platform minimums
+/// (`SystemRoot` and `SystemDrive` on Windows, whose crypto stack asserts
+/// without them), and nothing else. Names match case-insensitively on
+/// Windows, where the variables arrive in any case (`SYSTEMROOT` is the
+/// common spelling). Taking the parent environment as an iterable keeps
+/// this testable without mutating the process environment.
 pub(crate) fn spawn_env(
     parent: impl IntoIterator<Item = (String, String)>,
     data_dir: &Path,
 ) -> BTreeMap<String, String> {
     let allowed = |name: &str| {
+        let budget_override = |candidate: &str| {
+            if cfg!(windows) {
+                name.eq_ignore_ascii_case(candidate)
+            } else {
+                name == candidate
+            }
+        };
         if cfg!(windows) {
             name.eq_ignore_ascii_case("PATH")
                 || name.eq_ignore_ascii_case("SystemRoot")
                 || name.eq_ignore_ascii_case("SystemDrive")
+                || budget_override("ASTRA_AGENT_TOOL_BUDGET_MS")
+                || budget_override("ASTRA_AGENT_TOOL_BUDGET_GRACE_MS")
         } else {
             name == "PATH"
+                || budget_override("ASTRA_AGENT_TOOL_BUDGET_MS")
+                || budget_override("ASTRA_AGENT_TOOL_BUDGET_GRACE_MS")
         }
     };
     let mut env = BTreeMap::new();
@@ -307,6 +319,13 @@ mod tests {
             ("ASTRA_LLM_CHAT".to_string(), "openai:g".to_string()),
             ("HOME".to_string(), "/home/ada".to_string()),
             ("PATH".to_string(), "/usr/bin".to_string()),
+            // The budget overrides ride in so the harness (and its live
+            // proofs) can arm short tool budgets; they carry no secret.
+            ("ASTRA_AGENT_TOOL_BUDGET_MS".to_string(), "40".to_string()),
+            (
+                "ASTRA_AGENT_TOOL_BUDGET_GRACE_MS".to_string(),
+                "60".to_string(),
+            ),
         ];
         if cfg!(windows) {
             // The uppercase spelling pins the case-insensitive match: the
@@ -317,6 +336,11 @@ mod tests {
         let mut expected = BTreeMap::from([
             ("PATH".to_string(), "/usr/bin".to_string()),
             ("ASTRA_DATA_DIR".to_string(), "/tmp/astra-data".to_string()),
+            ("ASTRA_AGENT_TOOL_BUDGET_MS".to_string(), "40".to_string()),
+            (
+                "ASTRA_AGENT_TOOL_BUDGET_GRACE_MS".to_string(),
+                "60".to_string(),
+            ),
         ]);
         if cfg!(windows) {
             expected.insert("SYSTEMROOT".to_string(), r"C:\Windows".to_string());

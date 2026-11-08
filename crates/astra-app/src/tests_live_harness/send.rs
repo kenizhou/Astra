@@ -96,6 +96,7 @@ async fn the_send_path_delivers_the_pinned_mail_and_cleans_up_after_itself() {
         document: document(WORDS),
         blobs: Vec::new(),
         crypto: crate::crypto::CryptoFlags::default(),
+        composition: None,
     })
     .await
     .unwrap();
@@ -245,6 +246,7 @@ async fn an_attachment_round_trips_through_the_send_and_the_byte_read() {
         document,
         blobs: vec![blob],
         crypto: crate::crypto::CryptoFlags::default(),
+        composition: None,
     })
     .await
     .unwrap();

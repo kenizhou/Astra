@@ -20,6 +20,7 @@ mod graph;
 mod imap;
 mod jmap;
 mod log_handle;
+mod mail_oauth;
 mod oauth_accounts;
 mod pass_folders;
 mod reconnect;
@@ -27,6 +28,7 @@ mod setup;
 mod setup_choices;
 mod throttle;
 mod tls;
+mod watch;
 
 pub use autodetect::{recommend, MissReason, OauthRoutes, ServerSummary, SetupRecommendation};
 pub use config::{
@@ -50,10 +52,14 @@ pub use imap::{connect_imap_mailbox, connect_mail_providers, ImapConnections};
 pub use jmap::{
     begin_jmap_login, begin_jmap_reauth, build_jmap_config_toml, complete_jmap_login,
     complete_jmap_reauth, dial_jmap_account, dial_jmap_oauth_account, jmap_base_url,
-    jmap_signin_offered, jmap_token_source, JmapAccount, JmapLoginStart, JmapOAuthGrant, JmapSetup,
-    RefreshingJmapProvider,
+    jmap_reauth_document, jmap_signin_offered, jmap_token_source, JmapAccount, JmapLoginStart,
+    JmapOAuthGrant, JmapSetup, RefreshingJmapProvider,
 };
 pub use log_handle::account_log_handle;
+pub use mail_oauth::{
+    detected_issuer, imap_auth_offer, imap_oauth_credential_source, imap_oauth_token_source,
+    mail_oauth_issuer, register_mail_client, ImapAuth, ImapAuthQuery, MailOauthGrant,
+};
 pub use oauth_accounts::{GoogleAccount, GraphAccount};
 pub use pass_folders::pass_syncs;
 pub use reconnect::{ReconnectingImapProvider, Redial};
@@ -62,6 +68,7 @@ pub use setup::{
 };
 pub use setup_choices::{Capability, SetupChoice};
 pub use tls::{account_tls, setup_trust_policy, CertificateException};
+pub use watch::{open_watch, Watch, WatchEvent, WatchFace};
 
 /// An error shaping an account's connection config or connecting its providers.
 #[derive(Debug, thiserror::Error)]
@@ -116,9 +123,22 @@ pub enum AccountError {
     /// dead password for an outage.
     #[error("jmap: {0}")]
     Jmap(String),
+    /// A mail OAuth step failed: the client registration, or a mail
+    /// account's token source build. The sign-in path treats every one
+    /// of these as the password field, which works everywhere; a
+    /// refusal the account cannot recover from arrives as
+    /// [`Self::SigninRejected`] instead.
+    #[error("mail oauth: {0}")]
+    MailOauth(String),
     /// The IMAP connection or login failed.
     #[error("imap: {0}")]
     Imap(#[from] provider_imap::ImapError),
+    /// A standing watch could not be opened or was lost: the engine's push
+    /// channel failed outside the refuses it maps to [`Self::Poll`]
+    /// (no `IDLE`, no headroom, no event source), so the caller reads the
+    /// failure's own class and reconnects or parks on its cadence.
+    #[error("watch: {0}")]
+    Watch(#[from] engine_provider::ProviderError),
     /// The server presented a certificate that did not verify, and this is the certificate
     /// it presented.
     ///

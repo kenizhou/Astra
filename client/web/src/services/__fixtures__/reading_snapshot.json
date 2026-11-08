@@ -1,0 +1,18 @@
+{
+  "message": { "account": "work", "key": "imap:v1:u42" },
+  "subject": "Quarterly report",
+  "from_name": "Ada Lovelace",
+  "from_address": "ada@example.test",
+  "sent_at": "2026-10-09T08:30:00Z",
+  "html": "<p>See the report.</p><p>The quarterly figures are attached. Revenue grew fourteen per cent quarter on quarter, and the services line passed licensing for the first time, which is the April bet paying off. Section two needs your signature by Friday, and the board pack goes out Monday morning.</p><p>Two spots deserve your own eyes: the churn footnote on page six, and the hiring table.</p>",
+  "plain": "See the report.\n\nThe quarterly figures are attached. Revenue grew fourteen per cent quarter on quarter, and the services line passed licensing for the first time, which is the April bet paying off. Section two needs your signature by Friday, and the board pack goes out Monday morning.\n\nTwo spots deserve your own eyes: the churn footnote on page six, and the hiring table.\n\nThanks,\nAda",
+  "attachments": [
+    {
+      "id": 1,
+      "file_name": "report.pdf",
+      "media_type": "application/pdf",
+      "size": 2048
+    }
+  ],
+  "remote_image_count": 0
+}

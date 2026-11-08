@@ -7,11 +7,23 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const ipc = vi.hoisted(() => ({ peopleAvatar: vi.fn(), dispatch: vi.fn() }));
+const saves = vi.hoisted(() => ({ saveEml: vi.fn() }));
+const readerWindow = vi.hoisted(() => ({
+  openMessageWindow: vi.fn(),
+  openPrintWindow: vi.fn(),
+}));
 
 vi.mock('@/services/ipc', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   peopleAvatar: ipc.peopleAvatar,
   dispatch: ipc.dispatch,
+}));
+
+vi.mock('@/services/attachments', () => ({ saveEml: saves.saveEml }));
+
+vi.mock('@/features/reader/readerWindows', () => ({
+  openMessageWindow: readerWindow.openMessageWindow,
+  openPrintWindow: readerWindow.openPrintWindow,
 }));
 
 const settingsState = vi.hoisted(() => ({
@@ -27,9 +39,14 @@ import { useAppearanceStore } from '@/services/appearance';
 
 beforeEach(() => {
   ipc.peopleAvatar.mockReset();
+  ipc.dispatch.mockReset();
+  ipc.dispatch.mockResolvedValue(undefined);
   // Every header with a sender resolves an avatar; a test that cares
   // overrides the answer.
   ipc.peopleAvatar.mockResolvedValue({ initials: '', colour: '' });
+  saves.saveEml.mockReset();
+  readerWindow.openMessageWindow.mockReset();
+  readerWindow.openPrintWindow.mockReset();
 });
 
 afterEach(cleanup);
@@ -176,7 +193,7 @@ describe('the header actions', () => {
     );
   });
 
-  it('holds the placeholders in the overflow menu', () => {
+  it('holds the remaining placeholders in the overflow menu beside the working verbs', () => {
     render(
       <ReadingHeader
         subject='Launch'
@@ -189,10 +206,111 @@ describe('the header actions', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
 
-    for (const label of ['Recipients', 'Print', 'View source', 'Save as .eml']) {
+    for (const label of ['Recipients', 'View source']) {
       const item = screen.getByRole('menuitem', { name: label });
       expect(item.getAttribute('aria-disabled')).toBe('true');
     }
+    for (const label of ['Open in New Window', 'Print', 'Save as .eml']) {
+      const item = screen.getByRole('menuitem', { name: label });
+      expect(item.getAttribute('aria-disabled')).toBeNull();
+    }
+  });
+
+  it('saves the open message as .eml and surfaces the outcome like the attachment save', async () => {
+    saves.saveEml.mockResolvedValue({ saved: { path: 'C:\\mail\\Launch.eml' } });
+    render(
+      <ReadingHeader
+        subject='Launch'
+        fromName='Ada'
+        fromAddress='ada@example.test'
+        sentAt='2026-10-09T08:30:00Z'
+        message={message}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Save as .eml' }));
+
+    expect(saves.saveEml).toHaveBeenCalledWith({ account: 'work', key: 'm1' });
+    expect(await screen.findByRole('status').then((node) => node.textContent)).toBe(
+      'Saved to C:\\mail\\Launch.eml',
+    );
+  });
+
+  it('surfaces the refusal sentence when the .eml save fails and nothing on cancel', async () => {
+    saves.saveEml.mockResolvedValue({ failed: { reason: 'the disk refused' } });
+    render(
+      <ReadingHeader
+        subject='Launch'
+        fromName='Ada'
+        fromAddress='ada@example.test'
+        sentAt='2026-10-09T08:30:00Z'
+        message={message}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Save as .eml' }));
+
+    expect(
+      await screen.findByRole('status').then((node) => node.textContent),
+    ).toBe('the disk refused');
+
+    cleanup();
+    saves.saveEml.mockResolvedValue('cancelled');
+    render(
+      <ReadingHeader
+        subject='Launch'
+        fromName='Ada'
+        fromAddress='ada@example.test'
+        sentAt='2026-10-09T08:30:00Z'
+        message={message}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Save as .eml' }));
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('opens the print window over the open message', () => {
+    render(
+      <ReadingHeader
+        subject='Launch'
+        fromName='Ada'
+        fromAddress='ada@example.test'
+        sentAt='2026-10-09T08:30:00Z'
+        message={message}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Print' }));
+
+    expect(readerWindow.openPrintWindow).toHaveBeenCalledTimes(1);
+    expect(readerWindow.openPrintWindow).toHaveBeenCalledWith({ account: 'work', key: 'm1' });
+  });
+
+  it('opens the own window over the open message and the folder it was opened from', () => {
+    render(
+      <ReadingHeader
+        subject='Launch'
+        fromName='Ada'
+        fromAddress='ada@example.test'
+        sentAt='2026-10-09T08:30:00Z'
+        message={message}
+        openedFromFolder={{ account: 'work', key: 'junk' }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Open in New Window' }));
+
+    expect(readerWindow.openMessageWindow).toHaveBeenCalledWith(
+      { account: 'work', key: 'm1' },
+      'Launch',
+      'junk',
+    );
   });
 
   it('draws no verbs and no overflow without a message', () => {
@@ -207,6 +325,96 @@ describe('the header actions', () => {
 
     expect(screen.queryByRole('button', { name: 'Reply' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'More actions' })).toBeNull();
+  });
+});
+
+describe('the not-spam verb', () => {
+  const message = { account: 'work', key: 'm1' };
+
+  it('offers Not spam on the verb row only for a message opened from the junk folder', () => {
+    const { rerender } = render(
+      <ReadingHeader
+        subject='Misfiled'
+        fromName='Ada'
+        fromAddress='ada@example.test'
+        sentAt='2026-10-09T08:30:00Z'
+        message={message}
+        notJunk
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Not spam' })).toBeTruthy();
+
+    rerender(
+      <ReadingHeader
+        subject='Misfiled'
+        fromName='Ada'
+        fromAddress='ada@example.test'
+        sentAt='2026-10-09T08:30:00Z'
+        message={message}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: 'Not spam' })).toBeNull();
+  });
+
+  it('reports the message as legitimate through the mark_not_junk intent', () => {
+    render(
+      <ReadingHeader
+        subject='Misfiled'
+        fromName='Ada'
+        fromAddress='ada@example.test'
+        sentAt='2026-10-09T08:30:00Z'
+        message={message}
+        notJunk
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Not spam' }));
+
+    expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
+      '{"mark_not_junk":{"row":{"message":{"account":"work","key":"m1"}}}}',
+    );
+  });
+});
+
+describe('the zoom menu', () => {
+  beforeEach(() => {
+    useAppearanceStore.setState({ readingZoom: 'default' });
+  });
+
+  it('offers the three steps with the standing one checked', () => {
+    useAppearanceStore.setState({ readingZoom: 'large' });
+    render(
+      <ReadingHeader
+        subject='Launch'
+        fromName='Ada'
+        fromAddress='ada@example.test'
+        sentAt='2026-10-09T08:30:00Z'
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reading zoom' }));
+
+    const items = screen.getAllByRole('menuitem');
+    expect(items.map((i) => i.textContent)).toEqual(['Smaller', 'Default', 'Larger']);
+    expect(items[2]!.querySelector('svg')).not.toBeNull();
+    expect(items[0]!.querySelector('svg')).toBeNull();
+  });
+
+  it('sets the step from the menu and persists it in the appearance store', () => {
+    render(
+      <ReadingHeader
+        subject='Launch'
+        fromName='Ada'
+        fromAddress='ada@example.test'
+        sentAt='2026-10-09T08:30:00Z'
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reading zoom' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Smaller' }));
+
+    expect(useAppearanceStore.getState().readingZoom).toBe('small');
+    expect(localStorage.getItem('astra.readingZoom')).toBe('small');
   });
 });
 

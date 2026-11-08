@@ -13,6 +13,8 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 
+import type { AccountSetup } from './setup';
+
 /** A provider whose sign-in this build can offer; crosses as a bare word. */
 export type OAuthProvider = 'microsoft' | 'google';
 
@@ -137,6 +139,105 @@ export function onJmapSignInResult(
   handler: (result: JmapSignInResult) => void,
 ): Promise<() => void> {
   return listen<JmapSignInResult>('jmap_sign_in_result', (event) => {
+    handler(event.payload);
+  });
+}
+
+/**
+ * The wizard's three answers for one dialled IMAP server: the sign-in
+ * and registration screens cross as externally tagged records, the
+ * password answer as a bare word.
+ */
+export type ImapAuthAnswer =
+  | {
+      sign_in: {
+        issuer: string;
+        provider_label: string | null;
+        password_also_works: boolean;
+      };
+    }
+  | { registration_needed: { password_also_works: boolean } }
+  | 'password';
+
+/**
+ * Asks the dialled server what it accepts: bounded and fail-soft in both
+ * directions, so the answer is always one of the three screens and never
+ * an error. The `setup` is the same payload the step's test connection
+ * crosses (the accepted certificate pins into the ask's TLS); the
+ * `oauthIssuer` is the issuer the provider's own autoconfig named, when
+ * detection carried one across.
+ */
+export function imapAuthOffer(
+  setup: AccountSetup,
+  oauthIssuer?: string,
+): Promise<ImapAuthAnswer> {
+  return invoke('imap_auth_offer', { setup, oauthIssuer });
+}
+
+/**
+ * Begins one mail sign-in: the host walks the discovered or static
+ * route, registers this install, and opens the system browser; this
+ * resolves once the browser opened, and the completion arrives later,
+ * through {@link onImapSignInResult}.
+ */
+export function imapOauthBegin(setup: AccountSetup, oauthIssuer?: string): Promise<void> {
+  return invoke('imap_oauth_begin', { setup, oauthIssuer });
+}
+
+/**
+ * How one begun mail sign-in ended: the added account, or a refusal
+ * carrying the classification word beside the host's own sentence as the
+ * diagnostic detail. Crosses with snake_case tags.
+ */
+export type ImapSignInOutcome =
+  | { added: { address: string } }
+  | { refused: { refusal: GrantRefusalWord; detail: string } };
+
+/** The mail completion event's payload: how the flow ended. */
+export interface ImapSignInResult {
+  outcome: ImapSignInOutcome;
+}
+
+/**
+ * Subscribes to the mail completion notification and resolves its
+ * unlistener; the subscription discipline is the provider flows' own.
+ */
+export function onImapSignInResult(
+  handler: (result: ImapSignInResult) => void,
+): Promise<() => void> {
+  return listen<ImapSignInResult>('imap_sign_in_result', (event) => {
+    handler(event.payload);
+  });
+}
+
+/**
+ * Begins one JMAP re-grant for a stored account: the host mints the
+ * authorization URL from the account's persisted grant (no
+ * re-discovery, no re-registration), opens the system browser, and this
+ * resolves once the browser opened. The completion swaps the fresh grant
+ * in place (the account keeps its mail, folders, and settings) and
+ * arrives later, through {@link onJmapReauthResult}. Refuses for an
+ * account that stores no OAuth grant: a password account has no sign-in
+ * to re-run.
+ */
+export function jmapReauthBegin(account: string): Promise<void> {
+  return invoke('jmap_reauth_begin', { account });
+}
+
+/** The JMAP re-grant completion event's payload: how the flow ended. */
+export interface JmapReauthResult {
+  /** The outcome, the JMAP sign-in's own words: re-granted or refused. */
+  outcome: JmapSignInOutcome;
+}
+
+/**
+ * Subscribes to the JMAP re-grant completion notification and resolves
+ * its unlistener; the subscription discipline is the sign-in flows' own.
+ */
+export function onJmapReauthResult(
+  handler: (result: JmapReauthResult) => void,
+): Promise<() => void> {
+  return listen<JmapReauthResult>('jmap_reauth_result', (event) => {
     handler(event.payload);
   });
 }

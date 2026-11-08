@@ -20,10 +20,7 @@ use std::collections::HashMap;
 use astra_viewmodel::{queued_row, HeldSend, HeldState, SendingSnapshot};
 use engine_api::{AccountId, Confirmation, Draft, OpRejection, PendingOpKind, Provider};
 
-use crate::{
-    crypto::CryptoFlags, crypto_outbox::CryptoVerb, drafts::now_instant, reference::QueuedRef, App,
-    OutboxIntent,
-};
+use crate::{crypto::CryptoFlags, drafts::now_instant, reference::QueuedRef, App, OutboxIntent};
 
 /// One send the plugin gate is holding: the row the snapshot publishes plus
 /// the built draft a retry or a Send Anyway resumes. The draft, never a
@@ -78,37 +75,15 @@ impl<P: Provider> App<P> {
     pub(crate) async fn dispatch_outbox(&self, intent: OutboxIntent) {
         match intent {
             OutboxIntent::Show => self.rebuild_sending().await,
-            OutboxIntent::Cancel { queued } => {
-                if App::<P>::crypto_row_of(queued.op).is_some() {
-                    self.crypto_verb(queued.op, CryptoVerb::Withdraw).await;
-                } else {
-                    self.cancel_queued_send(&queued).await;
-                }
-            }
-            OutboxIntent::SendNow { queued } => {
-                if App::<P>::crypto_row_of(queued.op).is_some() {
-                    self.crypto_verb(queued.op, CryptoVerb::SendNow).await;
-                } else {
-                    self.send_queued_now(&queued).await;
-                }
-            }
+            OutboxIntent::Cancel { queued } => self.cancel_queued_send(&queued).await,
+            OutboxIntent::SendNow { queued } => self.send_queued_now(&queued).await,
             OutboxIntent::ConfirmSent { queued } => {
-                if App::<P>::crypto_row_of(queued.op).is_some() {
-                    self.crypto_verb(queued.op, CryptoVerb::ConfirmDelivered)
-                        .await;
-                } else {
-                    self.confirm_queued_send(&queued, Confirmation::Delivered)
-                        .await;
-                }
+                self.confirm_queued_send(&queued, Confirmation::Delivered)
+                    .await;
             }
             OutboxIntent::ConfirmNotSent { queued } => {
-                if App::<P>::crypto_row_of(queued.op).is_some() {
-                    self.crypto_verb(queued.op, CryptoVerb::ConfirmNotDelivered)
-                        .await;
-                } else {
-                    self.confirm_queued_send(&queued, Confirmation::NotDelivered)
-                        .await;
-                }
+                self.confirm_queued_send(&queued, Confirmation::NotDelivered)
+                    .await;
             }
             OutboxIntent::AnswerGate { hold, send_anyway } => {
                 self.answer_gate(&hold, send_anyway).await;
@@ -368,9 +343,6 @@ impl<P: Provider> App<P> {
                 }
             }
         }
-        // The crypto queue's rows ride the same panel (no second outbox
-        // UI), under the crypto op namespace.
-        rows.extend(self.crypto_outbox_rows());
         let held = self
             .outbox
             .lock()

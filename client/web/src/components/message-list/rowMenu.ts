@@ -1,29 +1,38 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The message row's context menu builder: pure functions from the target
 // rows to the item list, ported from kylins' thread menu in the order the
-// user pinned. Working items dispatch the intents the host already
-// accepts (batch targets loop the per-row intents, the multi-select's own
-// compromise until the host takes a batch); items the host cannot serve
-// yet stand as named placeholders.
+// user pinned. Working items dispatch the intents the host already accepts
+// (batch targets loop the per-row intents, the multi-select's own
+// compromise until the host takes a batch); the own-window verb opens the
+// pop-out reading window for a single message; the spam report rides the
+// report family's mark_junk and stands only where the account's provider
+// can report; items the host cannot serve yet stand as named placeholders.
 
 import {
   ArchiveIcon,
+  ComposeIcon,
   FlagIcon,
   ForwardIcon,
+  JunkIcon,
   MarkReadIcon,
+  PopOutIcon,
   ReplyAllIcon,
   ReplyIcon,
   TrashIcon,
 } from '@/components/icons';
-import { placeholderItem, type ContextMenuItem } from '@/components/ui/ContextMenu';
+import { type ContextMenuItem } from '@/components/ui/ContextMenu';
 import { dispatch, intents, type MessageRef } from '@/services/ipc';
+import { openMessageWindow } from '@/features/reader/readerWindows';
+import { openDraftRow, openDraftRowWindow } from '@/features/composer/draftOpen';
 import type { FolderRow, MessageRowView, ViewMode } from '@/services/surfaces';
 
-/** The account the move-to picker offers: the selection's own account, the
- *  folders the pane holds for it, and the folder the rows sit in. */
-export interface MoveToContext {
+/** The account context the menu holds: the account the picker and the
+ *  report gate ask about, its folders, the folder the rows sit in, and
+ *  whether its provider can report mail. */
+export interface RowAccountContext {
   account: string;
   currentKey: string | null;
+  canReportMail: boolean;
   folders: FolderRow[];
 }
 
@@ -54,12 +63,88 @@ function copy(text: string): void {
   void navigator.clipboard?.writeText(text);
 }
 
+/** The own-window verb: opens the pop-out reading window over the single
+ *  message, titled by its subject, carrying the folder the list sits in so
+ *  the window can judge the junk-folder context its Not-spam verb needs.
+ *  A thread row or a batch cannot name one message, so the verb stands
+ *  disabled with the reason. */
+function openWindowItem(
+  one: MessageRowView | null,
+  oneMessage: MessageRef | null,
+  context: RowAccountContext | undefined,
+): ContextMenuItem {
+  const reason =
+    oneMessage !== null
+      ? undefined
+      : one === null
+        ? 'Pick one message for this'
+        : 'A whole conversation cannot be opened in a window for this yet';
+  return {
+    label: 'Open in New Window',
+    icon: PopOutIcon,
+    disabled: reason !== undefined ? true : undefined,
+    title: reason,
+    description: reason,
+    onSelect: () => {
+      if (one === null) {
+        return;
+      }
+      void openMessageWindow(
+        oneMessage!,
+        one.subject === '' ? '(no subject)' : one.subject,
+        context?.currentKey ?? null,
+      );
+    },
+  };
+}
+
+/** The folder names the junk destination answers to besides its role,
+ *  mirroring the core resolver's own candidates: an account whose server
+ *  tags no Junk role still files reports when a folder carries one of
+ *  these names. */
+const JUNK_FOLDER_NAMES: readonly string[] = [
+  'junk',
+  'junk mail',
+  'junk e-mail',
+  'spam',
+  'bulk mail',
+  'ongewenste e-mail',
+];
+
+/** The spam-report verb: one mark_junk per target through the report
+ *  family, the report that files the message into Junk as part of itself.
+ *  Offered only where the account's provider can report its mail AND the
+ *  tree resolves a junk destination (the RFC 6154 role or a conventional
+ *  name), so the verb never stands where dispatching it would only be
+ *  refused or silently skipped. */
+function spamItem(
+  targets: MessageRowView[],
+  context: RowAccountContext | undefined,
+): ContextMenuItem | null {
+  if (context === undefined || !context.canReportMail) {
+    return null;
+  }
+  const junk = context.folders.some(
+    (folder) =>
+      folder.role === 'junk' ||
+      JUNK_FOLDER_NAMES.includes(folder.name.trim().toLowerCase()),
+  );
+  if (!junk) {
+    return null;
+  }
+  return {
+    label: 'Mark as spam',
+    icon: JunkIcon,
+    onSelect: () => forEach(targets, (row) => void dispatch(intents.markJunk(row.key))),
+  };
+}
+
 /** The move-to item: the account's other folders as a flyout, each choice
- *  moving the whole target set in one batch. Hidden while the targets span
- *  accounts (moves stay within one) or the account holds no other folder,
- *  disabled with the conversation reason while a target is a conversation,
- *  which a move batch cannot name. */
-function moveItem(targets: MessageRowView[], context: MoveToContext | undefined): ContextMenuItem | null {
+ * moving the whole target set in one batch. Hidden while the targets span
+ * accounts (moves stay within one) or the account holds no other folder,
+ * disabled with the conversation reason while a target is a conversation,
+ * which a move batch cannot name. */
+function moveItem(targets: MessageRowView[], context: RowAccountContext | undefined): ContextMenuItem | null {
   if (context === undefined) {
     return null;
   }
@@ -90,11 +175,39 @@ function messageRefs(targets: MessageRowView[]): MessageRef[] {
   return targets.flatMap((row) => ('message' in row.key ? [row.key.message] : []));
 }
 
+/** The permanent delete: the irreversible verb behind its own confirm, the
+ *  sentence the Trash folder delete's own confirm shaped. Stands anywhere
+ *  the menu opens, danger-styled, below the ordinary Delete (which stays
+ *  the move-to-trash), and only ever names one row: the verb never rides a
+ *  batch loop, so a multi-selection stands disabled with the reason. */
+function permanentDeleteItem(targets: MessageRowView[]): ContextMenuItem {
+  const reason = targets.length > 1 ? 'Pick one row for this' : undefined;
+  const noun = targets.length === 1 && 'thread' in targets[0]!.key ? 'conversation' : 'message';
+  return {
+    label: 'Delete Permanently',
+    icon: TrashIcon,
+    danger: true,
+    disabled: reason !== undefined ? true : undefined,
+    title: reason,
+    description: reason,
+    onSelect: () => {
+      if (reason !== undefined) {
+        return;
+      }
+      const question = `Permanently delete this ${noun}? This cannot be undone.`;
+      if (!window.confirm(question)) {
+        return;
+      }
+      void dispatch(intents.deleteMessage(targets[0]!.key));
+    },
+  };
+}
+
 /** The menu one message row (or a batch of them) opens. */
 export function buildRowMenu(
   targets: MessageRowView[],
   viewMode: ViewMode,
-  moveTo: MoveToContext | undefined = undefined,
+  context: RowAccountContext | undefined = undefined,
 ): ContextMenuItem[] {
   const one = single(targets);
   const oneMessage = singleMessage(targets);
@@ -109,10 +222,11 @@ export function buildRowMenu(
   const noun = viewMode === 'threaded' ? 'conversations' : 'messages';
   const anyUnread = targets.some((row) => row.unread);
   const allFlagged = targets.every((row) => row.flagged);
-  const move = moveItem(targets, moveTo);
+  const move = moveItem(targets, context);
+  const spam = spamItem(targets, context);
 
   return [
-    placeholderItem('Open in New Window', 'Opening a message in its own window arrives with a future slice'),
+    openWindowItem(one, oneMessage, context),
     { separator: true },
     {
       label: 'Reply',
@@ -150,7 +264,7 @@ export function buildRowMenu(
     },
     { separator: true },
     ...(move !== null ? [move] : []),
-    placeholderItem('Junk', 'Junk reporting arrives with a future slice'),
+    ...(spam !== null ? [spam] : []),
     { separator: true },
     {
       label: multi ? `Delete ${targets.length} ${noun}` : 'Delete',
@@ -158,6 +272,7 @@ export function buildRowMenu(
       danger: true,
       onSelect: () => forEach(targets, (row) => void dispatch(intents.moveToTrash(row.key))),
     },
+    permanentDeleteItem(targets),
     {
       label: multi ? `Archive ${targets.length} ${noun}` : 'Archive',
       icon: ArchiveIcon,
@@ -181,16 +296,57 @@ export function buildRowMenu(
   ];
 }
 
-/** The menu a saved-draft row opens; every action is a placeholder until
- *  the host resumes and deletes drafts by key. */
-export function buildDraftMenu(): ContextMenuItem[] {
+/** The menu a saved-draft row opens: the row's own three verbs over its key,
+ *  the resume into the composer (the pane, or its own window), and the
+ *  discard of the stored copy. A batch cannot name one draft, so every verb
+ *  stands disabled with the reason. */
+export function buildDraftMenu(targets: MessageRowView[]): ContextMenuItem[] {
+  const one = single(targets);
+  const oneMessage = singleMessage(targets);
+  const reason = oneMessage !== null ? undefined : 'Pick one draft for this';
+  const disabled = reason !== undefined;
+  const guard = (): MessageRef | null => (reason === undefined ? oneMessage : null);
   return [
-    placeholderItem(
-      'Open',
-      'Opening an individual draft arrives with a future slice; the app start resume opens the latest',
-    ),
-    placeholderItem('Open in New Window', 'Opening a draft in its own window arrives with a future slice'),
+    {
+      label: 'Open',
+      icon: ComposeIcon,
+      disabled: disabled || undefined,
+      title: reason,
+      description: reason,
+      onSelect: () => {
+        const message = guard();
+        if (message !== null) {
+          void openDraftRow(message);
+        }
+      },
+    },
+    {
+      label: 'Open in New Window',
+      icon: PopOutIcon,
+      disabled: disabled || undefined,
+      title: reason,
+      description: reason,
+      onSelect: () => {
+        const message = guard();
+        if (message !== null) {
+          void openDraftRowWindow(message, one?.subject ?? '');
+        }
+      },
+    },
     { separator: true },
-    { ...placeholderItem('Delete Draft', 'Deleting a draft arrives with a future slice'), danger: true },
+    {
+      label: 'Delete Draft',
+      icon: TrashIcon,
+      danger: true,
+      disabled: disabled || undefined,
+      title: reason,
+      description: reason,
+      onSelect: () => {
+        const message = guard();
+        if (message !== null) {
+          void dispatch(intents.discardStored(message));
+        }
+      },
+    },
   ];
 }

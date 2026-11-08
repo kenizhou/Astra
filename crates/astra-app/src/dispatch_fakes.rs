@@ -12,24 +12,15 @@
 use std::{
     collections::HashMap,
     path::PathBuf,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc, Mutex,
-    },
+    sync::{atomic::AtomicUsize, Arc, Mutex},
 };
 
 use async_trait::async_trait;
 use engine_api::{
-    AccountId, CalendarWrites, Capabilities, Draft, EmailAddress, Engine, Mailbox, MailboxEdit,
-    MailboxId, Message, Provider, ProviderKey, SubmissionReceipt, SyncWindow, SystemKeyword,
-    UtcDateTime,
+    AccountId, CalendarWrites, Draft, EmailAddress, Engine, IdentityControls, Mailbox, MailboxEdit,
+    MailboxId, Message, ProviderKey, SenderIdentity, SenderIdentityId, SystemKeyword, UtcDateTime,
 };
-use engine_core::raw::RawMime;
-use engine_core::sync::{SyncState, SyncUpdate};
-use engine_provider::{
-    ConnectionInfo, EmailChunk, EmailStream, HandOver, MailEdit, MailEditReceipt, ProviderError,
-    ProviderResult, ScopeSync,
-};
+use engine_provider::{MailEdit, MessageReport, ReportControls, ReportEvidence, ReportVerdicts};
 
 use crate::{Account, App, AppObserver, MailboxConnector, Surface};
 
@@ -41,6 +32,10 @@ mod mail;
 // module for the same limit, holding the key/folder/inbox builders every test
 // names and the `MailboxWrites` leg a folder-edit test drives.
 mod tree;
+// The provider legs: the sync, source, edit, draft, submit, and report
+// overrides the dispatch tests drive, split for the same limit. A trait impl
+// cannot split across modules, so the whole `Provider` block lives here.
+mod provider;
 // The AI pass fixtures, its own child for the same limit, pathed `fakes::ai::…`.
 pub(crate) mod ai;
 pub(super) use mail::{
@@ -86,6 +81,9 @@ pub(super) struct FakeProvider {
     /// to decode. A message without one fails its source fetch. Behind a mutex because
     /// a draft the provider stores registers its source as it goes out.
     pub(super) sources: Mutex<HashMap<String, Vec<u8>>>,
+    /// How many source fetches the provider has served, so a warm pass can
+    /// prove it asked for nothing the store already held.
+    pub(super) fetches: Arc<AtomicUsize>,
     /// How many email sync passes this provider has served.
     pub(super) syncs: Arc<AtomicUsize>,
     /// Every `edit_mail` this provider was asked to apply, in order.
@@ -100,15 +98,39 @@ pub(super) struct FakeProvider {
     /// Every submit this provider was asked to deliver, in order: the send
     /// log the outbox assertions read.
     pub(super) submits: Arc<Mutex<Vec<Draft>>>,
+    /// The identity capability the adapter answers with, `None` for a
+    /// provider with no identity object at all (the IMAP shape); the
+    /// sender-name tests' leg.
+    pub(super) identity_controls: Option<IdentityControls>,
+    /// The identities the adapter serves, among them the account's own
+    /// address; behind a mutex so a test can move what the fake holds.
+    pub(super) identities: Arc<Mutex<Vec<SenderIdentity>>>,
+    /// Every `set_sender_name` the adapter was asked to apply: the push log
+    /// the sender-name assertions read.
+    pub(super) name_writes: Arc<Mutex<Vec<(SenderIdentityId, String)>>>,
+    /// Name writes left to refuse permanently, so a test can model a server
+    /// that will not take the change.
+    name_refusals: Mutex<u32>,
     /// How the SMTP leg answers each submit, one entry per attempt in order;
     /// the script runs out into plain delivery.
     send_script: Mutex<Vec<ScriptedSend>>,
     /// Draft saves left to refuse as retryable ("no route to host"), so a test can model
     /// an outage the outbox rides out.
     offline_saves: Mutex<u32>,
+    /// Draft removals left to refuse as retryable, so a test can model the queued
+    /// discard.
+    delete_refusals: Mutex<u32>,
     /// Whether the adapter can change the account's folder tree (the
     /// capability); `with_tree_writes` is the shape a folder-edit test drives.
     pub(super) tree_writes: bool,
+    /// The report capability the adapter answers with, `None` for a provider
+    /// that cannot report at all; `with_reports` is the shape a report test
+    /// drives.
+    pub(super) report_controls: Option<ReportControls>,
+    /// Every `report_message` this provider was asked to apply, in order: each
+    /// entry carries the verdict (the keyword a server would train on) beside
+    /// the filing destination, the log the report assertions read.
+    pub(super) reports: Arc<Mutex<Vec<MessageReport>>>,
     /// Every tree edit this provider was asked to apply, in order: the log the
     /// folder-write assertions read.
     pub(super) mailbox_edits: Arc<Mutex<Vec<MailboxEdit>>>,
@@ -156,14 +178,22 @@ impl FakeProvider {
             messages: Arc::new(Mutex::new(messages)),
             updates: Arc::new(Mutex::new(Vec::new())),
             sources: Mutex::new(sources.into_iter().collect()),
+            fetches: Arc::new(AtomicUsize::new(0)),
             syncs: Arc::new(AtomicUsize::new(0)),
             edits: Arc::new(Mutex::new(Vec::new())),
             draft_puts: Arc::new(Mutex::new(Vec::new())),
             draft_deletes: Arc::new(Mutex::new(Vec::new())),
             submits: Arc::new(Mutex::new(Vec::new())),
+            identity_controls: None,
+            identities: Arc::new(Mutex::new(Vec::new())),
+            name_writes: Arc::new(Mutex::new(Vec::new())),
+            name_refusals: Mutex::new(0),
             send_script: Mutex::new(Vec::new()),
             offline_saves: Mutex::new(0),
+            delete_refusals: Mutex::new(0),
             tree_writes: false,
+            report_controls: None,
+            reports: Arc::new(Mutex::new(Vec::new())),
             mailbox_edits: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -174,6 +204,46 @@ impl FakeProvider {
     pub(super) fn with_tree_writes(mut self) -> Self {
         self.tree_writes = true;
         self
+    }
+
+    /// Marks the adapter as one that can report mail, the JMAP shape: every
+    /// verdict over a convention, and a report leg that records the verdict
+    /// and the filing destination rather than acting on them, the way the
+    /// edit leg records its edits.
+    pub(super) fn with_reports(mut self) -> Self {
+        self.report_controls = Some(ReportControls {
+            verdicts: ReportVerdicts::all(),
+            evidence: ReportEvidence::Convention,
+        });
+        self
+    }
+
+    /// Marks the adapter as one whose identities the account holder may
+    /// change (the JMAP shape), serving `identities`.
+    pub(super) fn with_writable_identities(mut self, identities: Vec<SenderIdentity>) -> Self {
+        self.identity_controls = Some(IdentityControls::Writable);
+        *self.identities.lock().unwrap() = identities;
+        self
+    }
+
+    /// Marks the adapter as one whose identities are the directory's, not
+    /// the account holder's (the Graph shape), serving `identities`.
+    pub(super) fn with_read_only_identities(mut self, identities: Vec<SenderIdentity>) -> Self {
+        self.identity_controls = Some(IdentityControls::ReadOnly);
+        *self.identities.lock().unwrap() = identities;
+        self
+    }
+
+    /// Scripts the next `refusals` name writes to fail permanently, the
+    /// best-effort push's refused shape.
+    pub(super) fn refusing_name_writes(self, refusals: u32) -> Self {
+        *self.name_refusals.lock().unwrap() = refusals;
+        self
+    }
+
+    /// Every recorded name write, for the push assertions.
+    pub(super) fn name_writes(&self) -> Arc<Mutex<Vec<(SenderIdentityId, String)>>> {
+        Arc::clone(&self.name_writes)
     }
 
     /// Scripts the SMTP leg's answers to the next submits, one entry per
@@ -195,6 +265,20 @@ impl FakeProvider {
         let provider = Self::with(vec![inbox()]);
         *provider.offline_saves.lock().unwrap() = saves;
         provider
+    }
+
+    /// Scripts the next `saves` draft saves to fail retryably on this provider's own
+    /// tree and mail, so a fixture with a standing Drafts folder can model the outage.
+    pub(super) fn offlining_saves(self, saves: u32) -> Self {
+        *self.offline_saves.lock().unwrap() = saves;
+        self
+    }
+
+    /// Scripts the next `deletes` draft removals to fail retryably, so a test can
+    /// model the queued discard.
+    pub(super) fn refusing_draft_deletes(self, deletes: u32) -> Self {
+        *self.delete_refusals.lock().unwrap() = deletes;
+        self
     }
 
     /// Every recorded draft save, each `(draft, replacing)`, for the contract assertions.
@@ -243,191 +327,6 @@ impl FakeProvider {
             .lock()
             .unwrap()
             .insert(key.to_owned(), source.into_bytes());
-    }
-}
-
-#[async_trait]
-impl Provider for FakeProvider {
-    fn connection_info(&self) -> ConnectionInfo {
-        let mut capabilities = Capabilities::none()
-            .with_mail()
-            .with_mail_drafts()
-            .with_submission();
-        if self.tree_writes {
-            capabilities = capabilities.with_mailbox_writes();
-        }
-        ConnectionInfo::new(capabilities)
-    }
-
-    async fn sync_mailboxes(
-        &self,
-        _account: &AccountId,
-        _cursor: Option<&SyncState>,
-    ) -> ProviderResult<ScopeSync<Mailbox>> {
-        // The whole tree on every pass, the IMAP shape (a LIST): a tree the
-        // writes moved is presented as it stands, so a post-edit reconcile
-        // lands the new folders.
-        let mailboxes = self.mailboxes.lock().unwrap().clone();
-        let present = mailboxes
-            .iter()
-            .map(|mailbox| mailbox.id.key().clone())
-            .collect();
-        Ok(ScopeSync::new(
-            SyncUpdate::snapshot(mailboxes, present),
-            SyncState::new("mbox-1"),
-        ))
-    }
-
-    fn stream_email<'a>(
-        &'a self,
-        _account: &'a AccountId,
-        cursor: Option<&'a SyncState>,
-        _window: SyncWindow,
-        _fetch_batch: usize,
-        _chunk_size: usize,
-    ) -> EmailStream<'a> {
-        self.syncs.fetch_add(1, Ordering::SeqCst);
-        let state = if cursor.is_some() {
-            "email-2"
-        } else {
-            "email-1"
-        };
-        let messages = self.messages.lock().unwrap().clone();
-        // The first pass delivers the whole mailbox; a later pass delivers whatever
-        // the test queued as a delta and re-presents the keys it still holds with
-        // nothing else changed, so a reconcile never tombstones what a local edit
-        // moved (the store shows queued keyword changes until the server answers).
-        let changed = if cursor.is_some() {
-            self.updates.lock().unwrap().clone()
-        } else {
-            messages.clone()
-        };
-        let present = messages
-            .iter()
-            .map(|message| message.id.key().clone())
-            .collect();
-        Box::pin(futures::stream::iter(vec![Ok(EmailChunk::reconcile_last(
-            changed,
-            present,
-            Some(messages.len()),
-            SyncState::new(state),
-        ))]))
-    }
-
-    async fn fetch_message_source(
-        &self,
-        _account: &AccountId,
-        message: &Message,
-    ) -> ProviderResult<RawMime> {
-        self.sources
-            .lock()
-            .unwrap()
-            .get(message.id.key().as_str())
-            .cloned()
-            .map(RawMime::new)
-            .ok_or_else(|| ProviderError::invalid_state("the fake holds no source for that key"))
-    }
-
-    async fn edit_mail(
-        &self,
-        _account: &AccountId,
-        edit: &MailEdit,
-    ) -> ProviderResult<MailEditReceipt> {
-        self.edits.lock().unwrap().push(edit.clone());
-        Ok(MailEditReceipt::new(edit.target().clone()))
-    }
-
-    /// Stores a draft, answering with a key that **moves on every save**, which is what
-    /// three of the four real adapters do. A fake echoing the key back would let a caller
-    /// that never passes `replacing` pass this suite and store a second copy per save
-    /// against a real server. The stored copy joins the server's mailbox, so a later sync
-    /// pass presents it to the store and a resume can read it back.
-    async fn put_draft(
-        &self,
-        _account: &AccountId,
-        draft: &Draft,
-        replacing: Option<&ProviderKey>,
-    ) -> ProviderResult<ProviderKey> {
-        {
-            let mut offline = self.offline_saves.lock().unwrap();
-            if *offline > 0 {
-                *offline -= 1;
-                return Err(ProviderError::retryable("no route to host"));
-            }
-        }
-        let key = {
-            let mut puts = self.draft_puts.lock().unwrap();
-            puts.push((draft.clone(), replacing.cloned()));
-            ProviderKey::new(format!("draft-{}", puts.len())).unwrap()
-        };
-        self.store_draft(key.as_str(), draft);
-        Ok(key)
-    }
-
-    /// Removes a stored draft from the server's mailbox along with its source, the way a
-    /// real Drafts folder would, so a later pass reconciles it away.
-    async fn delete_draft(&self, _account: &AccountId, draft: &ProviderKey) -> ProviderResult<()> {
-        self.draft_deletes.lock().unwrap().push(draft.clone());
-        self.messages
-            .lock()
-            .unwrap()
-            .retain(|message| message.id.key() != draft);
-        self.updates
-            .lock()
-            .unwrap()
-            .retain(|message| message.id.key() != draft);
-        self.sources.lock().unwrap().remove(draft.as_str());
-        Ok(())
-    }
-
-    /// Delivers a message over the scripted SMTP leg: the one attempt shape
-    /// whose every honest outcome the outbox exists to hold. The hand-over is
-    /// committed only where a real transport would have crossed its point of
-    /// no return (the message went out, the answer is what was lost), so a
-    /// recovery reading the record draws the same conclusion it would against
-    /// a live server.
-    async fn submit_email(
-        &self,
-        _account: &AccountId,
-        draft: &Draft,
-        hand_over: &HandOver<'_>,
-    ) -> ProviderResult<SubmissionReceipt> {
-        let attempt = self.submits.lock().unwrap().len() + 1;
-        self.submits.lock().unwrap().push(draft.clone());
-        let answer = self
-            .send_script
-            .lock()
-            .unwrap()
-            .get(attempt - 1)
-            .copied()
-            .unwrap_or(ScriptedSend::Delivered);
-        match answer {
-            ScriptedSend::Delivered => {
-                let handed_over = hand_over.commit().await?;
-                let key = ProviderKey::new(format!("sent-{attempt}")).unwrap();
-                let copy = sent_copy(key.as_str(), draft);
-                self.messages.lock().unwrap().push(copy.clone());
-                self.updates.lock().unwrap().push(copy);
-                Ok(SubmissionReceipt::filed(
-                    key,
-                    draft.message_id.clone(),
-                    &handed_over,
-                ))
-            }
-            // No connection, so no byte left the device: no hand-over record.
-            ScriptedSend::Unreachable => Err(ProviderError::retryable("no route to host")),
-            // The dialogue answered no before any data was sent: nothing was
-            // delivered, and no hand-over was crossed.
-            ScriptedSend::Refused => Err(ProviderError::permanent("relay access denied")),
-            // The message was handed to the transport and the connection died
-            // before the acknowledgement: the record must say it may have gone.
-            ScriptedSend::Silent => {
-                hand_over.commit().await?;
-                Err(ProviderError::needs_confirmation(
-                    "the server took the message but did not answer",
-                ))
-            }
-        }
     }
 }
 

@@ -61,7 +61,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('the mini-month navigator', () => {
-  it('moves the anchor on a day click and loads the window, view untouched', () => {
+  it('moves the anchor on a day click and loads the window, the standing view riding it', () => {
     render(<CalendarRail />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Go to 2026-10-20' }));
@@ -72,7 +72,7 @@ describe('the mini-month navigator', () => {
       '{"calendar":{"set_date":{"date":"2026-10-20"}}}',
     );
     expect(JSON.stringify(ipc.dispatch.mock.calls[1]?.[0])).toBe(
-      '{"calendar":{"set_range":{"start":"2026-09-27T22:00:00Z","days":42}}}',
+      '{"calendar":{"set_range":{"start":"2026-09-27T22:00:00Z","days":42,"view":"month"}}}',
     );
   });
 

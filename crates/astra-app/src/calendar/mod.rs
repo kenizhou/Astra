@@ -15,13 +15,16 @@
 
 mod brief;
 mod brief_drive;
+mod cadence;
 mod deposit;
+mod detail;
 mod drag;
 mod edit;
 mod horizon;
 mod imip;
 mod invite;
 mod prompt;
+mod rule_words;
 mod scope;
 mod snapshot;
 mod writes;
@@ -66,14 +69,20 @@ pub(crate) use horizon::{default_window, Window};
 #[derive(Default)]
 pub(crate) struct CalendarState {
     /// The visible window, or `None` until the first `SetRange`: then the
-    /// default window around the build instant.
+    /// default window around the build instant, or around the persisted
+    /// anchor when the boot seed restored one.
     window: Option<Window>,
     /// Which calendars' events are drawn, or `None` until the first
     /// `SetVisibleCalendars`: then every calendar's. `Some` of an empty set is
     /// the user hiding everything, a state the rebuild must be able to hold.
     visible: Option<HashSet<(AccountId, String)>>,
+    /// The view kind the pane renders, seeded from the shape preference at
+    /// boot and moved by a `SetRange` that names one.
+    view: astra_viewmodel::CalendarViewWire,
     /// The grids' navigation anchor (`SetDate`), for the surfaces that ask
-    /// where the view is centred.
+    /// where the view is centred. Seeded from the shape preference at boot:
+    /// an anchor from a past launch stands exactly, and `None` is today by
+    /// behaviour.
     anchor: Option<engine_api::CalendarDate>,
     /// The horizon the app has widened to, per account shared: what
     /// `expand_horizon` has covered, so a window inside it costs nothing and a
@@ -98,6 +107,23 @@ impl CalendarState {
     /// window's length are preferences, read at rebuild time.
     pub(crate) fn new() -> Self {
         Self::default()
+    }
+
+    /// The state an app whose preferences name a calendar shape starts with:
+    /// the view kind and the anchor the person left, restored exactly, so
+    /// the first rebuild paints the diary they were looking at. A shape the
+    /// file does not hold (absent, or a file the loader cannot parse) never
+    /// reaches here: the defaults are `new`'s, whose anchor is today by
+    /// behaviour.
+    pub(crate) fn seeded(
+        view: astra_viewmodel::CalendarViewWire,
+        anchor: Option<engine_api::CalendarDate>,
+    ) -> Self {
+        Self {
+            view,
+            anchor,
+            ..Self::default()
+        }
     }
 }
 
@@ -128,6 +154,9 @@ pub(crate) struct CalendarInputs {
     pub window: Horizon,
     /// The display zone floating and all-day rows resolve through.
     pub zone: TimeZoneId,
+    /// The standing view shape, as the snapshot publishes it for a surface
+    /// to restore at boot.
+    pub shape: astra_viewmodel::CalendarShape,
     /// The visible set, or `None` for every calendar.
     visible: Option<HashSet<(AccountId, String)>>,
     /// The write rows, one per account with a state.
@@ -159,19 +188,25 @@ impl<P: Provider> App<P> {
 
     /// The decision inputs for one rebuild, and the default window the rebuild
     /// falls back to when no `SetRange` has landed: the horizon preference's
-    /// days around the build instant, a week of it behind now.
+    /// days around the build instant, a week of it behind now, or around the
+    /// restored anchor's own midnight when the boot seed holds one.
     fn calendar_inputs(&self) -> CalendarInputs {
+        let zone = self.display_zone();
+        let horizon_days = self.horizon_days();
         let state = self.calendar_state.lock().expect("calendar mutex poisoned");
         let now = now_utc().unwrap_or_else(|| {
             UtcDateTime::new(2026, 1, 1, 0, 0, 0).expect("a representable instant")
         });
-        let horizon_days = self.horizon_days();
         let window = state
             .window
-            .unwrap_or_else(|| default_window(now, horizon_days));
+            .unwrap_or_else(|| default_window(now, horizon_days, state.anchor, &zone));
         CalendarInputs {
             window: window.horizon(),
-            zone: self.display_zone(),
+            zone,
+            shape: astra_viewmodel::CalendarShape {
+                view: state.view,
+                anchor: state.anchor,
+            },
             visible: state.visible.clone(),
             writes: {
                 let mut rows: Vec<CalendarWriteRow> = state
@@ -208,8 +243,8 @@ impl<P: Provider> App<P> {
     pub(crate) async fn dispatch_calendar(&self, intent: CalendarIntent) {
         match intent {
             CalendarIntent::Refresh => self.refresh_calendar().await,
-            CalendarIntent::SetRange { start, days } => {
-                self.set_calendar_window(start, days).await;
+            CalendarIntent::SetRange { start, days, view } => {
+                self.set_calendar_window(start, days, view).await;
             }
             CalendarIntent::SetVisibleCalendars { ids } => {
                 self.set_visible_calendars(&ids).await;
@@ -265,6 +300,10 @@ impl<P: Provider> App<P> {
                     .lock()
                     .expect("calendar mutex poisoned")
                     .anchor = Some(date);
+                self.pane
+                    .lock()
+                    .expect("preferences mutex poisoned")
+                    .set_calendar_anchor(date);
                 self.rebuild_calendar().await;
             }
         }
@@ -276,38 +315,35 @@ impl<P: Provider> App<P> {
     /// unconfirmed-but-landed write, and a refresh that lands one clears the
     /// row for the account it re-read.
     async fn refresh_calendar(&self) {
-        let zone = self.calendar_inputs().zone;
-        let horizon = self.sync_horizon();
         for handle in self.account_handles().await {
-            let Some(provider) = calendar_provider_of(&handle) else {
-                continue;
-            };
-            let at = self.account_ordinal(&handle.id).await;
-            match self
-                .engine
-                .sync_calendar(provider, &handle.id, horizon, &zone)
-                .await
-            {
-                Ok(_) => {
-                    self.clear_calendar_write(&handle.id);
-                    log::info!("calendar[a{at}]: the calendars synced");
-                }
-                Err(engine_api::ApiError::Busy) => {
-                    log::info!("calendar[a{at}]: another sync holds the calendar; skipped");
-                }
-                Err(err) => log::warn!("calendar[a{at}]: the calendar sync failed: {err}"),
-            }
+            self.sync_account_calendar(&handle).await;
         }
         self.rebuild_calendar().await;
     }
 
     /// Moves the visible window, widens the horizon to cover it when it has
-    /// escaped the watermark, and rebuilds.
-    async fn set_calendar_window(&self, start: UtcDateTime, days: u16) {
+    /// escaped the watermark, records the view kind half of the shape
+    /// preference when the intent names one, and rebuilds.
+    async fn set_calendar_window(
+        &self,
+        start: UtcDateTime,
+        days: u16,
+        view: Option<astra_viewmodel::CalendarViewWire>,
+    ) {
         self.calendar_state
             .lock()
             .expect("calendar mutex poisoned")
             .window = Some(Window { start, days });
+        if let Some(view) = view {
+            self.calendar_state
+                .lock()
+                .expect("calendar mutex poisoned")
+                .view = view;
+            self.pane
+                .lock()
+                .expect("preferences mutex poisoned")
+                .set_calendar_view(view);
+        }
         self.ensure_horizon().await;
         self.rebuild_calendar().await;
     }
@@ -348,5 +384,13 @@ pub(crate) fn now_utc() -> Option<UtcDateTime> {
 mod dispatch_tests;
 
 #[cfg(test)]
+#[path = "../calendar_boot_fetch_tests.rs"]
+mod boot_fetch_tests;
+
+#[cfg(test)]
 #[path = "../calendar_select_tests.rs"]
 mod select_tests;
+
+#[cfg(test)]
+#[path = "../calendar_shape_tests.rs"]
+mod shape_tests;

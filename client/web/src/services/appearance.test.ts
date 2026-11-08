@@ -130,3 +130,68 @@ describe('the density axis', () => {
     expect(fresh.useAppearanceStore.getState().density).toBe('comfortable');
   });
 });
+
+describe('the reading zoom', () => {
+  it('defaults to the default step and writes its storage key on set', () => {
+    expect(useAppearanceStore.getState().readingZoom).toBe('default');
+
+    useAppearanceStore.getState().setReadingZoom('large');
+    expect(useAppearanceStore.getState().readingZoom).toBe('large');
+    expect(localStorage.getItem('astra.readingZoom')).toBe('large');
+
+    useAppearanceStore.getState().setReadingZoom('small');
+    expect(localStorage.getItem('astra.readingZoom')).toBe('small');
+  });
+
+  it('hydrates a persisted step and falls back to default when stored unknown', async () => {
+    localStorage.setItem('astra.readingZoom', 'large');
+    vi.resetModules();
+    const large = await import('./appearance');
+    expect(large.useAppearanceStore.getState().readingZoom).toBe('large');
+
+    localStorage.clear();
+    localStorage.setItem('astra.readingZoom', 'enormous');
+    vi.resetModules();
+    const unknown = await import('./appearance');
+    expect(unknown.useAppearanceStore.getState().readingZoom).toBe('default');
+  });
+
+  it('writes no document-root attribute: the zoom reaches the body, not the chrome', () => {
+    useAppearanceStore.getState().setReadingZoom('large');
+
+    expect(document.documentElement.dataset.readingZoom).toBeUndefined();
+  });
+});
+
+describe('the swipe action choices', () => {
+  it('defaults the right swipe to archive and the left to trash', () => {
+    expect(useAppearanceStore.getState().swipePrimary).toBe('archive');
+    expect(useAppearanceStore.getState().swipeSecondary).toBe('trash');
+  });
+
+  it('writes each direction its own storage key', () => {
+    useAppearanceStore.getState().setSwipePrimary('flag');
+    useAppearanceStore.getState().setSwipeSecondary('read');
+
+    expect(localStorage.getItem('astra.swipePrimary')).toBe('flag');
+    expect(localStorage.getItem('astra.swipeSecondary')).toBe('read');
+    expect(useAppearanceStore.getState().swipePrimary).toBe('flag');
+    expect(useAppearanceStore.getState().swipeSecondary).toBe('read');
+  });
+
+  it('hydrates persisted choices and falls back to the defaults when stored unknown', async () => {
+    localStorage.setItem('astra.swipePrimary', 'trash');
+    localStorage.setItem('astra.swipeSecondary', 'read');
+    vi.resetModules();
+    const stored = await import('./appearance');
+    expect(stored.useAppearanceStore.getState().swipePrimary).toBe('trash');
+    expect(stored.useAppearanceStore.getState().swipeSecondary).toBe('read');
+
+    localStorage.clear();
+    localStorage.setItem('astra.swipePrimary', 'snooze');
+    vi.resetModules();
+    const unknown = await import('./appearance');
+    expect(unknown.useAppearanceStore.getState().swipePrimary).toBe('archive');
+    expect(unknown.useAppearanceStore.getState().swipeSecondary).toBe('trash');
+  });
+});

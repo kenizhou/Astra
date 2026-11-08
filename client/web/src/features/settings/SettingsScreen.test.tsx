@@ -67,7 +67,7 @@ describe('the settings screen', () => {
     expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull();
   });
 
-  it('renders the nine categories that ship and no others', () => {
+  it('renders the eleven categories that ship and no others', () => {
     render(<SettingsScreen />);
     const list = screen.getByLabelText('Settings categories');
     const labels = Array.from(list.querySelectorAll('button')).map((b) => b.textContent);
@@ -80,6 +80,8 @@ describe('the settings screen', () => {
       'Accounts',
       'Plugins',
       'Advanced',
+      'Diagnostics',
+      'Privacy',
       'About',
     ]);
   });
@@ -104,6 +106,23 @@ describe('the settings screen', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Advanced' }));
     expect(screen.getByLabelText('AI assistant access')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Diagnostics' }));
+    expect(screen.getByRole('button', { name: 'Read the log' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Privacy' }));
+    expect(screen.getByRole('checkbox', { name: 'Product analytics' })).toBeTruthy();
+  });
+
+  it('lands on the Plugins category a link inside the screen asked for', () => {
+    render(<SettingsScreen />);
+    fireEvent.click(screen.getByRole('button', { name: 'Privacy' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open the plugin registry' }));
+
+    expect(
+      screen.getByRole('button', { name: 'Plugins' }).getAttribute('aria-pressed'),
+    ).toBe('true');
+    expect(useSettingsStore.getState().requestedCategory).toBeNull();
   });
 
   it('lists the wired shortcuts on the Shortcuts page', () => {

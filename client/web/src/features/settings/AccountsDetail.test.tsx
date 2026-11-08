@@ -130,6 +130,148 @@ describe('the account page', () => {
   });
 });
 
+describe('the per-account sync section', () => {
+  it('opens on the account page, stating how far back mail syncs', () => {
+    render(<AccountsDetail />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open ada@example.test' }));
+
+    expect(screen.getByLabelText('How far back mail syncs')).toBeTruthy();
+    expect(screen.getByLabelText('Offline message bodies')).toBeTruthy();
+    expect(screen.getByLabelText('Check for new mail')).toBeTruthy();
+  });
+
+  it('reflects the standing effective values, never the click that started the write', () => {
+    useSettingsStore.getState().applySnapshot(
+      snapshot([
+        row({
+          sync: { depth_months: 12, body_cap: 'off', poll_minutes: 90 },
+        }),
+      ]),
+    );
+    render(<AccountsDetail />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open ada@example.test' }));
+
+    expect((screen.getByLabelText('How far back mail syncs') as HTMLSelectElement).value).toBe(
+      '12',
+    );
+    expect((screen.getByLabelText('Offline message bodies') as HTMLSelectElement).value).toBe(
+      'off',
+    );
+    expect((screen.getByLabelText('Check for new mail') as HTMLSelectElement).value).toBe('90');
+
+    // A change dispatches and the control keeps the standing truth until the
+    // republished snapshot lands.
+    fireEvent.change(screen.getByLabelText('How far back mail syncs'), { target: { value: '3' } });
+    expect((screen.getByLabelText('How far back mail syncs') as HTMLSelectElement).value).toBe(
+      '12',
+    );
+  });
+
+  it('answers the product defaults when the row carries no sync block', () => {
+    render(<AccountsDetail />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open ada@example.test' }));
+
+    expect((screen.getByLabelText('How far back mail syncs') as HTMLSelectElement).value).toBe('3');
+    expect((screen.getByLabelText('Offline message bodies') as HTMLSelectElement).value).toBe(
+      'default',
+    );
+    expect((screen.getByLabelText('Check for new mail') as HTMLSelectElement).value).toBe('30');
+  });
+
+  it('writes the depth alone, crossing no key for the cap or the cadence', () => {
+    render(<AccountsDetail />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open ada@example.test' }));
+
+    fireEvent.change(screen.getByLabelText('How far back mail syncs'), { target: { value: '12' } });
+
+    expect(ipc.dispatch).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
+      '{"settings":{"set_sync_settings":{"account":"work","depth_months":12}}}',
+    );
+  });
+
+  it('writes the whole mailbox as a zero depth', () => {
+    render(<AccountsDetail />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open ada@example.test' }));
+
+    fireEvent.change(screen.getByLabelText('How far back mail syncs'), { target: { value: '0' } });
+
+    expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
+      '{"settings":{"set_sync_settings":{"account":"work","depth_months":0}}}',
+    );
+  });
+
+  it('writes the body cap in every state, the words honest to the per-message rule', () => {
+    render(<AccountsDetail />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open ada@example.test' }));
+
+    const cap = screen.getByLabelText('Offline message bodies');
+    fireEvent.change(cap, { target: { value: 'off' } });
+    expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
+      '{"settings":{"set_sync_settings":{"account":"work","body_cap":"off"}}}',
+    );
+
+    fireEvent.change(cap, { target: { value: 'everything' } });
+    expect(JSON.stringify(ipc.dispatch.mock.calls[1]?.[0])).toBe(
+      '{"settings":{"set_sync_settings":{"account":"work","body_cap":"everything"}}}',
+    );
+
+    fireEvent.change(cap, { target: { value: 'default' } });
+    expect(JSON.stringify(ipc.dispatch.mock.calls[2]?.[0])).toBe(
+      '{"settings":{"set_sync_settings":{"account":"work","body_cap":{"bytes":{"octets":268435456}}}}}',
+    );
+  });
+
+  it('writes a custom per-message figure stated in mebibytes', () => {
+    render(<AccountsDetail />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open ada@example.test' }));
+
+    fireEvent.change(screen.getByLabelText('Offline message bodies'), {
+      target: { value: 'custom' },
+    });
+    expect(ipc.dispatch).not.toHaveBeenCalled();
+
+    const figure = screen.getByLabelText('Maximum per message (MiB)');
+    fireEvent.change(figure, { target: { value: '5' } });
+    fireEvent.blur(figure);
+
+    expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
+      '{"settings":{"set_sync_settings":{"account":"work","body_cap":{"bytes":{"octets":5242880}}}}}',
+    );
+  });
+
+  it('seeds the custom figure from a standing custom cap', () => {
+    useSettingsStore.getState().applySnapshot(
+      snapshot([
+        row({
+          sync: { depth_months: 3, body_cap: { bytes: { octets: 1048576 } }, poll_minutes: 30 },
+        }),
+      ]),
+    );
+    render(<AccountsDetail />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open ada@example.test' }));
+
+    expect((screen.getByLabelText('Offline message bodies') as HTMLSelectElement).value).toBe(
+      'custom',
+    );
+    expect((screen.getByLabelText('Maximum per message (MiB)') as HTMLInputElement).value).toBe(
+      '1',
+    );
+  });
+
+  it('writes the cadence in minutes', () => {
+    render(<AccountsDetail />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open ada@example.test' }));
+
+    fireEvent.change(screen.getByLabelText('Check for new mail'), { target: { value: '90' } });
+
+    expect(ipc.dispatch).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(ipc.dispatch.mock.calls[0]?.[0])).toBe(
+      '{"settings":{"set_sync_settings":{"account":"work","poll_minutes":90}}}',
+    );
+  });
+});
+
 describe('the remove confirmation', () => {
   it('names the address and the destructive act behind it', () => {
     render(<AccountsDetail />);
@@ -170,5 +312,136 @@ describe('the remove confirmation', () => {
       useSettingsStore.getState().applySnapshot(snapshot([row()], 'remove_failed'));
     });
     expect(screen.getByRole('alert').textContent).toContain('could not be removed');
+  });
+});
+
+describe('the outgoing name', () => {
+  it('carries the display name beside the address on the row', () => {
+    useSettingsStore
+      .getState()
+      .applySnapshot(snapshot([row({ display_name: 'Ada Lovelace' })]));
+    render(<AccountsDetail />);
+
+    const open = screen.getByRole('button', { name: 'Open ada@example.test' });
+    expect(open.textContent).toContain('Ada Lovelace');
+    expect(open.textContent).toContain('ada@example.test');
+  });
+
+  it('asks once on the page for an account whose name is unanswered', () => {
+    useSettingsStore
+      .getState()
+      .applySnapshot(snapshot([row({ needs_sender_name: true })]));
+    render(<AccountsDetail />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open ada@example.test' }));
+
+    const ask = screen.getByRole('group', { name: /outgoing name/i });
+    expect(ask.textContent).toContain('ada@example.test');
+    fireEvent.change(screen.getByLabelText(/what name/i), {
+      target: { value: 'Ada Lovelace' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /set the name/i }));
+
+    expect(ipc.dispatch).toHaveBeenCalledWith({
+      settings: { set_sender_name: { account: 'work', name: 'Ada Lovelace' } },
+    });
+
+    // The answered ask leaves with the snapshot that carries the answer.
+    act(() => {
+      useSettingsStore.getState().applySnapshot(snapshot([row()]));
+    });
+    expect(screen.queryByLabelText(/what name/i)).toBeNull();
+  });
+
+  it('the ask offers the address alone as a real answer', () => {
+    useSettingsStore
+      .getState()
+      .applySnapshot(snapshot([row({ needs_sender_name: true })]));
+    render(<AccountsDetail />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open ada@example.test' }));
+
+    fireEvent.click(screen.getByRole('button', { name: /use the address alone/i }));
+
+    expect(ipc.dispatch).toHaveBeenCalledWith({
+      settings: { set_sender_name: { account: 'work', name: '' } },
+    });
+  });
+
+  it('a writable card edits the name, shows the refusal, and clears it when the push lands', () => {
+    useSettingsStore.getState().applySnapshot(
+      snapshot([row({ display_name: 'Ada Lovelace', sender_name_control: 'writable' })]),
+    );
+    render(<AccountsDetail />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open ada@example.test' }));
+
+    const field = screen.getByLabelText(/the name on the from line/i);
+    expect((field as HTMLInputElement).value).toBe('Ada Lovelace');
+    fireEvent.change(field, { target: { value: 'Augusta Ada King' } });
+    fireEvent.click(screen.getByRole('button', { name: /save the name/i }));
+    expect(ipc.dispatch).toHaveBeenCalledWith({
+      settings: { set_sender_name: { account: 'work', name: 'Augusta Ada King' } },
+    });
+
+    act(() => {
+      useSettingsStore.getState().applySnapshot(
+        snapshot([
+          row({
+            display_name: 'Augusta Ada King',
+            sender_name_control: 'writable',
+            sender_name_error: 'the server refused the write',
+          }),
+        ]),
+      );
+    });
+    expect(screen.getByRole('alert').textContent).toContain('the server refused the write');
+
+    act(() => {
+      useSettingsStore.getState().applySnapshot(
+        snapshot([row({ display_name: 'Augusta Ada King', sender_name_control: 'writable' })]),
+      );
+    });
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('a read-only card shows the name with its reason and offers no field', () => {
+    useSettingsStore.getState().applySnapshot(
+      snapshot([row({ display_name: 'Ada Lovelace', sender_name_control: 'read_only' })]),
+    );
+    render(<AccountsDetail />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open ada@example.test' }));
+
+    const card = screen.getByRole('group', { name: /outgoing name/i });
+    expect(card.textContent).toContain('Ada Lovelace');
+    expect(card.textContent).toMatch(/cannot be changed here/i);
+    expect(screen.queryByLabelText(/the name on the from line/i)).toBeNull();
+    expect(ipc.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('a local card edits the name and says where it lives', () => {
+    useSettingsStore.getState().applySnapshot(
+      snapshot([row({ display_name: 'Ada Lovelace', sender_name_control: 'local' })]),
+    );
+    render(<AccountsDetail />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open ada@example.test' }));
+
+    const card = screen.getByRole('group', { name: /outgoing name/i });
+    expect(card.textContent).toMatch(/kept in Astra Mail/i);
+    fireEvent.change(screen.getByLabelText(/the name on the from line/i), {
+      target: { value: 'Grace Hopper' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /save the name/i }));
+    expect(ipc.dispatch).toHaveBeenCalledWith({
+      settings: { set_sender_name: { account: 'work', name: 'Grace Hopper' } },
+    });
+  });
+
+  it('the edit field seeds empty where the account sends as the bare address', () => {
+    useSettingsStore.getState().applySnapshot(
+      snapshot([row({ display_name: 'ada@example.test', sender_name_control: 'local' })]),
+    );
+    render(<AccountsDetail />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open ada@example.test' }));
+
+    const field = screen.getByLabelText(/the name on the from line/i) as HTMLInputElement;
+    expect(field.value).toBe('');
   });
 });

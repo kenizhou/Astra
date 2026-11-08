@@ -80,6 +80,22 @@ pub async fn complete_jmap_reauth(
     Ok(fresh)
 }
 
+/// The fresh section a completed re-authentication answers, serialised as
+/// the whole `[jmap]` document the host's in-place swap consumes: the same
+/// shape [`complete_jmap_login`] answers for a first sign-in, so the
+/// swap's document handling is written once. A grant-carrying document
+/// holds no password beside it.
+///
+/// # Errors
+///
+/// Returns [`AccountError::Jmap`] when the section cannot serialise, which
+/// no section this module mints can.
+pub fn jmap_reauth_document(fresh: &JmapAccount) -> Result<String, AccountError> {
+    let mut root = toml::Table::new();
+    root.insert("jmap".into(), fresh.to_table().into());
+    toml::to_string(&root).map_err(|err| AccountError::Jmap(err.to_string()))
+}
+
 /// Checks that the section just signed into is the one being
 /// reconnected.
 ///

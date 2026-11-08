@@ -30,8 +30,14 @@ describe('the settings snapshot wire', () => {
       quote_below: false,
       view_mode: 'threaded',
       plugins_enabled: true,
+      notifications_enabled: true,
       default_calendar: { account: 'work', key: 'cal-1' },
+      language: 'fr-FR',
+      debug_enabled: true,
+      analytics_consented: true,
+      zone_offered: true,
     });
+    expect(snapshot.device_zone_offer).toBe('Asia/Shanghai');
     expect(snapshot.accounts).toEqual([
       {
         account: 'work',
@@ -46,6 +52,14 @@ describe('the settings snapshot wire', () => {
         dav_error: 'the re-dial could not reach the origin',
         refresh_error:
           'the diary could not be re-expanded under the new zone; set the zone again to retry',
+        crypto_method: 'none',
+        display_name: 'Ada Lovelace',
+        sender_name_control: 'writable',
+        sync: {
+          depth_months: 12,
+          body_cap: { bytes: { octets: 1024 } },
+          poll_minutes: 90,
+        },
       },
     ]);
     expect(snapshot.about).toEqual({
@@ -223,6 +237,76 @@ describe('the settings intent wire', () => {
       '{"settings":{"set_signature":{"account":"work","reply":true,"signature":null}}}',
     );
   });
+
+  it('carries the sender name, the empty name among the answers', () => {
+    expect(JSON.stringify(settingsIntents.setSenderName('work', 'Ada Lovelace'))).toBe(
+      '{"settings":{"set_sender_name":{"account":"work","name":"Ada Lovelace"}}}',
+    );
+    expect(JSON.stringify(settingsIntents.setSenderName('work', ''))).toBe(
+      '{"settings":{"set_sender_name":{"account":"work","name":""}}}',
+    );
+  });
+
+  it('carries the sender-name row fields additively', () => {
+    const row = (fixtureJson as SettingsSnapshot).accounts![0]!;
+    expect(row.display_name).toBe('Ada Lovelace');
+    expect(row.sender_name_control).toBe('writable');
+    expect(row.needs_sender_name).toBeUndefined();
+    expect(row.sender_name_error).toBeUndefined();
+  });
+});
+
+// The platform arms the Diagnostics, Privacy, language, and device-zone
+// surfaces ride, each pinned against its exact wire in
+// protocol_settings_tests.rs's the_platform_arms_cross_their_exact_wires.
+describe('the platform settings arms', () => {
+  it('crosses the debug toggle and the analytics consent', () => {
+    expect(JSON.stringify(settingsIntents.setDebugEnabled(true))).toBe(
+      '{"settings":{"set_debug_enabled":{"enabled":true}}}',
+    );
+    expect(JSON.stringify(settingsIntents.setAnalyticsConsented(true))).toBe(
+      '{"settings":{"set_analytics_consented":{"consented":true}}}',
+    );
+    expect(JSON.stringify(settingsIntents.setAnalyticsConsented(false))).toBe(
+      '{"settings":{"set_analytics_consented":{"consented":false}}}',
+    );
+  });
+
+  it('crosses the language tag verbatim', () => {
+    expect(JSON.stringify(settingsIntents.setLanguage('fr-FR'))).toBe(
+      '{"settings":{"set_language":{"language":"fr-FR"}}}',
+    );
+  });
+
+  it('crosses the device-zone report, acceptance, and dismissal', () => {
+    expect(JSON.stringify(settingsIntents.reportDeviceZone('Europe/Berlin'))).toBe(
+      '{"settings":{"report_device_zone":{"zone":"Europe/Berlin"}}}',
+    );
+    expect(JSON.stringify(settingsIntents.acceptDeviceZone('Europe/Berlin'))).toBe(
+      '{"settings":{"accept_device_zone":{"zone":"Europe/Berlin"}}}',
+    );
+    expect(JSON.stringify(settingsIntents.dismissDeviceZone())).toBe(
+      '{"settings":"dismiss_device_zone"}',
+    );
+  });
+
+  it('carries the device zone offer and the platform block fields additively', () => {
+    const snapshot = JSON.parse(
+      '{"settings":{"theme":"follow_host","twenty_four_clock":false,"zone":"Etc/UTC","first_day_of_week":"mo","horizon_days":42,"quote_below":true,"view_mode":"flat","language":"fr-FR","debug_enabled":true,"analytics_consented":true,"zone_offered":true},"about":{"version":""},"device_zone_offer":"Asia/Shanghai"}',
+    ) as SettingsSnapshot;
+    expect(snapshot.device_zone_offer).toBe('Asia/Shanghai');
+    expect(snapshot.settings.language).toBe('fr-FR');
+    expect(snapshot.settings.debug_enabled).toBe(true);
+    expect(snapshot.settings.analytics_consented).toBe(true);
+    expect(snapshot.settings.zone_offered).toBe(true);
+  });
+
+  it('carries the zone picked refusal word beside the older words', () => {
+    const snapshot = JSON.parse(
+      '{"settings":{"theme":"follow_host","twenty_four_clock":false,"zone":"Etc/UTC","first_day_of_week":"mo","horizon_days":42,"quote_below":true,"view_mode":"flat"},"about":{"version":""},"error":"zone_picked"}',
+    ) as SettingsSnapshot;
+    expect(snapshot.error).toBe('zone_picked');
+  });
 });
 
 // The dispatch ride: the constructors spread into ipc's `intents` under
@@ -240,6 +324,34 @@ describe('the settings command wire', () => {
     );
     expect(JSON.stringify(intents.removeAccount('work'))).toBe(
       '{"settings":{"remove_account":{"account":"work"}}}',
+    );
+  });
+});
+
+// The per-account sync settings: the row carries the effective triple, and
+// the intent crosses only the fields the editor named, exactly as the Rust
+// arm's serde skips spell them.
+describe('the per-account sync settings wire', () => {
+  it('carries the effective triple on the account row', () => {
+    const snapshot = fixtureJson as SettingsSnapshot;
+    const row = snapshot.accounts?.[0];
+    expect(row?.sync).toEqual({
+      depth_months: 12,
+      body_cap: { bytes: { octets: 1024 } },
+      poll_minutes: 90,
+    });
+  });
+
+  it('crosses only the named fields of a sync settings write', () => {
+    expect(
+      JSON.stringify(settingsIntents.setSyncSettings('work', { depth_months: 12 })),
+    ).toBe('{"settings":{"set_sync_settings":{"account":"work","depth_months":12}}}');
+    expect(
+      JSON.stringify(
+        settingsIntents.setSyncSettings('work', { body_cap: 'off', poll_minutes: 90 }),
+      ),
+    ).toBe(
+      '{"settings":{"set_sync_settings":{"account":"work","body_cap":"off","poll_minutes":90}}}',
     );
   });
 });

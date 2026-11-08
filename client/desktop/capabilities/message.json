@@ -1,0 +1,17 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "message",
+  "description": "Permissions for the Astra Mail message windows: the pop-out reading window and the print surface over one message, the same controls the frameless composer windows carry",
+  "windows": ["message-*"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-minimize",
+    "core:window:allow-maximize",
+    "core:window:allow-unmaximize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-start-dragging",
+    "core:window:allow-close",
+    "core:window:allow-is-maximized",
+    "core:event:allow-listen"
+  ]
+}

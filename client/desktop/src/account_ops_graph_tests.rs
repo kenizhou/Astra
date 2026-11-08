@@ -54,6 +54,7 @@ fn account_infos_answer_the_microsoft_kind_the_graph_address_and_the_standing_re
         Arc::clone(&dials),
         FakeStore::accepting(),
         Arc::clone(&refusals),
+        crate::commands_fakes::crypto_store(),
     );
 
     let infos = crate::runtime::build_runtime()
@@ -92,6 +93,7 @@ fn a_removed_account_s_refusal_goes_with_the_row() {
         Arc::clone(&dials),
         FakeStore::accepting(),
         Arc::clone(&refusals),
+        crate::commands_fakes::crypto_store(),
     );
 
     crate::runtime::build_runtime()

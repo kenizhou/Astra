@@ -15,7 +15,7 @@
 
 ## 动词
 
-今天交付二十六个：九个邮件、草稿与规则动词，十个 `ai` 动词，七个
+今天交付三十一个：十四个邮件、草稿与规则动词，十个 `ai` 动词，七个
 `knowledge` 与 `snippets` 动词。语法是两个位置词（`verb
 subverb`）加标志，且标志顺序自由：sidecar 应拼写为
 `astra-cli [--json] [--correlation-id <id>] <verb> <subverb> [--flag <value> ...]`，
@@ -30,6 +30,11 @@ subverb`）加标志，且标志顺序自由：sidecar 应拼写为
 | `folders list --account <id>` | 引擎存储的 mailbox 对象 | `folders`：id、名称、角色、父级、`unread_count`，按侧栏的规范顺序，树被展平，每行携带父级因此嵌套可推导 |
 | `messages list --account <id> [--folder <key>] [--limit <n>]` | 引擎存储的窗口化列表读取 | `messages`：key、发件人、主题、日期、未读、草稿、有无附件、预览 |
 | `messages read --account <id> --key <k> [--key <k>...]` | 引擎存储的整封邮件读取与缓存正文 | `messages`：信封加 `body.plain` 与 `body.html_present` |
+| `messages search --query <q> [--account <id>] [--folder <key>] [--limit <n>] [--offset <n>]` | 引擎的搜索面，分页 | `rows`（账户、key、主题、发件人、日期、未读、旗标、有无附件；无正文）、`total`、`offset`、`has_more`、`windowed`。不带 `--account` 时搜索覆盖索引中的每个账户，但排除各账户自己的废纸篓；带账户则覆盖其整个邮箱；文件夹只在命名账户内收窄且必须伴随账户。页默认二十，最多五十 |
+| `messages mark-read --account <id> --key <k> [--unread]` | 经引擎发件队列写入 `$seen` 关键字编辑 | `key`、`op`、`state`（`applied` 或 `queued`）；`--preview` 打印确切的编辑 |
+| `messages set-flagged --account <id> --key <k> [--clear]` | 经引擎发件队列写入 `$flagged` 关键字编辑 | `key`、`op`、`state`；`--preview` 打印确切的编辑 |
+| `messages archive --account <id> --key <k>` | 经引擎发件队列把邮件移入账户的归档 | `key`、`op`、`state`；`--preview` 打印确切的移动 |
+| `messages trash --account <id> --key <k>` | 经引擎发件队列把邮件移入账户的废纸篓；可从那里恢复 | `key`、`op`、`state`；`--preview` 打印确切的移动 |
 | `drafts save --account <id> --from <a> --to <a,...> [--cc <a,...>] --subject <s> (--plain <text> 或 --file <path> 或 stdin)` | 经引擎的 `put_draft` 写入 | `message_id`、`op`、`state`（`stored` 或 `queued`），已存储时附 `key` |
 | `drafts discard --account <id> --key <k>` | 经引擎的 `delete_draft` 写入 | `key`、`op`、`state`（`removed` 或 `queued`） |
 | `rules list` | 审计账本旁的规则存储 | `rules`：id、名称、条件、线词形式的 `actions`、enabled、`created_at`；存储的载荷超出封闭集时该动词响亮失败并点名规则 |
@@ -68,8 +73,20 @@ subverb`）加标志，且标志顺序自由：sidecar 应拼写为
   agent 读纯文本形式，渲染 HTML 是宿主的职责。
 - **预览打印动作本身，来自执行它的同一个构建器。** `drafts save --preview`
   打印引擎调用将携带的那份草稿（地址、主题与正文长度，绝非正文文本）；
-  `drafts discard --preview` 打印确切的删除。预览不写入任何内容；审计行的
-  outcome 为 `preview`。
+  `drafts discard --preview` 打印确切的删除。四个 `messages` 动作动词打印引擎
+  调用将携带的确切 `MailEdit`，同一纪律：`mark-read` 与 `set-flagged` 展示
+  关键字变更，`archive` 与 `trash` 展示解析出的目的地。预览不写入任何内容；
+  审计行的 outcome 为 `preview`。
+- **动作动词止步于行级废纸篓。** `messages mark-read`、`set-flagged`、
+  `archive` 与 `trash` 是全部动作家族：不交付永久删除动词（应用层的 delete
+  保持不暴露），命名存储中不存在邮件的 key 是运行时错误而非排队的 op，因此
+  助手无法对从未移动过的邮件宣称成功。归档与废纸篓目的地的解析方式与应用层
+  相同（`astra-app/src/mail_writes.rs`）：先 SPECIAL-USE 角色，再约定文件夹名，
+  归档再退到 `\All` 邮箱；两个 crate 互不依赖，因此解析拼写两遍并由两套测试
+  钉住，即封闭动作集自身的先例。
+- **动作动词应答持久 op。** 每次编辑先经引擎发件队列排队：提供商一腿接收时
+  应答说 `applied`，op 等待应用排空时说 `queued`，即 drafts 动词自身的两态
+  应答。离线时应答恒为 `queued`，且关键字变更自那一刻起在存储中可见。
 - **正文只来自一个来源。** `--plain`、`--file` 或 stdin；同时给两个是用法错误。
 - **走存储的动词不经引擎应答。** `rules`、`ai`、`knowledge` 与 `snippets`
   读写 `ai.sqlite` 中审计账本旁的规则表、结果表、回复起草表（草稿池与风格画像、
@@ -146,10 +163,10 @@ id、数量、长度。地址、主题与正文文本绝不进入账本。解析
 
 **第二写入方的接缝，如实陈述。** CLI 与运行中的应用并行，打开同一个引擎存储。
 存储是 WAL 模式的 SQLite，带五秒 busy timeout；CLI 的每次写入都经引擎自己的
-`put_draft` 与 `delete_draft`，处于发件队列的租约与资源串行化之下，因此两个
-写入方不会互相破坏。但应用不会被推送：它通过自己的发件箱界面与下一次同步或
-刷新得知 CLI 写入的草稿，正如得知自己排队中的保存一样。CLI 的读取看到的是
-最后一次同步的状态，绝不向服务器索取更多。与纯读者相比有一处偏离：引擎的
+`put_draft`、`delete_draft` 与 `edit_mail`，处于发件队列的租约与资源串行化之下，
+因此两个写入方不会互相破坏。但应用不会被推送：它通过自己的发件箱界面与下一次
+同步或刷新得知 CLI 写入的草稿或编辑，正如得知自己排队中的保存一样。CLI 的读取
+看到的是最后一次同步的状态，绝不向服务器索取更多。与纯读者相比有一处偏离：引擎的
 `open` 即便在读取路径上也会创建并迁移存储，因此 CLI 首次运行在一个应用从未
 创建过的数据目录上时会创建 `astra.sqlite` 并带到本引擎的 schema。在应用旁这是
 无害的，因为两侧运行同一引擎版本、因此同一套迁移，这也是读动词不需要预置
@@ -159,8 +176,8 @@ id、数量、长度。地址、主题与正文文本绝不进入账本。解析
 
 | 规则 | 状态 | 位置 |
 |---|---|---|
-| 二十六个动词与固定信封 | ✅ | `cli/src/verbs` |
-| 每个变更动词（drafts、rules、knowledge 与 snippets）上的 `--preview`，各共享一个构建器 | ✅ | `cli/src/verbs/{drafts,rules,knowledge,snippets}.rs` |
+| 三十一个动词与固定信封 | ✅ | `cli/src/verbs` |
+| 每个变更动词（messages 动作、drafts、rules、knowledge 与 snippets）上的 `--preview`，各共享一个构建器 | ✅ | `cli/src/verbs/{messages,drafts,rules,knowledge,snippets}.rs` 与 `message_writes.rs` |
 | 每次调用带相关性 id 审计 | ✅ | `cli/src/audit.rs`、`cli/src/verbs/mod.rs` |
 | 发送类动词先解析后拒绝，退出码 3 | ✅ | `cli/src/verbs/mod.rs` |
 | 模型类动词（`ai style rebuild`、`ai digest generate`、`ai report generate`、`knowledge extract`、`snippets search`）先解析后拒绝，退出码 3 | ✅ | `cli/src/verbs/{ai,knowledge,snippets}.rs` |
@@ -170,8 +187,9 @@ id、数量、长度。地址、主题与正文文本绝不进入账本。解析
 | 每个动词的 `--json`，版本化 schema | ✅ | schema 固定为 1 |
 | CLI 自行生成规则或拨模型 | N/A | 生成接缝：agent 撰写，CLI 存储 |
 | 拒绝之外的发送类动词（不交付） | N/A | 发送类就是拒绝本身 |
-| 归档与标签动词 | ⬜ | 随其切片交付 |
-| 建立在动词之上的虚拟权限工具 | ⬜ | sidecar 的桥，SPA0 后续任务 |
+| 邮件动作动词（mark-read、set-flagged、archive、trash）与 MCP 搜索契约的作用域 | ✅ | `cli/src/verbs/{message_writes,messages}.rs` |
+| 永久删除动词（永不交付；行级废纸篓即上限） | N/A | 应用层的 delete 保持不暴露 |
+| 建立在动词之上的虚拟权限工具 | ✅ | sidecar 的桥与工具面，逐行门控 |
 
 已知缺口，记录而非静默：
 

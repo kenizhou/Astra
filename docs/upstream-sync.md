@@ -58,7 +58,19 @@ as reviewable merges instead of a manual re-pin. The loop:
   dependencies (`Cargo.toml`, `Cargo.lock`), behaviour, security. The
   dependencies bucket names rusqlite/libsqlite3-sys explicitly: the two
   stores share one libsqlite3-sys, so an upstream rusqlite bump can break
-  Astra in the same build.
+  Astra in the same build. Every `gh` call names the repository (`-R`): the
+  scheduled shell starts in no repository at all, and gh's own git
+  discovery fails there (the bug that once left five revisions pushed with
+  no PR). A range with no security classification opens READY and arms
+  GitHub auto-merge (`--auto --merge`, a merge commit, green gate); a
+  security-classified range opens as a draft and waits for morning review.
+  The loop is convergent from every state: a branch pushed with no PR
+  standing opens the PR for the standing range on the next run, and a
+  landed sync whose `last_ported` has not advanced yet (no open PR, the
+  branch tip an ancestor of main) advances it directly, the merge's own
+  bookkeeping. The security classifier word-boundaries its short acronyms
+  (`\brce\b` and kin): a bare `rce` pattern once matched inside the word
+  "source" and held clean syncs hostage.
 - **Sync PRs merge with a merge commit, never squash.** A squash merge
   means the branch tip never becomes an ancestor of main, every later sync
   re-diffs the whole tree, and the conflict-surfacing mechanism dies. (The
@@ -73,6 +85,14 @@ as reviewable merges instead of a manual re-pin. The loop:
   construction.
 - **On merge, advance `last_ported`.** The lock table's engine row stays
   the provenance record.
+- **The first in-tree delta is the MIME-wrap seam** (the ECS spec, landed
+  2026-10-23): `engine-provider`'s `MimeWrapper` trait and the
+  serde-defaulted `Draft::sign`/`Draft::encrypt` flags, provider-imap's
+  `wrap` module (the wrapper consulted pre-dial, the Sent-copy repair
+  re-wrapping), and a `PendingOutcome::Failed` detail so a refused op's
+  row says why. `git diff vendor-sync main -- vendor/engine` lists it;
+  every sync PR review should expect these files to differ and treat any
+  upstream touch to them as a conflict to resolve deliberately.
 - **The engine's own battery is not part of `cargo test --workspace`.**
   The vendored tree is a nested workspace excluded from membership, so its
   tests run only explicitly: `cd vendor/engine && cargo test --workspace`
@@ -86,3 +106,19 @@ as reviewable merges instead of a manual re-pin. The loop:
   own directory, or a build can be handed stale engine artifacts.
 - Security-classified syncs are always held for review and never
   auto-merged, matching the 22:00 contract's rule for every reference.
+
+### The 22:00 wiring
+
+A Windows Task Scheduler job runs the driver nightly, logging OUTSIDE the
+repository (`D:/Projects/mailclient/logs/vendor-sync.log`):
+
+```bash
+schtasks /Create /F /TN "Astra\vendor-upstream-sync" /SC DAILY /ST 22:00 \
+  /TR "\"C:\Program Files\Git\bin\bash.exe\" -lc 'D:/Projects/mailclient/Astra/scripts/dev/upstream-sync.sh >> D:/Projects/mailclient/logs/vendor-sync.log 2>&1'"
+```
+
+`upstream-sync.sh --dry-run` prints the current and new revisions with the
+classified digest and changes nothing; it is the way to watch a sync before
+letting it land. Any failure (a locked file, the network, `gh` auth, a
+failed pristine proof) exits non-zero into the log and is a morning-review
+item, never a silent skip.

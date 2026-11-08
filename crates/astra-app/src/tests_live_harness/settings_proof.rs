@@ -215,7 +215,11 @@ impl HostAccountOps<Box<dyn Provider>> for DocumentAccountStore {
         std::fs::remove_file(self.of(account.as_str())).map_err(|err| err.to_string())
     }
 
-    async fn store_crypto_method(&self, account: &AccountId, method: &str) -> Result<(), String> {
+    async fn store_crypto_method(
+        &self,
+        account: &AccountId,
+        method: &str,
+    ) -> Result<Option<Vec<Box<dyn Provider>>>, String> {
         let id = account.as_str().to_owned();
         let mut config =
             astra_account::load(self.of(&id)).map_err(|_| NOT_REGISTERED.to_owned())?;
@@ -226,7 +230,9 @@ impl HostAccountOps<Box<dyn Provider>> for DocumentAccountStore {
             }),
         };
         let document = config.to_toml().map_err(|err| err.to_string())?;
-        std::fs::write(self.of(&id), document).map_err(|err| err.to_string())
+        std::fs::write(self.of(&id), document).map_err(|err| err.to_string())?;
+        // The proof store re-dials nothing: the write answers no new providers.
+        Ok(None)
     }
 }
 

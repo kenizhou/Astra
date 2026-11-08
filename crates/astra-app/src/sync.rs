@@ -4,12 +4,19 @@
 //! in `sync_account`; the outbox drain a pass ends with lives in `outbox`; the fan-out
 //! here is what [`Intent::RefreshMail`](crate::Intent::RefreshMail) drives.
 
-use std::time::Instant;
+use std::{sync::Arc, time::Instant};
 
 use engine_api::{AccountId, CalendarDate, Provider, StreamTuning, SyncWindow};
 use futures::future::join_all;
 
-use crate::{accounts::NEW_ACCOUNT_SYNC_DEPTH_MONTHS, sync_account::sync_account_providers, App};
+use crate::{outage::PassOutcome, sync_account::sync_account_providers, App};
+
+/// One account's first-pass settle state: whether a pass has settled in
+/// this process, and the bell the joining driver waits on.
+pub(crate) struct FirstPass {
+    done: bool,
+    notify: Arc<tokio::sync::Notify>,
+}
 
 /// Objects a streamed pass asks the provider for per network round trip.
 pub(crate) const STREAM_FETCH_BATCH: usize = 200;
@@ -32,19 +39,8 @@ impl<P: Provider> App<P> {
         let accounts = self.account_handles().await;
         log::info!("refresh_mail: syncing {} account(s)", accounts.len());
         let sync_start = Instant::now();
-        join_all(accounts.iter().enumerate().map(|(at, account)| {
-            let tuning = self.sync_tuning();
-            async move {
-                sync_account_providers(
-                    &self.engine,
-                    account,
-                    self.connector.as_deref(),
-                    tuning,
-                    &self.sync_progress,
-                    at,
-                )
-                .await;
-            }
+        join_all(accounts.iter().enumerate().map(|(at, account)| async move {
+            self.run_account_pass(account, at).await;
         }))
         .await;
         // The pass committed new state, so the cached load is stale from here on.
@@ -71,28 +67,115 @@ impl<P: Provider> App<P> {
         let Some(account) = self.account_handle(id).await else {
             return;
         };
-        let tuning = self.sync_tuning();
         let at = self.account_ordinal(id).await;
-        sync_account_providers(
+        self.run_account_pass(&account, at).await;
+        self.invalidate_list_cache();
+    }
+
+    /// One account's whole pass, delivery end to end: the notification queue
+    /// arms against the store as it stands, the sync runs, the pass's
+    /// outcome folds into the outage state, and the account's missing
+    /// bodies warm under its own cap before the pass gives the account back.
+    /// The single seam the manual refresh, the account-add first sync, and
+    /// the host's background loop all drive, so every landing is the same
+    /// landing.
+    async fn run_account_pass(&self, account: &std::sync::Arc<crate::Account<P>>, at: usize) {
+        if account.providers.is_empty() {
+            log::info!("sync[a{at}]: skipped; no live mail providers");
+            self.settle_first_pass(&account.id);
+            return;
+        }
+        let tuning = self.sync_tuning_for(&account.id);
+        self.new_mail
+            .arm(&self.engine, &account.id, &account.identity)
+            .await;
+        let report = sync_account_providers(
             &self.engine,
-            &account,
+            account,
             self.connector.as_deref(),
             tuning,
             &self.sync_progress,
             at,
         )
         .await;
-        self.invalidate_list_cache();
+        let outcome = PassOutcome::of(&report);
+        self.record_pass_outcome(&account.id, outcome);
+        if outcome == PassOutcome::Success {
+            self.new_mail.import_done(&account.id);
+        }
+        let cap = self
+            .pane
+            .lock()
+            .expect("preferences mutex poisoned")
+            .sync_settings(&account.id)
+            .body_cap;
+        if let Some(provider) = account.providers.first() {
+            self.warm_account_bodies(&account.id, provider, cap).await;
+        }
+        self.settle_first_pass(&account.id);
     }
 
-    /// The tuning every pass runs with: the fetch and chunk sizes above, bounded by the
-    /// product default sync-depth window.
-    // A method rather than an associated function: the depth is per-account in the
-    // engine's contract, and this is where a per-account choice will be read from.
-    #[allow(clippy::unused_self)]
-    pub(crate) fn sync_tuning(&self) -> StreamTuning {
-        StreamTuning::new(STREAM_FETCH_BATCH, STREAM_CHUNK_SIZE)
-            .within(sync_window(NEW_ACCOUNT_SYNC_DEPTH_MONTHS))
+    /// Resolves once the account's first pass in this process has settled,
+    /// or at once when the app holds no such account: the join the host's
+    /// delivery driver opens its watch after, so the engine's prescribed
+    /// loop (sync once before trusting the watch) holds without the driver
+    /// duplicating the pass the boot or the add already spawned. An account
+    /// the app does not hold never runs a pass, so waiting on it would
+    /// strand the driver for the life of the process.
+    pub async fn wait_first_pass(&self, id: &AccountId) {
+        if self.account_handle(id).await.is_none() {
+            return;
+        }
+        let notify = {
+            let mut passes = self.first_passes.lock().expect("first-pass mutex poisoned");
+            let entry = passes.entry(id.clone()).or_insert_with(|| FirstPass {
+                done: false,
+                notify: Arc::new(tokio::sync::Notify::new()),
+            });
+            if entry.done {
+                return;
+            }
+            Arc::clone(&entry.notify)
+        };
+        // The bell is armed before the second look, so a pass settling
+        // between the two cannot strand the waiter.
+        let wait = std::pin::pin!(notify.notified());
+        if self
+            .first_passes
+            .lock()
+            .expect("first-pass mutex poisoned")
+            .get(id)
+            .is_some_and(|entry| entry.done)
+        {
+            return;
+        }
+        wait.await;
+    }
+
+    /// Marks the account's first pass settled and wakes every driver
+    /// waiting on it.
+    fn settle_first_pass(&self, id: &AccountId) {
+        let mut passes = self.first_passes.lock().expect("first-pass mutex poisoned");
+        let entry = passes.entry(id.clone()).or_insert_with(|| FirstPass {
+            done: false,
+            notify: Arc::new(tokio::sync::Notify::new()),
+        });
+        entry.done = true;
+        entry.notify.notify_waiters();
+    }
+
+    /// The tuning one account's pass runs with: the fetch and chunk sizes
+    /// above, bounded by the account's own sync-depth window, which the
+    /// per-account setting widens or narrows and the product default holds
+    /// for an account that has set none.
+    pub(crate) fn sync_tuning_for(&self, account: &AccountId) -> StreamTuning {
+        let months = self
+            .pane
+            .lock()
+            .expect("preferences mutex poisoned")
+            .sync_settings(account)
+            .depth_months;
+        StreamTuning::new(STREAM_FETCH_BATCH, STREAM_CHUNK_SIZE).within(sync_window(months))
     }
 
     /// Puts back what the previous run left unfinished in the outbox.
@@ -145,3 +228,7 @@ fn cutoff(today: time::Date, months: i32) -> Option<time::Date> {
     let day = today.day().min(month.length(year));
     time::Date::from_calendar_date(year, month, day).ok()
 }
+
+#[cfg(test)]
+#[path = "sync_tests.rs"]
+mod tests;

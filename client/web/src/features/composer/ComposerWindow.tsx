@@ -30,19 +30,24 @@ import { useSettingsStore } from '@/features/settings/settingsStore';
 import { ComposerPane } from './Composer';
 import { ComposerTitleBar } from './ComposerTitleBar';
 import { defaultSendAccount } from './composeWindow';
+import { draftResumeByKey } from './draftOpen';
 import { useComposerStore, type MailtoOpen } from './composerStore';
+import type { SharedFile } from './shareOpen';
 import { fromLabelFor } from './useComposeRequest';
 
 // One hydration per window, StrictMode safe: the double-mounted effect's
 // second run finds the session already taken and returns.
 let hydratedFor: CompositionId | null = null;
 
-/** Opens the window's composition: the transfer's resumed draft, the
- *  URL's mailto prefill, the pending request's, or a blank one. */
+/** Opens the window's composition: the draft row's resumed copy, the
+ *  transfer's resumed draft, the URL's mailto prefill, the pending
+ *  request's, the URL share set's, or a blank one. */
 async function openComposerSession(
   composition: CompositionId,
   resumeAccount: string | null,
+  draftKey: string | null,
   prefill: MailtoOpen | null,
+  shares: SharedFile[] | null,
 ): Promise<void> {
   if (hydratedFor === composition) {
     return;
@@ -54,6 +59,9 @@ async function openComposerSession(
     const account = defaultSendAccount();
     if (account !== undefined) {
       useComposerStore.getState().newMessage(account, composition);
+      if (shares !== null) {
+        useComposerStore.getState().seedShares(shares);
+      }
     }
     return;
   }
@@ -66,6 +74,34 @@ async function openComposerSession(
     useAccountStore.getState().applySnapshot(accountsSnapshot);
     useSettingsStore.getState().applySnapshot(preferences);
     useDraftStore.getState().applySnapshot(hint);
+    if (resumeAccount !== null && draftKey !== null) {
+      // A Drafts row's open: the window resumes exactly the copy the row
+      // names, not the account's latest, with the files it carries as
+      // pre-attached rows. A null answer (the copy moved or was deleted
+      // between the click and the open) opens the blank tail below the
+      // arms this open never owed: the latest-entry read would silently
+      // edit the account's newest words under the clicked row's name, and
+      // the take would spend a request this open never asked for.
+      const view = await draftResumeByKey(
+        { account: resumeAccount, key: draftKey },
+        composition,
+      );
+      if (view !== null) {
+        useComposerStore
+          .getState()
+          .hydrate(
+            view,
+            { id: view.account, label: fromLabelFor(view.account) },
+            composition,
+          );
+        return;
+      }
+      const account = defaultSendAccount();
+      if (account !== undefined) {
+        useComposerStore.getState().newMessage(account, composition);
+      }
+      return;
+    }
     if (resumeAccount !== null) {
       // The dock-to-window transfer: the dock saved its draft and closed
       // behind it, so the resume reads exactly those words back. The wire
@@ -94,6 +130,17 @@ async function openComposerSession(
         .newMessage({ id: prefill.from, label: fromLabelFor(prefill.from) }, composition, prefill);
       return;
     }
+    if (shares !== null) {
+      // A share window: a blank composition carrying the hand-off's files
+      // as the pending set, no request asked for or spent. The names seed
+      // the rows; the paths stay in the pending state alone.
+      const account = defaultSendAccount();
+      if (account !== undefined) {
+        useComposerStore.getState().newMessage(account, composition);
+        useComposerStore.getState().seedShares(shares);
+      }
+      return;
+    }
     const request = await takeComposeRequest();
     if (request !== null) {
       useComposeRequestStore.getState().dismiss();
@@ -114,23 +161,29 @@ async function openComposerSession(
 interface ComposerWindowProps {
   /** The composition this window holds, from the URL. */
   composition: CompositionId;
-  /** The account a transfer resumes the latest draft of, from the URL. */
+  /** The account a transfer or a draft row open resumes from, from the URL. */
   resumeAccount?: string | null;
+  /** The stored copy's key a draft row open resumes, from the URL. */
+  draftKey?: string | null;
   /** The mailto prefill this window opens from, from the URL. */
   prefill?: MailtoOpen | null;
+  /** The pending share set this window opens with, from the URL. */
+  shares?: SharedFile[] | null;
 }
 
 export function ComposerWindow({
   composition,
   resumeAccount = null,
+  draftKey = null,
   prefill = null,
+  shares = null,
 }: ComposerWindowProps) {
   const open = useComposerStore((s) => s.open && s.composition !== null);
   const subject = useComposerStore((s) => s.subject);
 
   useEffect(() => {
-    void openComposerSession(composition, resumeAccount, prefill);
-  }, [composition, resumeAccount, prefill]);
+    void openComposerSession(composition, resumeAccount, draftKey, prefill, shares);
+  }, [composition, resumeAccount, draftKey, prefill, shares]);
 
   // The save hint's surface, the one live feed the window needs.
   useEffect(() => {

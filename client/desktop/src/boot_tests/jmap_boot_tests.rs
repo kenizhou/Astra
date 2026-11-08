@@ -213,8 +213,10 @@ fn boot_dials(
         super::super::stored::dial_stored(
             &dials,
             &store,
+            &crate::commands_fakes::crypto_store(),
             unused_graph_dial(),
             unused_google_dial(),
+            super::unused_mail_dial(),
             &refusals,
         )
         .await
@@ -270,7 +272,10 @@ fn a_stored_jmap_password_document_dials_its_one_provider_at_boot() {
 fn the_folder_binder_reconnects_the_account_wide_provider_for_any_key() {
     let base = jmap_server(static_token);
     let (dials, id) = registered("boot-jmap-folder", password_config(&base), &base);
-    let connector = super::super::stored::DialConnector::new(Arc::clone(&dials));
+    let connector = super::super::stored::DialConnector::new(
+        Arc::clone(&dials),
+        crate::commands_fakes::crypto_store(),
+    );
 
     let bound = crate::runtime::build_runtime()
         .expect("the test runtime builds")

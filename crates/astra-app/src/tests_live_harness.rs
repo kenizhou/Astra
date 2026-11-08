@@ -57,7 +57,12 @@
 //! proof submits its own mail so the history it ranks is the run's
 //! own, and every seeded card and sent mail is withdrawn at the end (cards
 //! through the raw seeding helper: the product ships no contact delete; mail
-//! through the product's own delete). The gated settings tests (`settings`)
+//! through the product's own delete). The avatar proof (`people_avatar`)
+//! seeds a card carrying an inline photo whose address matches a seeded
+//! note's sender and proves the row's avatar ask both sides of the cache
+//! fill: the monogram first, the cached photo after one fetch through the
+//! installed leg; its card is withdrawn the same raw way and the note is
+//! the harness's own seed, so nothing else moves. The gated settings tests (`settings`)
 //! prove the settings editor's account seam live: the dav editor's save dials
 //! the real `connect_dav_providers` over a scratch config mirroring the
 //! store's merge rule and dial-before-persist ordering, installs both legs,
@@ -70,6 +75,23 @@
 //! html), and a link round trips both ways (a good https target arriving as
 //! an anchor, a javascript: target in the sent wire degrading to plain
 //! text), each proof withdrawing both copies like every delivery proof.
+//! The gated delivery proofs (`delivery_proof`) pin the background loop's
+//! landings over the same wire: the recipient's INBOX watch, opened
+//! through the account layer's own `open_watch`, answers `Changed` for a
+//! mail submitted while the watch stands, the account's ordinary pass
+//! lands it, and the core's new-mail queue holds its notice; the poll
+//! arm's pass lands a delivered mail through the same seam beside the
+//! cadence the settings carry. The gated warm proof (`warm_proof`) runs
+//! the per-account body cap's states over the account's own passes: the
+//! off account as metadata alone, the byte cap's pass warming until the
+//! missing-body read empties, and the return to off dropping the cached
+//! sources with the reading pipeline still answering, the opened note put
+//! back to unread at the end. The gated outage proof (`outage_proof`)
+//! proves the classification over a real refused dial: a config pointing
+//! at a released loopback port (the shared harness is never stopped), two
+//! refused passes putting the only dialled account in outage with the
+//! banner answering, and the real dial's own successful pass clearing
+//! both.
 //!
 //! The gated JMAP tests (`jmap`) prove the password account end to end over
 //! the harness's plaintext JMAP origin: the dial's session snapshot, the
@@ -77,11 +99,47 @@
 //! copies withdrawn, the calendar read the session advertises (seeded over
 //! CalDAV, read back over JMAP), and the OAuth gate's fail-soft refusal.
 //!
+//! The gated reading proofs (`reading_proof`) pin the reading batch's three
+//! live contracts: a `.eml` export read back byte for byte against a fresh
+//! engine source read over a message whose folded headers and
+//! quoted-printable body ride the harness's own submission listener (the
+//! app's serialiser writes canonical shapes only, so the raw submission is
+//! the only way the received source carries the shapes byte honesty needs);
+//! a junk report through the app's own verb filing a note into the Junk
+//! folder and its correction filing it back, both filings observed through
+//! the app's folder views; and a fixed-width table body keeping its hard
+//! pixel width into the sanitised html the wrapper clamps. Every proof
+//! withdraws its own mail through the product's delete.
+//!
+//! The gated finisher proofs pin the SP2x rows' verbs over the same wire:
+//! the permanent delete (`delete_proof`) removes a note submitted into the
+//! recipient's INBOX for good (gone from the stored set, no folder holding
+//! it, the harness Trash included, the other note intact); the boot calendar
+//! fetch (`calendar_boot_proof`) lands a seeded event in the engine's store
+//! through the boot's own join with no refresh dispatched, and one plain
+//! refresh paints it; and the drafts reopen (`drafts_reopen_proof`) stores a
+//! draft carrying one attachment through the engine's put path, resumes it
+//! by its row's key with the carried part answering, and shows the adopted
+//! composition's save superseding the stored copy rather than storing a
+//! second beside it. Each proof withdraws what it made, so the harness keeps
+//! the shape the other suites pin.
+//!
 //! The JMAP-detection test cannot dial `https://example.test/.well-known/jmap` (the
 //! harness domain resolves nowhere), so it rebases the probe onto the harness's plain
 //! HTTP JMAP origin (`127.0.0.1:2080`) through the detection crate's dev-harness
 //! `well_known_base_override`, mirroring mail-calendar's live JMAP tests; no
 //! host trust store is touched.
+//!
+//! The gated mail OAuth proofs (`mail_oauth_proof`) pin the wizard's question
+//! over the real server: the capability line read by the engine's probe verbs
+//! on both legs (the IMAP pre-auth line on 2143, the EHLO AUTH line on the
+//! submission listener), the decision composed over the product's own TLS
+//! acceptance walk into the registration-needed shape (the harness offers the
+//! OAuth mechanisms and serves no issuer), and the discovery's fail-soft over
+//! the resolving-nowhere domain: the issuer chain answers its miss inside its
+//! budget and the un-accepted certificate's refused dial answers the password
+//! screen, never an error. The full sign-in round trip waits on a real
+//! identity provider, exactly as JMAP's proof does.
 //!
 //! The tests skip unless `ASTRA_LIVE_HARNESS=1`, so the offline `cargo test` stays
 //! green. Against a running harness:
@@ -115,8 +173,12 @@ use crate::{reference::MessageRef, App, AppObserver, FolderRef, Intent, RowRef, 
 // fixtures the delivery proofs share; `folder_proof` the folder proofs'.
 #[path = "tests_live_harness/calendar.rs"]
 mod calendar;
+#[path = "tests_live_harness/calendar_boot_proof.rs"]
+mod calendar_boot_proof;
 #[path = "tests_live_harness/calendar_brief.rs"]
 mod calendar_brief;
+#[path = "tests_live_harness/calendar_detail.rs"]
+mod calendar_detail;
 #[path = "tests_live_harness/calendar_invite.rs"]
 mod calendar_invite;
 #[path = "tests_live_harness/calendar_proof.rs"]
@@ -125,8 +187,14 @@ mod calendar_proof;
 mod composer_proof;
 #[path = "tests_live_harness/crypto_send.rs"]
 mod crypto_send;
+#[path = "tests_live_harness/delete_proof.rs"]
+mod delete_proof;
+#[path = "tests_live_harness/delivery_proof.rs"]
+mod delivery_proof;
 #[path = "tests_live_harness/drafts.rs"]
 mod drafts;
+#[path = "tests_live_harness/drafts_reopen_proof.rs"]
+mod drafts_reopen_proof;
 #[path = "tests_live_harness/folder_proof.rs"]
 mod folder_proof;
 #[path = "tests_live_harness/folders.rs"]
@@ -139,28 +207,40 @@ mod gate;
 mod jmap;
 #[path = "tests_live_harness/list.rs"]
 mod list;
+#[path = "tests_live_harness/mail_oauth_proof.rs"]
+mod mail_oauth_proof;
 #[path = "tests_live_harness/move_to_folder.rs"]
 mod move_to_folder;
+#[path = "tests_live_harness/outage_proof.rs"]
+mod outage_proof;
 #[path = "tests_live_harness/people.rs"]
 mod people;
+#[path = "tests_live_harness/people_avatar.rs"]
+mod people_avatar;
 #[path = "tests_live_harness/people_proof.rs"]
 mod people_proof;
 #[path = "tests_live_harness/proof.rs"]
 mod proof;
 #[path = "tests_live_harness/reading.rs"]
 mod reading;
+#[path = "tests_live_harness/reading_proof.rs"]
+mod reading_proof;
 #[path = "tests_live_harness/reply.rs"]
 mod reply;
 #[path = "tests_live_harness/search.rs"]
 mod search;
 #[path = "tests_live_harness/send.rs"]
 mod send;
+#[path = "tests_live_harness/sender_identity.rs"]
+mod sender_identity;
 #[path = "tests_live_harness/settings.rs"]
 mod settings;
 #[path = "tests_live_harness/settings_proof.rs"]
 mod settings_proof;
 #[path = "tests_live_harness/unified.rs"]
 mod unified;
+#[path = "tests_live_harness/warm_proof.rs"]
+mod warm_proof;
 
 /// The harness connection details from the environment, or `None` to skip.
 fn harness() -> Option<(String, String, String, String)> {
@@ -208,6 +288,7 @@ fn account(
             server_name: host.to_owned(),
             username: user.to_owned(),
             password: Some(Secret::new(password.to_owned())),
+            oauth: None,
             security: ConnectionSecurity::ImplicitTls,
         }),
         smtp: Some(SmtpAccount {
@@ -246,7 +327,7 @@ async fn dial_with_accepted_certificate(
     let account_id = config.account_id().expect("the account id");
     let connections = ImapConnections::new();
 
-    let Err(error) = connect_mail_providers(&connections, &config, &account_id).await else {
+    let Err(error) = connect_mail_providers(&connections, &config, &account_id, None).await else {
         panic!("the harness certificate was trusted without an accepted exception");
     };
     let AccountError::CertificateRejected { rejected, .. } = error else {
@@ -255,7 +336,7 @@ async fn dial_with_accepted_certificate(
 
     let accepted = CertificateException::new(rejected.server_name(), rejected.certificate());
     let config = account(host, port, user, password, vec![accepted]);
-    let providers = connect_mail_providers(&connections, &config, &account_id)
+    let providers = connect_mail_providers(&connections, &config, &account_id, None)
         .await
         .expect("the dial with the accepted certificate");
     (account_id, providers, config, connections)

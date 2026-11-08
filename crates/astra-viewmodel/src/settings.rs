@@ -46,6 +46,12 @@ pub struct SettingsSnapshot {
     /// write that landed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<SettingsError>,
+    /// The device zone the core has offered and no answer has landed for,
+    /// carried verbatim as the IANA id. Absent crosses no key: no offer
+    /// stands, either because none was made or because the accept, the
+    /// pick, or the dismissal answered it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_zone_offer: Option<String>,
 }
 
 /// Why one settings write refused or failed, as the surface states it.
@@ -63,11 +69,19 @@ pub enum SettingsError {
     HorizonOutOfBounds,
     /// The account's removal could not be completed; nothing went.
     RemoveFailed,
+    /// The device-zone offer's acceptance refused: a zone the person
+    /// picked stands, and an accepted offer never overrides a pick.
+    ZonePicked,
 }
 
 /// The persisted settings the screen renders: the preferences document's
 /// settings fields projected as one block, every setting a surface can
 /// change named beside the value it holds now.
+///
+/// The independent toggles are deliberately plain bools: each answers its
+/// own question on the screen, and folding them into a state machine would
+/// invent a union no setting writer recognises.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SettingsBlock {
     /// The theme: follow the host, or an explicit light or dark override.
@@ -96,11 +110,62 @@ pub struct SettingsBlock {
     /// Whether plugins run at all (the admin policy switch). On by default.
     #[serde(default = "default_plugins_enabled")]
     pub plugins_enabled: bool,
+    /// Whether new mail raises OS notifications. On by default; the
+    /// notification switch the settings screen carries. Absent on a
+    /// snapshot from a build before the field reads back on.
+    #[serde(default = "default_notifications_enabled")]
+    pub notifications_enabled: bool,
+    /// Whether the log level is debug, the Diagnostics toggle. Off by
+    /// default: the log runs at info until the person raises it, and the
+    /// logger reads the level at boot, so the change lands with the next
+    /// launch. Absent on a snapshot from a build before the field reads
+    /// back as off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub debug_enabled: bool,
+    /// Whether analytics consent stands, the Privacy switch. Off by
+    /// default: nothing is recorded until the person consents, and one
+    /// click withdraws it again. Absent on a snapshot from a build before
+    /// the field reads back as off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub analytics_consented: bool,
+    /// The language tag the copy and the dates follow, for example
+    /// `en-GB`. The tag carries the mechanism, not a catalogue of
+    /// translations: the picker's offered set is the surface's own
+    /// honesty, and the core holds no language list. Absent reads back as
+    /// the default tag.
+    #[serde(
+        default = "default_language",
+        skip_serializing_if = "is_default_language"
+    )]
+    pub language: String,
+    /// Whether the device-zone offer has been made, its once-latch: the
+    /// first-run offer never returns on a later launch. Absent on a
+    /// snapshot from a build before the field reads back as off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub zone_offered: bool,
 }
 
 /// The switch's default: plugins run unless the preference says otherwise.
 fn default_plugins_enabled() -> bool {
     true
+}
+
+/// The notifications switch's default: new mail is announced unless the
+/// preference says otherwise.
+fn default_notifications_enabled() -> bool {
+    true
+}
+
+/// The language preference's default: the tag the copy and the dates
+/// follow before the person names another.
+fn default_language() -> String {
+    "en-GB".to_owned()
+}
+
+/// The language preference's default, as the serialiser's omission test
+/// reads it.
+fn is_default_language(language: &str) -> bool {
+    language == default_language()
 }
 
 /// The theme the chrome renders: follow the host, or an explicit override.
@@ -212,6 +277,53 @@ pub struct AccountSettingsRow {
     /// an account that seeds nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signatures: Option<AccountSignatures>,
+    /// The account's own sync settings: the fetch depth, the body cap, and
+    /// the cadence, the effective values the pass runs with. Absent crosses
+    /// no key, so a snapshot from a build before the field reads back with
+    /// the product defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync: Option<AccountSyncSettings>,
+    /// The name the account's mail goes out under: the adopted, edited, or
+    /// locally stored name, falling back to the address when none stands
+    /// (the bare-address send). Absent on a wire from a build before the
+    /// field reads back empty, which a surface renders as the address.
+    #[serde(default)]
+    pub display_name: String,
+    /// How the account's outgoing name is governed, off the providers'
+    /// identity capability. Absent on a wire from a build before the field
+    /// reads back `local`, the least claim: the name is this app's to keep.
+    #[serde(default)]
+    pub sender_name_control: SenderNameControl,
+    /// Whether the account still needs its name asked for once: no value
+    /// stands stored, not even the deliberate empty one. The wizard's and
+    /// the accounts page's ask-state; the settled state crosses no key.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub needs_sender_name: bool,
+    /// Why the account's last name write was refused, when it was: a name
+    /// that cannot go in a header (too long, or carrying a control
+    /// character; nothing stores) or a provider's refusal of the push
+    /// while the local name stood (it is the From line's source, and this
+    /// names why the provider's copy did not move). Absent crosses no key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sender_name_error: Option<String>,
+}
+
+/// How the account's outgoing name is governed, as the settings row states
+/// it. Crosses as a snake_case word.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SenderNameControl {
+    /// The provider holds the name and the account holder may change it
+    /// (JMAP, Google): a change is pushed back best-effort.
+    Writable,
+    /// The provider holds the name and the account holder may not (a
+    /// directory a tenant administrator owns): the card shows it and offers
+    /// no field.
+    ReadOnly,
+    /// The transport owns no name at all (IMAP/SMTP): the app's own stored
+    /// value is the From line's source.
+    #[default]
+    Local,
 }
 
 /// Why a Microsoft account's grant needs the person to act, as the
@@ -230,6 +342,38 @@ pub enum GrantState {
     /// about the account syncs, and the account never dialled. Never an
     /// outage word.
     SignInExpired,
+}
+
+/// How much of a message an account keeps a warm offline copy of. Crosses as
+/// a snake_case word, or a map for the byte figure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncBodyCap {
+    /// Metadata only: nothing warms, and a pass drops whatever an open
+    /// cached, so every body loads over the network.
+    Off,
+    /// Everything: any size warms and nothing is ever dropped.
+    Everything,
+    /// Messages up to this many octets warm and stay; larger ones keep their
+    /// list row and load their body on open.
+    Bytes {
+        /// The per-message ceiling, in octets.
+        octets: u64,
+    },
+}
+
+/// One account's own sync settings, as the settings row carries them: the
+/// effective depth, body cap, and cadence, the product defaults where the
+/// account sets none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountSyncSettings {
+    /// How many months of history the account syncs; zero is the whole
+    /// mailbox.
+    pub depth_months: u16,
+    /// The body cap state.
+    pub body_cap: SyncBodyCap,
+    /// The polling cadence, in minutes.
+    pub poll_minutes: u16,
 }
 
 /// An account's kind, as the row states it. Crosses as a snake_case word.

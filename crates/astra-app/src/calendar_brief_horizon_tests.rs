@@ -76,6 +76,7 @@ async fn a_brief_beyond_the_watermark_widens_every_account_store() {
     app.dispatch(Intent::Calendar(CalendarIntent::SetRange {
         start: utc("2026-12-10T00:00:00Z"),
         days: 6,
+        view: None,
     }))
     .await
     .unwrap();
@@ -133,6 +134,7 @@ async fn a_refused_widening_fails_the_brief_and_rolls_the_watermark_back() {
     app.dispatch(Intent::Calendar(CalendarIntent::SetRange {
         start: utc("2026-12-14T00:00:00Z"),
         days: 2,
+        view: None,
     }))
     .await
     .unwrap();

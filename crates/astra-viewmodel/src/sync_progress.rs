@@ -47,6 +47,26 @@ pub enum AccountSyncState {
 pub struct SyncProgressSnapshot {
     /// One entry per account with a sync position to report.
     pub accounts: Vec<AccountSyncProgress>,
+    /// The delivery state beside the progress: the offline banner and the
+    /// accounts in outage. Absent on a snapshot from a build before the
+    /// field, which reads back as the healthy empty state.
+    #[serde(default)]
+    pub delivery: DeliveryState,
+}
+
+/// The delivery state the sync-progress snapshot carries: whether the
+/// offline banner shows, and which dialled accounts are in outage. Folded
+/// from pass outcomes, so a pass or a watch failure moves it and any
+/// successful pass clears the account it names.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeliveryState {
+    /// Whether the offline banner shows: every dialled account in outage
+    /// and at least one dialled.
+    pub offline_banner: bool,
+    /// The accounts in outage, in account order; each one wears the outage
+    /// badge on its pane rows.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outages: Vec<AccountId>,
 }
 
 #[cfg(test)]

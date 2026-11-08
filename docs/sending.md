@@ -57,6 +57,13 @@ outbox, a durable queue the engine owns, and goes out when it can.
   class parks the op and everything else settles it. The app asks the queue whether
   the message is still there rather than re-reading the error, so there is one
   rule, in the one place that owns it.
+- **A crypto send is this same queue.** With an account's encryption method set,
+  the engine's drain wraps the message through the account's installed MIME
+  wrapper before any socket dials (the wire variant the same ciphertext minus the
+  `Bcc` header, the Sent copy filed by the engine). A recipient the trust gate
+  cannot encrypt to settles the op `Failed` with the gate's reason on the row,
+  and Send again retries the whole wrap once the keys are fixed: no separate
+  outbox, no separate rules.
 - **A queued send is on screen the moment it queues, offline included.** The queue
   lives in the store, not on a server, so being offline is no reason not to show
   it, and offline is the ordinary reason a send queues in the first place. Every
@@ -247,9 +254,18 @@ INBOX the three seeded notes and astra2 empty.
   unit fakes, not by the live harness.** Killing a process mid-send inside a test
   is a harness ability that does not exist yet; the recovery path
   (`recover_outbox` at start-up) runs on every real boot.
-- **The sender's name is the account's address.** No per-account outgoing name is
-  asked or stored yet, so mail goes out as the bare address the account dials
-  with; the From picker and its default arrive with their slice.
+- **The outgoing name.** The core adopts the provider's own
+  name where its identities answer one when the account joins, stores the name
+  the person sets beside the account (the From line every send carries, pushed
+  best-effort to the provider where the account holder owns its copy), and
+  answers the ask-once state; the wizard's ask step, the settings card, the
+  picker showing the name beside the address, and the pane rows all ship, so
+  this contract is complete. The name never validates client-side beyond the
+  engine's own bound, two rules not one: control characters and a 128-codepoint
+  length, refused at the setting (the difference between a settings field that
+  says no and a mailbox that cannot send), the refusal never echoing the name.
+  The one send-side exception: the iTIP scheduling reply sends From the bare
+  matched ATTENDEE address, the RFC 6047 rule the calendar surface documents.
 - **A resumed reply degrades to plain mail.** The compose request is session
   state and the draft save carries no threading, so a reply resumed after an app
   restart sends as a new message, its quote flattened back in as plain words.
@@ -271,6 +287,9 @@ INBOX the three seeded notes and astra2 empty.
 - **The quote style is a constant.** Every quote opens in the indented style;
   the account preference and the per-message override arrive with the settings
   slice.
-- **A forward does not carry the original's attachments.** The quote is the
-  body's text alone; re-sending received files needs the attachments staging
-  flow, so a forward's document opens with nothing attached.
+- **A forward carries the original's attachments as files, not inline
+  pictures.** The Forward intent names the original's parts, the composer
+  opens holding them as removable rows, and the submit re-reads the bytes
+  off the original and refuses a part that will not come back; the
+  original's inline `cid:` pictures ride as ordinary files, so their inline
+  placement in the body does not survive the forward.

@@ -94,13 +94,28 @@ impl<P: Provider> App<P> {
         }
     }
 
-    /// Syncs a just-added account's mail and rebuilds the snapshot so its folders
-    /// appear. The host registers the account first (via
-    /// [`add_new_account_deferred`](Self::add_new_account_deferred)), then spawns this
-    /// in the background: the install is instant and this is the slow half. A no-op for
-    /// an unknown account id.
+    /// Syncs a just-added account's mail and rebuilds the snapshot so its
+    /// folders appear, with the account's calendar fetched beside the mail
+    /// sync: the diary fills without opening it. The host registers the
+    /// account first (via
+    /// [`add_new_account_deferred`](Self::add_new_account_deferred)), then
+    /// spawns this in the background: the install is instant and this is
+    /// the slow half. The join's identity half rides at the head: the
+    /// provider's own name, where it holds one, is adopted before the sync
+    /// so the ask-once step the wizard draws needs nothing from the
+    /// network. A no-op for an unknown account id.
     pub async fn sync_added_account(&self, id: &AccountId) {
-        self.sync_account(id).await;
+        self.adopt_sender_name(id).await;
+        // Side by side, not one after the other: the mail sync and the
+        // calendar fetch talk to different servers and neither needs the
+        // other, and a calendar refresh can take longer than the first mail
+        // sync did. The fetch is the refresh body's silent half, never the
+        // intent: the prime already painted the persisted diary and the
+        // pane's own open refresh republishes it, so a boot-time intent
+        // would signal the calendar surface needlessly.
+        let mail = self.sync_account(id);
+        let calendar = self.fetch_account_calendar(id);
+        let ((), ()) = futures::join!(mail, calendar);
         self.rebuild_snapshot().await;
     }
 

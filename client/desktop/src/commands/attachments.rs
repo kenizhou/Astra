@@ -49,10 +49,18 @@ pub(crate) trait SaveHost {
 }
 
 /// The production host: the dialog plugin's save dialog beside a plain
-/// file write.
-struct HostSave<'a> {
+/// file write. Shared with the `.eml` save, the reading pane's other Save
+/// As over the same two host services.
+pub(crate) struct HostSave<'a> {
     /// The shell handle the dialog plugin answers through.
     app: &'a tauri::AppHandle,
+}
+
+impl<'a> HostSave<'a> {
+    /// The production host over `app`'s dialog plugin and filesystem.
+    pub(crate) fn new(app: &'a tauri::AppHandle) -> Self {
+        Self { app }
+    }
 }
 
 impl SaveHost for HostSave<'_> {

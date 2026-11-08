@@ -10,11 +10,15 @@
 // every test module's `commands_fakes::…` paths unchanged.
 mod snapshots;
 
-// The fake's whole AppPort impl beside the A3 assist pulls' seeds, its
-// own child for the same limit (one trait impl for the one fake, so the
-// block cannot split); the re-export keeps the seeds' type nameable
-// through the paths the tests already use.
+// The fake's whole AppPort impl, its own child for the same limit (one
+// trait impl for the one fake, so the block cannot split); the re-export
+// keeps the seeds' type nameable through the paths the tests already use.
 mod port;
+
+// The assist pulls' seed records, their own child beside the port module
+// so that file stays under the same limit beside the trait impl that serves
+// them.
+mod seeds;
 
 // The MCP host fixture (an empty backend over the in-memory ledger in a
 // per-test scratch directory), its own child for the same limit, for
@@ -24,13 +28,15 @@ mod mcp_host;
 pub(crate) use mcp_host::host;
 
 use std::{
+    collections::VecDeque,
     path::PathBuf,
     sync::{Arc, Mutex},
 };
 
 use astra_app::{
     AttachmentContent, AttachmentReadError, AvatarView, Chip, ComposeIntent, ContactDraftInput,
-    DraftResume, DraftsIntent, Intent, OutboxIntent,
+    DraftResume, DraftsIntent, EmlContent, EmlReadError, Intent, NewMailBatch, OutboxIntent,
+    PassOutcome,
 };
 use astra_viewmodel::{
     CalendarSnapshot, ComposeKind, ComposeRequestSnapshot, DraftSaveState, DraftStatusSnapshot,
@@ -47,7 +53,7 @@ use crate::{
 
 pub(crate) use snapshots::{compose_prefill, open_snapshot};
 
-pub(crate) use port::{AssistSeeds, BriefSeeds, DocsSeeds};
+pub(crate) use seeds::{AssistSeeds, BriefSeeds, DocsSeeds};
 
 /// A scratch directory for one test's account index.
 pub(crate) fn scratch(name: &str) -> PathBuf {
@@ -89,6 +95,11 @@ pub(crate) struct FakeApp {
     /// a test can assert the command hands the webview's ids through to the
     /// core.
     pub(crate) attachment_into: Mutex<Vec<(String, String, u32)>>,
+    /// The `.eml` read's answer; `Err` stands in for the typed refusal.
+    pub(crate) eml: Mutex<Result<EmlContent, EmlReadError>>,
+    /// The (account, key) pairs the `.eml` read was asked for, so a test
+    /// can assert the command hands the webview's ids through to the core.
+    pub(crate) eml_into: Mutex<Vec<(String, String)>>,
     /// The draft-status snapshot the pull answers with: what the fake's drafts
     /// dispatches last published.
     pub(crate) draft_status: Mutex<Option<DraftStatusSnapshot>>,
@@ -106,6 +117,10 @@ pub(crate) struct FakeApp {
     /// The (account, composition) pairs the resume was asked to open, so a test
     /// can assert the command hands the webview's ids through to the core.
     pub(crate) resumed_into: Mutex<Vec<(String, String)>>,
+    /// The (account, key, composition) triples the by-key resume was asked to
+    /// open, so a test can assert the command hands the webview's row
+    /// reference through to the core.
+    pub(crate) resumed_keys: Mutex<Vec<(String, String, String)>>,
     /// The sending snapshot the pull answers with: what the fake's submit and
     /// outbox dispatches last published over its own op counter.
     pub(crate) sending: Mutex<SendingQueue>,
@@ -137,6 +152,12 @@ pub(crate) struct FakeApp {
     pub(crate) docs: Mutex<DocsSeeds>,
     /// The calendar snapshot the pull answers with.
     pub(crate) calendar: Mutex<CalendarSnapshot>,
+    /// The event detail read's answer.
+    pub(crate) event_detail: Mutex<Option<astra_viewmodel::EventDetail>>,
+    /// The (account, key) pairs the detail read was asked for, so a test
+    /// can assert the command hands the webview's reference through to
+    /// the core.
+    pub(crate) detail_into: Mutex<Vec<(String, String)>>,
     /// The calendar brief pull's seeds and their record, under the same
     /// one-struct-one-lock discipline.
     pub(crate) brief: Mutex<BriefSeeds>,
@@ -158,6 +179,19 @@ pub(crate) struct FakeApp {
     pub(crate) avatar_into: Mutex<Vec<String>>,
     /// The settings snapshot the pull answers with.
     pub(crate) settings: Mutex<SettingsSnapshot>,
+    /// The product events the recorder was asked to record, in order:
+    /// the consent gate is the real core's, so the fake answers the
+    /// asks, not the gate.
+    pub(crate) analytics: Mutex<Vec<astra_app::AnalyticsEvent>>,
+    /// The batches the delivery drain answers with, in order; an empty
+    /// queue answers the empty batch.
+    pub(crate) batches: Mutex<VecDeque<NewMailBatch>>,
+    /// The sizes of the batches the delivery drain has taken.
+    pub(crate) drained: Mutex<Vec<usize>>,
+    /// The pass outcomes the delivery loop recorded, with their accounts.
+    pub(crate) outcomes: Mutex<Vec<(String, PassOutcome)>>,
+    /// The accounts whose first pass the delivery loop waited on.
+    pub(crate) first_waits: Mutex<Vec<String>>,
 }
 
 impl FakeApp {
@@ -182,12 +216,15 @@ impl FakeApp {
             reading: Mutex::new(None),
             attachment: Mutex::new(Ok(None)),
             attachment_into: Mutex::new(Vec::new()),
+            eml: Mutex::new(Err(EmlReadError::Unresolved)),
+            eml_into: Mutex::new(Vec::new()),
             draft_status: Mutex::new(None),
             compose_request: Mutex::new(None),
             mailto_open: Mutex::new(None),
             mailto_into: Mutex::new(Vec::new()),
             stored_draft: Mutex::new(None),
             resumed_into: Mutex::new(Vec::new()),
+            resumed_keys: Mutex::new(Vec::new()),
             sending: Mutex::new(SendingQueue::default()),
             chips: Mutex::new(Vec::new()),
             chips_into: Mutex::new(Vec::new()),
@@ -200,6 +237,8 @@ impl FakeApp {
             assist: Mutex::new(AssistSeeds::default()),
             docs: Mutex::new(DocsSeeds::default()),
             calendar: Mutex::new(CalendarSnapshot::default()),
+            event_detail: Mutex::new(None),
+            detail_into: Mutex::new(Vec::new()),
             brief: Mutex::new(BriefSeeds::default()),
             people: Mutex::new(PeopleSnapshot::default()),
             card_seed: Mutex::new(None),
@@ -209,6 +248,11 @@ impl FakeApp {
             avatar: Mutex::new(AvatarView::default()),
             avatar_into: Mutex::new(Vec::new()),
             settings: Mutex::new(SettingsSnapshot::default()),
+            analytics: Mutex::new(Vec::new()),
+            batches: Mutex::new(VecDeque::new()),
+            drained: Mutex::new(Vec::new()),
+            outcomes: Mutex::new(Vec::new()),
+            first_waits: Mutex::new(Vec::new()),
         })
     }
 
@@ -239,6 +283,7 @@ impl FakeApp {
                     bcc: bcc.clone(),
                     subject: subject.clone(),
                     body_text,
+                    attachments: Vec::new(),
                 });
                 let saving = DraftStatusSnapshot {
                     composition: composition.as_str().to_owned(),
@@ -262,6 +307,11 @@ impl FakeApp {
             DraftsIntent::Discard { .. } => {
                 *self.stored_draft.lock().unwrap() = None;
                 *self.draft_status.lock().unwrap() = None;
+            }
+            // The row's own verb: the stored copy goes with no composition
+            // to forget, so the hint stands.
+            DraftsIntent::DiscardStored { .. } => {
+                *self.stored_draft.lock().unwrap() = None;
             }
             DraftsIntent::Close { .. } => {
                 *self.draft_status.lock().unwrap() = None;
@@ -405,11 +455,19 @@ impl AccountCredentialStore for FakeStore {
 /// The agent relay runs the stub sidecar in echo mode (no process starts
 /// until an agent command asks for one), and the background client stays
 /// off: no tier list or provider key is read out of the test environment.
+/// An in-memory crypto store for the host's tests: the wrapper factory and
+/// the crypto-method write read one, and no test here dials a real key.
+pub(crate) fn crypto_store() -> Arc<astra_crypto_store::CryptoStore> {
+    Arc::new(astra_crypto_store::CryptoStore::open_in_memory().expect("the in-memory crypto store"))
+}
+
 pub(crate) fn state(name: &str, app: Arc<FakeApp>, store: Arc<FakeStore>) -> AppState {
-    let (relay, _sink, _data) = crate::agent::testkit::stub_relay(name, "echo", 3, 50);
+    let (relay, _sink, _data, ai_store) =
+        crate::agent::testkit::stub_relay_with_store(name, &["echo"], &[], 3, 50);
     AppState {
         app,
         agent: relay,
+        ai_store,
         mcp: mcp_host::host(name),
         plugins: Arc::new(crate::plugin::PluginRegistry::new(
             scratch(name).join("plugins"),
@@ -418,11 +476,14 @@ pub(crate) fn state(name: &str, app: Arc<FakeApp>, store: Arc<FakeStore>) -> App
         )),
         llm: None,
         connections: Arc::new(AccountDials::empty(&scratch(name))),
+        crypto_store: crypto_store(),
         photo_root: scratch(name).join("photos"),
         credential_store: store,
         oauth: crate::oauth::wiring::offline_surface(),
         refusals: Arc::new(crate::oauth::grant_refusals::GrantRefusals::new()),
         pending_mailto: Mutex::new(None),
+        pending_share: Mutex::new(None),
+        log_path: crate::logging::file_path(&scratch(name)),
         runtime: crate::runtime::build_runtime().expect("the test runtime builds"),
     }
 }

@@ -36,6 +36,13 @@ export type TextureMode = 'warm' | 'calm' | 'classic';
  *  list, docked beneath it, or hidden outright. */
 export type ReadingPosition = 'right' | 'bottom' | 'off';
 
+/** The reading body's zoom steps, one per step the control offers: the same
+ *  three-step shape the app font size takes. */
+export type ReadingZoomStep = 'small' | 'default' | 'large';
+
+/** One act a row swipe can take, the four the intent surface serves. */
+export type SwipeAction = 'archive' | 'trash' | 'read' | 'flag';
+
 /** The swatch catalogue the General page renders; swatch is the preview dot. */
 export const SKINS: ReadonlyArray<{ id: SkinId; label: string; swatch: string }> = [
   { id: 'iris', label: 'Iris', swatch: '#7a6ff0' },
@@ -55,6 +62,9 @@ const KEYS = {
   density: 'astra.density',
   texture: 'astra.texture',
   readingPosition: 'astra.readingPosition',
+  readingZoom: 'astra.readingZoom',
+  swipePrimary: 'astra.swipePrimary',
+  swipeSecondary: 'astra.swipeSecondary',
 } as const;
 
 function readSkin(): SkinId {
@@ -85,6 +95,23 @@ function readReadingPosition(): ReadingPosition {
   return raw === 'bottom' || raw === 'off' ? raw : 'right';
 }
 
+function readReadingZoom(): ReadingZoomStep {
+  const raw = localStorage.getItem(KEYS.readingZoom);
+  return raw === 'small' || raw === 'large' ? raw : 'default';
+}
+
+/** The standing swipe actions, one per direction, falling back to the
+ *  defaults when the stored value names no act. */
+function readSwipeAction(
+  key: 'swipePrimary' | 'swipeSecondary',
+  fallback: SwipeAction,
+): SwipeAction {
+  const raw = localStorage.getItem(KEYS[key]);
+  return raw === 'archive' || raw === 'trash' || raw === 'read' || raw === 'flag'
+    ? raw
+    : fallback;
+}
+
 interface AppearanceState {
   skin: SkinId;
   contrast: ContrastMode;
@@ -92,12 +119,18 @@ interface AppearanceState {
   density: DensityMode;
   texture: TextureMode;
   readingPosition: ReadingPosition;
+  readingZoom: ReadingZoomStep;
+  swipePrimary: SwipeAction;
+  swipeSecondary: SwipeAction;
   setSkin: (skin: SkinId) => void;
   setContrast: (contrast: ContrastMode) => void;
   setFontSize: (step: FontSizeStep) => void;
   setDensity: (density: DensityMode) => void;
   setTexture: (texture: TextureMode) => void;
   setReadingPosition: (position: ReadingPosition) => void;
+  setReadingZoom: (step: ReadingZoomStep) => void;
+  setSwipePrimary: (action: SwipeAction) => void;
+  setSwipeSecondary: (action: SwipeAction) => void;
 }
 
 /** Writes the five attributes onto the document root. */
@@ -119,6 +152,9 @@ export const useAppearanceStore = create<AppearanceState>((set) => ({
   density: readDensity(),
   texture: readTexture(),
   readingPosition: readReadingPosition(),
+  readingZoom: readReadingZoom(),
+  swipePrimary: readSwipeAction('swipePrimary', 'archive'),
+  swipeSecondary: readSwipeAction('swipeSecondary', 'trash'),
 
   setSkin: (skin) => {
     localStorage.setItem(KEYS.skin, skin);
@@ -153,6 +189,24 @@ export const useAppearanceStore = create<AppearanceState>((set) => ({
   setReadingPosition: (readingPosition) => {
     localStorage.setItem(KEYS.readingPosition, readingPosition);
     set({ readingPosition });
+  },
+
+  // The reading body's zoom and the swipe actions write no document-root
+  // attribute: the zoom reaches the reading body's own document, and the
+  // swipe actions reach the row the gesture lands on.
+  setReadingZoom: (readingZoom) => {
+    localStorage.setItem(KEYS.readingZoom, readingZoom);
+    set({ readingZoom });
+  },
+
+  setSwipePrimary: (swipePrimary) => {
+    localStorage.setItem(KEYS.swipePrimary, swipePrimary);
+    set({ swipePrimary });
+  },
+
+  setSwipeSecondary: (swipeSecondary) => {
+    localStorage.setItem(KEYS.swipeSecondary, swipeSecondary);
+    set({ swipeSecondary });
   },
 }));
 

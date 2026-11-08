@@ -50,13 +50,14 @@ import {
   type SendAccount,
 } from './composerOpening';
 import { normaliseRecipients } from './recipientTokens';
-import { REPLY_WITHOUT_ORIGIN, sendErrorMessage, submitIntent } from './composerSubmit';
+import { REPLY_WITHOUT_ORIGIN, SHARES_NOT_ATTACHED, sendErrorMessage, submitIntent } from './composerSubmit';
 import {
   seedSignatureBlocks,
   signatureForAccount,
   swapSeededSignature,
 } from './signatureSeeding';
 import { degradingLinkTargets, degradationSentence } from './sendLinks';
+import type { SharedFile } from './shareOpen';
 
 // The opening rules live in composerOpening; re-exported here so every
 // importer keeps the one path it always had.
@@ -96,6 +97,11 @@ interface ComposerStoreState {
   editor: EditorDocument;
   /** The composer's own staged files, keyed by the row's blob handle. */
   files: Record<string, File>;
+  /**
+   * The OS share hand-off's files, pending: their names render, their
+   * paths never do, and their bytes stage only when the read seam ships.
+   */
+  pendingShares: SharedFile[];
   /** Dropped pictures awaiting the inline-or-file answer, newest drop. */
   pendingImages: File[];
   /** What the last handover carried; equal content costs no dispatch. */
@@ -151,6 +157,10 @@ interface ComposerStoreState {
   changeFrom: (account: SendAccount) => void;
   /** Stands each picked file as a removable document row. */
   attachFiles: (files: File[]) => void;
+  /** Seeds the share hand-off's files as the composition's pending set. */
+  seedShares: (files: SharedFile[]) => void;
+  /** Drops one pending share by its name. */
+  removeShare: (share: { name: string; path: string }) => void;
   /** Takes one dropped batch: documents attach, pictures ask first. */
   dropFiles: (files: File[]) => void;
   /** Answers the dropped pictures' ask: inline content or a file row. */
@@ -178,6 +188,7 @@ const closedState = {
   subject: '',
   editor: emptyEditor(),
   files: {},
+  pendingShares: [],
   pendingImages: [],
   savedFingerprint: null,
   request: null,
@@ -260,10 +271,15 @@ export const useComposerStore = create<ComposerStoreState>((set, get) => ({
     // normalise their opening value at seed time, so every supplied address
     // is a finished pill, nothing sits in progress, and the fingerprint
     // compares against the normalised value. A resumed draft owns the
-    // document it comes with, so nothing seeds here.
+    // document it comes with, so nothing seeds here; the files it carries
+    // land as the document's pre-attached rows, removable like any other.
     useComposeRequestStore.getState().dismiss();
     set(() => {
-      const editor = documentToEditor(documentFromPlainText(view.body_text));
+      const document = {
+        ...documentFromPlainText(view.body_text),
+        attachments: view.attachments,
+      };
+      const editor = documentToEditor(document);
       const state = {
         ...closedState,
         open: true,
@@ -338,6 +354,15 @@ export const useComposerStore = create<ComposerStoreState>((set, get) => ({
   attachFiles: (files) =>
     set((state) => stage(state, files.map((file) => attachFile(file, false)))),
 
+  seedShares: (files) => set({ pendingShares: files }),
+
+  removeShare: (share) =>
+    set((state) => ({
+      pendingShares: state.pendingShares.filter(
+        (file) => file.name !== share.name || file.path !== share.path,
+      ),
+    })),
+
   dropFiles: (files) => {
     const pictures = files.filter((file) => file.type.startsWith('image/'));
     const documents = files.filter((file) => !file.type.startsWith('image/'));
@@ -411,6 +436,14 @@ export const useComposerStore = create<ComposerStoreState>((set, get) => ({
     if (state.to.trim() === '') {
       return;
     }
+    // A pending share stages no bytes (the read seam is the named
+    // remainder), and a send that dropped the named file silently would
+    // be a lie, so the send refuses with the sentence until the last one
+    // is removed.
+    if (state.pendingShares.length > 0) {
+      set({ sendError: SHARES_NOT_ATTACHED });
+      return;
+    }
     if (
       state.request !== null &&
       state.request.kind !== 'forward' &&
@@ -440,8 +473,9 @@ export const useComposerStore = create<ComposerStoreState>((set, get) => ({
       (intent) =>
         void dispatch(intent).then(
           () => {
-            // The submit carries no composition id, so the stored draft the
-            // autosave left behind goes with an explicit discard.
+            // The submit names the composition for its carried rows; the
+            // stored draft the autosave left behind still goes with an
+            // explicit discard.
             void dispatch(intents.discardDraft(composition));
             get().closePane();
           },

@@ -202,6 +202,8 @@ fn imap_test_dial(
                 &astra_account::ImapConnections::new(),
                 config,
                 &id,
+                // A connection probe sends nothing: no wrapper to install.
+                None,
             )
             .await
             .map(|_| ())
@@ -224,11 +226,7 @@ fn add_dial(
     astra_account::AccountError,
 > + '_ {
     |config: &astra_account::AccountConfig, id: &AccountId| {
-        let connections = astra_account::ImapConnections::new();
-        let providers = state
-            .runtime
-            .block_on(|| astra_account::connect_mail_providers(&connections, config, id));
-        providers.map(|providers| (providers, connections))
+        crate::crypto_wrapper::add_account_dial(&state.crypto_store, &state.runtime, config, id)
     }
 }
 
@@ -244,8 +242,25 @@ fn assemble_for(env: &SliceEnv) -> Result<AppState, String> {
     // OAuth surface stands over the offline stand-ins: no sign-in can
     // begin there, which nothing in the slice tries.
     let oauth = crate::oauth::wiring::offline_surface();
-    assemble_state(&env.data_dir, observer, agent_sink, draft_sink, oauth)
-        .map_err(|err| format!("the headless host could not boot: {err}"))
+    let state = assemble_state(&env.data_dir, observer, agent_sink, draft_sink, oauth)
+        .map_err(|err| format!("the headless host could not boot: {err}"))?;
+    // The background delivery rides the headless host too: its
+    // notifications land in the log, so the slice harness observes what
+    // would have crossed.
+    crate::delivery::spawn(
+        std::sync::Arc::clone(&state.app),
+        std::sync::Arc::clone(&state.connections),
+        std::sync::Arc::new(crate::notify::NotifyBridge::logged()),
+        &state.runtime,
+    );
+    // The periodic calendar refresh rides the headless host too, over the
+    // same change-gated body the windowed boot's timer drives.
+    crate::calendar_timer::spawn(
+        std::sync::Arc::clone(&state.app),
+        std::sync::Arc::clone(&state.connections),
+        &state.runtime,
+    );
+    Ok(state)
 }
 
 /// Which of `expected` no account's tree holds: the slice's assertion, as the diff a

@@ -10,7 +10,7 @@ use engine_api::{
     AccountId, DraftPut, MessageIdHeader, PendingOpId, PendingOpKind, Provider, ProviderKey,
 };
 
-use super::{build::digest, Composition, CompositionId, HeldSave};
+use super::{build::digest, CarriedPart, Composition, CompositionId, HeldSave};
 use crate::App;
 
 impl<P: Provider> App<P> {
@@ -38,6 +38,7 @@ impl<P: Provider> App<P> {
                 key: None,
                 saved: None,
                 held: Some(held.clone()),
+                carry: Vec::new(),
             },
         );
         Some(message_id)
@@ -121,6 +122,53 @@ impl<P: Provider> App<P> {
                 let put = serde_json::from_value::<DraftPut>(row.payload.clone()).ok()?;
                 (put.draft.message_id == *message_id).then_some((row.id, digest(&put.draft)))
             })
+    }
+
+    /// The carried parts a resume parked on `composition`, with their bytes: what a
+    /// plain submit resolves the document's standing rows against. Empty for a
+    /// composition that resumed nothing (a fresh message, a reply, a forward).
+    pub(crate) fn carried_parts(&self, composition: &CompositionId) -> Vec<CarriedPart> {
+        self.drafts
+            .lock()
+            .expect("drafts mutex poisoned")
+            .open
+            .get(composition)
+            .map(|record| record.carry.clone())
+            .unwrap_or_default()
+    }
+
+    /// The carried parts whose rows still stand in `document`: a row the composer
+    /// removed dropped its handle, so its file stamps neither the stored copy nor
+    /// the send.
+    pub(super) fn standing_carried(
+        &self,
+        composition: &CompositionId,
+        document: &astra_composer::ComposerDocument,
+    ) -> Vec<CarriedPart> {
+        let parked = self.carried_parts(composition);
+        if parked.is_empty() {
+            return parked;
+        }
+        let ids: Vec<u32> = parked.iter().map(|part| part.id).collect();
+        let standing = crate::compose_request::carry::standing(&ids, document);
+        parked
+            .into_iter()
+            .filter(|part| standing.contains(&part.id))
+            .collect()
+    }
+
+    /// Records the files a resume pre-attached onto the composition the resume
+    /// adopted, replacing whatever an earlier resume of the same id held.
+    pub(super) fn park_carried(&self, composition: &CompositionId, parts: Vec<CarriedPart>) {
+        if let Some(record) = self
+            .drafts
+            .lock()
+            .expect("drafts mutex poisoned")
+            .open
+            .get_mut(composition)
+        {
+            record.carry = parts;
+        }
     }
 
     /// Drops the composition and its hint, answering with what was known about it.

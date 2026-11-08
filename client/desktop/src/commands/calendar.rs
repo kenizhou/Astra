@@ -8,8 +8,8 @@
 //! blocking generation on the runtime's driver thread, the turn's
 //! correlation minted inside the core and landing in the ledger with it).
 
-use astra_app::{BriefDocumentError, MeetingBriefView};
-use astra_viewmodel::CalendarSnapshot;
+use astra_app::{BriefDocumentError, EventRef, MeetingBriefView};
+use astra_viewmodel::{CalendarSnapshot, EventDetail};
 use engine_api::{AccountId, CalendarDate};
 use tauri::State;
 
@@ -20,6 +20,19 @@ use crate::AppState;
 /// joined occurrences, the write states, and the now line data.
 pub(crate) fn calendar_of(state: &AppState) -> CalendarSnapshot {
     state.app.calendar()
+}
+
+/// Reads one event's detail over the reference the webview names: the
+/// roll-call (the organiser first, the tail folded into a count) and the
+/// full repeating rule with its read-back sentence, or `None` when the
+/// account's store holds no event at the key.
+pub(crate) async fn calendar_event_detail_of(
+    state: &AppState,
+    account: &str,
+    key: &str,
+) -> Option<EventDetail> {
+    let reference = EventRef::from_parts(account, key.to_owned())?;
+    state.app.calendar_event_detail(&reference).await
 }
 
 /// Generates the account's meeting brief over the civil day: the core's
@@ -48,6 +61,23 @@ pub(crate) async fn calendar_brief_generate_of(
 #[tauri::command]
 pub(crate) fn calendar(state: State<'_, AppState>) -> CalendarSnapshot {
     calendar_of(&state)
+}
+
+/// Reads one event's detail: the roll-call of who is on the event and the
+/// full repeating rule's read-back sentence, or null when nobody holds the
+/// event the webview named. The read is one targeted engine lookup on the
+/// runtime's driver thread, like the card seed the people editor rides.
+// Tauri's command macro hands `State` by value; the wrapper only reads through it.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) fn calendar_event_detail(
+    state: State<'_, AppState>,
+    account: String,
+    key: String,
+) -> Option<EventDetail> {
+    state
+        .runtime
+        .block_on(|| calendar_event_detail_of(&state, &account, &key))
 }
 
 /// Generates the account's meeting brief for the civil day, storing

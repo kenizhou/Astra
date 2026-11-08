@@ -79,6 +79,25 @@ describe('the submit wire', () => {
       '{"submit_rich_mail":{"from":"work","to":"you@test.local","cc":"","bcc":"","subject":"","document":{"blocks":[{"Paragraph":{"content":[{"Text":{"text":"With a file","bold":false,"italic":false,"underline":false,"font_size":null,"color":null,"highlight":null,"link":null}}]}}],"attachments":[]},"blobs":[{"handle":"blob-1","bytes":[1,2,3]}]}}',
     );
   });
+
+  it('names the composition a resumed draft sends under', () => {
+    expect(
+      JSON.stringify(
+        intents.submitRichMail({
+          from: 'work',
+          to: 'you@test.local',
+          cc: '',
+          bcc: '',
+          subject: 'The half',
+          document: document('Resumed words'),
+          blobs: [],
+          composition: 'compose-9',
+        }),
+      ),
+    ).toBe(
+      '{"submit_rich_mail":{"from":"work","to":"you@test.local","cc":"","bcc":"","subject":"The half","document":{"blocks":[{"Paragraph":{"content":[{"Text":{"text":"Resumed words","bold":false,"italic":false,"underline":false,"font_size":null,"color":null,"highlight":null,"link":null}}]}}],"attachments":[]},"blobs":[],"composition":"compose-9"}}',
+    );
+  });
 });
 
 // Every literal is byte-for-byte the JSON astra-app's protocol_tests.rs asserts

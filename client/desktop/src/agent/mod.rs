@@ -4,12 +4,16 @@
 //! answers back, and the frontend event seam everything streams through.
 //!
 //! Ported from the kylins agent module, trimmed to SPA0's chat: no
-//! conversation mirror, no background drafting, no compaction. The relay
-//! owns the process; [`supervisor`] owns the restart policy; the commands
-//! live in [`commands`].
+//! background drafting. The conversation mirror SP2y reopens is the
+//! chat-thread store ([`chats`]): every chat's turns record as rows and
+//! the store's rows are the one source of truth for the visible log;
+//! compaction and memory extraction stay out (the spec's named
+//! remainder). The relay owns the process; [`supervisor`] owns the
+//! restart policy; the commands live in [`commands`].
 
 // The command surface is declared `pub(crate)` only so the shell's invoke
 // handler can name its handlers; its logic is the crate's own.
+mod chats;
 pub(crate) mod commands;
 mod node;
 mod permissions;
@@ -30,6 +34,14 @@ mod e2e_tests;
 mod relay_tests;
 
 #[cfg(test)]
+#[path = "relay_chat_tests.rs"]
+mod relay_chat_tests;
+
+#[cfg(test)]
+#[path = "policy_tests.rs"]
+mod policy_tests;
+
+#[cfg(test)]
 #[path = "supervisor_tests.rs"]
 mod supervisor_tests;
 
@@ -42,6 +54,17 @@ pub(crate) use node::spawn_sidecar;
 pub(crate) use permissions::PendingApproval;
 pub(crate) use protocol::ModelConfig;
 pub(crate) use relay::SidecarRelay;
+
+// The pieces the ai module's gated live suites name (the chat live proof
+// assembles a relay beside them); test-only because the runtime reaches
+// the same items inside this module, and the pipeline stamp is the chat
+// rows' own pin.
+#[cfg(test)]
+pub(crate) use node::{find_node, resolve_cli_path};
+#[cfg(test)]
+pub(crate) use protocol::PermissionLevel;
+#[cfg(test)]
+pub(crate) use relay::{SidecarConfig, AGENT_PIPELINE_VERSION};
 
 use std::sync::Arc;
 
@@ -299,9 +322,10 @@ pub(crate) fn build_relay(
     )
 }
 
-/// The permission policy SPA0 ships: the read verbs run, the two draft
-/// verbs ask, and anything unknown fails closed inside the sidecar's
-/// bridge (an absent row means needs-approval there).
+/// The permission policy SPA0 ships: the read verbs run (search joins them
+/// with SP2y), the draft and act verbs ask, and anything unknown fails
+/// closed inside the sidecar's bridge (an absent row means needs-approval
+/// there).
 pub(crate) fn default_policy() -> std::collections::BTreeMap<String, protocol::PermissionPolicy> {
     let auto = || protocol::PermissionPolicy {
         level: protocol::PermissionLevel::Auto,
@@ -315,8 +339,13 @@ pub(crate) fn default_policy() -> std::collections::BTreeMap<String, protocol::P
         ("list_folders".to_string(), auto()),
         ("list_messages".to_string(), auto()),
         ("read_message".to_string(), auto()),
+        ("search_messages".to_string(), auto()),
         ("save_draft".to_string(), confirm()),
         ("discard_draft".to_string(), confirm()),
+        ("mark_read".to_string(), confirm()),
+        ("set_flagged".to_string(), confirm()),
+        ("archive_message".to_string(), confirm()),
+        ("move_to_trash".to_string(), confirm()),
     ]
     .into_iter()
     .collect()

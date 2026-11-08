@@ -42,11 +42,19 @@ impl SidecarRelay {
                 self.state_tx.send_replace(RelayState::Ready);
             }
             OutEnvelope::Event { session_id, event } => {
+                let payload = StreamPayload::from(&event);
                 let correlation = self.correlation_of(&session_id).await;
-                self.emit_event(&session_id, correlation, StreamPayload::from(&event));
+                if let Some(prompt_id) = self.prompt_of_session(&session_id).await {
+                    self.turn_fold_event(&prompt_id, &payload);
+                }
+                self.emit_event(&session_id, correlation, payload);
             }
             OutEnvelope::Done { id } => {
                 if let Some(prompt) = self.pending.lock().await.remove(&id) {
+                    // The fold point: the assistant's row lands before the
+                    // done crosses, so a UI that reloads on the settle
+                    // reads what the live log just became.
+                    self.turn_close(&id, super::threads::TurnFinish::Done);
                     self.emit_event(
                         &prompt.session_id,
                         Some(prompt.correlation),
@@ -61,6 +69,7 @@ impl SidecarRelay {
                     let mut pending = self.pending.lock().await;
                     if let Some(prompt) = pending.remove(&id) {
                         drop(pending);
+                        self.turn_close(&id, super::threads::TurnFinish::Error);
                         self.emit_event(
                             &prompt.session_id,
                             Some(prompt.correlation),
@@ -83,7 +92,10 @@ impl SidecarRelay {
                 }
                 None => log::warn!("agent: a result arrived for the unknown command {id}"),
             },
-            OutEnvelope::LlmCall { call } => self.record_llm_call(call).await,
+            OutEnvelope::LlmCall { call } => {
+                self.turn_note_llm(call.correlation_id.as_deref(), &call.model, &call.tier);
+                self.record_llm_call(call).await;
+            }
             OutEnvelope::PermissionRequest {
                 id,
                 tool_call_id,
@@ -92,7 +104,15 @@ impl SidecarRelay {
                 args,
                 preview,
             } => {
-                let correlation = self.any_correlation().await;
+                // The ask routes through the turn that staged its tool
+                // call, the same ownership the result envelope rides: an
+                // arbitrary in-flight prompt (a refused one sitting in the
+                // window) must never lend the ask its correlation. An ask
+                // nothing staged falls back to any live turn.
+                let correlation = match self.turn_owning_call(&tool_call_id) {
+                    Some((_session, correlation)) => Some(correlation),
+                    None => self.any_correlation().await,
+                };
                 let approval = PendingApproval {
                     id,
                     tool_call_id,
@@ -114,10 +134,24 @@ impl SidecarRelay {
                 status,
                 output,
             } => {
-                let correlation = self.any_correlation().await;
+                // The result envelope names no session of its own: the
+                // staged call's owner routes it, falling back to the main
+                // session the way the single-session relay always did.
+                let owned = self.turn_complete_tool(
+                    &tool_call_id,
+                    &tool,
+                    status_word(status),
+                    output.as_deref(),
+                );
+                let (session_id, correlation) = if let Some((session, correlation)) = owned {
+                    (session, Some(correlation))
+                } else {
+                    let correlation = self.any_correlation().await;
+                    (MAIN_SESSION_ID.to_string(), correlation)
+                };
                 self.record_tool_result(&tool, status, output.as_deref(), correlation.as_deref());
                 self.emit_event(
-                    MAIN_SESSION_ID,
+                    &session_id,
                     correlation,
                     StreamPayload::ToolResult {
                         tool_call_id,
@@ -178,8 +212,9 @@ impl SidecarRelay {
         let correlation = correlation.map_or_else(CorrelationId::generate, |id| {
             CorrelationId::new(id.to_owned())
         });
-        let mut arg_preview = output.unwrap_or_default().to_string();
-        arg_preview.truncate(200);
+        // The cap counts characters, never bytes: a multibyte output whose
+        // byte 200 lands inside a character must not panic the router.
+        let arg_preview: String = output.unwrap_or_default().chars().take(200).collect();
         let row = AuditRow {
             correlation,
             verb: tool.to_string(),

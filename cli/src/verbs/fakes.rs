@@ -18,9 +18,9 @@ use std::{
 
 use async_trait::async_trait;
 use engine_api::{
-    AccountId, CalendarWrites, Capabilities, Draft, EmailAddress, Engine, Keyword, Mailbox,
-    MailboxId, MailboxRole, MailboxWrites, Message, Provider, ProviderKey, StreamTuning,
-    SyncCommit, SyncObserver, SyncWindow, SystemKeyword, UtcDateTime,
+    AccountId, CalendarWrites, Capabilities, Draft, EmailAddress, Engine, Keyword, MailEdit,
+    MailEditReceipt, Mailbox, MailboxId, MailboxRole, MailboxWrites, Message, Provider,
+    ProviderKey, StreamTuning, SyncCommit, SyncObserver, SyncWindow, SystemKeyword, UtcDateTime,
 };
 use engine_core::ids::MessageId;
 use engine_core::membership::Memberships;
@@ -66,6 +66,9 @@ pub(super) struct FakeProvider {
     draft_puts: Mutex<Vec<(Draft, Option<ProviderKey>)>>,
     /// Every draft removal asked of the fake.
     draft_deletes: Mutex<Vec<ProviderKey>>,
+    /// Every mail edit asked of the fake, the record the act verbs' tests
+    /// compare their previews against.
+    mail_edits: Mutex<Vec<MailEdit>>,
     /// The next key a draft store hands back.
     next_key: AtomicU64,
 }
@@ -79,6 +82,7 @@ impl FakeProvider {
             sources: HashMap::new(),
             draft_puts: Mutex::new(Vec::new()),
             draft_deletes: Mutex::new(Vec::new()),
+            mail_edits: Mutex::new(Vec::new()),
             next_key: AtomicU64::new(1),
         }
     }
@@ -107,6 +111,11 @@ impl FakeProvider {
     /// Every recorded draft removal.
     pub(super) fn draft_deletes(&self) -> Vec<ProviderKey> {
         self.draft_deletes.lock().unwrap().clone()
+    }
+
+    /// Every recorded mail edit, in ask order.
+    pub(super) fn mail_edits(&self) -> Vec<MailEdit> {
+        self.mail_edits.lock().unwrap().clone()
     }
 }
 
@@ -218,6 +227,15 @@ impl Provider for FakeProvider {
         self.draft_deletes.lock().unwrap().push(draft.clone());
         Ok(())
     }
+
+    async fn edit_mail(
+        &self,
+        _account: &AccountId,
+        edit: &MailEdit,
+    ) -> ProviderResult<MailEditReceipt> {
+        self.mail_edits.lock().unwrap().push(edit.clone());
+        Ok(MailEditReceipt::new(edit.target().clone()))
+    }
 }
 
 impl MailboxWrites for FakeProvider {}
@@ -233,6 +251,14 @@ pub(super) fn inbox() -> Mailbox {
 /// A plain top-level folder.
 pub(super) fn folder(key: &str, name: &str) -> Mailbox {
     Mailbox::new(MailboxId::try_from(key).unwrap(), name)
+}
+
+/// A role-tagged folder, the trees the move verbs resolve their
+/// destinations from.
+pub(super) fn role_folder(key: &str, name: &str, role: MailboxRole) -> Mailbox {
+    let mut mailbox = folder(key, name);
+    mailbox.role = Some(role);
+    mailbox
 }
 
 /// A message `key` filed in `mailbox` about `subject`, from Ada, delivered at
@@ -254,5 +280,13 @@ pub(super) fn read(mut message: Message) -> Message {
     message
         .keywords
         .insert(Keyword::system(SystemKeyword::Seen));
+    message
+}
+
+/// Flags a message (the `$flagged` keyword).
+pub(super) fn flagged(mut message: Message) -> Message {
+    message
+        .keywords
+        .insert(Keyword::system(SystemKeyword::Flagged));
     message
 }

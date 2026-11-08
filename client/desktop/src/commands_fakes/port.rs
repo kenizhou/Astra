@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! The fake app's [`AppPort`] impl and the A3 assist pulls' seeds, split
-//! out of the fixture root so that root stays under the 500-line limit:
-//! one trait impl for the one fake, the inherited contract beside the
-//! assist answers, everything the command tests seed or assert in one
-//! place behind the fake's own locks.
+//! The fake app's [`AppPort`] impl, split out of the fixture root so that
+//! root stays under the 500-line limit: one trait impl for the one fake,
+//! the inherited contract beside the assist answers, everything the
+//! command tests seed or assert in one place behind the fake's own locks.
+//! The seed records the assist answers read sit in the sibling `seeds`.
 
 use astra_ai::{AiDocumentKind, KnowledgeId};
 use astra_app::{
     AppError, AttachmentContent, AttachmentReadError, AvatarView, BriefDocumentError, CardRef,
     Chip, CompositionId, ContactDraftInput, DigestView, DocumentError, DocumentView, DraftResume,
-    ExtractionSummary, Intent, KnowledgeView, MeetingBriefView, Snippet, SplitEntry,
-    SummariseMessageError, TranslateLanguage,
+    EmlContent, EmlReadError, ExtractionSummary, Intent, KnowledgeView, MeetingBriefView,
+    NewMailBatch, PassOutcome, Snippet, SplitEntry, SummariseMessageError, TranslateLanguage,
 };
 use astra_viewmodel::{
-    CalendarSnapshot, ComposeKind, ComposeRequestSnapshot, DraftStatusSnapshot,
+    CalendarSnapshot, ComposeKind, ComposeRequestSnapshot, DraftStatusSnapshot, EventDetail,
     MailboxListSnapshot, MailtoOpen, PeopleSnapshot, ReadingSnapshot, SendingSnapshot,
     SettingsSnapshot, SyncProgressSnapshot,
 };
@@ -22,98 +22,6 @@ use engine_api::{AccountId, CalendarDate, ProviderKey, RecipientSuggestion};
 use crate::app_state::{AppPort, HostAccount};
 
 use super::{compose_prefill, open_snapshot, FakeApp};
-
-/// The assist pulls' seeds and their record: every field the A3 command
-/// tests seed or assert, in one place.
-#[derive(Default)]
-pub(crate) struct AssistSeeds {
-    /// The knowledge listing's answer, the rows the fake holds.
-    pub(crate) knowledge: Vec<KnowledgeView>,
-    /// The accounts the knowledge listing was asked about.
-    pub(crate) knowledge_into: Vec<String>,
-    /// The extraction pull's answer.
-    pub(crate) extraction: ExtractionSummary,
-    /// The (account, limit) pairs the extraction pull was asked for.
-    pub(crate) extracted_into: Vec<(String, usize)>,
-    /// The ids the forget was asked to remove.
-    pub(crate) forgotten_into: Vec<String>,
-    /// The snippet listing's and the search's answer.
-    pub(crate) snippets: Vec<Snippet>,
-    /// The search texts the search pull was asked for.
-    pub(crate) searched_into: Vec<String>,
-    /// The autocomplete pull's answer.
-    pub(crate) suggestion: String,
-    /// The (before, after) pairs the autocomplete pull was asked for.
-    pub(crate) suggested_into: Vec<(String, String)>,
-    /// The translate action's answer.
-    pub(crate) translation: String,
-    /// The (account, key, lang) triples the translate action was asked
-    /// for, the lang as its wire word.
-    pub(crate) translated_into: Vec<(String, String, String)>,
-}
-
-/// The A4 documents pulls' seeds and their record: every field the
-/// documents command tests seed or assert, in one place.
-pub(crate) struct DocsSeeds {
-    /// The generate pulls' answer, an `Err` standing in for the typed
-    /// refusal a test maps onto the command error.
-    pub(crate) generated: Result<DigestView, DocumentError>,
-    /// The (account, kind word, days) triples the generate pulls were
-    /// asked for, the days as the boundary clamped them.
-    pub(crate) generated_into: Vec<(String, String, u32)>,
-    /// The latest read's answer.
-    pub(crate) latest: Option<DocumentView>,
-    /// The (account, kind word) pairs the latest read was asked for.
-    pub(crate) latest_into: Vec<(String, String)>,
-    /// The split pull's answer.
-    pub(crate) split: Vec<SplitEntry>,
-    /// The accounts the split pull was asked about.
-    pub(crate) split_into: Vec<String>,
-}
-
-impl Default for DocsSeeds {
-    fn default() -> Self {
-        Self {
-            generated: Ok(DigestView {
-                period_start: 0,
-                period_end: 0,
-                content: String::new(),
-                regenerated: false,
-            }),
-            generated_into: Vec::new(),
-            latest: None,
-            latest_into: Vec::new(),
-            split: Vec::new(),
-            split_into: Vec::new(),
-        }
-    }
-}
-
-/// The calendar brief pull's seeds and their record: the answer (an
-/// `Err` standing in for the typed refusal a test maps onto the command
-/// error) and the (account, day) pairs the pull was asked for, the day
-/// as its wire word.
-pub(crate) struct BriefSeeds {
-    /// The brief pull's answer.
-    pub(crate) brief: Result<MeetingBriefView, BriefDocumentError>,
-    /// The (account, day word) pairs the brief pull was asked for.
-    pub(crate) brief_into: Vec<(String, String)>,
-}
-
-impl Default for BriefSeeds {
-    fn default() -> Self {
-        Self {
-            brief: Ok(MeetingBriefView {
-                account: AccountId::try_from("work").expect("an account id"),
-                day: CalendarDate::new(1970, 1, 1).expect("the epoch day"),
-                state: astra_app::MeetingBriefState::NoMeetings,
-                brief: String::new(),
-                meetings: Vec::new(),
-            }),
-            brief_into: Vec::new(),
-        }
-    }
-}
 
 impl FakeApp {
     /// Seeds the fake's knowledge listing with one entry, minted around
@@ -190,6 +98,18 @@ impl AppPort for FakeApp {
         self.attachment.lock().unwrap().clone()
     }
 
+    async fn eml_content(
+        &self,
+        account: &AccountId,
+        key: &ProviderKey,
+    ) -> Result<EmlContent, EmlReadError> {
+        self.eml_into
+            .lock()
+            .unwrap()
+            .push((account.as_str().to_owned(), key.as_str().to_owned()));
+        self.eml.lock().unwrap().clone()
+    }
+
     fn draft_status(&self) -> Option<DraftStatusSnapshot> {
         self.draft_status.lock().unwrap().clone()
     }
@@ -223,6 +143,19 @@ impl AppPort for FakeApp {
         self.stored_draft.lock().unwrap().clone()
     }
 
+    async fn resume_draft_by_key(
+        &self,
+        message: &astra_app::MessageRef,
+        composition: CompositionId,
+    ) -> Option<DraftResume> {
+        self.resumed_keys.lock().unwrap().push((
+            message.account.as_str().to_owned(),
+            message.key.as_str().to_owned(),
+            composition.as_str().to_owned(),
+        ));
+        self.stored_draft.lock().unwrap().clone()
+    }
+
     async fn add_new_account_deferred(&self, account: HostAccount) {
         self.added
             .lock()
@@ -232,6 +165,34 @@ impl AppPort for FakeApp {
 
     async fn sync_added_account(&self, id: &AccountId) {
         self.synced.lock().unwrap().push(id.as_str().to_owned());
+    }
+
+    async fn refresh_calendars_if_changed(&self) {
+        // The command surface never drives the periodic refresh; the timer
+        // host owns it, so the fake answers the empty visit.
+    }
+
+    fn drain_new_mail(&self) -> NewMailBatch {
+        let batch = self.batches.lock().unwrap().pop_front().unwrap_or_default();
+        self.drained
+            .lock()
+            .unwrap()
+            .push(batch.messages.len() + batch.overflow);
+        batch
+    }
+
+    fn record_pass_outcome(&self, account: &AccountId, outcome: PassOutcome) {
+        self.outcomes
+            .lock()
+            .unwrap()
+            .push((account.as_str().to_owned(), outcome));
+    }
+
+    async fn wait_first_pass(&self, account: &AccountId) {
+        self.first_waits
+            .lock()
+            .unwrap()
+            .push(account.as_str().to_owned());
     }
 
     async fn draft_chips(&self, account: &AccountId, key: &ProviderKey) -> Vec<Chip> {
@@ -397,6 +358,14 @@ impl AppPort for FakeApp {
         self.calendar.lock().unwrap().clone()
     }
 
+    async fn calendar_event_detail(&self, event: &astra_app::EventRef) -> Option<EventDetail> {
+        self.detail_into.lock().unwrap().push((
+            event.account.as_str().to_owned(),
+            event.key.as_str().to_owned(),
+        ));
+        self.event_detail.lock().unwrap().clone()
+    }
+
     async fn generate_meeting_brief(
         &self,
         account: &AccountId,
@@ -415,6 +384,10 @@ impl AppPort for FakeApp {
 
     fn settings(&self) -> SettingsSnapshot {
         self.settings.lock().unwrap().clone()
+    }
+
+    fn record_analytics(&self, event: &astra_app::AnalyticsEvent) {
+        self.analytics.lock().unwrap().push(event.clone());
     }
 
     async fn card_seed(&self, card: &CardRef) -> Option<ContactDraftInput> {

@@ -3,18 +3,25 @@
 //! it drives on, the per-account dial table, and the credential store. One value,
 //! registered once at boot, read back by every command through Tauri's `State`.
 
+// The core's whole `AppPort` impl, its own child so this file stays under
+// the line cap (one trait impl for the one concrete type, so the block
+// cannot split further).
+mod port;
+
 use std::sync::Arc;
 
 use astra_ai::{AiDocumentKind, KnowledgeId};
 use astra_app::{
-    Account, App, AttachmentContent, AttachmentReadError, AvatarView, BriefDocumentError, CardRef,
-    Chip, CompositionId, ContactDraftInput, DigestView, DocumentError, DocumentView, DraftResume,
-    ExtractionSummary, Intent, KnowledgeView, MeetingBriefView, Snippet, SplitEntry,
-    SummariseMessageError, TranslateLanguage,
+    Account, AnalyticsEvent, AttachmentContent, AttachmentReadError, AvatarView,
+    BriefDocumentError, CardRef, Chip, CompositionId, ContactDraftInput, DigestView, DocumentError,
+    DocumentView, DraftResume, EmlContent, EmlReadError, ExtractionSummary, Intent, KnowledgeView,
+    MeetingBriefView, NewMailBatch, PassOutcome, Snippet, SplitEntry, SummariseMessageError,
+    TranslateLanguage,
 };
 use astra_viewmodel::{
-    CalendarSnapshot, ComposeRequestSnapshot, DraftStatusSnapshot, MailboxListSnapshot, MailtoOpen,
-    PeopleSnapshot, ReadingSnapshot, SendingSnapshot, SettingsSnapshot, SyncProgressSnapshot,
+    CalendarSnapshot, ComposeRequestSnapshot, DraftStatusSnapshot, EventDetail,
+    MailboxListSnapshot, MailtoOpen, PeopleSnapshot, ReadingSnapshot, SendingSnapshot,
+    SettingsSnapshot, SyncProgressSnapshot,
 };
 use async_trait::async_trait;
 use engine_api::{AccountId, CalendarDate, Provider, ProviderKey, RecipientSuggestion};
@@ -77,6 +84,20 @@ pub(crate) trait AppPort: Send + Sync {
         id: u32,
     ) -> Result<Option<AttachmentContent>, AttachmentReadError>;
 
+    /// Reads one message's `.eml` export for the host's Save as .eml: the
+    /// engine's own source bytes (never a re-serialization) beside the file
+    /// name the dialog opens on, derived from the subject.
+    ///
+    /// # Errors
+    ///
+    /// Returns the core's own refusal: unresolved when the message cannot
+    /// be resolved, the fetch sentence when the engine's read refuses.
+    async fn eml_content(
+        &self,
+        account: &AccountId,
+        key: &ProviderKey,
+    ) -> Result<EmlContent, EmlReadError>;
+
     /// The published draft-status snapshot, for the host's pull: the composition
     /// whose save moved and how it ended, or `None` when no composition has a
     /// save to report.
@@ -111,6 +132,17 @@ pub(crate) trait AppPort: Send + Sync {
         composition: CompositionId,
     ) -> Option<DraftResume>;
 
+    /// Opens the Drafts row's named copy into `composition`, so the composer
+    /// that holds it saves over that copy rather than beside it; the webview's
+    /// by-key resume read. `None` when the key names nothing the account holds,
+    /// the message is not a draft, or its body cannot be read, in which case
+    /// nothing is adopted either.
+    async fn resume_draft_by_key(
+        &self,
+        message: &astra_app::MessageRef,
+        composition: CompositionId,
+    ) -> Option<DraftResume>;
+
     /// Registers a newly added account without syncing, so the pane shows it and the
     /// setup flow can dismiss at once.
     async fn add_new_account_deferred(&self, account: HostAccount);
@@ -118,6 +150,28 @@ pub(crate) trait AppPort: Send + Sync {
     /// Syncs one account's mail in the background; the host spawns this after the
     /// install.
     async fn sync_added_account(&self, id: &AccountId);
+
+    /// Runs the periodic calendar refresh: every account's calendars synced
+    /// and the diary republished only when it moved, so the host's standing
+    /// tick signals on change alone. Never the intent: a tick that changed
+    /// nothing must signal nothing.
+    async fn refresh_calendars_if_changed(&self);
+
+    /// Takes the new-mail batch the passes have collected and leaves the
+    /// queue empty: the delivery loop's drain after each pass it lands, so
+    /// the OS notification policy stays in the host where the window state
+    /// is.
+    fn drain_new_mail(&self) -> NewMailBatch;
+
+    /// Records one account's pass outcome into the delivery state: the
+    /// loop's own outcomes (a watch error, a reconnect dial) beside the
+    /// ones the pass paths record for it.
+    fn record_pass_outcome(&self, account: &AccountId, outcome: PassOutcome);
+
+    /// Resolves once the account's first pass in this process has settled,
+    /// or at once when the app holds no such account: the join the
+    /// delivery loop opens its watch after.
+    async fn wait_first_pass(&self, account: &AccountId);
 
     /// The message's smart-reply chips: the reading pane's pull on open and
     /// on the draft-pool event, answered through the surfacing gate.
@@ -221,6 +275,12 @@ pub(crate) trait AppPort: Send + Sync {
     /// calendar signal.
     fn calendar(&self) -> CalendarSnapshot;
 
+    /// One event's detail read: the roll-call of who is on the event (the
+    /// organiser first, the tail folded into a count) and the full
+    /// repeating rule with its read-back sentence, or `None` when the
+    /// store holds no event at the reference's key.
+    async fn calendar_event_detail(&self, event: &astra_app::EventRef) -> Option<EventDetail>;
+
     /// The published people snapshot, for the host's pull after a
     /// people signal.
     fn people(&self) -> PeopleSnapshot;
@@ -228,6 +288,11 @@ pub(crate) trait AppPort: Send + Sync {
     /// The published settings snapshot, for the host's pull after a
     /// settings signal.
     fn settings(&self) -> SettingsSnapshot;
+
+    /// Records one product analytics event through the consent-gated
+    /// recorder: the row lands in the local ledger only while consent
+    /// stands, and a host flow never fails over a declined event.
+    fn record_analytics(&self, event: &AnalyticsEvent);
 
     /// The editor's seed for one card: the stored card the reference names,
     /// rendered as the editor's input subset, or `None` when nobody stores
@@ -257,183 +322,6 @@ pub(crate) trait AppPort: Send + Sync {
     ) -> Result<MeetingBriefView, BriefDocumentError>;
 }
 
-#[async_trait]
-impl AppPort for App<HostProvider> {
-    async fn dispatch(&self, intent: Intent) -> Result<(), astra_app::AppError> {
-        App::dispatch(self, intent).await
-    }
-
-    fn mailbox_list(&self) -> MailboxListSnapshot {
-        App::mailbox_list(self)
-    }
-
-    fn sync_progress(&self) -> SyncProgressSnapshot {
-        App::sync_progress(self)
-    }
-
-    fn reading(&self) -> Option<ReadingSnapshot> {
-        App::reading(self)
-    }
-
-    async fn attachment_content(
-        &self,
-        account: &AccountId,
-        key: &ProviderKey,
-        id: u32,
-    ) -> Result<Option<AttachmentContent>, AttachmentReadError> {
-        App::attachment_content(self, account, key, id).await
-    }
-
-    fn draft_status(&self) -> Option<DraftStatusSnapshot> {
-        App::draft_status(self)
-    }
-
-    fn compose_request(&self) -> Option<ComposeRequestSnapshot> {
-        App::compose_request(self)
-    }
-
-    fn take_compose_request(&self) -> Option<ComposeRequestSnapshot> {
-        App::take_compose_request(self)
-    }
-
-    async fn open_mailto(&self, uri: &str) -> Option<MailtoOpen> {
-        App::open_mailto(self, uri).await
-    }
-
-    fn sending(&self) -> SendingSnapshot {
-        App::sending(self)
-    }
-
-    async fn resume_latest_draft(
-        &self,
-        account: &AccountId,
-        composition: CompositionId,
-    ) -> Option<DraftResume> {
-        App::resume_latest_draft(self, account, composition).await
-    }
-
-    async fn add_new_account_deferred(&self, account: HostAccount) {
-        App::add_new_account_deferred(self, account).await;
-    }
-
-    async fn sync_added_account(&self, id: &AccountId) {
-        App::sync_added_account(self, id).await;
-    }
-
-    async fn draft_chips(&self, account: &AccountId, key: &ProviderKey) -> Vec<Chip> {
-        App::draft_chips(self, account, key).await
-    }
-
-    async fn summarise_message(
-        &self,
-        account: &AccountId,
-        key: &ProviderKey,
-    ) -> Result<String, SummariseMessageError> {
-        App::summarise_message(self, account, key).await
-    }
-
-    async fn account_style_note(&self, account: &AccountId) -> Option<String> {
-        App::account_style_note(self, account).await
-    }
-
-    fn dismiss_chips(&self, account: &AccountId, key: &ProviderKey) {
-        App::dismiss_chips(self, account, key);
-    }
-
-    async fn compose_from_draft(&self, account: &AccountId, key: &ProviderKey, draft: &str) {
-        App::compose_from_draft(self, account, key, draft).await;
-    }
-
-    fn knowledge_list(&self, account: &AccountId) -> Vec<KnowledgeView> {
-        App::knowledge_list(self, account)
-    }
-
-    async fn knowledge_extract(&self, account: &AccountId, limit: usize) -> ExtractionSummary {
-        App::knowledge_extract(self, account, limit).await
-    }
-
-    fn knowledge_forget(&self, id: &KnowledgeId) -> bool {
-        App::knowledge_forget(self, id)
-    }
-
-    fn snippet_list(&self) -> Vec<Snippet> {
-        App::snippet_list(self)
-    }
-
-    async fn snippet_search(&self, query: &str) -> Vec<Snippet> {
-        App::snippet_search(self, query).await
-    }
-
-    async fn compose_autocomplete(&self, before: &str, after: &str) -> String {
-        App::compose_autocomplete(self, before, after).await
-    }
-
-    async fn translate_message(
-        &self,
-        account: &AccountId,
-        key: &ProviderKey,
-        lang: TranslateLanguage,
-    ) -> String {
-        App::translate_message(self, account, key, lang).await
-    }
-
-    async fn generate_digest(
-        &self,
-        account: &AccountId,
-        days: u32,
-    ) -> Result<DigestView, DocumentError> {
-        App::generate_digest(self, account, days).await
-    }
-
-    async fn generate_report(
-        &self,
-        account: &AccountId,
-        days: u32,
-    ) -> Result<DigestView, DocumentError> {
-        App::generate_report(self, account, days).await
-    }
-
-    fn latest_document(&self, account: &AccountId, kind: AiDocumentKind) -> Option<DocumentView> {
-        App::latest_document(self, account, kind)
-    }
-
-    async fn split_map(&self, account: &AccountId) -> Vec<SplitEntry> {
-        App::split_map(self, account).await
-    }
-
-    fn calendar(&self) -> CalendarSnapshot {
-        App::calendar(self)
-    }
-
-    fn people(&self) -> PeopleSnapshot {
-        App::people(self)
-    }
-
-    fn settings(&self) -> SettingsSnapshot {
-        App::settings(self)
-    }
-
-    async fn card_seed(&self, card: &CardRef) -> Option<ContactDraftInput> {
-        App::card_seed(self, card).await
-    }
-
-    async fn recipient_suggestions(&self, token: &str, limit: usize) -> Vec<RecipientSuggestion> {
-        App::recipient_suggestions(self, token, limit).await
-    }
-
-    async fn avatar_by_email(&self, email: &str) -> AvatarView {
-        App::avatar_by_email(self, email).await
-    }
-
-    async fn generate_meeting_brief(
-        &self,
-        account: &AccountId,
-        day: CalendarDate,
-    ) -> Result<MeetingBriefView, BriefDocumentError> {
-        App::generate_meeting_brief(self, account, day).await
-    }
-}
-
 /// The state the shell manages: everything a command needs, in one registered value.
 ///
 /// The field order is the drop order, and it is load bearing: the agent
@@ -446,6 +334,10 @@ pub(crate) struct AppState {
     /// The agent sidecar relay: prompts, approvals, and the ledger the
     /// sidecar's calls land in.
     pub(crate) agent: Arc<SidecarRelay>,
+    /// The AI store the relay appends to and the chat commands read: the
+    /// same instance the relay holds, so a thread's rows and its turns
+    /// always land in one database.
+    pub(crate) ai_store: Arc<astra_ai::AiStore>,
     /// The MCP listener host: the advanced panel's run/stop seam and
     /// account gate. It carries a runtime of its own, so its drop
     /// carries no ordering constraint against the app runtime below.
@@ -461,6 +353,9 @@ pub(crate) struct AppState {
     /// Every registered account's config and connection pool: what a re-dial, a
     /// folder bind, and the boot's restore read.
     pub(crate) connections: Arc<AccountDials>,
+    /// The crypto store (key material and trust decisions): opened before the
+    /// boot dial, read by every wrapper an IMAP dial installs.
+    pub(crate) crypto_store: Arc<astra_crypto_store::CryptoStore>,
     /// The engine's contact-photo area, beside the store database: the one
     /// directory the photo command serves, so the webview never gains a
     /// protocol wide enough to read host files itself.
@@ -477,10 +372,18 @@ pub(crate) struct AppState {
     /// the host account store the settings rows render through.
     pub(crate) refusals: Arc<crate::oauth::grant_refusals::GrantRefusals>,
     /// The launch mailto link, when the process was started by one: the
-    /// plugin consumed the launch argument before any listener stood, so
-    /// the link is held here until the main page's load drains it into
+    /// plugin consumed the launch argument before any listener stood, so the
+    /// link is held here until the main page's load drains it into
     /// the open the web's listener hears.
     pub(crate) pending_mailto: std::sync::Mutex<Option<String>>,
+    /// The launch's shared files, when the process was started by a
+    /// share hand-off: held until the main page's load drains them
+    /// into the share channel, the mailto hold's sibling.
+    pub(crate) pending_share: std::sync::Mutex<Option<Vec<crate::share::SharedFile>>>,
+    /// The current log file's path, under the app data directory: the
+    /// boot-installed logger writes it and the diagnostics commands
+    /// read it.
+    pub(crate) log_path: std::path::PathBuf,
     /// The app's async runtime: dispatches, first syncs and blocking dials run on it.
     pub(crate) runtime: AppRuntime,
 }

@@ -51,14 +51,17 @@ pub(crate) mod people;
 // The settings command surface (the snapshot pull), under the same split.
 pub(crate) mod settings;
 
+// The diagnostics (log tail, log export) and platform (default-mail) surfaces.
+pub(crate) mod diagnostics;
+pub(crate) mod platform;
+
 // The mcp and plugin surfaces (the advanced panel's seam, the registry's verbs).
 pub(crate) mod mcp;
 pub(crate) mod plugin;
 
-// The jmap add command surface (the wizard's JMAP form's password leg)
-// and the attachments command surface (the reading pane's Save As), under
-// the same split.
+// The jmap add, attachments Save As, and eml save command surfaces.
 pub(crate) mod attachments;
+pub(crate) mod eml;
 pub(crate) mod jmap;
 
 /// A command failure, serialised to the webview as its display string: a sentence a
@@ -431,11 +434,7 @@ pub(crate) async fn add_account(
     config_toml: String,
 ) -> Result<AddedAccount, CommandError> {
     let dial = |config: &astra_account::AccountConfig, id: &AccountId| {
-        let connections = ImapConnections::new();
-        let providers = state
-            .runtime
-            .block_on(|| astra_account::connect_mail_providers(&connections, config, id));
-        providers.map(|providers| (providers, connections))
+        crate::crypto_wrapper::add_account_dial(&state.crypto_store, &state.runtime, config, id)
     };
     add_account_with(&state, &config_toml, dial)
 }
@@ -462,6 +461,7 @@ pub(crate) async fn imap_test_connection(
                 &config
                     .account_id()
                     .map_err(|err| astra_account::AccountError::Mailbox(err.to_string()))?,
+                None, // a connection test sends nothing: no wrapper to install
             )
             .await
             .map(|_| ())

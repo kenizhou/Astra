@@ -35,6 +35,9 @@ tauri-plugin-notification = "2"
 # The app core the host boots and the command surface drives: dispatch, the
 # surfaced snapshots, and the boot sequence the host hands its pieces to.
 astra-app = { path = "../../crates/astra-app" }
+# The composer document types the resume view carries: the pre-attached rows
+# the drafts reopen hands the webview, in the document wire own shape.
+astra-composer = { path = "../../crates/astra-composer" }
 # The account layer the host dials through: the stored config's TOML form, the
 # IMAP connections, and the setup builder behind the connection test.
 astra-account = { path = "../../crates/astra-account" }
@@ -58,6 +61,10 @@ toml.workspace = true
 astra-mcp = { path = "../../crates/astra-mcp" }
 # The engine facade: the `Provider` trait the host's boxed provider type names.
 engine-api.workspace = true
+# The provider failure the delivery loop classifies (a retryable watch
+# drop counts the outage streak; a permanent one never does), the same
+# plumbing the boot dial tests name ConnectionInfo through.
+engine-provider.workspace = true
 # The OS secure store the account credentials live in (Credential Manager,
 # keychain, secret service), behind the credential-store port.
 keyring.workspace = true
@@ -72,6 +79,10 @@ serde_json.workspace = true
 thiserror.workspace = true
 # Diagnostic lines for the boot and dial paths; the host installs the logger.
 log.workspace = true
+# The device's own zone, resolved once at boot for the core's device-zone
+# report arm (src/platform.rs). Already in the tree through chrono, so the
+# direct edge adds no new package.
+iana-time-zone = "0.1"
 # The app's async runtime: every engine call the host drives runs on it, and
 # blocking host calls are polled on a thread of our own (src/runtime.rs). The
 # time feature drives the five second bound around one detection run; the
@@ -102,18 +113,11 @@ url.workspace = true
 time.workspace = true
 
 [dev-dependencies]
-# The composer document the drafts intents carry; the command-surface fakes
-# render the saved document to the plain text a stored draft resumes as.
-astra-composer = { path = "../../crates/astra-composer" }
 # The echo plugin's loop, driven in-process over duplex streams by the gate
 # tests (the worker host's custom spawn path).
 astra-plugin-echo = { path = "../../plugins/echo" }
 # The install tests sign their fixture bundles for real.
 ring.workspace = true
-# The provider-side plumbing the boot dial tests name: ConnectionInfo for
-# the stand-in providers' connection answers, which engine-api re-exports
-# the traits of but not the type itself.
-engine-provider.workspace = true
 # Reading the LLM ledger rows back in the client tests, through the test's
 # own connection into the file-backed store the client records into.
 rusqlite = { workspace = true, features = ["fallible_uint"] }

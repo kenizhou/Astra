@@ -321,14 +321,19 @@ impl HostAccountOps<CalendarFake> for FakeAccountOps {
         Ok(())
     }
 
-    async fn store_crypto_method(&self, account: &AccountId, method: &str) -> Result<(), String> {
+    async fn store_crypto_method(
+        &self,
+        account: &AccountId,
+        method: &str,
+    ) -> Result<Option<Vec<CalendarFake>>, String> {
         let id = account.as_str();
         let mut infos = self.infos.lock().unwrap();
         let Some(info) = infos.get_mut(id) else {
             return Err("the account has no stored config on this host".to_owned());
         };
         info.crypto_method = method.to_owned();
-        Ok(())
+        // The fake re-dials nothing: the write answers no new providers.
+        Ok(None)
     }
 }
 

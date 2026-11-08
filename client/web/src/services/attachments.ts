@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The attachments IPC layer: the reading pane's Save As. The wire shapes
-// mirror the desktop host's serde exactly: the outcome crosses as its
-// snake_case tag with the saved path or the refusal's reason, and the
+// The reading saves' IPC layer: the reading pane's two Save As paths, the
+// attachment save and the whole-message .eml save. Both wires mirror the
+// desktop host's serde exactly: the outcomes cross as the shared
+// snake_case family with the saved path or the refusal's reason, and the
 // reader's cancel as the bare word. The composer's picker is no wire at
 // all: the webview's own multi-select file input hands the composer File
 // objects, so the bytes never round-trip through the host.
@@ -32,5 +33,18 @@ export function saveAttachment(
     account: message.account,
     key: message.key,
     attachment,
+  });
+}
+
+/**
+ * Saves one message as an `.eml`: the host reads the engine's source bytes
+ * (never a re-serialization), asks where to put them with the subject's
+ * sanitised name as the suggestion, writes them, and answers the same typed
+ * outcome family the attachment save answers.
+ */
+export function saveEml(message: MessageRef): Promise<SaveAttachmentOutcome> {
+  return invoke('eml_save', {
+    account: message.account,
+    key: message.key,
   });
 }

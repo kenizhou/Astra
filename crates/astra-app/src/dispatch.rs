@@ -106,11 +106,32 @@ impl<P: Provider> App<P> {
                     log::warn!("trash: {err}");
                 }
             }
+            // The permanent delete rides the same discard-and-resync
+            // discipline over the engine's irreversible delete edit. The
+            // confirm is the surface's own; nothing here second-guesses it.
+            Intent::DeleteMessage { row } => {
+                if let Err(err) = self.delete_message(row).await {
+                    log::warn!("delete: {err}");
+                }
+            }
             // The move-to-folder batch: the same discard-and-resync discipline
             // the single-row moves ride, looped over the row set.
             Intent::MoveMessages { rows, folder } => {
                 if let Err(err) = self.move_messages(rows, folder).await {
                     log::warn!("move-to-folder: {err}");
+                }
+            }
+            // The report writes: the engine's report files the message as part
+            // of the act, so the same discard-and-resync discipline the moves
+            // ride covers the filing too.
+            Intent::MarkJunk { row } => {
+                if let Err(err) = self.mark_junk(row).await {
+                    log::warn!("junk: {err}");
+                }
+            }
+            Intent::MarkNotJunk { row } => {
+                if let Err(err) = self.mark_not_junk(row).await {
+                    log::warn!("not-junk: {err}");
                 }
             }
             // The reading pane: one open, one close, both publishing the surface.
@@ -161,9 +182,20 @@ impl<P: Provider> App<P> {
                 document,
                 blobs,
                 crypto,
+                composition,
             } => {
-                self.submit_rich_mail(from, to, cc, bcc, subject, document, blobs, crypto)
-                    .await;
+                self.submit_rich_mail(
+                    from,
+                    to,
+                    cc,
+                    bcc,
+                    subject,
+                    document,
+                    blobs,
+                    crypto,
+                    composition,
+                )
+                .await;
             }
             Intent::SubmitRichReply {
                 from,

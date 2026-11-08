@@ -40,6 +40,20 @@ export interface SettingsBlock {
   default_send_account?: string;
   /** Whether plugins run at all (the admin policy switch); on by default. */
   plugins_enabled?: boolean;
+  /** Whether new mail raises OS notifications; on by default. */
+  notifications_enabled?: boolean;
+  /** Whether the log level is debug, the Diagnostics toggle; off by default,
+   *  and the logger reads it at boot, so the change lands with the next
+   *  launch. */
+  debug_enabled?: boolean;
+  /** Whether analytics consent stands, the Privacy switch; off by default,
+   *  and one click withdraws it again. */
+  analytics_consented?: boolean;
+  /** The language tag the copy and the dates follow, for example `en-GB`;
+   *  absent reads back as the default tag. */
+  language?: string;
+  /** The device-zone offer's once-latch: whether any offer was ever made. */
+  zone_offered?: boolean;
 }
 
 /** One account's signature assignment: what its new mail and its replies
@@ -47,6 +61,22 @@ export interface SettingsBlock {
 export interface AccountSignatures {
   new_mail?: Signature;
   reply?: Signature;
+}
+
+/**
+ * How much of a message an account keeps a warm offline copy of; crosses
+ * as a snake_case word, or a map for the byte figure.
+ */
+export type SyncBodyCap = 'off' | 'everything' | { bytes: { octets: number } };
+
+/** One account's own sync settings, the effective values the row carries. */
+export interface AccountSyncSettings {
+  /** Months of history the account syncs; zero is the whole mailbox. */
+  depth_months: number;
+  /** The body cap state. */
+  body_cap: SyncBodyCap;
+  /** The polling cadence, in minutes. */
+  poll_minutes: number;
 }
 
 /** An account's kind; crosses as a snake_case word. */
@@ -97,7 +127,42 @@ export interface AccountSettingsRow {
   crypto_error?: string;
   /** The account's signature assignment, when it holds one. */
   signatures?: AccountSignatures;
+  /** The account's own sync settings, the effective values; absent is the product defaults. */
+  sync?: AccountSyncSettings;
+  /**
+   * The name the account's mail goes out under: the adopted, edited, or
+   * locally stored name, falling back to the address when none stands
+   * (the bare-address send). Absent reads back empty, which renders as
+   * the address.
+   */
+  display_name?: string;
+  /**
+   * How the account's outgoing name is governed: writable (the provider
+   * holds it and the account holder may change it), read_only (the
+   * provider holds it and the account holder may not), or local (the
+   * transport owns none and this app's stored value is the source).
+   * Absent reads back as local.
+   */
+  sender_name_control?: SenderNameControl;
+  /**
+   * Whether the account still needs its name asked for once: no value
+   * stands stored, not even the deliberate empty one. The wizard's and
+   * the accounts page's ask-state.
+   */
+  needs_sender_name?: boolean;
+  /**
+   * Why the account's last name write was refused, when it was: a name
+   * that cannot go in a header, or a provider's refusal of the push
+   * while the local name stood. Absent crosses no key.
+   */
+  sender_name_error?: string;
 }
+
+/**
+ * How the account's outgoing name is governed; crosses as a snake_case
+ * word.
+ */
+export type SenderNameControl = 'writable' | 'read_only' | 'local';
 
 /** The About block: the version and the attributions. */
 export interface AboutBlock {
@@ -110,7 +175,8 @@ export type SettingsError =
   | 'persist_failed'
   | 'zone_unresolvable'
   | 'horizon_out_of_bounds'
-  | 'remove_failed';
+  | 'remove_failed'
+  | 'zone_picked';
 
 /** The settings snapshot the surface renders after every pull. */
 export interface SettingsSnapshot {
@@ -118,6 +184,12 @@ export interface SettingsSnapshot {
   accounts?: AccountSettingsRow[];
   about: AboutBlock;
   error?: SettingsError;
+  /**
+   * The device zone the core has offered and no answer has landed for,
+   * carried verbatim as the IANA id. Absent crosses no key: no offer
+   * stands.
+   */
+  device_zone_offer?: string;
 }
 
 /**
@@ -145,6 +217,7 @@ export type SettingsIntentBody =
   | { set_theme: { mode: ThemeMode } }
   | { set_clock: { twenty_four: boolean } }
   | { set_plugins_enabled: { enabled: boolean } }
+  | { set_notifications_enabled: { enabled: boolean } }
   | { set_zone: { zone: string } }
   | { set_first_day_of_week: { weekday: WeekdayWire } }
   | { set_horizon: { days: number } }
@@ -155,7 +228,22 @@ export type SettingsIntentBody =
   | { remove_account: { account: string } }
   | { set_send_account: { account: string | null } }
   | { set_signature: { account: string; reply: boolean; signature: Signature | null } }
-  | { set_crypto_method: { account: string; method: string } };
+  | { set_crypto_method: { account: string; method: string } }
+  | {
+      set_sync_settings: {
+        account: string;
+        depth_months?: number;
+        body_cap?: SyncBodyCap;
+        poll_minutes?: number;
+      };
+    }
+  | { set_sender_name: { account: string; name: string } }
+  | { set_debug_enabled: { enabled: boolean } }
+  | { set_analytics_consented: { consented: boolean } }
+  | { set_language: { language: string } }
+  | { report_device_zone: { zone: string } }
+  | { accept_device_zone: { zone: string } }
+  | 'dismiss_device_zone';
 
 /**
  * The section constructor's omission discipline: a field the editor did
@@ -187,6 +275,10 @@ export const settingsIntents = {
   /** Set whether plugins run at all (the admin policy switch). */
   setPluginsEnabled: (enabled: boolean) => ({
     settings: { set_plugins_enabled: { enabled } },
+  }),
+  /** Set whether new mail raises OS notifications. */
+  setNotificationsEnabled: (enabled: boolean) => ({
+    settings: { set_notifications_enabled: { enabled } },
   }),
   /** Set the calendar's display zone; the core refuses an id it cannot resolve. */
   setZone: (zone: string) => ({ settings: { set_zone: { zone } } }),
@@ -229,6 +321,53 @@ export const settingsIntents = {
   setCryptoMethod: (account: string, method: string) => ({
     settings: { set_crypto_method: { account, method } },
   }),
+  /**
+   * Write one account's own sync settings; each field stated is written and
+   * each omitted field crosses no key at all, exactly as the Rust arm's
+   * serde skips do, so an edit of the depth alone leaves the cap and the
+   * cadence standing.
+   */
+  setSyncSettings: (
+    account: string,
+    settings: { depth_months?: number; body_cap?: SyncBodyCap; poll_minutes?: number },
+  ) => ({
+    settings: {
+      set_sync_settings: {
+        account,
+        ...(settings.depth_months !== undefined && { depth_months: settings.depth_months }),
+        ...(settings.body_cap !== undefined && { body_cap: settings.body_cap }),
+        ...(settings.poll_minutes !== undefined && { poll_minutes: settings.poll_minutes }),
+      },
+    },
+  }),
+  /**
+   * Set the name one account's mail goes out under: the From line's
+   * source, stored locally whatever the provider holds, and pushed to
+   * the provider best-effort where the account holder owns its copy.
+   * The empty name is a real answer, the deliberate bare address.
+   */
+  setSenderName: (account: string, name: string) => ({
+    settings: { set_sender_name: { account, name } },
+  }),
+  /** Set whether the log level is debug, the Diagnostics toggle; the logger
+   *  reads it at boot, so the change lands with the next launch. */
+  setDebugEnabled: (enabled: boolean) => ({
+    settings: { set_debug_enabled: { enabled } },
+  }),
+  /** Set whether analytics consent stands; the withdrawal is this same
+   *  write turned off. */
+  setAnalyticsConsented: (consented: boolean) => ({
+    settings: { set_analytics_consented: { consented } },
+  }),
+  /** Set the language tag the copy and the dates follow, carried verbatim. */
+  setLanguage: (language: string) => ({ settings: { set_language: { language } } }),
+  /** Report the device's resolved zone; the core validates it and decides
+   *  whether the diary's offer stands. */
+  reportDeviceZone: (zone: string) => ({ settings: { report_device_zone: { zone } } }),
+  /** Accept the standing device-zone offer into the calendar's zone. */
+  acceptDeviceZone: (zone: string) => ({ settings: { accept_device_zone: { zone } } }),
+  /** Dismiss the standing device-zone offer without accepting it. */
+  dismissDeviceZone: () => ({ settings: 'dismiss_device_zone' as const }),
 };
 
 /** Pulls the settings snapshot. */

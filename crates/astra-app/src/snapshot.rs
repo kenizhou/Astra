@@ -113,21 +113,24 @@ impl<P: Provider> App<P> {
         limit: usize,
     ) -> MailboxListSnapshot {
         let trees = self.load_rows(ids).await;
-        let account_folders = account_folder_rows(handles, &trees, limit);
+        let account_folders = account_folder_rows(self, handles, &trees, limit);
         let rows = match scope {
             Scope::Folder(folder) => Some(self.folder_rows(folder, mode, limit).await),
             Scope::AllInboxes => Some(self.unified_rows(ids, &trees, mode, limit).await),
             Scope::Account(_) => None,
         };
+        let selected_scope = Some(list_scope(scope));
         let Some(rows) = rows else {
             return MailboxListSnapshot {
                 account_folders,
+                selected_scope,
                 ..Default::default()
             };
         };
         MailboxListSnapshot {
             account_folders,
             rows,
+            selected_scope,
             // Nothing selects a row from inside the core; `None` is the
             // field's at-rest value.
             selection: None,
@@ -312,12 +315,33 @@ impl<P: Provider> App<P> {
     }
 }
 
+/// The scope as the snapshot's header carries it: whose mail the list is
+/// standing in, in the view-model's own words.
+pub(crate) fn list_scope(scope: &Scope) -> astra_viewmodel::ListScope {
+    match scope {
+        Scope::AllInboxes => astra_viewmodel::ListScope::AllInboxes,
+        Scope::Account(account) => astra_viewmodel::ListScope::Account {
+            account: account.clone(),
+        },
+        Scope::Folder(folder) => astra_viewmodel::ListScope::Folder {
+            account: folder.account.clone(),
+            key: folder.key.clone(),
+        },
+    }
+}
+
 /// The pane's account rows: every account's tree in pane order, the window's
 /// budget spent account by account so the first accounts fill the page and the
 /// later ones wait for a ShowMore, the same contract the merged message list
 /// follows. The folder view and the search view draw the same pane, so both
 /// project through here.
+///
+/// The row's label is the account's outgoing name (the stored name, or the
+/// address while none stands), read through the one resolver the From line
+/// rides, so the pane's header, the switcher's label, and the From picker
+/// carry the same name the send carries.
 pub(crate) fn account_folder_rows<P: Provider>(
+    app: &App<P>,
     handles: &[Arc<Account<P>>],
     trees: &[Arc<Vec<Mailbox>>],
     limit: usize,
@@ -330,9 +354,10 @@ pub(crate) fn account_folder_rows<P: Provider>(
             folders.truncate(budget);
         }
         budget = budget.saturating_sub(folders.len());
+        let name = app.sender_name_row(&account.id, &account.identity.email);
         account_folders.push(AccountFolderRow {
             account_id: account.id.clone(),
-            display_name: account.identity.email.clone(),
+            display_name: name.display_name,
             // The sending address beside the label, the field a From picker
             // offers; the identity's own address, never one a link dictated.
             address: account.identity.email.clone(),
@@ -345,6 +370,15 @@ pub(crate) fn account_folder_rows<P: Provider>(
                 .providers
                 .first()
                 .is_some_and(|provider| provider.connection_info().capabilities.mailbox_writes()),
+            // The pane's report verbs ride the provider's report capability,
+            // so a surface never offers a report the account cannot apply.
+            can_report_mail: account.providers.first().is_some_and(|provider| {
+                provider
+                    .connection_info()
+                    .capabilities
+                    .mail_report()
+                    .is_some()
+            }),
             folders,
         });
     }

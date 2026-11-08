@@ -7,6 +7,7 @@
 // astra-viewmodel's sending_tests.rs assert.
 
 import type { ComposerDocument } from './composerDocument';
+import type { CompositionId } from './ipc';
 
 /** Host-resolved bytes for one composer blob handle, riding beside the document at submit. */
 export interface ComposerBlob {
@@ -32,6 +33,10 @@ export interface MailSubmission {
   document: ComposerDocument;
   /** Host-resolved bytes for every attachment handle; empty with no attachments. */
   blobs: ComposerBlob[];
+  /** The composition the send belongs to, when the composer names one: a
+   *  resumed draft's send resolves its pre-attached rows' bytes host-side
+   *  against the record the resume parked. */
+  composition?: CompositionId | null;
 }
 
 /** A queued send an outbox action names: its account and durable op id together. */
@@ -115,6 +120,7 @@ export const sendingIntents = {
       subject: mail.subject,
       document: mail.document,
       blobs: mail.blobs,
+      ...(mail.composition === undefined ? {} : { composition: mail.composition }),
     },
   }),
   /** Show the sends that have not gone out, across every account. */

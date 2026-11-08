@@ -373,6 +373,7 @@ async fn send_and_read_back(
         document,
         blobs: Vec::new(),
         crypto: crate::crypto::CryptoFlags::default(),
+        composition: None,
     })
     .await
     .unwrap();

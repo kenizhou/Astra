@@ -261,7 +261,7 @@ dependencies = [
 
 [[package]]
 name = "astra-account"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "astra-autodetect",
  "astra-oauth",
@@ -278,6 +278,7 @@ dependencies = [
  "provider-graph",
  "provider-imap",
  "provider-jmap",
+ "psl",
  "rcgen",
  "rustls",
  "serde",
@@ -291,7 +292,7 @@ dependencies = [
 
 [[package]]
 name = "astra-ai"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "rusqlite",
  "serde",
@@ -302,7 +303,7 @@ dependencies = [
 
 [[package]]
 name = "astra-app"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ammonia",
  "astra-account",
@@ -325,6 +326,7 @@ dependencies = [
  "hex",
  "log",
  "provider-caldav",
+ "provider-imap",
  "reqwest",
  "serde",
  "serde_json",
@@ -338,7 +340,7 @@ dependencies = [
 
 [[package]]
 name = "astra-autodetect"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "engine-tls",
@@ -355,7 +357,7 @@ dependencies = [
 
 [[package]]
 name = "astra-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "astra-ai",
  "async-trait",
@@ -372,7 +374,7 @@ dependencies = [
 
 [[package]]
 name = "astra-composer"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -464,7 +466,8 @@ dependencies = [
  "astra-crypto-smime",
  "async-trait",
  "base64 0.23.1",
- "engine-tls",
+ "engine-core",
+ "engine-provider",
  "hex",
  "keyring",
  "log",
@@ -477,14 +480,13 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
- "tokio-rustls",
  "uuid",
  "x509-parser",
 ]
 
 [[package]]
 name = "astra-desktop"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "astra-account",
  "astra-ai",
@@ -503,6 +505,7 @@ dependencies = [
  "engine-provider",
  "engine-tls",
  "hickory-resolver",
+ "iana-time-zone",
  "keyring",
  "log",
  "reqwest",
@@ -526,7 +529,7 @@ dependencies = [
 
 [[package]]
 name = "astra-mcp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "astra-ai",
  "astra-app",
@@ -542,7 +545,7 @@ dependencies = [
 
 [[package]]
 name = "astra-mcp-relay"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "astra-account",
  "astra-ai",
@@ -557,7 +560,7 @@ dependencies = [
 
 [[package]]
 name = "astra-oauth"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.23.1",
  "engine-tls",
@@ -574,7 +577,7 @@ dependencies = [
 
 [[package]]
 name = "astra-plugin"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ring",
  "serde",
@@ -586,7 +589,7 @@ dependencies = [
 
 [[package]]
 name = "astra-plugin-echo"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "astra-plugin",
  "serde_json",
@@ -595,7 +598,7 @@ dependencies = [
 
 [[package]]
 name = "astra-viewmodel"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "astra-composer",
  "engine-api",
@@ -9362,7 +9365,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "astra-plugin",
  "image",

@@ -22,6 +22,7 @@
 //!   drag intents speak the event's own clock and leave the resolution to the
 //!   core, which holds the tzdata.
 
+use astra_viewmodel::CalendarViewWire;
 use engine_api::{CalendarDate, CalendarDateTime, Frequency, LocalDateTime, UtcDateTime, Weekday};
 use serde::{Deserialize, Serialize};
 
@@ -220,6 +221,13 @@ pub enum CalendarIntent {
         start: UtcDateTime,
         /// How many days the window spans.
         days: u16,
+        /// The view kind the window serves, when the host that moves the
+        /// window knows it: the core persists it as the calendar's shape
+        /// preference, so the next launch restores the view the person left.
+        /// Absent (a host moving a window without naming a view) keeps the
+        /// standing preference untouched.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        view: Option<CalendarViewWire>,
     },
     /// Which calendars' events are drawn: the toggle set of the calendar
     /// manager. An empty set hides every calendar's events; the ids are

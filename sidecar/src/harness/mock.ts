@@ -21,6 +21,10 @@ interface MockFixture {
   /** Echo the received prompt text as the first chunk, so a host-side test
    *  can observe over the wire exactly what the session was asked. */
   echo_prompt?: boolean;
+  /** Hold createSession for this many milliseconds before resolving: the
+   *  e2e seam for the session-creation window, which the real harness
+   *  spends on genuinely awaited disk work. */
+  create_session_delay_ms?: number;
 }
 
 const DEFAULT_CHUNK_DELAY_MS = 5;
@@ -195,6 +199,22 @@ export class MockHarness implements AgentHarness {
     if (this.opts.fixturePath === 'reject-create-session') {
       throw new Error('mock: createSession rejected (fault injection)');
     }
+    const delay = this.createSessionDelayMs();
+    if (delay > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
     return new MockSession(this.opts.fixturePath, this.opts.tools);
+  }
+
+  /** The fixture's session-creation delay, zero when absent or unreadable:
+   *  an unreadable fixture is the sessionless default, never a failure. */
+  private createSessionDelayMs(): number {
+    if (!this.opts.fixturePath) return 0;
+    try {
+      const parsed = JSON.parse(readFileSync(this.opts.fixturePath, 'utf8')) as MockFixture;
+      return parsed.create_session_delay_ms ?? 0;
+    } catch {
+      return 0;
+    }
   }
 }

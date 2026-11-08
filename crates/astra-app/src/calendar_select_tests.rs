@@ -38,13 +38,38 @@ fn zoned(value: &str) -> CalendarDateTime {
     }
 }
 
+/// A wall-clock literal `days` from today at `hour`, so the fixtures sit
+/// inside the default window whatever day the suite runs: a fixed past
+/// date ages out of the now-relative horizon and the occurrence silently
+/// stops rendering.
+fn in_days(days: i64, hour: u8) -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("the clock reads after the epoch")
+        .as_secs()
+        .cast_signed();
+    let day = secs.div_euclid(86_400) + days;
+    // Howard Hinnant's civil_from_days: the day number to (y, m, d).
+    let z = day + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    format!("{y:04}-{m:02}-{d:02}T{hour:02}:00:00")
+}
+
 #[tokio::test]
 async fn an_appended_calendar_leg_syncs_through_the_second_provider() {
     let surfaces = Arc::new(Mutex::new(Vec::new()));
     let calendar = CalendarFake::with_calendar_and_mail().holding(zoned_event(
         "evt-cal",
         "The real standup",
-        "2026-10-19T09:00:00",
+        &in_days(7, 9),
     ));
     let app = calendar_app(
         vec![split_account("work", mail_half(), calendar)],
@@ -86,8 +111,8 @@ async fn a_write_rides_the_appended_calendar_leg_too() {
     app.dispatch(Intent::Calendar(CalendarIntent::CreateEvent {
         calendar: CalendarRef::from_parts("work", "cal-1".to_owned()).unwrap(),
         summary: "Review".to_owned(),
-        start: zoned("2026-10-21T14:00:00"),
-        end: zoned("2026-10-21T15:00:00"),
+        start: zoned(&in_days(9, 14)),
+        end: zoned(&in_days(9, 15)),
         description: None,
         location: None,
         recurrence: None,

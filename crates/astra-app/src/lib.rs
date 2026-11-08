@@ -6,11 +6,10 @@
 //! for it, and dispatches an [`Intent`] back; state flows one way and commands the
 //! other. The [`App`] owns one [`engine_api::Engine`] shared across every configured
 //! [`Account`], and [`boot`] assembles the whole sequence over a host-provided runtime.
-//! The crate root holds the runtime's state; the command surface, the projection, the
-//! sync paths, the preferences, the AI rules model with its generation seam, the AI
-//! replies model with its draft pool service, the AI assist services (knowledge,
-//! snippets, autocomplete, translate), and the AI documents services (the digest,
-//! the report, the split) each live in their own module.
+//! The crate root holds the runtime's state; the command surface, the projection,
+//! the sync paths, the preferences, the sender-name service, the AI rules model,
+//! the AI replies model, the AI assist services, and the AI documents services
+//! each live in their own module.
 
 mod accounts;
 mod ai_assist;
@@ -18,20 +17,24 @@ mod ai_docs;
 mod ai_replies;
 mod ai_results;
 mod ai_rules;
+mod analytics;
 mod attachments;
+mod body_warm;
 mod boot;
 mod calendar;
 mod compose_open;
 mod compose_request;
 mod crypto;
-mod crypto_outbox;
 mod decode;
 mod dispatch;
 mod drafts;
 mod folder_writes;
 mod gate;
+mod ids;
 mod list_rows;
 mod mail_writes;
+mod notifications;
+mod outage;
 mod outbox;
 mod people;
 mod preferences;
@@ -39,9 +42,11 @@ mod protocol;
 mod query;
 mod reading;
 mod reference;
+mod report_writes;
 mod row_cache;
 mod sanitise;
 mod search;
+mod sender_names;
 mod settings;
 mod signatures;
 mod snapshot;
@@ -60,48 +65,43 @@ mod window;
 #[path = "tests_live_harness.rs"]
 mod tests_live_harness;
 
-// The dispatch-loop test fixtures: one compiled copy of the fake provider and its
-// builders, at the crate root so every test module (the dispatch tests, the list
-// tests they split off, and the reading tests) includes the same module rather
-// than its own.
+// The dispatch-loop test fixtures: one compiled copy of the fake provider
+// and its builders, at the crate root so every test module includes the same
+// module rather than its own.
 #[cfg(test)]
 mod dispatch_fakes;
 
 // The calendar slice's test fixtures: the calendar-and-mail provider the
-// calendar tests drive, at the crate root for the same reason. Each calendar
-// module's tests attach to the module itself, the house pattern.
+// calendar tests drive, at the crate root for the same reason.
 #[cfg(test)]
 #[path = "calendar_fakes/mod.rs"]
 mod calendar_fakes;
 
-// The people slice's test fixtures: the contacts-leg provider the people
-// tests drive, beside the calendar's for the same reason.
+// The people slice's test fixtures: the contacts-leg provider the people tests
+// drive, beside the calendar's.
 #[cfg(test)]
 #[path = "people_fakes/mod.rs"]
 mod people_fakes;
 
 // The settings slice's test fixtures: the scripted account store the
-// settings tests drive over the account-info seam, beside the calendar's
-// and people's for the same reason.
+// settings tests drive, beside the calendar's and people's for the same reason.
 #[cfg(test)]
 #[path = "settings_fakes/mod.rs"]
 mod settings_fakes;
 
-// The eval harness: the scenario fixtures under the repository's evals/
-// directory, driven through the same seams the unit tests exercise. The
-// scenario vocabulary and the seam-parameter drive are library surface
-// (the desktop host's live suite drives the live-mode fixtures over its
-// background client); the offline battery and its fixture injection stay
-// test-only, riding the dispatch-loop fakes.
+// The eval harness: the scenario fixtures under evals/, driven through the
+// same seams the unit tests exercise. The vocabulary and the drive are
+// library surface; the offline battery stays test-only, riding the fakes.
 pub mod evals;
 
 use std::{
+    collections::BTreeMap,
     path::PathBuf,
     sync::{atomic::AtomicU64, Arc, Mutex},
     time::Duration,
 };
 
-use engine_api::{AccountId, Engine, Provider};
+use engine_api::{Engine, Provider};
 use tokio::sync::RwLock;
 
 use crate::{
@@ -141,7 +141,8 @@ pub use ai_rules::{
     Category, MailContext, MatchResult, RulesError, CATEGORISE_PROMPT_VERSION, COLD_JUDGE_VERSION,
     MATCH_CONTEXT_BODY_CAP, RULES_MATCH_VERSION, RULES_PROMPT_VERSION,
 };
-pub use attachments::{AttachmentContent, AttachmentReadError};
+pub use analytics::AnalyticsEvent;
+pub use attachments::{AttachmentContent, AttachmentReadError, EmlContent, EmlReadError};
 pub use boot::{boot, BootError, SpawnedTask};
 pub use calendar::{
     generate_meeting_brief, meeting_brief_prompt, BriefDocumentError, BriefMeeting,
@@ -149,29 +150,37 @@ pub use calendar::{
     BRIEF_INVITATION_SCAN_LIMIT, MEETING_BRIEF_PROMPT_VERSION,
 };
 pub use compose_request::OpenDraftError;
-pub use crypto::{CryptoFlags, CryptoTransport, CryptoTransportResolver};
+pub use crypto::CryptoFlags;
 pub use decode::{DecodeOutcome, MessageDecoder};
 pub use dispatch::AppError;
 pub use drafts::{DraftResume, DRAFT_AUTOSAVE_IDLE};
 pub use folder_writes::FolderWriteError;
 pub use gate::{BeforeSendGate, ComposeTransform, GateComposition, GateVerdict, TransformFailure};
 pub use mail_writes::MailWriteError;
+pub use notifications::{NewMailBatch, NewMailNotice};
+pub use outage::PassOutcome;
 pub use people::avatar::AvatarView;
-pub use preferences::{load_preferences, preferences_path, save_preferences, Preferences};
+pub use preferences::{
+    load_preferences, preferences_path, save_preferences, Preferences, DEFAULT_POLL_MINUTES,
+};
 pub use protocol::{
     AppObserver, CalendarIntent, ComposeIntent, ComposerBlob, CompositionId, ContactDraftInput,
     ContactNameInput, ContactPatchInput, DavSectionInput, DraftsIntent, EventDrag, EventEdge,
     EventEdit, FolderIntent, Intent, OutboxIntent, PeopleIntent, RecurrenceChange, RepeatEnd,
-    RepeatRule, RsvpAnswer, SearchScope, SettingsIntent, Surface, ThemeMode, ViewMode, WeekdayWire,
+    RepeatRule, RsvpAnswer, SearchScope, SettingsIntent, Surface, SyncBodyCap, ThemeMode, ViewMode,
+    WeekdayWire,
 };
 pub use query::{MessageDetail, MessagePage, QueryAccount, QueryRow, MAX_PAGE};
 pub use reference::{
     AddressBookRef, CalendarRef, CardRef, EventRef, FolderRef, MessageRef, QueuedRef, RowRef,
     ThreadRef,
 };
+pub use report_writes::ReportWriteError;
 pub use settings::{AccountInfo, DavLegs, HostAccountOps};
 pub use signatures::{seed_signature, swap_seeded, AccountSignatures};
 pub use surfaced::Surfaced;
+
+pub(crate) use window::Scope;
 
 /// The app runtime: owns one [`Engine`] shared across every configured [`Account`],
 /// holds the surface and selection state, and notifies an [`AppObserver`] when a
@@ -253,8 +262,8 @@ pub struct App<P> {
     /// one thing. See `calendar`.
     calendar: Surfaced<astra_viewmodel::CalendarSnapshot>,
     /// The calendar view state a rebuild projects and the intents move: the
-    /// window, the visible set, the anchor, the horizon watermark, the write
-    /// states, and the reply prompts. See `calendar`.
+    /// view kind, the window, the visible set, the anchor, the horizon
+    /// watermark, the write states, and the reply prompts. See `calendar`.
     calendar_state: Mutex<calendar::CalendarState>,
     /// The people snapshot and its signal: the unified rows, the open
     /// person's detail, the write states, and the create targets, as one
@@ -279,6 +288,15 @@ pub struct App<P> {
     /// per-account position through, published on change by the
     /// [`SyncObserver`](engine_api::SyncObserver) fold in `sync_progress`.
     sync_progress: sync_progress::SyncProgress,
+    /// The new-mail notification queue the pass commits feed and the host
+    /// bridge drains. See `notifications`.
+    new_mail: Arc<notifications::NewMailQueue>,
+    /// The outage state over pass outcomes, shared with the progress fold
+    /// that projects it onto the snapshot the surfaces pull. See `outage`.
+    outages: outage::OutagesShared,
+    /// Each account's first-pass settle state: the join the host's delivery
+    /// drivers open their watches after. See `sync`.
+    first_passes: Mutex<BTreeMap<engine_api::AccountId, sync::FirstPass>>,
     /// The loaded preferences and the path they write through: the view mode, the
     /// expansion map, and the selected folder.
     pane: Mutex<PreferencesState>,
@@ -338,10 +356,10 @@ pub struct App<P> {
     /// The plugin message decoder: every reading open's raw source passes it
     /// before the render. `None` (the default) renders the store's own read.
     pub(crate) decoder: Option<Arc<dyn crate::decode::MessageDecoder>>,
-    /// The built-in crypto send path: installed by the host with the shared
-    /// crypto store and its dial-table resolver. `None` (the default) and
-    /// every send rides the engine's queue untouched.
-    pub(crate) crypto_send: std::sync::Mutex<Option<crypto::CryptoSendSupport>>,
+    /// The ledger the consented analytics events append to, installed by
+    /// the host beside the account store. `None` (the default) and the
+    /// recorder records nothing. See `analytics`.
+    analytics: Mutex<Option<Arc<astra_ai::AiStore>>>,
 }
 
 impl<P> core::fmt::Debug for App<P> {
@@ -367,7 +385,13 @@ impl<P: Provider> App<P> {
         connector: Option<Box<dyn MailboxConnector<P>>>,
         observer: Arc<dyn AppObserver>,
     ) -> Self {
-        let sync_progress = sync_progress::SyncProgress::new(Arc::clone(&observer));
+        let new_mail = Arc::new(notifications::NewMailQueue::new());
+        let outages = Arc::new(outage::Outages::new());
+        let sync_progress = sync_progress::SyncProgress::new(
+            Arc::clone(&observer),
+            Arc::clone(&new_mail),
+            Arc::clone(&outages),
+        );
         Self {
             engine,
             accounts: RwLock::new(accounts.into_iter().map(Arc::new).collect()),
@@ -393,6 +417,9 @@ impl<P: Provider> App<P> {
             autosave_idle: DRAFT_AUTOSAVE_IDLE,
             open_reading: Mutex::new(None),
             sync_progress,
+            new_mail,
+            outages,
+            first_passes: Mutex::new(BTreeMap::new()),
             pane: Mutex::new(PreferencesState::new(None)),
             visible_limit: Mutex::new(PAGE),
             generation: AtomicU64::new(0),
@@ -408,30 +435,37 @@ impl<P: Provider> App<P> {
             send_gate: None,
             compose_transform: None,
             decoder: None,
-            crypto_send: std::sync::Mutex::new(None),
+            analytics: Mutex::new(None),
         }
     }
 
     /// Names the preferences file the app persists through. Call it before the first
     /// dispatch: the view mode, the expansion map, and the selected scope load from
-    /// here (defaults while unnamed, as an in-memory build wants), and a persisted
+    /// here (defaults while unnamed, as an in-memory build wants), a persisted
     /// selection seeds the scope so a relaunch reopens the folder, the account, or
-    /// the unified view that was showing.
+    /// the unified view that was showing, and the calendar's shape preference seeds
+    /// the calendar state the same way (the view kind and the anchor the person
+    /// left, or the defaults, whose anchor is today by behaviour).
     #[must_use]
     pub fn with_prefs_path(mut self, path: Option<PathBuf>) -> Self {
         let pane = Mutex::new(PreferencesState::new(path));
-        let scope = {
+        let (scope, calendar_shape) = {
             let pane = pane.lock().expect("preferences mutex poisoned");
-            pane.selected_folder().map_or_else(
+            let scope = pane.selected_folder().map_or_else(
                 || {
                     pane.selected_account()
                         .map_or_else(Scope::default, Scope::Account)
                 },
                 Scope::Folder,
+            );
+            (
+                scope,
+                calendar::CalendarState::seeded(pane.calendar_view(), pane.calendar_anchor()),
             )
         };
         self.pane = pane;
         self.scope = Mutex::new(scope);
+        self.calendar_state = Mutex::new(calendar_shape);
         self
     }
 
@@ -460,37 +494,7 @@ impl<P: Provider> App<P> {
     // their own modules, beside the ports they install.
 }
 
-/// The mailbox list's scope. An account is always named alongside a folder, so the
-/// folder key, unique only within its account, can never be resolved against the wrong
-/// one, or against none: separately held, "no account but a folder" is a state the
-/// types would permit and nothing renders.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) enum Scope {
-    /// Every account, each one's Inbox in view.
-    #[default]
-    AllInboxes,
-    /// One account's whole mailbox.
-    Account(AccountId),
-    /// One folder of one account.
-    Folder(FolderRef),
-}
-
-impl Scope {
-    /// The scope for a host's account selection: an id, or the unified list for `None`.
-    pub(crate) fn for_account(account: Option<AccountId>) -> Self {
-        account.map_or(Self::AllInboxes, Self::Account)
-    }
-}
-
-/// A unique-per-intent idempotency key under `prefix`, from the wall clock
-/// and a process counter: the one mint every write family shares, so no
-/// family carries its own copy of the recipe.
-pub(crate) fn mint_idempotency(prefix: &str) -> String {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static SEQ: AtomicU64 = AtomicU64::new(0);
-    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_nanos());
-    format!("{prefix}:{nanos}:{seq}")
-}
+/// The idempotency-key mint, split into [`ids`] for the file cap and
+/// re-exported so every write family's `crate::` path stands.
+/// [`ids`]: self::ids
+pub(crate) use ids::mint_idempotency;

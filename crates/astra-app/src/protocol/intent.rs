@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 use crate::reference::{FolderRef, MessageRef, RowRef};
 
 use super::{
-    CalendarIntent, ComposeIntent, ComposerBlob, DraftsIntent, OutboxIntent, PeopleIntent,
-    SettingsIntent,
+    CalendarIntent, ComposeIntent, ComposerBlob, CompositionId, DraftsIntent, OutboxIntent,
+    PeopleIntent, SettingsIntent,
 };
 
 /// How the mailbox list is grouped.
@@ -174,6 +174,16 @@ pub enum Intent {
         /// The row to trash, bound to its owning account.
         row: RowRef,
     },
+    /// Permanently delete one row's mail, for good: a message in the flat
+    /// list, or a whole conversation in the threaded list. The engine's
+    /// delete edit behind it, through the same outbox discipline
+    /// [`Intent::MoveToTrash`] rides; nothing moves to the trash and nothing
+    /// recovers. The row menu gates the verb behind its own confirm, and one
+    /// row names it: the verb never rides a batch loop.
+    DeleteMessage {
+        /// The row to delete, bound to its owning account.
+        row: RowRef,
+    },
     /// Move a set of messages to one folder of their own account. Every row
     /// must belong to the destination folder's account, the row's own
     /// constraint; a move to the folder a row already sits in is a no-op the
@@ -183,6 +193,24 @@ pub enum Intent {
         rows: Vec<MessageRef>,
         /// The destination folder, bound to its owning account.
         folder: FolderRef,
+    },
+    /// Report one row as spam: the engine's outbox-mediated report with the
+    /// Junk verdict, which files the message into the account's Junk folder as
+    /// part of the report itself, so the app queues no second move beside it.
+    /// A message, or a whole conversation in the threaded list (one report per
+    /// member). Refused before anything is queued when the account's provider
+    /// cannot report mail.
+    MarkJunk {
+        /// The row to report, bound to its owning account.
+        row: RowRef,
+    },
+    /// Report one row as legitimate mail the account filed as junk: the same
+    /// engine report with the NotJunk verdict, which files the message back
+    /// into the account's Inbox as part of the report itself. The verb a
+    /// message sitting in Junk is offered.
+    MarkNotJunk {
+        /// The row to report, bound to its owning account.
+        row: RowRef,
     },
     /// Read one message in the reading pane: fetch its body, sanitise the HTML,
     /// resolve the inline images, and publish the reading snapshot. Opening also
@@ -237,6 +265,12 @@ pub enum Intent {
         /// both on.
         #[serde(default)]
         crypto: crate::crypto::CryptoFlags,
+        /// The composition the send belongs to, when the composer names one: a
+        /// resumed draft's send resolves its pre-attached rows' bytes off the
+        /// composition's own record, core-side. Absent for a sender that does
+        /// not name a composition, whose document carries nothing to resolve.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        composition: Option<CompositionId>,
     },
     /// Send the composer's rich document as a reply: the same durable-outbox
     /// discipline as [`Intent::SubmitRichMail`], with the threading the reply

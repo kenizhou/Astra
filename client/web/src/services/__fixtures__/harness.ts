@@ -41,6 +41,11 @@ const SNAPSHOTS: Record<string, unknown> = {
   mcp_status: mcpStatusSnapshot,
   agent_status: { state: 'idle', model: null },
   split_map: [],
+  /* The platform legs' pulls: the diagnostics tail renders empty and the
+     default-mail latch counts as asked, so the fixture server shows the
+     shell without the ask-once banner. */
+  log_tail: [],
+  default_mail_asked: true,
   /* The AI read pulls a mounted surface can fire: empty, never null, so a
      chips strip or a suggestion list renders empty instead of crashing on
      a null it never typed. */

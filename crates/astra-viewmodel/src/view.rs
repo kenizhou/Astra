@@ -9,9 +9,41 @@
 
 use serde::{Deserialize, Serialize};
 
+use engine_api::AccountId;
+
 use crate::folders::AccountFolderRow;
 use crate::rows::{MessageRowView, RowKey, ViewMode};
 use crate::search::SearchState;
+
+/// Whose mail the list is standing in, as the snapshot's header carries it:
+/// every account's inboxes merged, one account's whole mailbox, or one
+/// folder of one account. The account switcher's own wire: a surface that
+/// renders the list names whose mail stands from this, never from a
+/// mirror it keeps alone, so a relaunch and a second surface read the
+/// same label the core holds.
+///
+/// The folder half is a mirror of the app's folder reference (the account
+/// and the key together), stated here in the view-model's own words
+/// because the app's reference type cannot cross the dependency; the
+/// account and key fields are pinned equal to it in the tests.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ListScope {
+    /// The unified view: every account's inbox rows merged, newest first.
+    AllInboxes,
+    /// One account's whole mailbox, the switcher's selection.
+    Account {
+        /// The account whose mail the list stands in.
+        account: AccountId,
+    },
+    /// One folder of one account, the tree's own selection.
+    Folder {
+        /// The account that owns the folder.
+        account: AccountId,
+        /// The folder's key, unique within `account`.
+        key: String,
+    },
+}
 
 /// An immutable mailbox-list snapshot for a surface to render: every account's
 /// folder tree, always populated, so the pane is available whatever else the
@@ -59,6 +91,12 @@ pub struct MailboxListSnapshot {
     /// `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub search: Option<SearchState>,
+    /// Whose mail the list is standing in: the unified view, one account,
+    /// or one folder. Absent on a wire from a build before the field,
+    /// which reads back as no scope named and a surface falls back to its
+    /// own state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_scope: Option<ListScope>,
 }
 
 /// Whether a count is zero, the at-rest value [`MailboxListSnapshot`] skips.

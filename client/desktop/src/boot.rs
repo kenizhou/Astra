@@ -46,6 +46,17 @@ pub(crate) fn assemble_state(
     draft_sink: Arc<dyn astra_app::DraftPoolSink>,
     oauth: Arc<crate::oauth::commands::SignInSurface>,
 ) -> Result<AppState, Box<dyn std::error::Error>> {
+    // The showcase flag chooses the fixture app at assembly, debug builds
+    // alone: the shell stands over recorded answers with no dial and no
+    // engine, and a name no surface answers is refused at the launch.
+    #[cfg(debug_assertions)]
+    match crate::showcase::requested() {
+        Ok(Some(screen)) => return crate::showcase::assemble(data_dir, screen, agent_sink),
+        Ok(None) => {}
+        Err(name) => {
+            return Err(format!("ASTRA_SHOWCASE names an unknown screen: {name}").into());
+        }
+    }
     std::fs::create_dir_all(data_dir)?;
     let runtime = build_runtime()?;
     let credentials: Arc<dyn crate::credential_store::AccountCredentialStore> =
@@ -58,12 +69,21 @@ pub(crate) fn assemble_state(
     // completion that rewrites it.
     let refusals = Arc::new(crate::oauth::grant_refusals::GrantRefusals::new());
 
+    // The crypto store opens BEFORE the dial: every IMAP account's dial
+    // installs the MIME wrapper its `[crypto]` method asks for, so the store
+    // the wrapper reads must stand first (ECS; the send path lives in the
+    // engine now, and the wrapper is installed at connect time).
+    let crypto_store = Arc::new(astra_crypto_store::CryptoStore::open(
+        &data_dir.join(CRYPTO_STORE_FILE),
+    )?);
     let accounts = runtime.block_on(|| {
         dial_stored(
             &connections,
             &credentials,
+            &crypto_store,
             crate::oauth::graph_add::production_dial(),
             crate::oauth::google_add::production_google_dial(),
+            crate::oauth::mail_add::production_mail_dial(Arc::clone(&crypto_store)),
             &refusals,
         )
     });
@@ -120,7 +140,10 @@ pub(crate) fn assemble_state(
         astra_app::boot(
             &engine_path,
             accounts,
-            Some(Box::new(DialConnector::new(Arc::clone(&connections)))),
+            Some(Box::new(DialConnector::new(
+                Arc::clone(&connections),
+                Arc::clone(&crypto_store),
+            ))),
             observer,
             spawn,
             ai_pass,
@@ -134,25 +157,22 @@ pub(crate) fn assemble_state(
     // state hands anything to a command, so every settings dispatch from
     // the first finds it standing. The store reads the standing grant
     // refusals beside the configs, so the rows the snapshot renders carry
-    // what the boot dial learned.
+    // what the boot dial learned. The crypto store rides along: the
+    // crypto-method write re-dials with the new method's wrapper built
+    // from it.
     core.install_account_ops(Arc::new(HostAccountStore::new(
         Arc::clone(&connections),
         Arc::clone(&credentials),
         Arc::clone(&refusals),
+        Arc::clone(&crypto_store),
     )));
-    // The built-in crypto send path: the crypto store beside the AI store,
-    // and the dial table's resolver for each account's method and endpoints.
-    // Installed before the first dispatch, so every crypto send from the
-    // first finds it standing.
-    let crypto_store = Arc::new(astra_crypto_store::CryptoStore::open(
-        &data_dir.join(CRYPTO_STORE_FILE),
-    )?);
-    core.install_crypto_send(
-        crypto_store,
-        Arc::new(crate::crypto_send::HostCryptoResolver::new(Arc::clone(
-            &connections,
-        ))),
-    );
+    // The analytics ledger beside the account store: the consented
+    // product events append to the same sqlite the AI ledgers live
+    // in, installed before the state hands anything to a command so
+    // the first event the boot records finds it standing.
+    core.install_analytics_store(Arc::clone(&ai_store));
+    // The crypto store opened before the dial (above) rides the state: the
+    // account-add flow and the headless dial build wrappers from it too.
     // Prime the settings snapshot: nothing republishes it until a settings
     // intent lands, so without this the first pull after a launch answers
     // the empty default, grant states and account rows included.
@@ -203,10 +223,12 @@ pub(crate) fn assemble_state(
     Ok(AppState {
         app: core as Arc<dyn AppPort>,
         agent: agent_relay,
+        ai_store,
         mcp,
         plugins,
         llm,
         connections,
+        crypto_store,
         photo_root: engine_path
             .with_file_name(format!("{ENGINE_STORE_FILE}.blobs"))
             .join("contact-photos"),
@@ -214,16 +236,19 @@ pub(crate) fn assemble_state(
         oauth,
         refusals,
         pending_mailto: std::sync::Mutex::new(None),
+        pending_share: std::sync::Mutex::new(None),
+        log_path: crate::logging::file_path(data_dir),
         runtime,
     })
 }
 
 /// The AI ledgers' file name, under the data directory: the same store the
 /// CLI opens, so both writers land in one ledger.
-const AI_STORE_FILE: &str = "ai.sqlite";
+pub(crate) const AI_STORE_FILE: &str = "ai.sqlite";
 
-/// The crypto store's file name, under the data directory: key material,
-/// trust decisions, and the crypto outbox.
+/// The crypto store's file name, under the data directory: key material and
+/// trust decisions. Opened before the account dial so every IMAP dial can
+/// install the MIME wrapper its method asks for.
 const CRYPTO_STORE_FILE: &str = "crypto.sqlite";
 
 /// The hard cap on one plugin's gate or transform call (the plan's ~5min):
@@ -288,6 +313,15 @@ pub(crate) fn setup_host(app: &mut tauri::App) -> Result<(), Box<dyn std::error:
         .path()
         .app_data_dir()
         .map_err(|err| format!("the app data directory could not be resolved: {err}"))?;
+    // The file logger first, before any line the boot itself logs: the
+    // diagnostics contract holds from the first line of the run.
+    crate::logging::install(&data_dir);
+    // The window state's creation half: the persisted geometry applies
+    // here, before the event loop's first paint, so no wrong-size
+    // frame ever flashes.
+    if let Some(window) = app.get_webview_window("main") {
+        crate::window_state::restore(&window, &data_dir);
+    }
     let observer: Arc<dyn astra_app::AppObserver> = Arc::new(DebouncedObserver::new(
         ObserverBridge::new(Box::new(TauriEventSink::new(handle.clone()))),
     ));
@@ -309,11 +343,40 @@ pub(crate) fn setup_host(app: &mut tauri::App) -> Result<(), Box<dyn std::error:
     // The mailto entry's host leg: the launch link, when the process was
     // started by one, is held for the page-load drain, and the deep-link
     // and reading-pane roads are wired once the state they read stands.
+    // The share hand-off's launch files hold beside it, the sibling.
     crate::mailto::hold_launch_link(app.handle(), &mut state);
+    crate::share::hold_launch_files(&mut state);
+    // The background delivery: one loop per dialled account, beside the
+    // first-sync spawns the core's boot already made. Each loop joins its
+    // account's first pass before its first watch, so nothing duplicates
+    // the pass that just ran and no watch is trusted before a sync.
+    crate::delivery::spawn(
+        Arc::clone(&state.app),
+        Arc::clone(&state.connections),
+        Arc::new(crate::notify::NotifyBridge::windowed(app.handle().clone())),
+        &state.runtime,
+    );
+    // The periodic calendar refresh rides the same lifetime: one timer over
+    // the core's change-gated body, gated on the dial table the delivery
+    // supervisor reads, holding nothing the state's drop order depends on.
+    crate::calendar_timer::spawn(
+        Arc::clone(&state.app),
+        Arc::clone(&state.connections),
+        &state.runtime,
+    );
     let accounts = state.connections.ids().len();
     let handle = app.handle().clone();
     app.manage(state);
     crate::mailto::listen(&handle);
+
+    // The platform legs: the boot zone report (the core's offer stands
+    // on the settings snapshot before the web's first pull) and the
+    // boot's own product event.
+    let state = app.state::<AppState>();
+    crate::platform::report_boot_zone(&state);
+    state
+        .app
+        .record_analytics(&crate::platform::app_open_event(accounts));
 
     log::info!("boot: the app core is up over {accounts} account(s)");
     Ok(())

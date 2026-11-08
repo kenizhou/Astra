@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The message body: the sanitised HTML rides in a srcdoc iframe. The csp
+// The message body: the sanitised HTML rides in a srcdoc iframe, wrapped in
+// a document of the reading zoom's own. The wrapper's base font-size scales
+// with the standing step, its viewport meta lets the sender's mobile rules
+// read the frame's width, and its clamp rules hold every fixed-width
+// element to the viewport so the body reflows live during resize; the
+// sanitised fragment itself rides the wrapper's body verbatim. The csp
 // widens with the reader's opt-in, in step with the placeholder rewrite
 // the toggle runs: gated, nothing loads but data images and inline
 // styles; opted in, remote images and remote CSS join. The Rust-side
@@ -21,6 +26,7 @@ import { openUrl } from '@tauri-apps/plugin-opener';
 import { ContextMenu, type ContextMenuItem } from '@/components/ui/ContextMenu';
 import { isTauri } from '@/events/surfaceEvents';
 import { askMailtoOpen, isMailtoHref } from '@/features/composer/mailtoOpen';
+import type { ReadingZoomStep } from '@/services/appearance';
 
 /** The framed document's barrier while remote references stay gated. */
 export const READING_CSP_GATED =
@@ -30,6 +36,46 @@ export const READING_CSP_GATED =
  * `default-src 'none'` unchanged so no scripts, frames, or fetches load. */
 export const READING_CSP_REMOTE =
   "default-src 'none'; img-src data: https:; style-src 'unsafe-inline' https:";
+
+/**
+ * The reading body's base sizes, one per zoom step. The default is the size
+ * the frame document's fragment always rendered at (the browser's own
+ * sixteen-pixel medium), so the standing default changes nothing and the
+ * steps move around it.
+ */
+export const READING_ZOOM_BASE_PX: Record<ReadingZoomStep, number> = {
+  small: 13,
+  default: 16,
+  large: 20,
+};
+
+/** The wrapper's stylesheet: the base font-size the step names, and the
+ *  clamp that holds fixed-width content to the viewport, so a table or a
+ *  hard pixel width reflows at every pane width, live during resize (the
+ *  rules are CSS, so the browser reapplies them per layout pass). */
+const WRAPPER_STYLE = (zoom: ReadingZoomStep): string =>
+  `html{font-size:${READING_ZOOM_BASE_PX[zoom]}px}` +
+  'body{margin:0}' +
+  'body>*{max-width:100% !important}' +
+  'img,video,table{max-width:100% !important}' +
+  'img,video{height:auto}';
+
+/**
+ * Wraps the sanitised fragment in the zoom document: a viewport meta the
+ * sender's mobile rules read (a newsletter laid out against the frame's own
+ * width applies its own rules at every width), the base stylesheet above,
+ * and the fragment itself in the body, verbatim, with no escape or rewrite
+ * between the snapshot and the frame.
+ */
+export function wrapBodyDocument(html: string, zoom: ReadingZoomStep): string {
+  return (
+    '<!DOCTYPE html><html><head>' +
+    '<meta charset="utf-8">' +
+    '<meta name="viewport" content="width=device-width, initial-scale=1">' +
+    `<style>${WRAPPER_STYLE(zoom)}</style>` +
+    `</head><body>${html}</body></html>`
+  );
+}
 
 /**
  * Rewrites the sanitiser's placeholders back to the remote references they
@@ -157,6 +203,8 @@ interface MessageHtmlProps {
   showRemoteImages: boolean;
   /** Records the opt-in. */
   onShowRemoteImages: () => void;
+  /** The standing zoom step, wrapping the body's document. */
+  zoom?: ReadingZoomStep;
 }
 
 export function MessageHtml({
@@ -164,8 +212,12 @@ export function MessageHtml({
   remoteImageCount,
   showRemoteImages,
   onShowRemoteImages,
+  zoom = 'default',
 }: MessageHtmlProps) {
-  const doc = showRemoteImages ? enableRemoteImages(html) : html;
+  const doc = wrapBodyDocument(
+    showRemoteImages ? enableRemoteImages(html) : html,
+    zoom,
+  );
   const csp = showRemoteImages ? READING_CSP_REMOTE : READING_CSP_GATED;
   const blocked = remoteImageCount > 0 && !showRemoteImages;
   const noun = remoteImageCount === 1 ? 'image' : 'images';

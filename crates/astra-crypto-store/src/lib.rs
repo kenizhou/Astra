@@ -5,6 +5,9 @@
 //! `crypto.sqlite` beside the AI store holds the key material, the
 //! append-only trust-decision audit, the staged (collected) keys, the
 //! per-contact key pins, the CRL cache, and the per-message crypto results.
+//! The send half is the engine's MIME-wrap seam, implemented in `wrap` over
+//! this store: crypto sends ride the engine's own outbox, so there is
+//! deliberately no second queue here.
 //!
 //! The store is synchronous (rusqlite under a `Mutex`, like `astra-ai`'s
 //! store); the [`KeyStore`] trait it implements is async, and the bridge
@@ -29,15 +32,14 @@ pub mod crypto_policy;
 mod default;
 mod keys;
 mod keystore;
-mod outbox;
 mod password;
 mod pinned;
 mod policy;
 mod resolve;
 mod store;
-pub mod transport;
 mod trust;
 pub mod vault;
+mod wrap;
 
 pub use certs::{
     get_crypto_key_by_token, insert_harvested_cert, list_intermediate_certs,
@@ -59,11 +61,6 @@ pub use keys::{
     CryptoKeyRow,
 };
 pub use keystore::SqliteKeyStore;
-pub use outbox::{
-    enqueue_crypto_send, get_crypto_outbox_row, list_crypto_outbox, list_due_crypto_sends,
-    mark_crypto_failed, mark_crypto_sending, mark_crypto_unconfirmed, requeue_crypto_send,
-    settle_crypto_send, CryptoOutboxRow,
-};
 pub use password::apply_password_crypto;
 pub use pinned::{list_pinned_keys, remove_pinned_key, set_pinned_key, PinnedKey};
 pub use policy::StoreCryptoPolicy;
@@ -72,11 +69,8 @@ pub use resolve::{
     resolve_recipient_status_at, RecipientTrustFailure, RecipientTrustState, RecipientTrustStatus,
 };
 pub use store::CryptoStore;
-pub use transport::{
-    file_sent_copy, submit_smtp, ImapDial, SmtpDial, SubmitFailure, SubmitFailureKind,
-    TransportSecurity,
-};
 pub use trust::{
     get_latest_trust_decision, list_decisions_for_email, list_latest_decisions_for_key,
     put_trust_decision, TrustDecisionRow,
 };
+pub use wrap::{mime_wrapper_for, StoreMimeWrapper};

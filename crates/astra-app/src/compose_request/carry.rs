@@ -36,7 +36,12 @@ pub(crate) fn standing(carry: &[u32], document: &ComposerDocument) -> Vec<u32> {
 }
 
 /// One carried part as the document's pre-attached row.
-fn row(id: u32, file_name: &str, media_type: &str, size: u64) -> Option<DraftAttachment> {
+pub(crate) fn row(
+    id: u32,
+    file_name: &str,
+    media_type: &str,
+    size: u64,
+) -> Option<DraftAttachment> {
     Some(DraftAttachment {
         id: AttachmentId::new(format!("carry-{id}"))?,
         blob: Some(DraftBlobHandle::new(handle_of(id))?),

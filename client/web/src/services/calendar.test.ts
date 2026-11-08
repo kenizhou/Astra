@@ -10,7 +10,7 @@ const invoke = vi.hoisted(() => vi.fn());
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke }));
 
-import type { CalendarSnapshot, MeetingBriefView } from './calendar';
+import type { CalendarSnapshot, EventDetail, MeetingBriefView } from './calendar';
 import { calendarIntents } from './calendar';
 import fixtureJson from './__fixtures__/calendar_snapshot.json';
 
@@ -107,6 +107,14 @@ describe('the calendar intent wire', () => {
   it('carries the window anchor and its length', () => {
     expect(JSON.stringify(calendarIntents.setCalendarRange('2026-10-18T22:00:00Z', 7))).toBe(
       '{"calendar":{"set_range":{"start":"2026-10-18T22:00:00Z","days":7}}}',
+    );
+  });
+
+  it('carries the view beside the window when the navigation names one', () => {
+    expect(
+      JSON.stringify(calendarIntents.setCalendarRange('2026-10-18T22:00:00Z', 7, 'work_week')),
+    ).toBe(
+      '{"calendar":{"set_range":{"start":"2026-10-18T22:00:00Z","days":7,"view":"work_week"}}}',
     );
   });
 
@@ -279,6 +287,51 @@ describe('the calendar intent wire', () => {
     ).toBe(
       '{"calendar":{"answer_reply_prompt":{"send":false,"remember":true,"reply_subject":"Zusage: Sprint planning"}}}',
     );
+  });
+});
+
+// The detail literal is byte-for-byte the JSON astra-desktop's
+// calendar_tests.rs asserts for the roll-call and the rule read, so the
+// folded tail and the sentence cannot drift between the host and the
+// surface.
+describe('the event detail wire', () => {
+  beforeEach(() => {
+    invoke.mockReset();
+  });
+
+  it('mirrors the roll-call and the rule the core answers', () => {
+    const wire = JSON.parse(
+      '{"account":"work","event":"/dav/cal/work/default/evt-1.ics",' +
+        '"participants":[{"name_or_address":"Ada Lovelace","role":"organiser","response":"accepted"},' +
+        '{"name_or_address":"blaise@example.test","response":"needs_action"}],' +
+        '"folded_participants":4,' +
+        '"rule":{"frequency":"weekly","interval":1,"sentence":"Repeats every week."}}',
+    ) as EventDetail;
+
+    expect(wire.participants).toEqual([
+      {
+        name_or_address: 'Ada Lovelace',
+        role: 'organiser',
+        response: 'accepted',
+      },
+      { name_or_address: 'blaise@example.test', response: 'needs_action' },
+    ]);
+    expect(wire.folded_participants).toBe(4);
+    expect(wire.rule).toEqual({
+      frequency: 'weekly',
+      interval: 1,
+      sentence: 'Repeats every week.',
+    });
+  });
+
+  it('asks the host for one event own detail by its reference', async () => {
+    invoke.mockResolvedValue(undefined);
+    const { calendarEventDetail } = await import('./calendar');
+    await calendarEventDetail('work', '/dav/cal/work/default/evt-1.ics');
+    expect(invoke).toHaveBeenCalledWith('calendar_event_detail', {
+      account: 'work',
+      key: '/dav/cal/work/default/evt-1.ics',
+    });
   });
 });
 

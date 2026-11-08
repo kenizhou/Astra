@@ -43,6 +43,7 @@ fn a_snapshot_round_trips_through_json_with_the_exact_wire_shape() {
                 address: "me@work.example".to_owned(),
                 expanded: true,
                 can_edit_folders: false,
+                can_report_mail: false,
                 folders: vec![
                     FolderRow {
                         key: folder("INBOX"),
@@ -82,6 +83,7 @@ fn a_snapshot_round_trips_through_json_with_the_exact_wire_shape() {
                 address: "me@home.example".to_owned(),
                 expanded: false,
                 can_edit_folders: false,
+                can_report_mail: false,
                 folders: vec![],
             },
         ],
@@ -154,6 +156,7 @@ fn a_snapshot_with_message_rows_crosses_with_the_list_fields_after_the_trees() {
             address: "me@work.example".to_owned(),
             expanded: true,
             can_edit_folders: false,
+            can_report_mail: false,
             folders: vec![inbox_row(0)],
         }],
         rows: vec![thread_row, message_row],
@@ -164,6 +167,7 @@ fn a_snapshot_with_message_rows_crosses_with_the_list_fields_after_the_trees() {
         visible_limit: 100,
         view_mode: ViewMode::Threaded,
         search: None,
+        selected_scope: None,
     };
 
     let json = serde_json::to_string(&snapshot).unwrap();
@@ -197,6 +201,7 @@ fn a_snapshot_at_rest_crosses_without_the_list_fields() {
             address: "me@home.example".to_owned(),
             expanded: false,
             can_edit_folders: false,
+            can_report_mail: false,
             folders: vec![],
         }],
         rows: Vec::new(),
@@ -204,6 +209,7 @@ fn a_snapshot_at_rest_crosses_without_the_list_fields() {
         visible_limit: 0,
         view_mode: ViewMode::Flat,
         search: None,
+        selected_scope: None,
     })
     .unwrap();
     assert_eq!(
@@ -241,6 +247,7 @@ fn the_snapshot_carries_every_account_s_tree_unchanged() {
             address: "me@work.example".to_owned(),
             expanded: true,
             can_edit_folders: false,
+            can_report_mail: false,
             folders: vec![
                 inbox_row(2),
                 FolderRow {
@@ -271,6 +278,7 @@ fn the_snapshot_carries_every_account_s_tree_unchanged() {
             address: "me@home.example".to_owned(),
             expanded: false,
             can_edit_folders: false,
+            can_report_mail: false,
             folders: vec![inbox_row(1)],
         },
     ];

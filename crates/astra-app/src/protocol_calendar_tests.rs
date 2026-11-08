@@ -67,8 +67,24 @@ fn set_range_carries_the_window_anchor_and_its_length() {
         &Intent::Calendar(CalendarIntent::SetRange {
             start: utc("2026-10-18T22:00:00Z"),
             days: 7,
+            view: None,
         }),
         r#"{"calendar":{"set_range":{"start":"2026-10-18T22:00:00Z","days":7}}}"#,
+    );
+}
+
+#[test]
+fn set_range_optionally_names_the_view_kind() {
+    // The view half of the calendar's shape preference crosses only when the
+    // host names it: a window moved without a view keeps the standing
+    // preference, so the key itself stays absent above.
+    round_trips(
+        &Intent::Calendar(CalendarIntent::SetRange {
+            start: utc("2026-10-18T22:00:00Z"),
+            days: 7,
+            view: Some(astra_viewmodel::CalendarViewWire::Agenda),
+        }),
+        r#"{"calendar":{"set_range":{"start":"2026-10-18T22:00:00Z","days":7,"view":"agenda"}}}"#,
     );
 }
 

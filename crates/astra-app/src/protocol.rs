@@ -21,7 +21,7 @@ pub use intent_compose::ComposeIntent;
 pub use intent_drafts::{CompositionId, DraftsIntent};
 pub use intent_outbox::OutboxIntent;
 pub use intent_people::{ContactDraftInput, ContactNameInput, ContactPatchInput, PeopleIntent};
-pub use intent_settings::{DavSectionInput, SettingsIntent, ThemeMode, WeekdayWire};
+pub use intent_settings::{DavSectionInput, SettingsIntent, SyncBodyCap, ThemeMode, WeekdayWire};
 
 use astra_composer::DraftBlobHandle;
 use serde::{Deserialize, Serialize};
@@ -129,6 +129,11 @@ mod search_tests;
 #[path = "protocol_folder_tests.rs"]
 mod folder_tests;
 
+// The report family's intents, split for the same reason.
+#[cfg(test)]
+#[path = "protocol_report_tests.rs"]
+mod report_tests;
+
 // The calendar family's intents and surface word, split for the same reason.
 #[cfg(test)]
 #[path = "protocol_calendar_tests.rs"]
@@ -143,3 +148,8 @@ mod people_tests;
 #[cfg(test)]
 #[path = "protocol_settings_tests.rs"]
 mod settings_tests;
+
+// The drafts family's row-keyed arm, split for the same reason.
+#[cfg(test)]
+#[path = "protocol_drafts_tests.rs"]
+mod drafts_tests;

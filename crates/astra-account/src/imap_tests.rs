@@ -37,13 +37,14 @@ const LIST: &str = "* LIST (\\HasNoChildren) \"/\" \"INBOX\"\r\n\
                     * LIST (\\HasChildren) \"/\" \"Projects\"\r\n\
                     * LIST (\\HasNoChildren) \"/\" \"Projects/2026\"\r\n";
 
-/// The reply to one tagged command line.
-fn reply(line: &str) -> String {
+/// The reply to one tagged command line, answering `CAPABILITY` with
+/// the server's advertised capability line.
+fn reply(line: &str, capabilities: &str) -> String {
     let mut words = line.split_whitespace();
     let tag = words.next().unwrap_or("*");
     let command = words.next().unwrap_or_default().to_ascii_uppercase();
     match command.as_str() {
-        "CAPABILITY" => format!("* CAPABILITY IMAP4rev1 IDLE SPECIAL-USE\r\n{tag} OK done\r\n"),
+        "CAPABILITY" => format!("* CAPABILITY {capabilities}\r\n{tag} OK done\r\n"),
         "LIST" => format!("{LIST}{tag} OK LIST done\r\n"),
         "EXAMINE" | "SELECT" => {
             format!("* 0 EXISTS\r\n* OK [UIDVALIDITY 1] ok\r\n{tag} OK [READ-ONLY] done\r\n")
@@ -54,6 +55,18 @@ fn reply(line: &str) -> String {
 
 /// A TLS server socket answering IMAP lines with `reply`, counting what it accepts.
 async fn scripted_server() -> (
+    u16,
+    rustls::pki_types::CertificateDer<'static>,
+    Arc<AtomicUsize>,
+) {
+    scripted_server_offering("IMAP4rev1 IDLE SPECIAL-USE").await
+}
+
+/// The scripted server whose capability line advertises the OAuth SASL
+/// mechanism: what a grant-carrying account's dial negotiates against.
+async fn scripted_server_offering(
+    mechanisms: &'static str,
+) -> (
     u16,
     rustls::pki_types::CertificateDer<'static>,
     Arc<AtomicUsize>,
@@ -84,17 +97,19 @@ async fn scripted_server() -> (
         while let Ok((tcp, _)) = listener.accept().await {
             counter.fetch_add(1, Ordering::SeqCst);
             let acceptor = acceptor.clone();
+            let greeting = format!("* OK [CAPABILITY {mechanisms}] ready\r\n");
+            let mechanisms = mechanisms.to_owned();
             tokio::spawn(async move {
                 let Ok(tls) = acceptor.accept(tcp).await else {
                     return;
                 };
                 let mut tls = BufReader::new(tls);
-                if tls.write_all(b"* OK ready\r\n").await.is_err() {
+                if tls.write_all(greeting.as_bytes()).await.is_err() {
                     return;
                 }
                 let mut line = String::new();
                 while matches!(tls.read_line(&mut line).await, Ok(read) if read > 0) {
-                    let answer = reply(&line);
+                    let answer = reply(&line, &mechanisms);
                     if tls.write_all(answer.as_bytes()).await.is_err() {
                         return;
                     }
@@ -160,7 +175,7 @@ async fn a_dial_binds_every_folder_the_account_lists_with_the_inbox_first() {
     let config = account(port, &served);
     let connections = ImapConnections::new();
 
-    let providers = connect_mail_providers(&connections, &config, &account_id())
+    let providers = connect_mail_providers(&connections, &config, &account_id(), None)
         .await
         .expect("the dial");
 
@@ -188,7 +203,7 @@ async fn a_dial_binds_the_submission_provider_when_the_account_configures_smtp()
     let (port, served, _accepted) = scripted_server().await;
     let config = submission_account(port, &served);
 
-    let providers = connect_mail_providers(&ImapConnections::new(), &config, &account_id())
+    let providers = connect_mail_providers(&ImapConnections::new(), &config, &account_id(), None)
         .await
         .expect("the dial");
 
@@ -214,7 +229,7 @@ async fn a_dial_without_smtp_binds_mail_only_providers() {
     let (port, served, _accepted) = scripted_server().await;
     let config = account(port, &served);
 
-    let providers = connect_mail_providers(&ImapConnections::new(), &config, &account_id())
+    let providers = connect_mail_providers(&ImapConnections::new(), &config, &account_id(), None)
         .await
         .expect("the dial");
 
@@ -235,10 +250,10 @@ async fn a_dial_binds_every_folder_over_one_login() {
     let config = account(port, &served);
     let connections = ImapConnections::new();
 
-    let providers = connect_mail_providers(&connections, &config, &account_id())
+    let providers = connect_mail_providers(&connections, &config, &account_id(), None)
         .await
         .expect("the dial");
-    let opened = connect_imap_mailbox(&connections, &config, "Projects")
+    let opened = connect_imap_mailbox(&connections, &config, "Projects", None)
         .await
         .expect("a folder opened on demand");
 
@@ -259,7 +274,7 @@ async fn folders_opened_together_before_any_dial_connect_the_account_once() {
 
     let opened = futures::future::join_all(
         ["INBOX", "Sent", "Projects"]
-            .map(|mailbox| connect_imap_mailbox(&connections, &config, mailbox)),
+            .map(|mailbox| connect_imap_mailbox(&connections, &config, mailbox, None)),
     )
     .await;
 
@@ -280,7 +295,7 @@ async fn every_dial_logs_in_afresh() {
     let connections = ImapConnections::new();
 
     for _ in 0..2 {
-        connect_mail_providers(&connections, &config, &account_id())
+        connect_mail_providers(&connections, &config, &account_id(), None)
             .await
             .expect("the dial");
     }
@@ -293,7 +308,7 @@ async fn invalidating_the_connections_makes_the_next_call_dial() {
     let (port, served, accepted) = scripted_server().await;
     let config = account(port, &served);
     let connections = ImapConnections::new();
-    let providers = connect_mail_providers(&connections, &config, &account_id())
+    let providers = connect_mail_providers(&connections, &config, &account_id(), None)
         .await
         .expect("the dial");
 
@@ -358,7 +373,7 @@ async fn server_refusing_login_with(
 
 /// The dial's first login, against a server that refuses every one.
 async fn first_login(config: &AccountConfig) -> AccountError {
-    match connect_mail_providers(&ImapConnections::new(), config, &account_id()).await {
+    match connect_mail_providers(&ImapConnections::new(), config, &account_id(), None).await {
         Ok(_) => panic!("the server refuses every LOGIN"),
         Err(err) => err,
     }
@@ -392,3 +407,6 @@ async fn a_first_login_refused_for_the_credential_is_a_rejected_sign_in() {
         "a refused credential was not read as one: {error}"
     );
 }
+
+#[path = "imap_tests/grant_pool_tests.rs"]
+mod grant_pool_tests;

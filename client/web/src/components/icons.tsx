@@ -6,6 +6,7 @@ import { HugeiconsIcon } from '@hugeicons/react';
 import type { SVGProps } from 'react';
 import {
   Add01Icon,
+  Activity01Icon,
   ArchiveArrowUpIcon as ArchiveArrowUpIconData,
   ArchiveIcon as ArchiveIconData,
   ArrowExpandDiagonal01Icon as PopOutIconData,
@@ -42,6 +43,7 @@ import {
   Search01Icon,
   SentIcon as SentIconData,
   Settings02Icon,
+  Shield01Icon,
   SlidersHorizontalIcon as AdvancedIconData,
   SpamIcon,
   SparklesIcon,
@@ -111,3 +113,5 @@ export const RefreshIcon = makeIcon(RefreshIconData);
 export const MoreIcon = makeIcon(MoreIconData);
 export const PopOutIcon = makeIcon(PopOutIconData);
 export const PluginIcon = makeIcon(PluginIconData);
+export const DiagnosticsIcon = makeIcon(Activity01Icon);
+export const PrivacyIcon = makeIcon(Shield01Icon);

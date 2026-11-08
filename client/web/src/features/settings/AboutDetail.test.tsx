@@ -38,6 +38,16 @@ describe('the About detail', () => {
     expect(screen.getByText('Version 0.1.0')).toBeTruthy();
   });
 
+  it('renders the About copy through the strings module', () => {
+    render(<AboutDetail />);
+    // The catalogue's own words, not the component's literals: the
+    // mechanism is the deliverable, so the heading and the app name come
+    // from the standing language's catalogue.
+    expect(screen.getByRole('heading', { name: 'About' })).toBeTruthy();
+    expect(screen.getByText('Astra Mail')).toBeTruthy();
+    expect(screen.getByText('Attributions')).toBeTruthy();
+  });
+
   it('renders every attribution the snapshot carries', () => {
     render(<AboutDetail />);
     expect(screen.getByText('email-calendar-sync-engine (the mail and calendar engine)')).toBeTruthy();

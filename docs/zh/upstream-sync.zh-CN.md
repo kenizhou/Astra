@@ -56,7 +56,16 @@ Astra 如何跟踪其四个参考项目。规则手册（AGENTS.md）链接到�
   分类 digest：docs only、tests only、ci-docker、dependencies
   （`Cargo.toml`、`Cargo.lock`）、behaviour、security。dependencies
   桶显式点名 rusqlite/libsqlite3-sys：两家存储共享一个 libsqlite3-sys，
-  上游 bump rusqlite 可能在同一次构建中打坏 Astra。
+  上游 bump rusqlite 可能在同一次构建中打坏 Astra。每次 `gh` 调用都
+  显式命名仓库（`-R`）：计划任务的 shell 起始于任何仓库之外，gh 自己
+  的 git 发现会在那里失败（这个 bug 曾让五个版本推送后没有 PR）。无
+  security 分类的区间以 READY 开启并武装 GitHub auto-merge（`--auto
+  --merge`，merge commit，绿门）；带 security 分类的区间以草稿开启，
+  等早晨审阅。循环从任何状态收敛：已推送而无 PR 站立的分支，下一晚
+  为既有区间补开 PR；已合并而 `last_ported` 未推进的同步（无开放
+  PR 且分支尖已是 main 的祖先）直接推进它，即合并自身的簿记。安全
+  分类器对短缩写加词边界（`rce` 一类）：裸的 `rce` 模式曾在
+  “source”一词内部命中，把干净的同步扣作人质。
 - **同步 PR 一律用 merge commit 合并，绝不 squash。** squash 意味着分
   支尖端永远不是 main 的祖先，此后每次同步都会重新全量 diff，冲突显
   形机制随之失效。（备选 —— 每次 squash 后在 `vendor-sync` 上
@@ -67,6 +76,14 @@ Astra 如何跟踪其四个参考项目。规则手册（AGENTS.md）链接到�
   推送，PR 随之更新。`git diff vendor-sync main -- vendor/engine` 永
   远给出全部树内修改的清单，因此静默偏离上游在结构上不可能。
 - **合并时推进 `last_ported`。** 锁定表的引擎行继续作为溯源记录。
+- **首个树内 delta 是 MIME-wrap 接缝**（ECS 规格，2026-10-23 落
+  地）：`engine-provider` 的 `MimeWrapper` trait 与 serde 默认化的
+  `Draft::sign`/`Draft::encrypt` 标记、provider-imap 的 `wrap` 模块
+  （包装器在拨号前被咨询、Sent 副本修复重新包装），以及让被拒 op 的
+  行说明原因的 `PendingOutcome::Failed` detail。
+  `git diff vendor-sync main -- vendor/engine` 会列出它；每个同步 PR
+  的审查都应预期这些文件存在差异，并把上游对它们的任何触碰当作需要
+  审慎解决的冲突。
 - **引擎自身电池不属于 `cargo test --workspace`。** vendored 树是被
   排除于成员之外的嵌套 workspace，其测试只显式运行：`cd vendor/engine
   && cargo test --workspace`（live-server 测试无环境变量时自动跳过）。
@@ -77,3 +94,18 @@ Astra 如何跟踪其四个参考项目。规则手册（AGENTS.md）链接到�
   录，否则构建可能吃到陈旧引擎产物。
 - security 分类的同步一律扣留审阅，绝不自动合并，与 22:00 契约对每个
   参考项目的规则一致。
+
+### 22:00 接线
+
+一个 Windows Task Scheduler 任务每晚运行该驱动，日志写在仓库**之外**
+（`D:/Projects/mailclient/logs/vendor-sync.log`）：
+
+```bash
+schtasks /Create /F /TN "Astra\vendor-upstream-sync" /SC DAILY /ST 22:00 \
+  /TR "\"C:\Program Files\Git\bin\bash.exe\" -lc 'D:/Projects/mailclient/Astra/scripts/dev/upstream-sync.sh >> D:/Projects/mailclient/logs/vendor-sync.log 2>&1'"
+```
+
+`upstream-sync.sh --dry-run` 打印当前与新版本及分类 digest 而不改动任
+何状态，是在放行同步前观察它的方式。任何失败（文件锁、网络、`gh`
+auth、原样性证明失败）以非零退出进日志，成为晨审事项，绝不静默跳
+过。

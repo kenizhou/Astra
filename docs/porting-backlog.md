@@ -34,20 +34,48 @@ After SP2v: the lock-phase assessment (every row shipped, partial with
 recorded gaps, or explicitly decided), then the 22:00 upstream-sync
 activation.
 
+## The lock-phase assessment (2026-11-03, all slices landed)
+
+SP2k through SP2v are merged; the ladder is empty. The matrix counts
+16 rows shipped, 101 partial with named shortfalls in their notes, and
+13 unstarted, every one listed below for the owner to pick. The
+shortfall-naming discipline held through every slice: no partial row
+carries a silent gap, and the reviews enforced the naming at each
+landing. The references can be locked and the 22:00 upstream-sync
+activation scheduled.
+
+The 13 unstarted rows, the owner's picking list: the outgoing name per
+account (its core landed with SP2w; the surfaces follow); the JMAP and
+IMAP in-place re-grants (both families' expired rows name the reconnect
+remedy today); the unified inbox behind the account switcher; the vendor
+account family (the next-device list, the sign-in, the subscription view,
+decided out as N/A on 2026-11-07, the decisions below); the Drafts row
+reopening into the composer; the image resize handle; the mail actions
+row (read and unread, flag, archive, delete, trash); the offline diary at
+launch and the periodic calendar refresh; the showcase mode (the fixtures
+dev server already renders the seeded shell); and the assistant chat with
+tool budget.
+
 ## The decisions this backlog owes
 
 - **The Allodia commerce surface** (the vendor account, the subscription
-  view, the next-device account list) is mail-calendar's own business
-  layer. Astra records an explicit N/A, or an owner decision to port,
-  before the lock phase; it must not stand as a silent unstarted row.
+  view, the next-device account list) is decided out: the three rows carry
+  N/A in `capabilities.md` (2026-11-07), naming the licence bar
+  (LicenseRef-Allodia-1.0 §4.2, the code published to be audited, not
+  reused) and the owner's from-scratch path (the business behind the
+  reference is Allodia's closed account service, so a port would be a
+  from-scratch commercial service build, not a port). Reopening the family
+  means the owner building a vendor service; it never returns as porting
+  debt.
 - **The kylins additions** (the command palette, pin and pinned searches,
   snooze, quick steps, sweep, unsubscribe, VIP, watch-replies, hover
   actions, flag reminders, junk blocking, categories and classification
   and conditional formats, quote collapse, shortcuts help, the attachment
   browser, notification history, the crypto plugin surface) wait for the
   owner's pick; each pick becomes its own slice beside this ladder.
-- **The AI remainder**: the assistant chat with tool budget is the one
-  unstarted inbox-zero row; it slots wherever the owner places it.
+- **The AI remainder**: the assistant chat with tool budget was the one
+  unstarted inbox-zero row; SP2y shipped it (2026-11-08, PR #60), live-proven
+  armed over the harness and the model endpoint.
 
 ## Known gaps
 

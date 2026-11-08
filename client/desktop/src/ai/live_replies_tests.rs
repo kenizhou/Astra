@@ -228,7 +228,6 @@ fn a_real_draft_lands_for_the_seeded_rich_note_live() {
             cleared,
             "a judge verdict is spent exactly when the draft cleared the confidence floor"
         );
-
         // Put the note back the way the seed left it.
         app.dispatch(Intent::MarkRead {
             row: astra_app::RowRef::Message(message),
@@ -420,6 +419,7 @@ fn the_style_profile_is_inferred_live_from_sent_mail() {
             document: document(STYLE_WORDS),
             blobs: Vec::new(),
             crypto: astra_app::CryptoFlags::default(),
+            composition: None,
         })
         .await
         .expect("the proof send");

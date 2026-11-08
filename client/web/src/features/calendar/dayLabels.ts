@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The day key labels: one formatting module so every view names a day the
 // same way. All formatting runs over the key's UTC-midnight identity with an
-// explicit UTC zone, so a label never shifts with the host's own clock. The
-// clock label answers the persisted clock setting (24-hour, or 12-hour with
-// a meridiem), and the first-day word maps onto the JS weekday index the
-// week layout arithmetic takes.
+// explicit UTC zone, so a label never shifts with the host's own clock and
+// the calendar's display zone stays its own setting, whatever language the
+// words spell. The words follow the language the settings block carries;
+// the clock label answers the persisted clock setting (24-hour, or 12-hour
+// with a meridiem), and the first-day word maps onto the JS weekday index
+// the week layout arithmetic takes.
 
 import type { WeekdayWire } from '@/services/ipc';
+import { currentLanguage } from '@/features/settings/language';
 
 import { parseDayKey } from './calendarRange';
 
@@ -16,11 +19,11 @@ function asUtc(key: string): Date {
   return new Date(Date.UTC(year, month - 1, day));
 }
 
-/** One localised field of a day key, in the invariant locale. */
+/** One field of a day key, in the standing language, over UTC. */
 function field(key: string, options: Intl.DateTimeFormatOptions): string {
   // The locale inserts a comma after the weekday; the labels read cleaner
   // without it, and one normalisation keeps every view agreeing.
-  return new Intl.DateTimeFormat('en-GB', { ...options, timeZone: 'UTC' })
+  return new Intl.DateTimeFormat(currentLanguage(), { ...options, timeZone: 'UTC' })
     .format(asUtc(key))
     .replace(', ', ' ');
 }

@@ -228,6 +228,7 @@ async fn the_password_account_syncs_reads_and_sends_end_to_end_over_jmap() {
         document: proof::document(WORDS),
         blobs: Vec::new(),
         crypto: crate::crypto::CryptoFlags::default(),
+        composition: None,
     })
     .await
     .unwrap();

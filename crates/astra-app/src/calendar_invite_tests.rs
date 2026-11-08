@@ -170,6 +170,7 @@ async fn answered_app(
     app.dispatch(Intent::Calendar(CalendarIntent::SetRange {
         start: utc("2026-07-27T00:00:00Z"),
         days: 7,
+        view: None,
     }))
     .await
     .unwrap();

@@ -3,10 +3,12 @@
 //! events in the three time forms, the recurring series, the meeting with its
 //! organiser and attendee, and the invitation message that carries one.
 
+use std::num::NonZeroU32;
+
 use engine_api::{
     Calendar, CalendarDate, CalendarDateTime, CalendarId, Duration, Event, EventId, Frequency,
-    Mailbox, MailboxRole, Message, MessageIdHeader, Participant, ParticipantRole, Recurrence,
-    RecurrenceRule, TimeZoneId, Uid, UtcDateTime,
+    Mailbox, MailboxRole, Message, MessageIdHeader, Participant, ParticipantRole,
+    ParticipationStatus, Recurrence, RecurrenceRule, TimeZoneId, Uid, UtcDateTime,
 };
 use engine_core::{ids::MessageId, membership::Memberships};
 
@@ -112,6 +114,122 @@ pub(crate) fn meeting(key: &str, attendee: &str) -> Event {
     let mut organizer = Participant::attendee("boss@test.local");
     organizer.roles.insert(ParticipantRole::Owner);
     event.participants = vec![organizer, Participant::attendee(attendee)];
+    event
+}
+
+/// One participant named `name` at `address`, with `roles` beside the plain
+/// attendee's and the `status` they answered.
+fn seated(
+    name: Option<&str>,
+    address: &str,
+    roles: &[ParticipantRole],
+    status: ParticipationStatus,
+) -> Participant {
+    let mut participant = Participant::attendee(address);
+    participant.name = name.map(str::to_owned);
+    for role in roles {
+        participant.roles.insert(role.clone());
+    }
+    participant.participation_status = status;
+    participant
+}
+
+/// The meeting whose roll-call exercises every word: the organiser stored
+/// last (the roll-call must move the owner line first), a chair, an optional
+/// attendee, an informational address with no name, a plain attendee, and a
+/// line with neither a name nor an address, which renders nothing at all.
+pub(crate) fn roll_call_meeting(key: &str) -> Event {
+    let mut event = zoned_event(key, "Quarterly review", "2026-10-21T15:00:00");
+    let owner = ParticipantRole::Owner;
+    let chair = ParticipantRole::Chair;
+    let optional = ParticipantRole::Optional;
+    let informational = ParticipantRole::Informational;
+    event.participants = vec![
+        seated(
+            Some("Kim"),
+            "kim@test.local",
+            &[],
+            ParticipationStatus::NeedsAction,
+        ),
+        seated(
+            Some("Boss"),
+            "boss@test.local",
+            &[owner],
+            ParticipationStatus::Accepted,
+        ),
+        seated(
+            Some("Ada"),
+            "ada@test.local",
+            &[chair],
+            ParticipationStatus::Tentative,
+        ),
+        seated(
+            Some("Sam"),
+            "sam@test.local",
+            &[optional],
+            ParticipationStatus::Declined,
+        ),
+        seated(
+            None,
+            "digest@test.local",
+            &[informational],
+            ParticipationStatus::NeedsAction,
+        ),
+        Participant {
+            name: None,
+            email: None,
+            ..Participant::attendee("unreachable@test.local")
+        },
+    ];
+    event
+}
+
+/// The meeting of `attendees` plain attendees beside the organiser: the
+/// roll-call cap's fold case.
+pub(crate) fn crowded_meeting(key: &str, attendees: usize) -> Event {
+    let mut event = zoned_event(key, "All hands", "2026-10-21T10:00:00");
+    let mut organizer = Participant::attendee("boss@test.local");
+    organizer.name = Some("Boss".to_owned());
+    organizer.roles.insert(ParticipantRole::Owner);
+    organizer.participation_status = ParticipationStatus::Accepted;
+    event.participants = Vec::with_capacity(attendees + 1);
+    event.participants.push(organizer);
+    for seat in 0..attendees {
+        event
+            .participants
+            .push(Participant::attendee(format!("guest{seat}@test.local")));
+    }
+    event
+}
+
+/// The series the read-back words in full: every third week on Mondays and
+/// Wednesdays, ten instances.
+pub(crate) fn every_third_week_series(key: &str) -> Event {
+    let mut event = zoned_event(key, "Third-week sync", "2026-10-19T09:00:00");
+    let mut rule = RecurrenceRule::new(Frequency::Weekly);
+    rule.interval = NonZeroU32::new(3).unwrap();
+    rule.by_day = vec![
+        engine_api::NDay {
+            day: engine_api::Weekday::We,
+            nth_of_period: None,
+        },
+        engine_api::NDay {
+            day: engine_api::Weekday::Mo,
+            nth_of_period: None,
+        },
+    ];
+    rule.bound = engine_api::RecurrenceBound::Count(NonZeroU32::new(10).unwrap());
+    event.recurrence = Some(Recurrence::from_rule(rule));
+    event
+}
+
+/// The series whose rule sits outside the wording vocabulary (a by-month-day
+/// pattern): the read-back falls back to the bare interval and frequency.
+pub(crate) fn exotic_series(key: &str) -> Event {
+    let mut event = zoned_event(key, "Payday", "2026-10-15T09:00:00");
+    let mut rule = RecurrenceRule::new(Frequency::Monthly);
+    rule.by_month_day = vec![15];
+    event.recurrence = Some(Recurrence::from_rule(rule));
     event
 }
 

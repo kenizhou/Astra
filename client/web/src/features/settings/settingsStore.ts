@@ -18,6 +18,8 @@ import type {
 } from '@/services/ipc';
 import { useUiStore } from '@/stores/uiStore';
 
+import { setStandingLanguage } from './language';
+
 /** The category id, one per detail the settings screen ships. */
 export type SettingsCategory =
   | 'general'
@@ -28,6 +30,8 @@ export type SettingsCategory =
   | 'accounts'
   | 'plugins'
   | 'advanced'
+  | 'diagnostics'
+  | 'privacy'
   | 'about';
 
 /** The block the core hands a fresh preferences document: the shipped defaults. */
@@ -50,6 +54,11 @@ interface SettingsStoreState {
   about: AboutBlock;
   /** Why the newest settings write refused or failed, when it did. */
   error: SettingsError | undefined;
+  /**
+   * The device zone the core has offered and no answer has landed for,
+   * the prompt over the diary; null when no offer stands.
+   */
+  deviceZoneOffer: string | null;
   /** Moves on every applied snapshot, so watches see a fresh publish. */
   revision: number;
   /** The category the next open lands on; null opens on the last one. */
@@ -65,16 +74,21 @@ export const useSettingsStore = create<SettingsStoreState>((set) => ({
   accounts: [],
   about: { version: '' },
   error: undefined,
+  deviceZoneOffer: null,
   revision: 0,
   requestedCategory: null,
 
   applySnapshot: (snapshot) => {
     useUiStore.getState().setTheme(snapshot.settings.theme);
+    // The language's one writer: every formatter reads the standing tag,
+    // so the dates follow the snapshot the moment it lands.
+    setStandingLanguage(snapshot.settings.language);
     set((state) => ({
       settings: snapshot.settings,
       accounts: snapshot.accounts ?? [],
       about: snapshot.about,
       error: snapshot.error,
+      deviceZoneOffer: snapshot.device_zone_offer ?? null,
       revision: state.revision + 1,
     }));
   },

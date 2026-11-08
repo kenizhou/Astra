@@ -1,0 +1,27 @@
+{
+  "id": "agent-tools-search-auto",
+  "feature": "agent-tools",
+  "mode": "offline",
+  "inputs": {
+    "tool_budget_ms": 600000,
+    "chunks": ["searching"],
+    "chunk_delay_ms": 1,
+    "tool_call": { "name": "search_messages", "args": { "query": "from:boss", "limit": 20 } },
+    "policy": { "search_messages": { "level": "auto" } },
+    "cli_page": {
+      "rows": [
+        { "account": "acct-1", "key": "msg-1", "from": "boss@example.com", "subject": "Re: the budget", "date": "2026-11-07T09:00:00Z", "unread": true, "draft": false, "attachment": false }
+      ],
+      "total": 1,
+      "offset": 0,
+      "limit": 20,
+      "has_more": false
+    }
+  },
+  "expected": {
+    "no_permission_ask": true,
+    "tool_result": { "tool": "search_messages", "status": "ok" },
+    "output_equals_page": true,
+    "done": true
+  }
+}

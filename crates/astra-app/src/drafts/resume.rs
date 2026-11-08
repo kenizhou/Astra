@@ -10,10 +10,10 @@
 //! nothing to replace would leave the user two drafts and no way to tell which one they
 //! are editing.
 
-use engine_api::{AccountId, EmailAddress, Message, Provider};
+use engine_api::{AccountId, AttachmentPartId, EmailAddress, Message, Provider};
 
-use super::{Composition, CompositionId};
-use crate::App;
+use super::{CarriedPart, Composition, CompositionId};
+use crate::{compose_request::carry, reading::resolve, reference::MessageRef, App};
 
 /// A stored draft, as the composer that resumes it needs to open.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,6 +33,11 @@ pub struct DraftResume {
     /// The body, as plain text: what the composer can open without a second markup
     /// parser. The files the draft carries join the resume with the attachments slice.
     pub body_text: String,
+    /// The files the stored draft carries, as the document's pre-attached removable
+    /// rows: the forward's own carry shape, a blob handle naming the part behind it
+    /// and metadata only, never bytes and never a `data:` URI. The submit resolves
+    /// the standing rows' bytes core-side.
+    pub attachments: Vec<astra_composer::DraftAttachment>,
 }
 
 impl<P: Provider> App<P> {
@@ -70,18 +75,118 @@ impl<P: Provider> App<P> {
             .message_body(provider, account, &newest)
             .await
             .ok()?;
-        let resumed = DraftResume {
-            account: account.as_str().to_owned(),
-            to: join_emails(&newest.envelope.to),
-            cc: join_emails(&newest.envelope.cc),
-            bcc: join_emails(&newest.envelope.bcc),
-            subject: newest.envelope.subject.clone().unwrap_or_default(),
-            body_text: body.plain().unwrap_or_default().to_owned(),
-        };
+        let parts = self.read_carried_parts(provider, account, &newest).await;
+        let resumed = resume_record(
+            account.as_str(),
+            &newest,
+            body.plain().unwrap_or_default(),
+            &parts,
+        );
         if !self.adopt_stored_draft(&composition, account, &newest) {
             return None;
         }
+        self.park_carried(
+            &composition,
+            parts.into_iter().map(|(_, parked)| parked).collect(),
+        );
         Some(resumed)
+    }
+
+    /// Opens the Drafts row's named copy into `composition`: the same adoption and
+    /// the same three refusal gates as the latest-entry resume, addressed by the
+    /// row's own account and key rather than by recency, so a folder of drafts
+    /// reopens the one the user clicked. The files the stored copy carries
+    /// pre-attach as removable rows and park their bytes on the composition.
+    ///
+    /// `None` when the key resolves to nothing, the message is not a draft, or its
+    /// body cannot be read; nothing is adopted in any of those cases, because a
+    /// composition that opened without the draft's content must not be one whose
+    /// next save replaces it.
+    pub async fn resume_draft_by_key(
+        &self,
+        message: &MessageRef,
+        composition: CompositionId,
+    ) -> Option<DraftResume> {
+        let handle = self.account_handle(&message.account).await?;
+        let provider = handle.providers.first()?;
+        let stored = resolve(&self.engine, message).await?;
+        if !stored.is_draft() {
+            log::warn!("drafts: the key names a message that is not a draft");
+            return None;
+        }
+        let body = self
+            .engine
+            .message_body(provider, &message.account, &stored)
+            .await
+            .ok()?;
+        let parts = self
+            .read_carried_parts(provider, &message.account, &stored)
+            .await;
+        let resumed = resume_record(
+            message.account.as_str(),
+            &stored,
+            body.plain().unwrap_or_default(),
+            &parts,
+        );
+        if !self.adopt_stored_draft(&composition, &message.account, &stored) {
+            return None;
+        }
+        self.park_carried(
+            &composition,
+            parts.into_iter().map(|(_, parked)| parked).collect(),
+        );
+        Some(resumed)
+    }
+
+    /// The files `stored` carries, read once with their bytes: the rows the resume
+    /// answers with beside the parts it parks on the composition. A part whose
+    /// bytes will not read parks nothing and shows no row, the forward's own rule:
+    /// there is no row to show for a part that is not there.
+    async fn read_carried_parts(
+        &self,
+        provider: &P,
+        account: &AccountId,
+        stored: &Message,
+    ) -> Vec<(engine_api::MessageAttachment, CarriedPart)> {
+        let parts = self
+            .engine
+            .message_attachments(provider, account, stored)
+            .await
+            .unwrap_or_else(|err| {
+                log::warn!("drafts: the stored draft's parts did not read: {err}");
+                Vec::new()
+            });
+        let mut carried = Vec::new();
+        for part in parts {
+            let id = part.id();
+            match self
+                .engine
+                .message_attachment(
+                    provider,
+                    account,
+                    stored,
+                    AttachmentPartId::new(id.as_u32()),
+                )
+                .await
+            {
+                Ok(Some(content)) => {
+                    let parked = CarriedPart {
+                        id: id.as_u32(),
+                        file_name: part.file_name().to_owned(),
+                        media_type: part.media_type().to_owned(),
+                        bytes: content.into_bytes(),
+                    };
+                    carried.push((part, parked));
+                }
+                Ok(None) => {
+                    log::warn!("drafts: the stored draft names a part it does not carry");
+                }
+                Err(err) => {
+                    log::warn!("drafts: a stored part could not be read: {err}");
+                }
+            }
+        }
+        carried
     }
 
     /// Joins `composition` to the copy already on the server: its key, so the first save
@@ -131,6 +236,7 @@ impl<P: Provider> App<P> {
                     key: Some(stored.id.key().clone()),
                     saved: None,
                     held: None,
+                    carry: Vec::new(),
                 },
             )
             .is_some()
@@ -156,3 +262,36 @@ fn join_emails(addresses: &[EmailAddress]) -> String {
         .collect::<Vec<_>>()
         .join(", ")
 }
+
+/// One stored draft as the composer's resume record: the fields to hydrate from
+/// and the carried parts as the document's pre-attached rows, metadata only.
+fn resume_record(
+    account: &str,
+    stored: &Message,
+    body_plain: &str,
+    parts: &[(engine_api::MessageAttachment, CarriedPart)],
+) -> DraftResume {
+    DraftResume {
+        account: account.to_owned(),
+        to: join_emails(&stored.envelope.to),
+        cc: join_emails(&stored.envelope.cc),
+        bcc: join_emails(&stored.envelope.bcc),
+        subject: stored.envelope.subject.clone().unwrap_or_default(),
+        body_text: body_plain.to_owned(),
+        attachments: parts
+            .iter()
+            .filter_map(|(part, _)| {
+                carry::row(
+                    part.id().as_u32(),
+                    part.file_name(),
+                    part.media_type(),
+                    part.size(),
+                )
+            })
+            .collect(),
+    }
+}
+
+#[cfg(test)]
+#[path = "resume_by_key_tests.rs"]
+mod by_key_tests;

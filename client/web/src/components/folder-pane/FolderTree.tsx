@@ -27,14 +27,15 @@ import {
 import { ContextMenu } from '@/components/ui/ContextMenu';
 import { useContextMenu } from '@/components/ui/useContextMenu';
 import { dispatch, intents, type FolderRef } from '@/services/ipc';
-import type { AccountFolderRow, FolderRow, FolderRole, RowKey } from '@/services/surfaces';
+import type { AccountFolderRow, FolderRow, FolderRole } from '@/services/surfaces';
 import { useSettingsStore } from '@/features/settings/settingsStore';
 import { useFolderStore, visibleFolders } from '@/stores/folderStore';
 import { useListStore } from '@/stores/listStore';
 import { useSendingStore } from '@/stores/sendingStore';
 import { useUiStore } from '@/stores/uiStore';
 import { buildFolderMenu } from './folderMenu';
-import { folderDrop, messageRefsOf, type FolderDropTarget } from './folderDrag';
+import { droppedRowKeys, folderDrop, messageRefsOf, type FolderDropTarget } from './folderDrag';
+import { OutageBadge } from './OutageBadge';
 import { CONVERSATIONS_DRAG_TYPE, ROWS_DRAG_TYPE } from '@/components/message-list/MessageRow';
 import { NewFolderRow } from './NewFolderRow';
 import { RenameFolderRow } from './RenameFolderRow';
@@ -230,6 +231,10 @@ export function FolderTree({
   paletteIndex: number;
 }) {
   const selected = useFolderStore((s) => s.selected);
+  // The switcher's standing selection, read for the header's name row.
+  const accountSelected = useFolderStore(
+    (s) => s.scope?.kind === 'account' && s.scope.account === account.account_id,
+  );
   const rows = visibleFolders(account);
   const menu = useContextMenu();
   const [menuRow, setMenuRow] = useState<FolderRow | null>(null);
@@ -242,6 +247,12 @@ export function FolderTree({
 
   const onToggleAccount = () => {
     void dispatch(intents.setAccountExpanded(account.account_id, !account.expanded));
+  };
+
+  // The name row selects the account's scope; the chevron keeps expansion.
+  const onSelectAccount = () => {
+    useFolderStore.getState().selectAccount(account.account_id);
+    void dispatch(intents.selectAccount(account.account_id));
   };
 
   const openMenu = (row: FolderRow, event: React.MouseEvent): void => {
@@ -339,7 +350,7 @@ export function FolderTree({
     // A message drop moves the payload only when every key names a message:
     // a conversation the batch cannot name refuses the whole drop, the same
     // refusal the hover already gave it; the rest keep to their account.
-    const keys = droppedRowKeys(event);
+    const keys = droppedRowKeys((type) => event.dataTransfer.getData(type));
     if (keys.length > 0 && keys.every((key) => 'message' in key)) {
       const refs = messageRefsOf(keys);
       void dispatch(
@@ -397,9 +408,23 @@ export function FolderTree({
           className="h-2 w-2 shrink-0 rounded-full"
           style={{ background: `var(--account-${paletteIndex + 1})` }}
         />
-        <span className="truncate text-[11px] uppercase tracking-wide text-muted-text">
+        {/* The name row selects the account's scope; the chevron keeps
+            expansion, so the two never fight over one click. */}
+        <button
+          type="button"
+          onClick={onSelectAccount}
+          aria-pressed={accountSelected}
+          aria-label={`Show ${account.display_name}'s mail`}
+          title={`Show only ${account.display_name}'s mail`}
+          className={`min-w-0 flex-1 truncate rounded-[2px] text-left text-[11px] uppercase tracking-wide transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+            accountSelected
+              ? 'font-medium text-foreground'
+              : 'text-muted-text hover:bg-hover hover:text-foreground'
+          }`}
+        >
           {account.display_name}
-        </span>
+        </button>
+        <OutageBadge accountId={account.account_id} displayName={account.display_name} />
         <RefusalBadge accountId={account.account_id} displayName={account.display_name} />
         {collapsedUnread > 0 && (
           <span className="ml-auto shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-[11px] font-medium tabular-nums leading-none text-primary-foreground">
@@ -461,22 +486,4 @@ export function FolderTree({
       )}
     </section>
   );
-}
-
-/** The row keys a dropped selection carried, keys only, thread keys
- *  included: the drop site decides what a batch can name. */
-function droppedRowKeys(event: React.DragEvent): RowKey[] {
-  try {
-    const raw = event.dataTransfer.getData(ROWS_DRAG_TYPE);
-    if (raw === '') {
-      return [];
-    }
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-    return parsed as RowKey[];
-  } catch {
-    return [];
-  }
 }

@@ -4,10 +4,13 @@
 //! [`run`] assembles the Tauri shell: the single-instance guard first, then the
 //! deep-link (mailto), opener, dialog, and notification plugins, over the frameless
 //! main window `tauri.conf.json` declares, with the IPC command surface registered
-//! and the boot hook that builds the managed state behind it. The app's async
-//! runtime lives in [`runtime`], the observer port and its rate limiter in
-//! `observer`, the credential store port in `credential_store`, the background
-//! LLM client in `ai`, and the exit hook that stops sync in `exit`.
+//! and the boot hook that builds the managed state behind it. The boot hook also
+//! installs the rotating file log (`logging`), restores the main window's
+//! remembered geometry (`window_state`), and holds the launch's share hand-off
+//! (`share`) beside the mailto link. The app's async runtime lives in [`runtime`],
+//! the observer port and its rate limiter in `observer`, the credential store port
+//! in `credential_store`, the background LLM client in `ai`, and the exit hook that
+//! stops sync in `exit`.
 
 pub mod runtime;
 
@@ -16,18 +19,27 @@ mod agent;
 mod ai;
 mod app_state;
 mod boot;
+mod calendar_timer;
 mod commands;
 mod credential_store;
-mod crypto_send;
+mod crypto_wrapper;
+mod delivery;
 mod detection;
 mod dial_table;
 mod exit;
 mod headless;
+mod logging;
 mod mailto;
 mod mcp;
+mod notify;
 mod oauth;
 mod observer;
+mod platform;
 mod plugin;
+mod share;
+#[cfg(debug_assertions)]
+mod showcase;
+mod window_state;
 
 // The command-surface test fixtures: one compiled copy of the fake app, the
 // credential store, and the state builder, at the crate root so every command
@@ -41,6 +53,10 @@ mod commands_fakes;
 // is what a code path logs rather than what it answers.
 #[cfg(test)]
 mod log_capture;
+
+// The capability manifests' shape test: the message window family's entry.
+#[cfg(test)]
+mod capabilities_tests;
 
 use tauri::{Emitter, Manager};
 
@@ -76,8 +92,10 @@ pub fn run() {
             // A deep link that reached the already-running app arrives as
             // this argv on Windows; the hand-off makes the deep-link
             // plugin emit it, which is the only road an OAuth redirect
-            // takes back into a running instance.
+            // takes back into a running instance. Files in the same argv
+            // cross on the share channel, the mailto sibling road.
             oauth::wiring::forward_launch_arguments(app, &argv);
+            share::forward_files(app, &argv);
             let _ = app.emit("single-instance-args", argv);
         }))
         .plugin(tauri_plugin_deep_link::init())
@@ -87,15 +105,26 @@ pub fn run() {
         .register_uri_scheme_protocol("astra-plugin", |context, request| {
             plugin::scheme::handler(context.app_handle(), request)
         })
-        .on_page_load(mailto::on_page_load)
+        .on_page_load(|webview, payload| {
+            mailto::on_page_load(webview, payload);
+            share::on_page_load(webview, payload);
+            window_state::on_page_load(webview, payload);
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                window_state::save_close(window);
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             commands::dispatch,
             commands::mailbox_list,
             commands::sync_progress,
             commands::reading,
             commands::attachments::save_attachment,
+            commands::eml::eml_save,
             commands::drafts::draft_status,
             commands::drafts::draft_resume,
+            commands::drafts::draft_resume_by_key,
             commands::sending::sending,
             commands::compose::compose_request,
             commands::compose::take_compose_request,
@@ -117,12 +146,18 @@ pub fn run() {
             commands::ai_docs::split_map,
             commands::calendar::calendar,
             commands::calendar::calendar_brief_generate,
+            commands::calendar::calendar_event_detail,
             commands::people::people,
             commands::people::people_card,
             commands::people::people_suggestions,
             commands::people::people_avatar,
             commands::people::people_photo,
             commands::settings::settings,
+            commands::diagnostics::log_tail,
+            commands::diagnostics::log_export,
+            commands::platform::register_default_mail,
+            commands::platform::default_mail_asked,
+            commands::platform::default_mail_mark_asked,
             commands::mcp::mcp_status,
             commands::mcp::mcp_set_enabled,
             commands::mcp::mcp_set_allowed,
@@ -135,10 +170,17 @@ pub fn run() {
             oauth::commands::oauth_cancel,
             oauth::jmap_commands::jmap_oauth_offered,
             oauth::jmap_commands::jmap_oauth_begin,
+            oauth::jmap_reauth::jmap_reauth_begin,
+            oauth::mail_commands::imap_auth_offer,
+            oauth::mail_commands::imap_oauth_begin,
             agent::commands::agent_prompt,
             agent::commands::agent_abort,
             agent::commands::agent_status,
             agent::commands::permission_response,
+            agent::commands::chat_list,
+            agent::commands::chat_load,
+            agent::commands::chat_rename,
+            agent::commands::chat_delete,
             commands::plugin::plugin_list,
             commands::plugin::plugin_enable,
             commands::plugin::plugin_disable,

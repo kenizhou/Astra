@@ -78,6 +78,25 @@ pub(super) struct Composition {
     pub(super) saved: Option<u64>,
     /// The composer's current content, as its last Save carried it.
     pub(super) held: Option<HeldSave>,
+    /// The files a resume pre-attached onto the composition's document, with their
+    /// bytes: the parts the stored copy carried, read once at the resume and held
+    /// core-side so neither a save nor a send has to name the server again. The id is
+    /// the resume-time part id, the handle the document's rows carry; the bytes never
+    /// cross to the host.
+    pub(super) carry: Vec<CarriedPart>,
+}
+
+/// One file a resumed draft opened holding: its row's identity beside the bytes.
+#[derive(Clone)]
+pub(crate) struct CarriedPart {
+    /// The part id the resume read the file under, the handle's own name.
+    pub(super) id: u32,
+    /// The file's suggested name, as the row shows it and the copy stores it.
+    pub(super) file_name: String,
+    /// The file's media type.
+    pub(super) media_type: String,
+    /// The file's bytes, resolved once at the resume.
+    pub(super) bytes: Vec<u8>,
 }
 
 /// The drafts state: the open compositions and their per-composition facts.
@@ -129,6 +148,9 @@ impl<P: Provider> App<P> {
                 }
             }
             DraftsIntent::Discard { composition } => self.discard_draft(&composition).await,
+            DraftsIntent::DiscardStored { message } => {
+                self.discard_stored_draft(&message).await;
+            }
             DraftsIntent::Close { composition } => {
                 self.close_composition(&composition).await;
             }
@@ -177,7 +199,9 @@ impl<P: Provider> App<P> {
             log::warn!("drafts: the account has no provider to save a draft through");
             return;
         };
-        let Some(draft) = build_draft(&message_id, &handle.identity, held) else {
+        let identity = self.send_identity(&handle);
+        let carried = self.standing_carried(composition, &held.document);
+        let Some(draft) = build_draft(&message_id, &identity, held, &carried) else {
             log::warn!("drafts: the draft could not be rendered to store");
             return;
         };
@@ -333,6 +357,51 @@ impl<P: Provider> App<P> {
         }
     }
 
+    /// Removes one stored draft the Drafts row names: the row's own Delete verb,
+    /// with no composition to forget. The whole verb runs under the save gate,
+    /// exactly the composition discard's own guard, so a save mid-flight cannot
+    /// slip its put between the withdrawal and the delete and store a copy over
+    /// the removal. A save still waiting for a network under the same
+    /// `Message-ID` is withdrawn first, or the parked words would store a draft
+    /// the user just deleted; then the named copy goes through the engine's
+    /// outbox, so a refusal keeps the removal queued rather than dropping it.
+    async fn discard_stored_draft(&self, message: &crate::reference::MessageRef) {
+        let gate = Arc::clone(&self.save_gate);
+        let _discarding = gate.lock().await;
+        // The parked-save guard names its op by the copy's `Message-ID`, so the copy
+        // is resolved first. A copy that no longer resolves still gets its removal:
+        // the engine settles a removal of what is gone as done.
+        if let Some(stored) = crate::reading::resolve(&self.engine, message).await {
+            if let Some(header) = stored.envelope.message_id.first() {
+                if let Some((op, _)) = self.parked_save(&message.account, header).await {
+                    match self.engine.cancel_pending_op(&message.account, op).await {
+                        Ok(_) => log::info!("drafts: a queued save was withdrawn with the row"),
+                        Err(err) => {
+                            log::warn!("drafts: withdrawing the queued save failed: {err}");
+                        }
+                    }
+                }
+            }
+        }
+        let Some(handle) = self.account_handle(&message.account).await else {
+            return;
+        };
+        let Some(provider) = handle.providers.first() else {
+            return;
+        };
+        match self
+            .engine
+            .delete_draft(provider, &message.account, &message.key)
+            .await
+        {
+            Ok(_) => {
+                log::info!("drafts: the stored draft was removed");
+                self.invalidate_list_cache();
+            }
+            Err(err) => log::info!("drafts: the discard did not reach the server yet: {err}"),
+        }
+    }
+
     /// Saves what the composition last handed over, then forgets it: the host's `Close`
     /// for a composer that is dismissed without sending, and the draft stays in Drafts
     /// where the user will find it. Both steps run under the save gate, so a deadline
@@ -382,3 +451,9 @@ impl<P: Provider> App<P> {
 #[cfg(test)]
 #[path = "drafts_tests.rs"]
 mod tests;
+
+// The Drafts row's own discard, split from the resume's by-key tests so each
+// file keeps one concern under the 500-line cap.
+#[cfg(test)]
+#[path = "discard_by_key_tests.rs"]
+mod discard_by_key_tests;

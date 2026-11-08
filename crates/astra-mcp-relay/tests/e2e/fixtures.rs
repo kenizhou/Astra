@@ -89,6 +89,7 @@ pub(crate) fn account(
             server_name: host.to_owned(),
             username: user.to_owned(),
             password: Some(Secret::new(password.to_owned())),
+            oauth: None,
             security: ConnectionSecurity::ImplicitTls,
         }),
         smtp: Some(SmtpAccount {
@@ -120,7 +121,7 @@ pub(crate) async fn dial_with_accepted_certificate(
     let account_id = config.account_id().expect("the account id");
     let connections = ImapConnections::new();
 
-    let Err(error) = connect_mail_providers(&connections, &config, &account_id).await else {
+    let Err(error) = connect_mail_providers(&connections, &config, &account_id, None).await else {
         panic!("the harness certificate was trusted without an accepted exception");
     };
     let AccountError::CertificateRejected { rejected, .. } = error else {
@@ -129,7 +130,7 @@ pub(crate) async fn dial_with_accepted_certificate(
 
     let accepted = CertificateException::new(rejected.server_name(), rejected.certificate());
     let config = account(host, port, user, password, vec![accepted]);
-    let providers = connect_mail_providers(&connections, &config, &account_id)
+    let providers = connect_mail_providers(&connections, &config, &account_id, None)
         .await
         .expect("the dial with the accepted certificate");
     (account_id, providers)

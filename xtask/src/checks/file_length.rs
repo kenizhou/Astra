@@ -88,7 +88,8 @@ mod tests {
     #[test]
     fn the_vendored_engine_tree_is_exempt() {
         let long = "line
-".repeat(super::MAX_LINES + 1);
+"
+        .repeat(super::MAX_LINES + 1);
         let root = fixture(&[("vendor/engine/crates/engine-core/src/lib.rs", &long)]);
         assert!(super::check(&root).is_ok());
     }

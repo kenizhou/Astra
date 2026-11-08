@@ -185,20 +185,22 @@ sha256(内容)) 对的 sha256，签名自身不参与，发布者密钥参与）
   认开启且读错安全默认开的受保护头主题隐藏、仅 PGP 且在加密部分内的
   Autocrypt-Gossip、`EncryptOp.sign_with` 组合（绝不先明文签名再加密），
   以及 W9 密码臂（SKESK 对称，`PasswordConflict`/`PasswordRequired`）。
-- **Astra 侧发件箱**（规格 D3）：钉定引擎的提交只接受 `Draft`，因此加
-  密发送用引擎自己的 `engine_rfc5322` 组装（输出逐字节一致），包装一
-  次（归档变体，带 `Bcc`），排入 `crypto_outbox`。线上变体是同一密文
-  减去 `Bcc` 头。绕行传输刻意小而明确：EHLO、`AUTH PLAIN`、
-  `MAIL FROM`、`RCPT TO`、带转义的 DATA、出错时 RSET，走账户已拨号的
-  设置与宿主构建的 TLS 连接器；Sent 副本以 IMAP `APPEND` 归档（按
-  special-use `\Sent` 发现）。DATA 中途断连落为 `unconfirmed`；只有用户
-  的作答会重发。加密行项以高位 op 命名空间并入既有发送快照，动词同
-  样路由。
+- **引擎的 MIME-wrap 接缝**（ECS 规格，取代 SP4b 的 D3）：vendored 引擎
+  携带 provider 中立的 `MimeWrapper` trait，绑定存储的包装器
+  （`astra-crypto-store::wrap`）在拨号时安装到每个启用了方法的 IMAP 账
+  户。加密发送骑乘**引擎自己的发件箱**：drain 组装归档变体（带
+  `Bcc`）并交给包装器一次，线上变体是同一密文减去 `Bcc` 头，Sent 副
+  本由引擎自己的归档逻辑落盘。信任拒绝在任何 socket 拨号前将 op 落为
+  `Failed`，原因随行展示；密钥修好后用队列自己的 Send Now 重跑整个包
+  装。一台发送引擎、一个发件箱、一条 drain：SP4b 的 Astra 侧加密发件
+  箱及其绕行传输已退役（`crypto_outbox` 表删除，未发布）。
 - **开关**：每个账户在其存储配置中的 `[crypto] method`
   （`none | openpgp | smime`），随设置行回显并可在账户页编辑。`none`
-  是零开销默认：引擎队列保留每一封发送。编写器的 sign/encrypt 标记随
-  提交 intent 下发，在启用方法时默认同开。方法存在而无 IMAP/SMTP 提交
-  设置的账户得到类型化的不可用回答并扣留，绝不静默丢弃。
+  是零开销默认：每封发送明文发出，标记惰性。编写器的 sign/encrypt 标
+  记在提交时盖到引擎的 `Draft` 上，默认同开。写入在持久化**之前**重
+  拨账户，因此新方法随下一封发送生效；对没有 IMAP/SMTP 提交设置的账
+  户（今天是 Graph/Google/JMAP：没有可挂包装器的接缝）失败关闭地拒绝
+  ——方法存在而发送明文的情况不会发生。
 
 后续切片：SP4c 是接收半（经阅读流水线的解密/验签、静存加密草稿、结果
 行与安全横幅、CRL 拉取、Autocrypt 消费半）；SP4d 是令牌注册表

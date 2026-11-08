@@ -32,14 +32,12 @@ hex = "0.4"
 x509-parser = "0.18"
 # The autocrypt helpers manipulate OpenPGP certs directly (minimal_export).
 sequoia-openpgp = { version = "2", default-features = false, features = ["crypto-rust", "allow-experimental-crypto", "allow-variable-time-crypto"] }
-# The bypass transport: sockets and TLS (the host builds the connector).
-tokio = { workspace = true, features = ["io-util", "net", "time"] }
-tokio-rustls = { workspace = true }
+# The engine's MIME-wrap seam this crate's wrapper implements.
+engine-core = { workspace = true }
+engine-provider = { workspace = true }
 
 [dev-dependencies]
 astra-crypto-smime = { path = "../astra-crypto-smime", features = ["testing"] }
-# The fixture TLS connector that trusts the scripted servers' self-signed certs.
-engine-tls = { workspace = true, features = ["dangerous-testing"] }
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt"] }
 

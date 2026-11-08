@@ -47,7 +47,12 @@ fn account_infos_answer_the_google_kind_the_grant_s_address_and_the_standing_ref
     let (dials, id) = google_table("infos-google");
     let refusals = Arc::new(crate::oauth::grant_refusals::GrantRefusals::new());
     refusals.record(&id, astra_viewmodel::GrantState::SignInExpired);
-    let ops = HostAccountStore::new(dials, FakeStore::accepting(), Arc::clone(&refusals));
+    let ops = HostAccountStore::new(
+        dials,
+        FakeStore::accepting(),
+        Arc::clone(&refusals),
+        crate::commands_fakes::crypto_store(),
+    );
 
     let infos = crate::runtime::build_runtime()
         .expect("the test runtime builds")

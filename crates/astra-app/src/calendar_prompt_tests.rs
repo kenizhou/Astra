@@ -23,6 +23,7 @@ async fn prompted_app(
     app.dispatch(Intent::Calendar(CalendarIntent::SetRange {
         start: "2026-07-27T00:00:00Z".parse().unwrap(),
         days: 7,
+        view: None,
     }))
     .await
     .unwrap();
@@ -202,6 +203,7 @@ async fn an_imip_reply_that_cannot_be_sent_surfaces_a_failed_row() {
     app.dispatch(Intent::Calendar(CalendarIntent::SetRange {
         start: "2026-07-27T00:00:00Z".parse().unwrap(),
         days: 7,
+        view: None,
     }))
     .await
     .unwrap();

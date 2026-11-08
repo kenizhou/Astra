@@ -4,7 +4,9 @@
 //! runtime's state stays separate from it; the constants stay here beside the policy
 //! that reads them.
 
-use crate::App;
+use engine_api::AccountId;
+
+use crate::{reference::FolderRef, App};
 
 /// How many mailbox-list rows one page holds: the initial window after any navigation,
 /// and the step [`Intent::ShowMore`](crate::Intent::ShowMore) grows it by. Sized so the
@@ -20,6 +22,28 @@ pub(crate) const MIN_LOAD_WINDOW: usize = 500;
 /// slice of the account's newest mail, so the read over-reaches to keep one folder's
 /// page from running short of the window's own depth.
 pub(crate) const WINDOW_ROW_FACTOR: usize = 4;
+
+/// The mailbox list's scope. An account is always named alongside a folder, so the
+/// folder key, unique only within its account, can never be resolved against the wrong
+/// one, or against none: separately held, "no account but a folder" is a state the
+/// types would permit and nothing renders.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) enum Scope {
+    /// Every account, each one's Inbox in view.
+    #[default]
+    AllInboxes,
+    /// One account's whole mailbox.
+    Account(AccountId),
+    /// One folder of one account.
+    Folder(FolderRef),
+}
+
+impl Scope {
+    /// The scope for a host's account selection: an id, or the unified list for `None`.
+    pub(crate) fn for_account(account: Option<AccountId>) -> Self {
+        account.map_or(Self::AllInboxes, Self::Account)
+    }
+}
 
 impl<P> App<P> {
     /// Resets the visible mailbox-list window to the first [`PAGE`]; called on any

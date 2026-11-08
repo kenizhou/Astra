@@ -1,18 +1,34 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The row menu's builder: the ported order, the flip labels, the disabled
-// reasons on both channels, and the batch loops dispatching one intent
-// per target.
+// reasons on both channels, the batch loops dispatching one intent per
+// target, and the two reading-batch verbs: the own-window opening (single
+// message only) and the spam report (offered only where the account can
+// report).
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const ipc = vi.hoisted(() => ({ dispatch: vi.fn() }));
+const window = vi.hoisted(() => ({ openMessageWindow: vi.fn() }));
+const draftOpen = vi.hoisted(() => ({
+  openDraftRow: vi.fn(),
+  openDraftRowWindow: vi.fn(),
+}));
 
 vi.mock('@/services/ipc', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   ...ipc,
 }));
 
-import { buildDraftMenu, buildRowMenu } from './rowMenu';
+vi.mock('@/features/reader/readerWindows', () => ({
+  openMessageWindow: window.openMessageWindow,
+}));
+
+vi.mock('@/features/composer/draftOpen', () => ({
+  openDraftRow: draftOpen.openDraftRow,
+  openDraftRowWindow: draftOpen.openDraftRowWindow,
+}));
+
+import { buildDraftMenu, buildRowMenu, type RowAccountContext } from './rowMenu';
 import type { FolderRow, MessageRowView, RowKey } from '@/services/surfaces';
 
 function row(key: RowKey, over: Partial<MessageRowView> = {}): MessageRowView {
@@ -34,14 +50,18 @@ const m1 = row({ message: { account: 'work', key: 'k1' } });
 const m2 = row({ message: { account: 'work', key: 'k2' } });
 const th = row({ thread: { account: 'work', thread_id: 'th-1' } });
 
-/** The picker context the account's pane holds: one destination folder. */
-const moveCtx = {
+/** The account context the menu holds: one destination folder, a junk
+ * folder the report files into, and a provider that can report its
+ * mail. */
+const accountCtx = {
   account: 'work',
   currentKey: 'INBOX',
+  canReportMail: true,
   folders: [
     { key: 'Archive', name: 'Archive', unread: 0, depth: 0, has_children: false, expanded: false },
+    { key: 'Junk', name: 'Junk', role: 'junk', unread: 0, depth: 0, has_children: false, expanded: false },
   ] as FolderRow[],
-};
+} satisfies RowAccountContext;
 
 /** The labels of the menu's items, separators as '|'. */
 function labels(items: ReturnType<typeof buildRowMenu>): string[] {
@@ -50,11 +70,21 @@ function labels(items: ReturnType<typeof buildRowMenu>): string[] {
 
 beforeEach(() => {
   ipc.dispatch.mockReset();
+  window.openMessageWindow.mockReset();
+  window.openMessageWindow.mockResolvedValue(undefined);
+  draftOpen.openDraftRow.mockReset();
+  draftOpen.openDraftRowWindow.mockReset();
+});
+
+// The confirm spy restores after each test, so a refused click in one
+// leaves the next its own answer.
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe('buildRowMenu', () => {
   it('holds the ported order', () => {
-    expect(labels(buildRowMenu([m1], 'flat', moveCtx))).toEqual([
+    expect(labels(buildRowMenu([m1], 'flat', accountCtx))).toEqual([
       'Open in New Window',
       '|',
       'Reply',
@@ -64,9 +94,10 @@ describe('buildRowMenu', () => {
       'Flag',
       '|',
       'Move to folder',
-      'Junk',
+      'Mark as spam',
       '|',
       'Delete',
+      'Delete Permanently',
       'Archive',
       '|',
       'Copy Subject',
@@ -74,23 +105,63 @@ describe('buildRowMenu', () => {
     ]);
   });
 
-  it('disables the placeholders with their reasons on both channels', () => {
-    const items = buildRowMenu([m1], 'flat');
-    const openWindow = items.find((item) => item.label === 'Open in New Window')!;
-    expect(openWindow.disabled).toBe(true);
-    expect(openWindow.title).toContain('future slice');
-    expect(openWindow.description).toBe(openWindow.title);
-    const junk = items.find((item) => item.label === 'Junk')!;
-    expect(junk.disabled).toBe(true);
+  it('opens the message in its own window from the single-message item', () => {
+    const items = buildRowMenu([m1], 'flat', accountCtx);
+    const open = items.find((item) => item.label === 'Open in New Window')!;
+
+    expect(open.disabled).toBeUndefined();
+    open.onSelect!();
+
+    expect(window.openMessageWindow).toHaveBeenCalledTimes(1);
+    expect(window.openMessageWindow).toHaveBeenCalledWith(
+      { account: 'work', key: 'k1' },
+      'Quarterly report',
+      'INBOX',
+    );
   });
 
-  it('offers the account folders as the move-to submenu, the sitting folder out', () => {
+  it('disables the own-window verb on a thread row and on a batch, with the reason', () => {
+    const threadItems = buildRowMenu([th], 'flat', accountCtx);
+    const threadOpen = threadItems.find((item) => item.label === 'Open in New Window')!;
+    expect(threadOpen.disabled).toBe(true);
+    expect(threadOpen.description).toContain('conversation');
+
+    const batchItems = buildRowMenu([m1, m2], 'flat', accountCtx);
+    const batchOpen = batchItems.find((item) => item.label === 'Open in New Window')!;
+    expect(batchOpen.disabled).toBe(true);
+    expect(batchOpen.description).toContain('Pick one message');
+    batchOpen.onSelect?.();
+    expect(window.openMessageWindow).not.toHaveBeenCalled();
+  });
+
+  it('reports the row as spam through the mark_junk intent, one per target', () => {
+    const items = buildRowMenu([m1, th], 'threaded', accountCtx);
+
+    items.find((item) => item.label === 'Mark as spam')!.onSelect!();
+
+    expect(ipc.dispatch).toHaveBeenCalledTimes(2);
+    expect(ipc.dispatch).toHaveBeenCalledWith({ mark_junk: { row: m1.key } });
+    expect(ipc.dispatch).toHaveBeenCalledWith({ mark_junk: { row: th.key } });
+  });
+
+  it('offers the spam report only where the account can report', () => {
+    const incapable = { ...accountCtx, canReportMail: false };
+    expect(
+      buildRowMenu([m1], 'flat', incapable).find((item) => item.label === 'Mark as spam'),
+    ).toBeUndefined();
+    expect(buildRowMenu([m1], 'flat').find((item) => item.label === 'Mark as spam')).toBeUndefined();
+    expect(
+      buildRowMenu([m1], 'flat', accountCtx).find((item) => item.label === 'Mark as spam'),
+    ).toBeTruthy();
+  });
+
+  it('offers the move-to submenu, the sitting folder out', () => {
     const folders: FolderRow[] = [
       { key: 'INBOX', name: 'Inbox', role: 'inbox', unread: 0, depth: 0, has_children: false, expanded: false },
       { key: 'Archive', name: 'Archive', unread: 0, depth: 0, has_children: false, expanded: false },
       { key: 'Clients', name: 'Clients', unread: 0, depth: 0, has_children: false, expanded: false },
     ];
-    const items = buildRowMenu([m1], 'flat', { account: 'work', currentKey: 'INBOX', folders });
+    const items = buildRowMenu([m1], 'flat', { ...accountCtx, folders });
 
     const move = items.find((item) => item.label === 'Move to folder')!;
     expect(move.disabled).toBeUndefined();
@@ -110,7 +181,7 @@ describe('buildRowMenu', () => {
     const folders: FolderRow[] = [
       { key: 'Archive', name: 'Archive', unread: 0, depth: 0, has_children: false, expanded: false },
     ];
-    const items = buildRowMenu([m1, m2], 'flat', { account: 'work', currentKey: 'INBOX', folders });
+    const items = buildRowMenu([m1, m2], 'flat', { ...accountCtx, folders });
 
     items.find((item) => item.label === 'Move to folder')!.children![0]!.onSelect!();
     expect(ipc.dispatch).toHaveBeenCalledWith({
@@ -128,18 +199,18 @@ describe('buildRowMenu', () => {
     const folders: FolderRow[] = [
       { key: 'INBOX', name: 'Inbox', role: 'inbox', unread: 0, depth: 0, has_children: false, expanded: false },
     ];
-    const items = buildRowMenu([m1], 'flat', { account: 'work', currentKey: 'INBOX', folders });
+    const items = buildRowMenu([m1], 'flat', { ...accountCtx, folders });
     expect(items.find((item) => item.label === 'Move to folder')).toBeUndefined();
   });
 
   it('hides the move-to verb for a selection that spans accounts', () => {
     const other = row({ message: { account: 'home', key: 'k9' } }, { account_id: 'home' });
-    const items = buildRowMenu([m1, other], 'flat', moveCtx);
+    const items = buildRowMenu([m1, other], 'flat', accountCtx);
     expect(items.find((item) => item.label === 'Move to folder')).toBeUndefined();
   });
 
   it('disables the move-to verb with the conversation reason on a thread target', () => {
-    const items = buildRowMenu([th], 'threaded', moveCtx);
+    const items = buildRowMenu([th], 'threaded', accountCtx);
     expect(items.find((item) => item.label === 'Move to folder')).toEqual({
       label: 'Move to folder',
       disabled: true,
@@ -208,7 +279,7 @@ describe('buildRowMenu', () => {
 
   it('loops archive and trash over a batch with counted labels', () => {
     const batch = [m1, m2, th];
-    const items = buildRowMenu(batch, 'threaded');
+    const items = buildRowMenu(batch, 'threaded', accountCtx);
     const del = items.find((item) => item.label === 'Delete 3 conversations')!;
     expect(del.danger).toBe(true);
     del.onSelect!();
@@ -220,8 +291,56 @@ describe('buildRowMenu', () => {
     expect(ipc.dispatch).toHaveBeenCalledWith({ archive_message: { row: m2.key } });
   });
 
+  it('offers the permanent delete below the ordinary Delete, danger-styled', () => {
+    const items = buildRowMenu([m1], 'flat', accountCtx);
+    const positions = labels(items);
+    expect(positions.indexOf('Delete Permanently')).toBe(positions.indexOf('Delete') + 1);
+    expect(items.find((item) => item.label === 'Delete Permanently')!.danger).toBe(true);
+    expect(items.find((item) => item.label === 'Delete Permanently')!.disabled).toBeUndefined();
+  });
+
+  it('asks the cannot-be-undone confirm, then dispatches the delete intent', () => {
+    vi.spyOn(globalThis, 'confirm').mockReturnValue(true);
+    const items = buildRowMenu([m1], 'flat', accountCtx);
+
+    items.find((item) => item.label === 'Delete Permanently')!.onSelect!();
+
+    expect(globalThis.confirm).toHaveBeenCalledWith('Permanently delete this message? This cannot be undone.');
+    expect(ipc.dispatch).toHaveBeenCalledTimes(1);
+    expect(ipc.dispatch).toHaveBeenCalledWith({ delete_message: { row: m1.key } });
+  });
+
+  it('words the confirm for a conversation row', () => {
+    vi.spyOn(globalThis, 'confirm').mockReturnValue(true);
+    const items = buildRowMenu([th], 'threaded', accountCtx);
+
+    items.find((item) => item.label === 'Delete Permanently')!.onSelect!();
+
+    expect(globalThis.confirm).toHaveBeenCalledWith('Permanently delete this conversation? This cannot be undone.');
+    expect(ipc.dispatch).toHaveBeenCalledWith({ delete_message: { row: th.key } });
+  });
+
+  it('keeps the mail when the permanent delete confirm is refused', () => {
+    vi.spyOn(globalThis, 'confirm').mockReturnValue(false);
+    const items = buildRowMenu([m1], 'flat', accountCtx);
+
+    items.find((item) => item.label === 'Delete Permanently')!.onSelect!();
+
+    expect(globalThis.confirm).toHaveBeenCalled();
+    expect(ipc.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('never offers the permanent delete as a batch loop', () => {
+    const items = buildRowMenu([m1, m2], 'flat', accountCtx);
+    const permanent = items.find((item) => item.label === 'Delete Permanently')!;
+    expect(permanent.disabled).toBe(true);
+    expect(permanent.title).toBe('Pick one row for this');
+    permanent.onSelect?.();
+    expect(ipc.dispatch).not.toHaveBeenCalled();
+  });
+
   it('counts flat-mode batches as messages', () => {
-    const items = buildRowMenu([m1, m2], 'flat');
+    const items = buildRowMenu([m1, m2], 'flat', accountCtx);
     expect(items.find((item) => item.label === 'Delete 2 messages')).toBeTruthy();
     expect(items.find((item) => item.label === 'Archive 2 messages')).toBeTruthy();
   });
@@ -243,13 +362,52 @@ describe('buildRowMenu', () => {
 });
 
 describe('buildDraftMenu', () => {
-  it('holds Open, Open in New Window, and a dangerous Delete, all placeholders', () => {
-    const items = buildDraftMenu();
+  const d1 = row({ message: { account: 'work', key: 'd-1' } }, { subject: 'The half' });
+
+  it('holds Open, Open in New Window, and a dangerous Delete Draft, no placeholders', () => {
+    const items = buildDraftMenu([d1]);
     expect(labels(items)).toEqual(['Open', 'Open in New Window', '|', 'Delete Draft']);
     for (const item of items.filter((entry) => !entry.separator)) {
-      expect(item.disabled).toBe(true);
-      expect(item.title).toContain('future slice');
+      expect(item.disabled).toBeUndefined();
+      expect(item.title).toBeUndefined();
     }
     expect(items.find((item) => item.label === 'Delete Draft')!.danger).toBe(true);
+  });
+
+  it('opens the draft row into the composer by key', () => {
+    buildDraftMenu([d1]).find((item) => item.label === 'Open')!.onSelect!();
+    expect(draftOpen.openDraftRow).toHaveBeenCalledTimes(1);
+    expect(draftOpen.openDraftRow).toHaveBeenCalledWith({ account: 'work', key: 'd-1' });
+  });
+
+  it('opens the draft row in its own window', () => {
+    buildDraftMenu([d1])
+      .find((item) => item.label === 'Open in New Window')!
+      .onSelect!();
+    expect(draftOpen.openDraftRowWindow).toHaveBeenCalledTimes(1);
+    expect(draftOpen.openDraftRowWindow).toHaveBeenCalledWith(
+      { account: 'work', key: 'd-1' },
+      'The half',
+    );
+  });
+
+  it('deletes the draft by key through the stored discard intent', () => {
+    buildDraftMenu([d1]).find((item) => item.label === 'Delete Draft')!.onSelect!();
+    expect(ipc.dispatch).toHaveBeenCalledTimes(1);
+    expect(ipc.dispatch).toHaveBeenCalledWith({
+      drafts: { discard_stored: { message: { account: 'work', key: 'd-1' } } },
+    });
+  });
+
+  it('disables every verb on a batch with the reason', () => {
+    const items = buildDraftMenu([m1, m2]);
+    for (const item of items.filter((entry) => !entry.separator)) {
+      expect(item.disabled).toBe(true);
+      expect(item.title).toBe('Pick one draft for this');
+      item.onSelect?.();
+    }
+    expect(ipc.dispatch).not.toHaveBeenCalled();
+    expect(draftOpen.openDraftRow).not.toHaveBeenCalled();
+    expect(draftOpen.openDraftRowWindow).not.toHaveBeenCalled();
   });
 });

@@ -22,6 +22,7 @@ vi.mock('@/features/settings/settingsStore', () => ({
 
 import { WorkWeekGrid } from './WorkWeekGrid';
 import { useCalendarStore } from './calendarStore';
+import type { OccurrenceRow } from '@/services/ipc';
 
 beforeEach(() => {
   ipc.dispatch.mockReset();
@@ -125,5 +126,85 @@ describe('the work-week grid', () => {
       '{"calendar":{"move_event":{"event":{"account":"work","key":"/dav/cal/work/default/evt-1.ics"},' +
         '"drag":{"edge":"whole","days":1,"minutes":15}}}}',
     );
+  });
+});
+
+describe('the work-week grid all-day lane', () => {
+  /** An all-day row over the given Amsterdam days, as UTC midnights. */
+  function allDay(over: Record<string, unknown> = {}): OccurrenceRow {
+    return {
+      account: 'work',
+      event: '/dav/cal/work/default/conf.ics',
+      calendar: 'cal-1',
+      title: 'Conference',
+      start: '2026-10-19T22:00:00Z',
+      end: '2026-10-21T22:00:00Z',
+      all_day: true,
+      recurring: false,
+      overridden: false,
+      accuracy: 'all_day',
+      participation: 'accepted',
+      can_move: true,
+      series_edit_warns: false,
+      ...over,
+    } as OccurrenceRow;
+  }
+
+  it('joins a multi-day all-day occurrence into one spanning banner', () => {
+    useCalendarStore.setState({
+      occurrences: [allDay({ start: '2026-10-19T22:00:00Z', end: '2026-10-21T22:00:00Z' })],
+    });
+    render(<WorkWeekGrid onSelectEvent={() => undefined} />);
+
+    const banners = document.querySelectorAll('[data-banner]');
+    expect(banners).toHaveLength(1);
+    // Tuesday and Wednesday Amsterdam: the banner joins both columns.
+    expect(banners[0]!.getAttribute('style')).toContain('grid-column: 2 / span 2');
+    expect(banners[0]!.textContent).toContain('Conference');
+    expect(banners[0]!.getAttribute('data-continues-before')).toBe('false');
+    expect(banners[0]!.getAttribute('data-continues-after')).toBe('false');
+  });
+
+  it('marks the continuation into days the window hides', () => {
+    // From the Saturday before the week to the Saturday after it.
+    useCalendarStore.setState({
+      occurrences: [allDay({ start: '2026-10-16T22:00:00Z', end: '2026-10-24T22:00:00Z' })],
+    });
+    render(<WorkWeekGrid onSelectEvent={() => undefined} />);
+
+    const banner = document.querySelector('[data-banner]')!;
+    expect(banner.getAttribute('style')).toContain('grid-column: 1 / span 5');
+    expect(banner.getAttribute('data-continues-before')).toBe('true');
+    expect(banner.getAttribute('data-continues-after')).toBe('true');
+    // The clip marks read: the banner says it runs on past both edges.
+    expect(banner.textContent).toContain('‹');
+    expect(banner.textContent).toContain('›');
+  });
+
+  it('stacks two banners that share days in their own lanes', () => {
+    useCalendarStore.setState({
+      occurrences: [
+        allDay({
+          event: 'a',
+          title: 'First',
+          start: '2026-10-19T22:00:00Z',
+          end: '2026-10-21T22:00:00Z',
+        }),
+        allDay({
+          event: 'b',
+          title: 'Second',
+          start: '2026-10-20T22:00:00Z',
+          end: '2026-10-22T22:00:00Z',
+        }),
+      ],
+    });
+    render(<WorkWeekGrid onSelectEvent={() => undefined} />);
+
+    const banners = document.querySelectorAll('[data-banner]');
+    expect(banners).toHaveLength(2);
+    expect(banners[0]!.textContent).toContain('First');
+    expect(banners[0]!.getAttribute('style')).toContain('grid-row: 1');
+    expect(banners[1]!.textContent).toContain('Second');
+    expect(banners[1]!.getAttribute('style')).toContain('grid-row: 2');
   });
 });

@@ -5,14 +5,15 @@
 // end-only edit as the end-edge drag, the one-vs-all choice on a recurring
 // row, the series warning that names what a series edit would discard, and
 // the read-only recurrence degradation.
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const ipc = vi.hoisted(() => ({ dispatch: vi.fn() }));
+const ipc = vi.hoisted(() => ({ dispatch: vi.fn(), calendarEventDetail: vi.fn() }));
 
 vi.mock('@/services/ipc', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   dispatch: ipc.dispatch,
+  calendarEventDetail: ipc.calendarEventDetail,
 }));
 
 const settingsState = vi.hoisted(() => ({
@@ -74,6 +75,8 @@ function seed(): void {
 beforeEach(() => {
   ipc.dispatch.mockReset();
   ipc.dispatch.mockResolvedValue(undefined);
+  ipc.calendarEventDetail.mockReset();
+  ipc.calendarEventDetail.mockResolvedValue(undefined);
   onClose.mockReset();
   settingsState.settings.default_calendar = undefined;
   seed();
@@ -308,11 +311,48 @@ describe('the event dialog edit flow', () => {
     );
   });
 
-  it('shows the recurrence as read-only on a repeating event', () => {
+  it('shows the rule read back in full on a repeating event', async () => {
+    ipc.calendarEventDetail.mockResolvedValue({
+      account: 'work',
+      event: '/dav/cal/work/default/evt-1.ics',
+      rule: {
+        frequency: 'weekly',
+        interval: 1,
+        sentence: 'Repeats every week until 30 November 2026.',
+      },
+    });
     render(<EventDialog row={row({ recurring: true })} onClose={onClose} />);
 
-    expect(screen.getByText('Repeats. The series holds its own rule.')).toBeTruthy();
+    await waitFor(() => {
+      expect(
+        screen.getByText('Repeats every week until 30 November 2026.'),
+      ).toBeTruthy();
+    });
+    // The minimal line is retired: the read-back is the read.
+    expect(screen.queryByText('Repeats. The series holds its own rule.')).toBeNull();
     expect(screen.queryByLabelText('Repeats')).toBeNull();
+  });
+
+  it('carries the roll-call read-only beside the editor fields', async () => {
+    ipc.calendarEventDetail.mockResolvedValue({
+      account: 'work',
+      event: '/dav/cal/work/default/evt-1.ics',
+      participants: [
+        { name_or_address: 'Ada Lovelace', role: 'organiser', response: 'accepted' },
+        { name_or_address: 'blaise@example.test', response: 'needs_action' },
+      ],
+      folded_participants: 3,
+    });
+    render(<EventDialog row={row()} onClose={onClose} />);
+
+    const dialog = screen.getByRole('dialog');
+    await waitFor(() => {
+      expect(dialog.textContent).toContain('Ada Lovelace');
+    });
+    expect(dialog.textContent).toContain('organiser');
+    expect(dialog.textContent).toContain('blaise@example.test');
+    expect(dialog.textContent).toContain('not answered yet');
+    expect(dialog.textContent).toContain('and 3 more people');
   });
 });
 

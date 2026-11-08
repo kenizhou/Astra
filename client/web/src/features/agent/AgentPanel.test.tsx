@@ -12,6 +12,10 @@ const ipc = vi.hoisted(() => ({
   agentAbort: vi.fn(),
   agentStatus: vi.fn(),
   permissionResponse: vi.fn(),
+  chatList: vi.fn(),
+  chatLoad: vi.fn(),
+  chatRename: vi.fn(),
+  chatDelete: vi.fn(),
 }));
 
 vi.mock('@/services/agent', async (importOriginal) => ({
@@ -20,6 +24,10 @@ vi.mock('@/services/agent', async (importOriginal) => ({
   agentAbort: ipc.agentAbort,
   agentStatus: ipc.agentStatus,
   permissionResponse: ipc.permissionResponse,
+  chatList: ipc.chatList,
+  chatLoad: ipc.chatLoad,
+  chatRename: ipc.chatRename,
+  chatDelete: ipc.chatDelete,
 }));
 
 import type { PendingApproval } from '@/services/agent';
@@ -33,10 +41,18 @@ function reset(): void {
   ipc.agentAbort.mockReset();
   ipc.agentStatus.mockReset();
   ipc.permissionResponse.mockReset();
-  ipc.agentPrompt.mockResolvedValue('p-1');
+  ipc.chatList.mockReset();
+  ipc.chatLoad.mockReset();
+  ipc.chatRename.mockReset();
+  ipc.chatDelete.mockReset();
+  ipc.agentPrompt.mockResolvedValue({ prompt_id: 'p-1', chat_id: 'chat-1' });
   ipc.agentAbort.mockResolvedValue(undefined);
   ipc.agentStatus.mockResolvedValue({ state: 'down', model: null });
   ipc.permissionResponse.mockResolvedValue(undefined);
+  ipc.chatList.mockResolvedValue([]);
+  ipc.chatLoad.mockResolvedValue({ chat: { id: 'chat-1', title: 'Thread one', created_at: 1, last_touched_at: 2 }, messages: [] });
+  ipc.chatRename.mockResolvedValue(true);
+  ipc.chatDelete.mockResolvedValue(true);
   useAgentStore.getState().reset();
   useUiStore.getState().setAgentOpen(false);
 }
@@ -79,21 +95,20 @@ describe('the status toggle', () => {
 });
 
 describe('the chat log', () => {
-  it('renders the streamed turn: the user bubble, the streaming assistant bubble, and the tool notes', () => {
-    act(() => {
-      const store = useAgentStore.getState();
-      store.sendPrompt('summarise the inbox');
+  it('renders the streamed turn: the user bubble, the markdown assistant bubble, and the tool card', async () => {
+    await act(async () => {
+      await useAgentStore.getState().sendPrompt('summarise the inbox');
     });
     act(() => {
       const store = useAgentStore.getState();
-      store.applyStreamEvent({ session_id: 'agent:main', event: { kind: 'text_delta', text: 'Hello' } });
-      store.applyStreamEvent({ session_id: 'agent:main', event: { kind: 'text_delta', text: ' there' } });
+      store.applyStreamEvent({ session_id: 'agent:chat:chat-1', event: { kind: 'text_delta', text: 'Hello' } });
+      store.applyStreamEvent({ session_id: 'agent:chat:chat-1', event: { kind: 'text_delta', text: ' **there**' } });
       store.applyStreamEvent({
-        session_id: 'agent:main',
-        event: { kind: 'tool_call', name: 'list_messages', args: {}, tool_call_id: 'c1' },
+        session_id: 'agent:chat:chat-1',
+        event: { kind: 'tool_call', name: 'list_messages', args: { account: 'work' }, tool_call_id: 'c1' },
       });
       store.applyStreamEvent({
-        session_id: 'agent:main',
+        session_id: 'agent:chat:chat-1',
         event: { kind: 'tool_result', tool_call_id: 'c1', name: 'list_messages', status: 'ok' },
       });
     });
@@ -102,9 +117,94 @@ describe('the chat log', () => {
 
     const log = screen.getByRole('log', { name: 'Agent conversation' });
     expect(within(log).getByText('summarise the inbox')).toBeTruthy();
-    expect(within(log).getByText('Hello there')).toBeTruthy();
-    expect(within(log).getByText('called list_messages')).toBeTruthy();
-    expect(within(log).getByText('list_messages: ok')).toBeTruthy();
+    // The assistant bubble renders as markdown: the streamed emphasis
+    // lands as a real element, never literal stars.
+    const bold = within(log).getByText('there');
+    expect(bold.tagName).toBe('STRONG');
+    expect(within(log).queryByText('Hello **there**')).toBeNull();
+    const card = within(log).getByRole('article', { name: 'Tool list_messages' });
+    expect(within(card).getByText('list_messages')).toBeTruthy();
+    expect(within(card).getByText('ok')).toBeTruthy();
+    expect(within(card).getByText(/"account":"work"/)).toBeTruthy();
+  });
+
+  it('completes one tool card in place, never two note lines', async () => {
+    await act(async () => {
+      await useAgentStore.getState().sendPrompt('search the inbox');
+    });
+    act(() => {
+      const store = useAgentStore.getState();
+      store.applyStreamEvent({
+        session_id: 'agent:chat:chat-1',
+        event: {
+          kind: 'tool_call',
+          name: 'search_messages',
+          args: { query: 'from:boss' },
+          tool_call_id: 'c2',
+        },
+      });
+    });
+    expect(useAgentStore.getState().messages.filter((m) => m.role === 'tool').length).toBe(1);
+    expect(useAgentStore.getState().messages.find((m) => m.role === 'tool')?.tool?.status).toBe(
+      'running',
+    );
+
+    act(() => {
+      useAgentStore.getState().applyStreamEvent({
+        session_id: 'agent:chat:chat-1',
+        event: {
+          kind: 'tool_result',
+          tool_call_id: 'c2',
+          name: 'search_messages',
+          status: 'ok',
+          output: '{"rows":[],"total":0,"has_more":false}',
+        },
+      });
+    });
+    const cards = useAgentStore.getState().messages.filter((m) => m.role === 'tool');
+    expect(cards.length).toBe(1);
+    expect(cards[0]?.tool?.status).toBe('ok');
+    expect(cards[0]?.tool?.output).toBe('{"rows":[],"total":0,"has_more":false}');
+
+    useUiStore.getState().setAgentOpen(true);
+    render(<AgentPanel />);
+    const log = screen.getByRole('log', { name: 'Agent conversation' });
+    const card = within(log).getByRole('article', { name: 'Tool search_messages' });
+    expect(within(card).getByText(/"rows":\[\]/)).toBeTruthy();
+    // The user's bubble stays plain text, untouched by the renderer.
+    expect(within(log).getByText('search the inbox').tagName).toBe('P');
+  });
+
+  it('truncates a long tool output on the card, keeping the whole under the title', async () => {
+    await act(async () => {
+      await useAgentStore.getState().sendPrompt('read the message');
+    });
+    act(() => {
+      const store = useAgentStore.getState();
+      store.applyStreamEvent({
+        session_id: 'agent:chat:chat-1',
+        event: { kind: 'tool_call', name: 'read_message', args: { keys: ['k1'] }, tool_call_id: 'c3' },
+      });
+      store.applyStreamEvent({
+        session_id: 'agent:chat:chat-1',
+        event: {
+          kind: 'tool_result',
+          tool_call_id: 'c3',
+          name: 'read_message',
+          status: 'ok',
+          output: 'x'.repeat(400),
+        },
+      });
+    });
+    useUiStore.getState().setAgentOpen(true);
+    render(<AgentPanel />);
+
+    const card = screen.getByRole('article', { name: 'Tool read_message' });
+    const shown = within(card).getByText(/x{3}/).textContent ?? '';
+    expect(shown.length).toBeLessThan(400);
+    expect(shown.endsWith('…')).toBe(true);
+    const line = within(card).getByText(/x{3}/);
+    expect(line.getAttribute('title')).toBe('x'.repeat(400));
   });
 
   it('folds a turn that ends in error into a note and clears the live turn', async () => {
@@ -113,7 +213,7 @@ describe('the chat log', () => {
     });
     act(() => {
       useAgentStore.getState().applyStreamEvent({
-        session_id: 'agent:main',
+        session_id: 'agent:chat:chat-1',
         event: { kind: 'error', message: 'prompt before init' },
       });
     });
@@ -137,7 +237,7 @@ describe('the input', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     });
 
-    expect(ipc.agentPrompt).toHaveBeenCalledWith('summarise today');
+    expect(ipc.agentPrompt).toHaveBeenCalledWith('summarise today', undefined, undefined);
     expect(useAgentStore.getState().turn).toBe('p-1');
     expect(useAgentStore.getState().messages[0]).toMatchObject({
       role: 'user',
@@ -177,6 +277,30 @@ describe('the input', () => {
     const log = screen.getByRole('log', { name: 'Agent conversation' });
     expect(within(log).getByText('the prompt failed: the agent is unavailable')).toBeTruthy();
     expect(useAgentStore.getState().turn).toBeNull();
+  });
+
+  it('keeps a failed send\'s user bubble through a later fold', async () => {
+    ipc.agentPrompt.mockRejectedValue(new Error('the relay is down'));
+    useUiStore.getState().setAgentOpen(true);
+    render(<AgentPanel />);
+
+    const input = screen.getByRole('textbox', { name: 'Message the agent' });
+    fireEvent.change(input, { target: { value: 'lost words' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    });
+
+    // Any later fold recomputes the visible log from the painted base; the
+    // failed send never produced a live buffer to carry its bubble.
+    act(() => {
+      useAgentStore.getState().applyStreamEvent({
+        session_id: 'agent:main',
+        event: { kind: 'text_delta', text: 'elsewhere' },
+      });
+    });
+
+    const log = screen.getByRole('log', { name: 'Agent conversation' });
+    expect(within(log).getByText('lost words')).toBeTruthy();
   });
 });
 
@@ -236,6 +360,76 @@ describe('the approval card', () => {
   });
 });
 
+describe('the tool budget', () => {
+  it('folds the budget-spent state into a bound note and the status line', async () => {
+    await act(async () => {
+      await useAgentStore.getState().sendPrompt('clean the inbox');
+    });
+    act(() => {
+      useAgentStore.getState().applyStreamEvent({
+        session_id: 'agent:chat:chat-1',
+        event: { kind: 'state', state: 'budget-spent' },
+      });
+    });
+    useUiStore.getState().setAgentOpen(true);
+    render(<AgentPanel />);
+
+    const log = screen.getByRole('log', { name: 'Agent conversation' });
+    expect(
+      within(log).getByText('the tool budget is spent; the assistant finishes in text'),
+    ).toBeTruthy();
+    expect(screen.getByText('finishing in text')).toBeTruthy();
+    expect(useAgentStore.getState().budgetSpent).toBe(true);
+  });
+
+  it('clears the spent word when the turn ends, so the next turn thinks again', async () => {
+    await act(async () => {
+      await useAgentStore.getState().sendPrompt('clean the inbox');
+    });
+    act(() => {
+      useAgentStore.getState().applyStreamEvent({
+        session_id: 'agent:chat:chat-1',
+        event: { kind: 'state', state: 'budget-spent' },
+      });
+      useAgentStore.getState().applyStreamEvent({
+        session_id: 'agent:chat:chat-1',
+        event: { kind: 'done', prompt_id: 'p-1' },
+      });
+    });
+    expect(useAgentStore.getState().budgetSpent).toBe(false);
+
+    // The host mints a fresh prompt id per send; a settled id never names a
+    // new turn.
+    ipc.agentPrompt.mockResolvedValue({ prompt_id: 'p-2', chat_id: 'chat-1' });
+    await act(async () => {
+      await useAgentStore.getState().sendPrompt('what changed');
+    });
+    useUiStore.getState().setAgentOpen(true);
+    render(<AgentPanel />);
+
+    expect(screen.getByText('thinking')).toBeTruthy();
+    expect(screen.queryByText('finishing in text')).toBeNull();
+  });
+
+  it('leaves the harness state words unfolded', async () => {
+    await act(async () => {
+      await useAgentStore.getState().sendPrompt('hello');
+    });
+    act(() => {
+      useAgentStore.getState().applyStreamEvent({
+        session_id: 'agent:chat:chat-1',
+        event: { kind: 'state', state: 'thinking' },
+      });
+    });
+    useUiStore.getState().setAgentOpen(true);
+    render(<AgentPanel />);
+
+    const log = screen.getByRole('log', { name: 'Agent conversation' });
+    expect(within(log).getAllByText('hello').length).toBe(1);
+    expect(useAgentStore.getState().messages.length).toBe(1);
+  });
+});
+
 describe('the relay status', () => {
   it('renders the lifecycle word in the header', () => {
     act(() => {
@@ -259,3 +453,4 @@ describe('the relay status', () => {
     expect(screen.getByText('restarting')).toBeTruthy();
   });
 });
+

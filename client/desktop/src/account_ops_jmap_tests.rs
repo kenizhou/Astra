@@ -73,6 +73,7 @@ fn store(dials: &Arc<AccountDials>) -> (HostAccountStore, Arc<FakeStore>) {
         Arc::clone(dials),
         Arc::clone(&credentials) as Arc<dyn AccountCredentialStore>,
         Arc::new(crate::oauth::grant_refusals::GrantRefusals::new()),
+        crate::commands_fakes::crypto_store(),
     );
     (ops, credentials)
 }

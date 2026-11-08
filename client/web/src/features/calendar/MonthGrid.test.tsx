@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The month grid: the fixed six-week civil grid around the anchor month,
-// chips bucketed per zone-local day, the overflow affordance into the day
-// view, and today's cell named from the snapshot's now data.
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+// chips bucketed per zone-local day, the all-day banners chipped once on
+// the day they start so the overflow count names occurrences rather than
+// repeats, the overflow affordance into the day view, and today's cell
+// named from the snapshot's now data.
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MonthGrid } from './MonthGrid';
@@ -123,5 +125,85 @@ describe('the month grid', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Go to Thursday 22 October 2026' }));
 
     expect(pickDay).toHaveBeenCalledWith('2026-10-22');
+  });
+});
+
+describe('the month grid banners', () => {
+  it('shows a spanning all-day occurrence once, on the day it starts', () => {
+    useCalendarStore.setState({
+      occurrences: [
+        row({
+          event: 'conf',
+          title: 'Conference',
+          all_day: true,
+          accuracy: 'all_day',
+          start: '2026-10-18T22:00:00Z',
+          end: '2026-10-21T22:00:00Z',
+        }),
+      ],
+    });
+    render(<MonthGrid onPickDay={pickDay} onSelectEvent={() => undefined} />);
+
+    const nineteenth = screen.getByLabelText('Monday 19 October 2026');
+    const twentieth = screen.getByLabelText('Tuesday 20 October 2026');
+    const twentyFirst = screen.getByLabelText('Wednesday 21 October 2026');
+    expect(nineteenth.textContent).toContain('Conference');
+    expect(twentieth.textContent).not.toContain('Conference');
+    expect(twentyFirst.textContent).not.toContain('Conference');
+    // The chip itself says the occurrence runs on: a banner, not a day.
+    const banner = nineteenth.querySelector('[data-span]');
+    expect(banner).not.toBeNull();
+    expect(banner!.getAttribute('data-span')).toBe('true');
+  });
+
+  it('counts the overflow over banners and timed chips alike', () => {
+    useCalendarStore.setState({
+      occurrences: [
+        // The banner opens on the 19th and runs to the 20th: midnight in
+        // Amsterdam is 22:00Z the evening before.
+        row({
+          event: 'conf',
+          title: 'Conference',
+          all_day: true,
+          accuracy: 'all_day',
+          start: '2026-10-18T22:00:00Z',
+          end: '2026-10-20T22:00:00Z',
+        }),
+        ...[1, 2, 3].map((n) =>
+          row({
+            event: `t${n}`,
+            title: `Timed ${n}`,
+            start: '2026-10-20T07:00:00Z',
+            end: '2026-10-20T08:00:00Z',
+          }),
+        ),
+      ],
+    });
+    render(<MonthGrid onPickDay={pickDay} onSelectEvent={() => undefined} />);
+
+    // The banner started on the 19th, so the 20th holds the three timed
+    // chips alone: every one shows, no overflow counts the banner again.
+    const twentieth = screen.getByLabelText('Tuesday 20 October 2026');
+    expect(twentieth.textContent).toContain('Timed 1');
+    expect(twentieth.textContent).toContain('Timed 3');
+    expect(twentieth.textContent).not.toContain('more on');
+
+    // A fourth timed chip pushes the count over: one more, the banner
+    // nowhere in the arithmetic.
+    act(() => {
+      useCalendarStore.setState({
+        occurrences: [1, 2, 3, 4].map((n) =>
+          row({
+            event: `t${n}`,
+            title: `Timed ${n}`,
+            start: '2026-10-22T07:00:00Z',
+            end: '2026-10-22T08:00:00Z',
+          }),
+        ),
+      });
+    });
+    expect(
+      screen.getByRole('button', { name: '1 more on Thursday 22 October 2026' }),
+    ).toBeTruthy();
   });
 });

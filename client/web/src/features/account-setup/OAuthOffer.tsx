@@ -7,12 +7,43 @@
 // refusal sentences hang off the ported classification words and never
 // off the host's detail text, which rides beside them as the diagnostic.
 
+import { useEffect, useState } from 'react';
+
+import { oauthOffer } from '@/services/ipc';
 import type {
   GrantRefusalWord,
   OAuthProvider,
   OAuthSignInResult,
   OAuthSignInOutcome,
 } from '@/services/ipc';
+
+/** The offer pull, once per wizard open: the providers this build carries
+ *  a registration for, and nothing when it carries none. A refused pull
+ *  offers nothing rather than failing the wizard. */
+export function useOAuthOffer(open: boolean): OAuthProvider[] {
+  const [offer, setOffer] = useState<OAuthProvider[]>([]);
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    let live = true;
+    oauthOffer().then(
+      (answered) => {
+        if (live) {
+          setOffer(answered.providers);
+        }
+      },
+      (err) => {
+        console.error('account-setup: the oauth offer failed to pull', err);
+      },
+    );
+    return () => {
+      live = false;
+      setOffer([]);
+    };
+  }, [open]);
+  return offer;
+}
 
 /** The wizard's OAuth state machine: idle, browser-open, then the result. */
 export type OAuthFlowState =

@@ -2,7 +2,9 @@
 // The navigation arms: the anchor date and the loadable window each view
 // needs, derived in the snapshot's own zone and dispatched together so the
 // core's window and its anchor never disagree. The week-shaped views open
-// on the first day the settings block names.
+// on the first day the settings block names. The range write carries the
+// view, so the shape preference the next launch restores moves with every
+// navigation the person makes.
 
 import { dispatch, intents } from '@/services/ipc';
 
@@ -33,8 +35,10 @@ export function windowOf(
 
 /**
  * Moves the grids: the anchor date the surfaces navigate by, then the window
- * the new anchor and view need. Both intents together, because either alone
- * leaves the core holding a window the view is not looking at.
+ * the new anchor and view need, the write carrying the view so the shape
+ * preference (the view the next launch restores) moves with it. Both intents
+ * together, because either alone leaves the core holding a window the view
+ * is not looking at.
  */
 export function navigateTo(
   anchor: string,
@@ -44,5 +48,5 @@ export function navigateTo(
 ): void {
   void dispatch(intents.setCalendarDate(anchor));
   const { start, days } = windowOf(view, anchor, zone, firstDay);
-  void dispatch(intents.setCalendarRange(start, days));
+  void dispatch(intents.setCalendarRange(start, days, view));
 }

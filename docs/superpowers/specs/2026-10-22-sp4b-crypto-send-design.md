@@ -68,6 +68,13 @@ on empty, no recipient resolution, no gossip, protected headers identical.
 
 ## D3: the Astra-side crypto outbox and its submitter
 
+> **Superseded 2026-10-23** by
+> `2026-10-23-sp4b-crypto-send-engine-seam-design.md`: the gate moved into
+> the vendored engine's MIME-wrap seam and the bypass below was removed
+> (the crypto outbox, the Astra transport, and the second send engine's
+> known gap are all retired). Kept for history; the engine seam spec is
+> the contract now.
+
 At submit (astra-app's `submit_*` arms, in the gate seam), when the
 account's crypto method is `openpgp` or `smime`: Astra assembles the MIME
 with `engine_rfc5322::assemble_message`, applies the gate, and enqueues

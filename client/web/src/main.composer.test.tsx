@@ -11,6 +11,12 @@ vi.mock('@/features/composer/ComposerWindow', () => ({
     <div data-testid="composer-root">{composition}</div>
   ),
 }));
+vi.mock('@/features/reader/MessageWindow', () => ({
+  MessageWindow: () => <div data-testid="message-root" />,
+}));
+vi.mock('@/features/reader/PrintWindow', () => ({
+  PrintWindow: () => <div data-testid="print-root" />,
+}));
 
 describe('the entry point on a composer URL', () => {
   it('mounts the composer root over the named composition', async () => {

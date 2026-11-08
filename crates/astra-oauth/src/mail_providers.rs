@@ -23,9 +23,10 @@
 //!
 //! Add an entry with the provider's documented endpoints and the host
 //! suffixes its mailboxes live under, read its `client_id` from an
-//! injected variable, and nothing else changes: the setup path already
-//! prefers a discovered registration over a static one, and hides a
-//! route whose id is absent.
+//! injected variable, and nothing else changes: the setup path prefers
+//! this table over discovery (a pre-registered client carries the
+//! provider-reviewed scopes a dynamically minted one lacks), and skips
+//! an entry whose id is absent, leaving discovery to answer.
 //!
 //! Two things to get right, both of which the shape here forces. The
 //! `issuer` must be what the provider's own metadata claims, because a

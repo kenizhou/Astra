@@ -164,6 +164,33 @@ async fn open_message_skips_the_write_for_an_already_read_message() {
     );
 }
 
+/// Two readers of one store (the pane and a message window) mark read through
+/// the same open path: the pin that a second open of the same message is one
+/// write in total, the gate the open re-resolves at the moment of its
+/// decision.
+#[tokio::test]
+async fn a_second_open_of_the_same_message_marks_read_once() {
+    let surfaces = Arc::new(Mutex::new(Vec::new()));
+    let (app, edits) = rich_mailbox(&surfaces).await;
+
+    app.dispatch(Intent::OpenMessage { message: m1() })
+        .await
+        .unwrap();
+    app.dispatch(Intent::OpenMessage { message: m1() })
+        .await
+        .unwrap();
+
+    assert_eq!(
+        edits.lock().unwrap().as_slice(),
+        [engine_provider::MailEdit::mark_seen(
+            engine_api::ProviderKey::new("m1").unwrap(),
+            true,
+        )],
+        "the queued read state of the first open is what the second sees, so \
+         the reader pair lands one write"
+    );
+}
+
 #[tokio::test]
 async fn open_message_of_an_unknown_message_leaves_the_pane_empty() {
     let surfaces = Arc::new(Mutex::new(Vec::new()));

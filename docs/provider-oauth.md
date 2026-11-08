@@ -210,9 +210,11 @@ more, so token acquisition and refresh never cross `engine-api`.
    provider can return `access_denied` (consent declined, or a policy
    blocked the app); the sign-in surface shows the refusal with its
    classification word rather than doing nothing. A button that silently
-   does nothing is a bug. The honest corollary for the families whose
-   account wiring waits: the JMAP and IMAP OAuth completions ride their
-   slices (SP2o, SP2v), and no such route is offered until one lands.
+   does nothing is a bug. The JMAP (SP2o) and IMAP/SMTP (SP2v)
+   completions ship beside the integrated ones, and the wizard's sign-in
+   renders where the server's own word offers it: a JMAP session
+   advertising its authorization server, an IMAP server whose probe
+   answers with a discoverable route.
 
 11. **A sign-in abandoned in the browser never wedges the surface.**
    Closing the browser tab is undetectable, so the way out is explicit:
@@ -239,8 +241,11 @@ more, so token acquisition and refresh never cross `engine-api`.
    | every target | `ASTRA_MS_CLIENT_ID` |
 
    These are Astra Mail's own registrations, not the reference's: none is
-   shipped today, so the wizard's OAuth offer renders for no one and
-   detection recommends no OAuth route; a from-source build is a working
+   shipped today, so the Microsoft and Google routes render for no one
+   and detection recommends no integrated OAuth route; the wizard's
+   OAuth offer still renders where a server offers it, a JMAP session
+   advertising its authorization server or an IMAP server whose probe
+   answers with a route. A from-source build is a working
    open-standards mail client, never a dead button. Absent is a supported
    build, not a broken one. A blank value is an absent value. The
    reference's refuse-a-shipped-build check is deliberately not ported
@@ -552,12 +557,18 @@ once registrations exist.
 
 ## Known gaps
 
-- **No registration exists, so nothing user-visible ships, and neither
-  live proof has run.** The Microsoft account wiring (SP2m) and the
-  Google account wiring (SP2n) ship offline-proven end to end over
-  scripted servers, but the wizard's OAuth offer still renders for no
-  one. The Microsoft live proof (the real browser sign-in, a mail sync,
-  a calendar read and write, the refresh rotation against the real
+- **No integrated registration exists, so the Microsoft and Google
+  routes render for no one, and neither live proof has run.** The
+  Microsoft account wiring (SP2m) and the Google account wiring (SP2n)
+  ship offline-proven end to end over scripted servers. The wizard's
+  OAuth offer renders where a server offers it: the JMAP (SP2o) and
+  IMAP/SMTP (SP2v) families ship beside them, discovered from the
+  standards and offline-proven end to end, their sign-ins offered only
+  where the server's own word supports them, and their full sign-in
+  proofs wait on real identity providers with their fail-soft halves
+  pinned live against the harness (jmap.md, mail-oauth.md). The
+  Microsoft live proof (the real browser sign-in, a mail sync, a
+  calendar read and write, the refresh rotation against the real
   endpoint) lands when the owner's Azure registration does; the Google
   live proof lands when the owner's Google Cloud registration does, and
   while the app is unverified the Early Access test-user allow-list is
@@ -565,16 +576,18 @@ once registrations exist.
   surface ports with it when that becomes reachable). Neither is ever
   faked. If the Azure registration turns out to require a client
   secret, the divergence from the public-client shape is escalated in
-  its PR. The remaining provider slices consume the same floor: SP2o
-  (JMAP OAuth, live-provable against the harness once it mints grants),
-  SP2v (IMAP/SMTP OAuth).
+  its PR.
 - **The reconnect banner ships for the Microsoft family only.** Google
   has no calendar re-auth (the scope is asked at sign-in; a refused
   calendar is the dial's error), so the banner is Graph's own surface.
-  The expired-sign-in row crosses both integrated families: the refusal
-  map is id-keyed and provider-neutral, a dead google grant renders the
-  row over the google kind, and its Sign in again targets the google
-  flow. The JMAP and password families wait for their slices.
+  The expired-sign-in row crosses every family: the refusal map is
+  id-keyed and provider-neutral, a dead google grant renders the row
+  over the google kind with its Sign in again targeting the google
+  flow, the JMAP (SP2o) row re-grants in place from its stored grant
+  (SP2w), and the IMAP/SMTP (SP2v) row names the refused credential
+  with reconnecting the account as the remedy: the mail grant does not
+  share the JMAP re-authorisation arms (they are typed over the JMAP
+  section), so its own arm is a later slice.
 - **A Microsoft account keeps no server-side draft.** The refreshing
   wrapper deliberately does not advertise the engine's server-side drafts
   capability, so the composer holds a Microsoft draft in the app alone
@@ -621,10 +634,6 @@ once registrations exist.
 - **The Windows browser is the OS default.** Reusing the person's browser
   session is the point, and the cost is inherited from it: no API closes
   the tab after the custom-scheme hand-off, so a blank tab remains.
-- **A completed sign-in with no refresh token is refused only by the
-  integrated families.** Rule 7's enforcement point ships with the
-  Microsoft and Google completions' first door; the JMAP and IMAP
-  completions ride their slices.
 - **One build identity, one scheme.** The reference's packaged-versus-dev
   scheme split (Windows registers a protocol per user, so two builds
   claiming one scheme put a picker in front of a live auth code) has no

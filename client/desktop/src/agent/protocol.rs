@@ -334,6 +334,7 @@ mod tests {
         fixture!("in-permission-response.json"),
         fixture!("out-ready.json"),
         fixture!("out-event-state.json"),
+        fixture!("out-event-budget-spent.json"),
         fixture!("out-event-text-delta.json"),
         fixture!("out-event-tool-call.json"),
         fixture!("out-event-tool-result.json"),

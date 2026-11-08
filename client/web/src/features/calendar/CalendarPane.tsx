@@ -5,8 +5,8 @@
 // that picking an event opens. Clicking an event picks it for the dock; the
 // dock's Edit opens the event editor, and a drag over empty time opens the
 // editor prefilled with the dragged slot. The write banners, the
-// reply-delivery prompt, the briefs panel, and the refresh on entry and on
-// focus regain ride the pane as before.
+// reply-delivery prompt, the briefs panel, the device-zone offer prompt,
+// and the refresh on entry and on focus regain ride the pane as before.
 
 import { useEffect, useState } from 'react';
 
@@ -22,12 +22,16 @@ import { BriefsPanel } from './BriefsPanel';
 import { CalendarRail } from './CalendarRail';
 import { CalendarToolbar } from './CalendarToolbar';
 import { DayGrid } from './DayGrid';
+import { DeviceZoneOffer } from './DeviceZoneOffer';
 import { EventDetailDock } from './EventDetailDock';
 import { EventDialog } from './EventDialog';
 import { MonthGrid } from './MonthGrid';
 import { ReplyPromptDialog } from './ReplyPromptDialog';
 import { WorkWeekGrid } from './WorkWeekGrid';
+import { navigateTo } from './navigate';
 import { useCalendarStore } from './calendarStore';
+import { firstDayIndex } from './dayLabels';
+import { useSettingsStore } from '@/features/settings/settingsStore';
 import type { CreateSlot } from './useEventDrag';
 
 /** The write banners: a write settling, and a write that did not settle. */
@@ -85,10 +89,12 @@ export function CalendarPane() {
   const view = useCalendarStore((s) => s.view);
   const replyPrompts = useCalendarStore((s) => s.replyPrompts);
   const selectedEvent = useCalendarStore((s) => s.selectedEvent);
+  const nowData = useCalendarStore((s) => s.nowData);
   const setView = useCalendarStore((s) => s.setView);
   const setAnchor = useCalendarStore((s) => s.setAnchor);
   const selectEvent = useCalendarStore((s) => s.selectEvent);
   const clearSelection = useCalendarStore((s) => s.clearSelection);
+  const firstDay = firstDayIndex(useSettingsStore((s) => s.settings.first_day_of_week));
   const [editing, setEditing] = useState<OccurrenceRow | null>(null);
   const [creating, setCreating] = useState(false);
   const [createSlot, setCreateSlot] = useState<CreateSlot | null>(null);
@@ -119,8 +125,12 @@ export function CalendarPane() {
   };
 
   const pickDay = (dayKey: string): void => {
+    // The month's day click is navigation: the store arms move at once and
+    // the write follows, so the core's shape (and the publish that will
+    // confirm it) lands on the same day the pane is already showing.
     setAnchor(dayKey);
     setView('day');
+    navigateTo(dayKey, 'day', nowData?.zone ?? 'Etc/UTC', firstDay);
   };
 
   return (
@@ -134,6 +144,7 @@ export function CalendarPane() {
       }}
     >
       <CalendarToolbar onCreate={() => openCreate(null)} onBriefs={() => setBriefsOpen(true)} />
+      <DeviceZoneOffer />
       <WriteBanners />
       <div className="min-h-0 flex-1 p-1">
         <Group

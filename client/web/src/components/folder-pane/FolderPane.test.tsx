@@ -4,7 +4,7 @@
 // badges only where mail is unread, and selection and expansion crossing back
 // as intents. Each expanded account's group closes with its Outbox row, which
 // badges the sends still owed and leads the list's queue view.
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const ipc = vi.hoisted(() => ({
@@ -33,7 +33,13 @@ const fixture = fixtureJson as MailboxListSnapshot;
 beforeEach(() => {
   ipc.dispatch.mockReset();
   ipc.dispatch.mockResolvedValue(undefined);
-  useFolderStore.setState({ accounts: [], selected: null, outboxAccount: null });
+  useFolderStore.setState({
+    accounts: [],
+    selected: null,
+    outboxAccount: null,
+    scope: null,
+    unified: false,
+  });
   useFolderStore.getState().applySnapshot(fixture);
   useSendingStore.getState().applySnapshot({ rows: [] });
 });
@@ -271,6 +277,58 @@ describe('the per-account refusal badge', () => {
   });
 });
 
+describe('the per-account outage badge', () => {
+  it('badges an account in outage, its tooltip naming the account reconnect', () => {
+    useUiStore.getState().applySyncProgress({
+      accounts: [],
+      delivery: { offline_banner: false, outages: ['work'] },
+    });
+    render(<FolderPane />);
+
+    const work = screen.getByRole('region', { name: 'work@example.net' });
+    const badge = work.querySelector('[data-outage-badge]');
+    expect(badge).not.toBeNull();
+    expect(badge?.getAttribute('title')).toBe('work@example.net is offline and reconnecting');
+  });
+
+  it('leaves with the snapshot that clears the account', () => {
+    useUiStore.getState().applySyncProgress({
+      accounts: [],
+      delivery: { offline_banner: false, outages: ['work'] },
+    });
+    render(<FolderPane />);
+    expect(
+      screen.getByRole('region', { name: 'work@example.net' }).querySelector('[data-outage-badge]'),
+    ).not.toBeNull();
+
+    act(() => {
+      useUiStore.getState().applySyncProgress({
+        accounts: [],
+        delivery: { offline_banner: false, outages: [] },
+      });
+    });
+    expect(
+      screen.getByRole('region', { name: 'work@example.net' }).querySelector('[data-outage-badge]'),
+    ).toBeNull();
+  });
+
+  it('draws no badge for an account not in outage', () => {
+    useUiStore.getState().applySyncProgress({
+      accounts: [],
+      delivery: { offline_banner: false, outages: ['home'] },
+    });
+    render(<FolderPane />);
+
+    expect(
+      screen.getByRole('region', { name: 'work@example.net' }).querySelector('[data-outage-badge]'),
+    ).toBeNull();
+    // The outaged account carries it: only its own rows badge.
+    expect(
+      screen.getByRole('region', { name: 'Home' }).querySelector('[data-outage-badge]'),
+    ).not.toBeNull();
+  });
+});
+
 describe('the folder context menu', () => {
   /** The fixture's accounts carry no capability flag, so a test that wants
    *  the live verbs stamps the work account as an editor first. */
@@ -357,5 +415,48 @@ describe('the folder context menu', () => {
     });
     // The row closes on the dispatch's settlement, never before.
     await waitFor(() => expect(screen.queryByLabelText('New folder name')).toBeNull());
+  });
+});
+
+describe('the account switcher', () => {
+  it("selects the account's scope from its name row, keeping the chevron for expansion", () => {
+    render(<FolderPane />);
+
+    // The name row selects the account's scope: the header's own name,
+    // not the chevron beside it.
+    fireEvent.click(screen.getByRole('button', { name: /work@example.net's mail/i }));
+
+    expect(ipc.dispatch).toHaveBeenCalledWith({ select_account: 'work' });
+    expect(useFolderStore.getState().scope).toEqual({ kind: 'account', account: 'work' });
+    expect(useFolderStore.getState().selected).toBeNull();
+    expect(useFolderStore.getState().unified).toBe(false);
+
+    // The chevron still owns expansion, not selection.
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse work@example.net' }));
+    expect(ipc.dispatch).toHaveBeenCalledWith({
+      set_account_expanded: { account: 'work', expanded: false },
+    });
+    expect(useFolderStore.getState().scope).toEqual({ kind: 'account', account: 'work' });
+  });
+
+  it('marks the standing account scope selected on its header', () => {
+    act(() => {
+      useFolderStore.setState({ scope: { kind: 'account', account: 'work' } });
+    });
+    render(<FolderPane />);
+
+    const name = screen.getByRole('button', { name: /work@example.net's mail/i });
+    expect(name.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('reads the standing scope off the snapshot, so a relaunch labels it too', () => {
+    act(() => {
+      useFolderStore.getState().applySnapshot({
+        ...fixture,
+        selected_scope: { kind: 'account', account: 'home' },
+      });
+    });
+
+    expect(useFolderStore.getState().scope).toEqual({ kind: 'account', account: 'home' });
   });
 });

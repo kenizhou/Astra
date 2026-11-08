@@ -30,6 +30,14 @@ const GREETING: &str = "* OK ready\r\n";
 const LOGIN_OK: &str = "a1 OK LOGIN ok\r\n";
 
 /// Builds a provider bound to INBOX over a mock that has greeted and accepted login.
+/// Prepares a draft the way production's `submit` does: no wrapper installed,
+/// plain assembly.
+async fn prepared(draft: &Draft) -> crate::wrap::Submission {
+    crate::wrap::prepare_submission(draft, None)
+        .await
+        .expect("the draft prepares")
+}
+
 async fn connected_provider(server: Vec<u8>) -> ImapProvider<MockStream> {
     let (stream, _) = MockStream::new(server);
     let mut conn = Connection::open(stream).await.unwrap();
@@ -65,6 +73,7 @@ async fn submit_over_smtp_delivers_and_files_the_sent_copy() {
     let receipt = provider
         .submit_over(
             smtp_stream,
+            &prepared(&submit_draft()).await,
             &submit_draft(),
             None,
             &engine_provider::HandOver::new(&engine_provider::Unrecorded),
@@ -115,6 +124,7 @@ async fn submit_over_hides_bcc_on_the_wire_but_keeps_it_in_the_sent_copy() {
     provider
         .submit_over(
             smtp_stream,
+            &prepared(&draft).await,
             &draft,
             None,
             &engine_provider::HandOver::new(&engine_provider::Unrecorded),
@@ -192,6 +202,7 @@ async fn submit_over_deduplicates_a_recipient_listed_in_both_to_and_cc() {
     provider
         .submit_over(
             smtp_stream,
+            &prepared(&draft).await,
             &draft,
             None,
             &engine_provider::HandOver::new(&engine_provider::Unrecorded),
@@ -225,6 +236,7 @@ async fn submit_over_smtp_maps_a_lost_ack_to_needs_confirmation() {
     let err = provider
         .submit_over(
             smtp_stream,
+            &prepared(&submit_draft()).await,
             &submit_draft(),
             None,
             &engine_provider::HandOver::new(&engine_provider::Unrecorded),
@@ -252,6 +264,7 @@ async fn submit_over_smtp_rejects_permanently_when_no_recipient_accepts() {
     let err = provider
         .submit_over(
             smtp_stream,
+            &prepared(&submit_draft()).await,
             &submit_draft(),
             None,
             &engine_provider::HandOver::new(&engine_provider::Unrecorded),
@@ -278,6 +291,7 @@ async fn submit_over_smtp_defers_retryably_on_a_transient_rejection() {
     let err = provider
         .submit_over(
             smtp_stream,
+            &prepared(&submit_draft()).await,
             &submit_draft(),
             None,
             &engine_provider::HandOver::new(&engine_provider::Unrecorded),
@@ -313,6 +327,7 @@ async fn submit_falls_back_to_a_message_id_key_without_appenduid() {
     let receipt = provider
         .submit_over(
             smtp_stream,
+            &prepared(&submit_draft()).await,
             &submit_draft(),
             None,
             &engine_provider::HandOver::new(&engine_provider::Unrecorded),
@@ -350,6 +365,7 @@ async fn a_delivered_send_whose_sent_copy_cannot_be_filed_says_so() {
     let receipt = provider
         .submit_over(
             smtp_stream,
+            &prepared(&submit_draft()).await,
             &submit_draft(),
             None,
             &engine_provider::HandOver::new(&engine_provider::Unrecorded),

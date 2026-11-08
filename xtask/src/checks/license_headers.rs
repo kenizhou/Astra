@@ -44,8 +44,11 @@ mod tests {
 
     #[test]
     fn the_vendored_engine_tree_is_exempt() {
-        let root = fixture(&[("vendor/engine/crates/engine-core/src/lib.rs", "fn a() {}
-")]);
+        let root = fixture(&[(
+            "vendor/engine/crates/engine-core/src/lib.rs",
+            "fn a() {}
+",
+        )]);
         assert!(super::check(&root).is_ok());
     }
 

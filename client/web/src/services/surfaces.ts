@@ -45,11 +45,18 @@ export interface AccountFolderRow {
   /** Whether this account's folder tree is open in the sidebar. */
   expanded: boolean;
   /**
-   * Whether the account's provider can change its folder tree: what decides
+   * Whether this account's provider can change its folder tree: what decides
    * whether the pane offers the folder edit verbs. Absent reads as false, so
    * an incapable account never shows the verbs.
    */
   can_edit_folders?: boolean;
+  /**
+   * Whether this account's provider can report its mail (the junk and
+   * not-junk verdicts): what decides whether the row menu offers Mark as
+   * spam and the verb row offers Not spam. Absent reads as false, the same
+   * rule `can_edit_folders` holds.
+   */
+  can_report_mail?: boolean;
   /** The account's sorted folder rows, ready for the sidebar. */
   folders: FolderRow[];
 }
@@ -114,6 +121,16 @@ export interface SearchState {
   depth_months: number;
 }
 
+/**
+ * Whose mail the list is standing in, as the snapshot's header carries
+ * it: the unified view, one account's whole mailbox (the switcher's
+ * selection), or one folder of one account. Crosses with a `kind` tag.
+ */
+export type ListScope =
+  | { kind: 'all_inboxes' }
+  | { kind: 'account'; account: string }
+  | { kind: 'folder'; account: string; key: string };
+
 /** The mailbox-list snapshot the panes render after every pull. */
 export interface MailboxListSnapshot {
   /** Every account's sorted folder list, one entry per configured account. */
@@ -128,6 +145,11 @@ export interface MailboxListSnapshot {
   view_mode?: ViewMode;
   /** The search state; absent at rest, while no search is running. */
   search?: SearchState;
+  /**
+   * Whose mail the list is standing in; absent on a wire from a build
+   * before the field, which reads as no scope named.
+   */
+  selected_scope?: ListScope;
 }
 
 /** One account's position between sync passes, crossing as a snake_case word. */
@@ -143,8 +165,23 @@ export interface AccountSyncProgress {
   detail?: string;
 }
 
+/**
+ * The delivery state the sync-progress snapshot carries beside the
+ * account positions: whether the offline banner shows and which accounts
+ * are in outage. Optional so a capture from a build before the field
+ * still parses; the core always writes it.
+ */
+export interface DeliveryState {
+  /** Whether the offline banner shows: every dialled account in outage. */
+  offline_banner: boolean;
+  /** The accounts in outage, wearing the badge on their pane rows. */
+  outages?: string[];
+}
+
 /** The sync-progress snapshot the status bar renders after every pull. */
 export interface SyncProgressSnapshot {
   /** One entry per account with a sync position to report. */
   accounts: AccountSyncProgress[];
+  /** The delivery state: the offline banner and the outage badges. */
+  delivery?: DeliveryState;
 }
