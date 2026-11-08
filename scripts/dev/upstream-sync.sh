@@ -156,29 +156,34 @@ if [ "$DRY_RUN" -eq 1 ]; then
     exit 0
 fi
 
-# 4. Land the new revision in the vendor-sync worktree, conversion off (the
-# pristine rule from the vendor import: archive with core.autocrlf=false,
-# vendor/** marked -text).
-git -C "$WT" checkout --quiet vendor-sync
-git -C "$WT" pull --ff-only --quiet
-rm -rf "$WT/vendor/engine"
-mkdir -p "$WT/vendor/engine"
-git -c core.autocrlf=false -C "$UPSTREAM" archive "$NEW" | tar -x -C "$WT/vendor/engine"
+# 4-6 land the new revision; the standing-pile path (the branch already at
+# NEW) skips them: there is nothing to land, and a re-archive of the same
+# revision commits nothing.
+if [ "$NEW" != "$CUR" ]; then
+    # 4. Land the new revision in the vendor-sync worktree, conversion off
+    # (the pristine rule from the vendor import: archive with
+    # core.autocrlf=false, vendor/** marked -text).
+    git -C "$WT" checkout --quiet vendor-sync
+    git -C "$WT" pull --ff-only --quiet
+    rm -rf "$WT/vendor/engine"
+    mkdir -p "$WT/vendor/engine"
+    git -c core.autocrlf=false -C "$UPSTREAM" archive "$NEW" | tar -x -C "$WT/vendor/engine"
 
-# 5. Pristine proof by blob hash (never working-tree bytes: autocrlf
-# materialises CRLF for extensions .gitattributes does not pin).
-git -C "$WT" add -A vendor/engine
-git -C "$WT" ls-files -s vendor/engine | awk '{print $2"\t"$4}' | sed 's|\tvendor/engine/|\t|' | sort -k2 > /tmp/sync-astra-vendor.txt
-git -C "$UPSTREAM" ls-tree -r "$NEW" --format='%(objectname)%x09%(path)' | sort -k2 > /tmp/sync-upstream-tree.txt
-if ! diff -q /tmp/sync-astra-vendor.txt /tmp/sync-upstream-tree.txt > /dev/null; then
-    diff /tmp/sync-astra-vendor.txt /tmp/sync-upstream-tree.txt | head -10 >&2 || true
-    die "the landed tree is not byte-pristine with $NEW (blob hashes differ); refusing to commit"
+    # 5. Pristine proof by blob hash (never working-tree bytes: autocrlf
+    # materialises CRLF for extensions .gitattributes does not pin).
+    git -C "$WT" add -A vendor/engine
+    git -C "$WT" ls-files -s vendor/engine | awk '{print $2"\t"$4}' | sed 's|\tvendor/engine/|\t|' | sort -k2 > /tmp/sync-astra-vendor.txt
+    git -C "$UPSTREAM" ls-tree -r "$NEW" --format='%(objectname)%x09%(path)' | sort -k2 > /tmp/sync-upstream-tree.txt
+    if ! diff -q /tmp/sync-astra-vendor.txt /tmp/sync-upstream-tree.txt > /dev/null; then
+        diff /tmp/sync-astra-vendor.txt /tmp/sync-upstream-tree.txt | head -10 >&2 || true
+        die "the landed tree is not byte-pristine with $NEW (blob hashes differ); refusing to commit"
+    fi
+
+    # 6. Commit and push.
+    git -C "$WT" commit --quiet -m "vendor: upstream $NEW $(date +%F)" -m "$(git -C "$UPSTREAM" log --oneline "$BASE..$NEW")"
+    git -C "$WT" push --quiet origin vendor-sync
+    log "pushed vendor-sync at $NEW"
 fi
-
-# 6. Commit and push.
-git -C "$WT" commit --quiet -m "vendor: upstream $NEW $(date +%F)" -m "$(git -C "$UPSTREAM" log --oneline "$BASE..$NEW")"
-git -C "$WT" push --quiet origin vendor-sync
-log "pushed vendor-sync at $NEW"
 
 # 7. Open the PR, or leave the open one to its updated diff. Every gh call
 # names the repository: the scheduled shell starts in no repository at all,
