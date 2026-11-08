@@ -16,6 +16,10 @@ on:
 # beforeBuildCommand, which serves local `cargo tauri build` and runs the
 # same chain redundantly here. The installers are UNSIGNED: no signing
 # configuration rides in this workflow, and the release body says so.
+permissions:
+  # The token writes release assets; the default read-only token answers
+  # "Resource not accessible by integration" at the upload.
+  contents: write
 jobs:
   bundle:
     strategy:
