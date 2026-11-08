@@ -41,23 +41,61 @@ UPSTREAM="$ROOT/$ENGINE_PATH"
 git -C "$UPSTREAM" fetch origin --quiet
 NEW=$(git -C "$UPSTREAM" rev-parse origin/main)
 
-# 2. The current vendored revision: vendor-sync's last `vendor:` commit
-# message (a 40-hex anywhere in subject or body), refs-lock baseline as the
-# floor. Anchoring here, not on last_ported, so an open sync PR neither
-# resends a stale digest nor skips a revision.
+# 2. The revision anchors. CUR: vendor-sync's last `vendor:` commit message
+# (a 40-hex anywhere in subject or body), refs-lock baseline as the floor.
+# MERGED: main's own last vendored revision, so a branch pushed with no PR
+# standing (a night the PR step failed) still converges to an open PR
+# instead of no-opping past its own unmerged work. Anchoring here, not on
+# last_ported, so an open sync PR neither resends a stale digest nor skips
+# a revision.
+git -C "$WT" fetch origin --quiet
 CUR=$(git -C "$WT" log -1 --format=%B -- vendor/engine | grep -oE '[0-9a-f]{40}' | head -1 || true)
 [ -z "$CUR" ] && CUR="$BASELINE"
+# MERGED is refs-lock's `last_ported`: the contract's own record of what
+# main holds (advanced on every sync merge). Message-derived anchors fail
+# under a squash-merged sync PR (no 40-hex to read), and tree-exact anchors
+# fail by design (main's vendor/engine carries Astra's in-tree edits).
+MERGED=$(awk '/name = "email-calendar-sync-engine"/{f=1} f && /^last_ported = /{print; exit}' "$LOCK" | cut -d'"' -f2)
+[ -z "$MERGED" ] && MERGED="$BASELINE"
+OPEN_PR=$(gh pr list -R "$GH_REPO" --head vendor-sync --state open --json number --jq '.[0].number' 2>/dev/null || true)
 if ! git -C "$UPSTREAM" cat-file -e "$CUR^{commit}" 2>/dev/null; then
     die "current vendored rev $CUR is not a commit upstream knows (history rewrite?)"
 fi
 
-if [ "$NEW" = "$CUR" ]; then
-    log "already at $NEW; nothing to do"
+# A landed sync the lock table has not recorded yet: no open PR, the branch
+# tip IS an ancestor of main (a merge commit made it one), and last_ported
+# still names an older revision. The advance is the merge's own bookkeeping
+# (the reviewed content is already on main), so it commits straight to main
+# as the contract's step 7; without it the next night would re-PR the same
+# range.
+if [ -z "$OPEN_PR" ] && [ "$MERGED" != "$CUR" ] \
+   && git -C "$WT" merge-base --is-ancestor vendor-sync origin/main 2>/dev/null; then
+    git -C "$WT" checkout --quiet main
+    git -C "$WT" pull --ff-only --quiet
+    sed -i "s/^last_ported = \"$MERGED\"/last_ported = \"$CUR\"/" "$WT/refs/refs-lock.toml"
+    git -C "$WT" add refs/refs-lock.toml
+    git -C "$WT" commit --quiet -m "vendor: advance last_ported to ${CUR:0:12}"
+    git -C "$WT" push --quiet origin main
+    git -C "$WT" checkout --quiet vendor-sync
+    log "the sync merged; advanced last_ported to $CUR"
     exit 0
 fi
-git -C "$UPSTREAM" merge-base --is-ancestor "$CUR" "$NEW" || die "$CUR is not an ancestor of $NEW (upstream force-push?)"
 
-COUNT=$(git -C "$UPSTREAM" rev-list --count "$CUR..$NEW")
+BASE="$CUR"
+if [ "$NEW" = "$CUR" ]; then
+    if [ "$MERGED" = "$CUR" ] || [ -n "$OPEN_PR" ]; then
+        log "already at $NEW; nothing to do"
+        exit 0
+    fi
+    # The branch already carries what upstream holds and main lacks it: the
+    # standing pile. Open the PR for what main holds..now, with no landing
+    # to redo (the worktree is already at NEW).
+    BASE="$MERGED"
+    log "branch already at $NEW; opening the standing PR main lacks"
+fi
+git -C "$UPSTREAM" merge-base --is-ancestor "$BASE" "$NEW" || die "$BASE is not an ancestor of $NEW (upstream force-push?)"
+
+COUNT=$(git -C "$UPSTREAM" rev-list --count "$BASE..$NEW")
 log "sync range $CUR -> $NEW ($COUNT commits)"
 
 # 3. The classified digest of the range.
@@ -68,7 +106,9 @@ while IFS= read -r line; do
         commit\ *)
             subject="${line#commit }"
             short="${subject%% *}"
-            if echo "$subject" | grep -iqE 'secur|vuln|cve[- ]|rce|xss|csrf|inject|overflow|forgery|spoof'; then
+            # Word boundaries on the short acronyms: a bare `rce` pattern
+            # matches inside the word "source" and held clean syncs hostage.
+            if echo "$subject" | grep -iqE 'secur|vuln|\bcve[- ]|\brce\b|\bxss\b|\bcsrf\b|inject|overflow|forgery|spoof'; then
                 SECURITIES="$SECURITIES\n- $subject"
             fi
             ;;
@@ -79,10 +119,10 @@ while IFS= read -r line; do
         "") ;;
         *) BEHAVIOUR=$((BEHAVIOUR+1)) ;;
     esac
-done < <(git -C "$UPSTREAM" log --format='commit %h %s' --name-only "$CUR..$NEW")
+done < <(git -C "$UPSTREAM" log --format='commit %h %s' --name-only "$BASE..$NEW")
 
 DIGEST=$(cat <<EOF
-## Engine sync ${CUR:0:7}..${NEW:0:7} ($COUNT commits)
+## Engine sync ${BASE:0:7}..${NEW:0:7} ($COUNT commits)
 
 ### Classification
 - docs only: $DOCS file(s)
@@ -92,7 +132,7 @@ DIGEST=$(cat <<EOF
 - behaviour: $BEHAVIOUR file(s)
 
 ### Commits
-$(git -C "$UPSTREAM" log --oneline "$CUR..$NEW")
+$(git -C "$UPSTREAM" log --oneline "$BASE..$NEW")
 
 ### Review notes
 - Sync PRs merge with a merge commit, never squash (docs/upstream-sync.md).
@@ -136,7 +176,7 @@ if ! diff -q /tmp/sync-astra-vendor.txt /tmp/sync-upstream-tree.txt > /dev/null;
 fi
 
 # 6. Commit and push.
-git -C "$WT" commit --quiet -m "vendor: upstream $NEW $(date +%F)" -m "$(git -C "$UPSTREAM" log --oneline "$CUR..$NEW")"
+git -C "$WT" commit --quiet -m "vendor: upstream $NEW $(date +%F)" -m "$(git -C "$UPSTREAM" log --oneline "$BASE..$NEW")"
 git -C "$WT" push --quiet origin vendor-sync
 log "pushed vendor-sync at $NEW"
 
@@ -155,13 +195,13 @@ if [ -n "$EXISTING" ]; then
 else
     if [ -n "$SECURITIES" ]; then
         gh pr create -R "$GH_REPO" --base main --head vendor-sync \
-            --title "vendor: engine sync ${CUR:0:7}..${NEW:0:7}" \
+            --title "vendor: engine sync ${BASE:0:7}..${NEW:0:7}" \
             --body "$DIGEST" --draft
         log "opened the sync PR vendor-sync -> main as a draft (security classified; held for review)"
         exit 0
     fi
     gh pr create -R "$GH_REPO" --base main --head vendor-sync \
-        --title "vendor: engine sync ${CUR:0:7}..${NEW:0:7}" \
+        --title "vendor: engine sync ${BASE:0:7}..${NEW:0:7}" \
         --body "$DIGEST"
     PR=$(gh pr list -R "$GH_REPO" --head vendor-sync --state open --json number --jq '.[0].number' 2>/dev/null || true)
     log "opened the sync PR vendor-sync -> main as #$PR"

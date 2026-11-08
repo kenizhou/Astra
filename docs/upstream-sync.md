@@ -64,6 +64,13 @@ as reviewable merges instead of a manual re-pin. The loop:
   no PR). A range with no security classification opens READY and arms
   GitHub auto-merge (`--auto --merge`, a merge commit, green gate); a
   security-classified range opens as a draft and waits for morning review.
+  The loop is convergent from every state: a branch pushed with no PR
+  standing opens the PR for the standing range on the next run, and a
+  landed sync whose `last_ported` has not advanced yet (no open PR, the
+  branch tip an ancestor of main) advances it directly, the merge's own
+  bookkeeping. The security classifier word-boundaries its short acronyms
+  (`\brce\b` and kin): a bare `rce` pattern once matched inside the word
+  "source" and held clean syncs hostage.
 - **Sync PRs merge with a merge commit, never squash.** A squash merge
   means the branch tip never becomes an ancestor of main, every later sync
   re-diffs the whole tree, and the conflict-surfacing mechanism dies. (The

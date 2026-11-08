@@ -61,7 +61,11 @@ Astra 如何跟踪其四个参考项目。规则手册（AGENTS.md）链接到�
   的 git 发现会在那里失败（这个 bug 曾让五个版本推送后没有 PR）。无
   security 分类的区间以 READY 开启并武装 GitHub auto-merge（`--auto
   --merge`，merge commit，绿门）；带 security 分类的区间以草稿开启，
-  等早晨审阅。
+  等早晨审阅。循环从任何状态收敛：已推送而无 PR 站立的分支，下一晚
+  为既有区间补开 PR；已合并而 `last_ported` 未推进的同步（无开放
+  PR 且分支尖已是 main 的祖先）直接推进它，即合并自身的簿记。安全
+  分类器对短缩写加词边界（`rce` 一类）：裸的 `rce` 模式曾在
+  “source”一词内部命中，把干净的同步扣作人质。
 - **同步 PR 一律用 merge commit 合并，绝不 squash。** squash 意味着分
   支尖端永远不是 main 的祖先，此后每次同步都会重新全量 diff，冲突显
   形机制随之失效。（备选 —— 每次 squash 后在 `vendor-sync` 上
