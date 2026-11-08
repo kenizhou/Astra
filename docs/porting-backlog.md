@@ -73,8 +73,9 @@ tool budget.
   and conditional formats, quote collapse, shortcuts help, the attachment
   browser, notification history, the crypto plugin surface) wait for the
   owner's pick; each pick becomes its own slice beside this ladder.
-- **The AI remainder**: the assistant chat with tool budget is the one
-  unstarted inbox-zero row; it slots wherever the owner places it.
+- **The AI remainder**: the assistant chat with tool budget was the one
+  unstarted inbox-zero row; SP2y shipped it (2026-11-08, PR #60), live-proven
+  armed over the harness and the model endpoint.
 
 ## Known gaps
 
