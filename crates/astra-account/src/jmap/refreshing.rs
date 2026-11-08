@@ -35,18 +35,18 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use engine_api::{
-    AccountId, CalendarWrites, Capabilities, Draft, MailEdit, MailEditReceipt, MailboxEdit,
-    MailboxEditReceipt, MailboxWrites, Message, MessageReport, Provider, SenderIdentity,
-    SenderIdentityId, SubmissionReceipt, SyncScope, SyncWindow,
+    AccountId, CalendarId, CalendarWrites, Capabilities, Draft, MailEdit, MailEditReceipt,
+    MailboxEdit, MailboxEditReceipt, MailboxWrites, Message, MessageReport, Provider,
+    SenderIdentity, SenderIdentityId, SubmissionReceipt, SyncScope, SyncWindow,
 };
 use engine_core::{
-    calendar::{Calendar, Event},
+    calendar::Event,
     mail::Mailbox,
     raw::RawMime,
     sync::{JmapDataType, SyncState},
 };
 use engine_provider::{
-    ConnectionInfo, EmailStream, EventDeletion, EventDraft, EventEdit, EventWrite,
+    CalendarListing, ConnectionInfo, EmailStream, EventDeletion, EventDraft, EventEdit, EventWrite,
     EventWriteReceipt, HandOver, ProviderError, ProviderResult, ReportReceipt, ScopeSync,
     SourceStream,
 };
@@ -54,7 +54,7 @@ use engine_tls::TlsClientConfig;
 use futures::StreamExt;
 use provider_jmap::{Credentials, JmapConfig, JmapProvider};
 
-use crate::GraphTokenSource;
+use crate::{user_agent, GraphTokenSource};
 
 /// A [`Provider`] for an OAuth JMAP account: refreshes the access token as
 /// needed and delegates to a [`JmapProvider`] built with it.
@@ -147,9 +147,13 @@ impl RefreshingJmapProvider {
             }
         }
         log::debug!("jmap: access token changed; rebuilding the provider session");
-        let config = JmapConfig::new(self.base_url.clone(), Credentials::bearer(token.clone()))
-            .with_tls(self.tls.clone())
-            .with_retry(self.tokens.retry());
+        let config = JmapConfig::new(
+            self.base_url.clone(),
+            Credentials::bearer(token.clone()),
+            user_agent(),
+        )
+        .with_tls(self.tls.clone())
+        .with_retry(self.tokens.retry());
         let rebuilt = JmapProvider::connect(config)
             .await
             .map_err(|err| ProviderError::retryable(err.to_string()))?;
@@ -331,7 +335,10 @@ impl Provider for RefreshingJmapProvider {
         }
     }
 
-    fn event_scope(&self, account: &AccountId) -> SyncScope {
+    /// JMAP's event delta is account-wide (`CalendarEvent` state), so
+    /// every calendar answers the same scope and the account's events
+    /// sync once under it.
+    fn event_scope(&self, account: &AccountId, _calendar: &CalendarId) -> SyncScope {
         SyncScope::JmapType {
             account: account.clone(),
             data_type: JmapDataType::CalendarEvent,
@@ -342,16 +349,20 @@ impl Provider for RefreshingJmapProvider {
         &self,
         account: &AccountId,
         cursor: Option<&SyncState>,
-    ) -> ProviderResult<ScopeSync<Calendar>> {
+    ) -> ProviderResult<CalendarListing> {
         self.delegate().await?.sync_calendars(account, cursor).await
     }
 
     async fn sync_events(
         &self,
         account: &AccountId,
+        calendar: &CalendarId,
         cursor: Option<&SyncState>,
     ) -> ProviderResult<ScopeSync<Event>> {
-        self.delegate().await?.sync_events(account, cursor).await
+        self.delegate()
+            .await?
+            .sync_events(account, calendar, cursor)
+            .await
     }
 
     /// The identities the session's submission account can send as,

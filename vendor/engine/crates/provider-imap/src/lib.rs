@@ -70,6 +70,7 @@
 //! yet (durable blob storage is a later store sub-step).
 
 mod account;
+mod acl;
 mod base64;
 mod bodystructure;
 mod capability;
@@ -84,13 +85,18 @@ mod fetch;
 mod fetch_batch;
 mod fetch_stream;
 pub(crate) mod filing;
+mod folders;
+mod gmail;
+mod gmail_read;
 mod idle;
+mod listing;
 mod mail;
 mod mailbox_write;
 mod metadata_fetch;
 mod mutate;
 mod parse;
 mod parse_body;
+mod parse_gmail;
 mod parse_qresync;
 mod place;
 mod pool;
@@ -103,7 +109,9 @@ mod resync;
 mod sasl;
 mod smtp;
 mod smtp_auth;
+mod smtp_sender;
 mod smtp_stream;
+mod store;
 mod stream;
 mod sync;
 mod target;
@@ -118,6 +126,7 @@ mod transport_search;
 mod transport_select;
 mod transport_session;
 mod transport_starttls;
+mod transport_store;
 mod unseen;
 mod utf7;
 mod watch;
@@ -138,6 +147,9 @@ pub use account::ImapAccount;
 pub use config::{ImapConfig, ImapSecurity};
 pub use credentials::{CredentialSource, Credentials};
 pub use error::ImapError;
+pub use gmail::{
+    GmailFolder, GmailFolderState, GmailMail, GmailMessage, GmailQuery, GmailSources, GmailState,
+};
 pub use probe::{AuthOffer, probe_imap_auth, probe_smtp_auth};
 pub use provider::ImapProvider;
 pub use watch::{DEFAULT_IDLE_KEEPALIVE, ImapWatcher};

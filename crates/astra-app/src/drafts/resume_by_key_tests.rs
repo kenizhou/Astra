@@ -165,7 +165,9 @@ async fn the_named_draft_opens_with_its_parts_as_removable_rows() {
         row.blob
             .as_ref()
             .map(astra_composer::DraftBlobHandle::as_str),
-        Some("carry:0"),
+        // The PDF's MIME part number: the multipart root is 0, the text
+        // body 1, the PDF 2, and the engine's part ids are those numbers.
+        Some("carry:2"),
         "the row's handle names the stored copy's part"
     );
     assert_eq!(row.data_url, None);
@@ -440,7 +442,11 @@ async fn a_forward_submit_does_not_read_the_draft_record() {
         .expect("the named draft resumes");
     app.dispatch(Intent::Compose(ComposeIntent::Forward {
         message: draft_ref("d-1"),
-        carry: vec![0],
+        // Part 2 is the pdf's MIME part number (the root is 0, the text 1):
+        // the ordinal 0 this test once carried matched no part, so the
+        // submit never re-read a carried part off the original and the
+        // draft-record hazard the name claims went unexercised.
+        carry: vec![2],
     }))
     .await
     .unwrap();

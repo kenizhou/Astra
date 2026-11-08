@@ -25,7 +25,8 @@ fn a_normalizer_version_change_clears_sync_cursors() {
     // A synced scope carries a cursor; reconciling at the same version keeps it.
     super::reconcile_normalizer_version(&conn, 1).unwrap();
     conn.execute(
-        "INSERT INTO sync_scope (scope_key, account, token, cursor) VALUES ('s', 'a', 1, 'c1')",
+        "INSERT INTO sync_scope (scope_key, account, token, cursor, collection_tag)
+         VALUES ('s', 'a', 1, 'c1', 't1')",
         [],
     )
     .unwrap();
@@ -43,53 +44,56 @@ fn a_normalizer_version_change_clears_sync_cursors() {
         "unchanged version keeps cursors"
     );
 
-    // A bump clears the cursor, so the next sync re-snapshots + re-normalizes.
+    // A bump clears the cursor, so the next sync re-snapshots + re-normalizes, and the
+    // collection tag with it: a calendar whose tag has not moved is otherwise skipped as
+    // unchanged, and keeps the old projection.
     super::reconcile_normalizer_version(&conn, 2).unwrap();
-    let cursor: Option<String> = conn
+    let (cursor, tag): (Option<String>, Option<String>) = conn
         .query_row(
-            "SELECT cursor FROM sync_scope WHERE scope_key = 's'",
+            "SELECT cursor, collection_tag FROM sync_scope WHERE scope_key = 's'",
             [],
-            |r| r.get(0),
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .unwrap();
     assert_eq!(cursor, None, "a version bump clears cursors");
+    assert_eq!(tag, None, "a version bump clears collection tags");
 }
 
-#[test]
-fn clear_one_cursor_clears_the_cursor_but_keeps_a_held_lease() {
+/// A scope mid-sync: a cursor plus a live lease under fencing token 5.
+fn scope_mid_sync() -> rusqlite::Connection {
     let mut conn = rusqlite::Connection::open_in_memory().unwrap();
     crate::migrations::migrate(&mut conn).unwrap();
-
-    // A scope mid-sync: a cursor plus a live lease (a fencing token and a future
-    // expiry). The per-scope clear runs concurrently with such syncs, so unlike
-    // reset_sync it must clear ONLY the cursor — stealing the lease would let the
-    // in-flight worker commit its cursor back over the clear.
     conn.execute(
         "INSERT INTO sync_scope (scope_key, account, token, cursor, lease_expiry) \
              VALUES ('s', 'a', 5, 'c1', '2099-01-01T00:00:00Z')",
         [],
     )
     .unwrap();
+    conn
+}
 
+fn cursor_token_lease(conn: &rusqlite::Connection) -> (Option<String>, i64, Option<String>) {
+    conn.query_row(
+        "SELECT cursor, token, lease_expiry FROM sync_scope WHERE scope_key = 's'",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    )
+    .unwrap()
+}
+
+#[test]
+fn clearing_a_cursor_fences_off_the_pass_holding_it() {
+    // Freed without a new token, the pass would still commit its cursor back over the clear.
+    let conn = scope_mid_sync();
     super::clear_one_cursor(&conn, "s").unwrap();
+    assert_eq!(cursor_token_lease(&conn), (None, 6, None));
+}
 
-    let (cursor, token, lease): (Option<String>, i64, Option<String>) = conn
-        .query_row(
-            "SELECT cursor, token, lease_expiry FROM sync_scope WHERE scope_key = 's'",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-        )
-        .unwrap();
-    assert_eq!(
-        cursor, None,
-        "the cursor is cleared so the next sync snapshots"
-    );
-    assert_eq!(token, 5, "the fencing token is untouched");
-    assert_eq!(
-        lease.as_deref(),
-        Some("2099-01-01T00:00:00Z"),
-        "a live lease is NOT stolen (the contrast with reset_sync)"
-    );
+#[test]
+fn a_reset_fences_off_every_pass_holding_a_scope() {
+    let conn = scope_mid_sync();
+    super::clear_sync_cursors(&conn).unwrap();
+    assert_eq!(cursor_token_lease(&conn), (None, 6, None));
 }
 
 #[tokio::test]
@@ -226,13 +230,18 @@ async fn a_pre_v14_row_is_listed_and_cancellable_but_never_claimed() {
         .call(|conn| {
             conn.execute(
                 "INSERT INTO pending_op
-                     (account, idempotency_key, resource_key, depends_on, payload, state, token,
+                     (account, idempotency_key, resource_key, depends_on, state, token,
                       lease_expiry)
                  VALUES ('acct-legacy', 'edit:1757942400:7', 'mail:imap:v1:u42@INBOX', '[]',
-                         'null', 'Pending', 0, NULL)",
+                         'Pending', 0, NULL)",
                 [],
             )
             .expect("seed a pre-v14 row");
+            conn.execute(
+                "INSERT INTO pending_op_payload (op_id, payload) VALUES (last_insert_rowid(), 'null')",
+                [],
+            )
+            .expect("seed its payload");
             Ok(())
         })
         .await
@@ -258,7 +267,7 @@ async fn a_pre_v14_row_is_listed_and_cancellable_but_never_claimed() {
             .unwrap(),
         PendingOpClaim::Refused(ClaimRejection::Unknown)
     );
-    assert!(
+    assert_eq!(
         store
             .claim_pending_ops(
                 account.clone(),
@@ -266,8 +275,8 @@ async fn a_pre_v14_row_is_listed_and_cancellable_but_never_claimed() {
                 10,
             )
             .await
-            .unwrap()
-            .is_empty()
+            .unwrap(),
+        []
     );
 
     // And a host can clear it, which is the only way it ever leaves the queue.
@@ -275,7 +284,7 @@ async fn a_pre_v14_row_is_listed_and_cancellable_but_never_claimed() {
         store.cancel_pending_op(account.clone(), op).await.unwrap(),
         None
     );
-    assert!(store.list_pending_ops(account).await.unwrap().is_empty());
+    assert_eq!(store.list_pending_ops(account).await.unwrap(), []);
 }
 
 /// A pre-v14 row an older build left `InFlight` under a lease that has since lapsed: no claim
@@ -298,13 +307,18 @@ async fn a_pre_v14_row_left_in_flight_is_released_and_cancellable() {
         .call(|conn| {
             conn.execute(
                 "INSERT INTO pending_op
-                     (account, idempotency_key, resource_key, depends_on, payload, state, token,
+                     (account, idempotency_key, resource_key, depends_on, state, token,
                       lease_expiry)
                  VALUES ('acct-legacy', 'edit:1757942400:7', 'mail:imap:v1:u42@INBOX', '[]',
-                         'null', 'InFlight', 1, '2025-12-31T23:00:00Z')",
+                         'InFlight', 1, '2025-12-31T23:00:00Z')",
                 [],
             )
             .expect("seed a pre-v14 row in flight");
+            conn.execute(
+                "INSERT INTO pending_op_payload (op_id, payload) VALUES (last_insert_rowid(), 'null')",
+                [],
+            )
+            .expect("seed its payload");
             Ok(())
         })
         .await

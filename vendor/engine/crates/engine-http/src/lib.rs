@@ -48,10 +48,12 @@ mod gate;
 mod hand_over;
 mod observed;
 mod observer;
+mod pace;
 mod policy;
 mod send;
 #[cfg(any(test, feature = "test-server"))]
 pub mod test_server;
+mod user_agent;
 
 pub use classify::{StatusAlone, Throttle, ThrottleClassifier};
 pub use deadline::{Exchange, chunk_within, client};
@@ -61,11 +63,14 @@ pub use observed::ObservedConnection;
 pub use observer::{IgnoreThrottles, ThrottleEvent, ThrottleObserver};
 pub use policy::RetryPolicy;
 pub use send::{RetryConfig, Sent, send_retrying};
+pub use user_agent::{InvalidUserAgent, UserAgent};
 
 #[cfg(test)]
 mod classify_send_tests;
 #[cfg(test)]
 mod gate_tests;
+#[cfg(test)]
+mod pace_tests;
 #[cfg(test)]
 mod send_test_support;
 #[cfg(test)]

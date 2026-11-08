@@ -205,10 +205,19 @@ fn the_default_snapshot_crosses_as_an_empty_object() {
     // nothing skips on the wire except by being absent, so a cold host renders an empty
     // calendar, not a zeroed one.
     let snapshot = CalendarSnapshot::default();
-    assert!(snapshot.calendars.is_empty());
-    assert!(snapshot.occurrences.is_empty());
-    assert!(snapshot.write_states.is_empty());
-    assert!(snapshot.reply_prompts.is_empty());
+    assert_eq!(snapshot.calendars, [] as [crate::calendar::CalendarRow; 0]);
+    assert_eq!(
+        snapshot.occurrences,
+        [] as [crate::calendar::OccurrenceRow; 0]
+    );
+    assert_eq!(
+        snapshot.write_states,
+        [] as [crate::calendar::CalendarWriteRow; 0]
+    );
+    assert_eq!(
+        snapshot.reply_prompts,
+        [] as [crate::calendar::ReplyPromptRow; 0]
+    );
     assert!(snapshot.now_data.is_none());
 
     let wire = serde_json::to_value(&snapshot).expect("the default serialises");

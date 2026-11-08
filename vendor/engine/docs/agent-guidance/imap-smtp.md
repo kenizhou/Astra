@@ -42,13 +42,26 @@ is authoritative for the `provider-caldav` calendar client.
   live as `NO [LIMIT] LOGIN Rate limit hit.` on a session opened seconds after five
   others had authenticated with the same credential. The rule is scoped to `LOGIN`:
   RFC 5530's `LIMIT` is any implementation limit, so on `STORE` it can mean too many
-  keywords, which is `InvalidState` like any other `NO`. An `AUTHENTICATE` carrying a token
+  keywords, which is `InvalidState` like any other lasting `NO`. A temporary code (next
+  item) did not judge the credential either, and stays the `Retryable` `NO` it is: RFC 5530
+  §3's own example of `UNAVAILABLE` is a `LOGIN` refused while the directory that checks
+  passwords is down. An `AUTHENTICATE` carrying a token
   is classified the same way, since it is the other way into a session. SMTP `AUTH`, with a
   password or a token, follows the same rule in its own terms: a 4xx is "try again later"
   (RFC 5321 §4.2.1), so it is `RateLimited` too, except RFC 4954's `432` (a password
   transition is needed), which only the user can resolve and stays `Authentication`. Nothing in the adapter waits either
   out; the class is the host's cue to back off (`http-throttling.md` covers the HTTP
   adapters, where the engine does the waiting).
+- **A refused command is classed by its response code.** A tagged `NO` is `ImapError::No`
+  whatever it carries, so every site that tolerates a refusal (an `ENABLE`, a `STATUS`
+  probe, `NAMESPACE`) keeps tolerating it. Its class is read from the code RFC 5530 puts at
+  the start of the text (`error::opens_with_temporary_code`): `[UNAVAILABLE]`, `[INUSE]`
+  and `[SERVERBUG]` say the refusal is temporary, so they are `Retryable`; any other code,
+  and none, is `InvalidState`. A `NO` took no effect, so a write the outbox parks on
+  `Retryable` and repeats after its backoff cannot apply twice. Without this a host cannot
+  tell a server that is briefly short of something from a lasting answer such as a folder
+  hidden from IMAP, and has to guess with waits of its own. Proof:
+  `transport_refusal_tests.rs`.
 - Layers: `dial` (the connect sequence itself: TCP, TLS, authenticate, negotiate; behind
   `ImapAccount::connect` and every connection the account's pool opens after it),
   `credentials`/`sasl` (a password or an OAuth 2.0 access token, and the two SASL
@@ -70,7 +83,8 @@ is authoritative for the `provider-caldav` calendar client.
   **SMTP submission**), `smtp_stream` (its framing: reading a reply, writing a command
   or the message), `deadline` (how IMAP and SMTP apply the shared bounds on a silent
   server, `deadlines.md`), `pool` + `account` (the per-account connection budget — see
-  **Connections** below), `provider` (the `Provider` impl).
+  **Connections** below), `provider` (the `Provider` impl), `gmail` + `gmail_read` +
+  `parse_gmail` (Gmail's mail as one store, below).
 
 ## How IMAP differs from JMAP (the shape)
 
@@ -103,7 +117,9 @@ is authoritative for the `provider-caldav` calendar client.
   each dialled a socket they held for their whole lifetime, so an account's socket count
   was a property of the *type* — one per bound folder, idle or not, all re-dialled in one
   burst on every network drop (measured: 107 connections in four hours on one Android
-  device). Two `ImapAccount`s for one account are two budgets; build one.
+  device). Two `ImapAccount`s for one account are two budgets; build one. A mail store shared
+  with that login is a view of it (`ImapAccount::with_shared_mailbox`, under "Shared
+  mailboxes"), not a second account.
 - **Why the engine must bound it, not the server.** IMAP has no way to learn a server's
   connection limit, and only some servers say when it was hit: RFC 5530 has no "too many
   connections" code. Yahoo answers with `NO [LIMIT]` at `LOGIN` (`RateLimited`, above);
@@ -137,9 +153,9 @@ is authoritative for the `provider-caldav` calendar client.
   number, and the server's limit is shared with every other client of the user's. A caller
   whose dial fails while another *worker* holds a connection waits for one to come back
   rather than failing; it fails only once no worker is left. When the server *answered*
-  (`LOGIN` `NO`, `NO [LIMIT]`, `BYE` at the greeting) the ceiling also drops by that
-  connection, since a `NO` to a credential other sessions are logged in with right now is
-  a session limit, not a verdict on the credential; `ImapAccount::invalidate` restores it,
+  (`LOGIN` `NO`, with or without a code, `BYE` at the greeting) the ceiling also drops by
+  that connection, since a `NO` to a credential other sessions are logged in with right now
+  is a session limit, not a verdict on the credential; `ImapAccount::invalidate` restores it,
   a new network being a new address. An unanswered dial (the network) lowers nothing.
   A refused **token** first gets its one renewal (**Authentication** below), so an expired
   token that a fresh one replaces never reaches the pool as a refusal; only a fresh token
@@ -312,17 +328,25 @@ is authoritative for the `provider-caldav` calendar client.
   one. Yahoo builds
   `BODYSTRUCTURE` at about 25 ms a message, single-part ones included, against under 3 ms for
   the rest of the metadata together, and about half of a typical inbox is one text body. The
-  streamed backfill commits a settled row as it arrives, and a batch's open rows together once
-  their structure is in. Those sets are shared out over up to three **spare** pooled
+  streamed backfill commits every row as it arrives, an open one as having no attachment, and
+  once a batch's structure is in sends again only the open rows it shows carry one, before the
+  batch's checkpoint. Those sets are shared out over up to three **spare** pooled
   connections (`ImapPool::try_acquire_for` lends only a free permit and never waits), one per 20
   open rows beyond the first 20; a helper that fails is discarded and its share asked again on
   the pass's own connection. On Yahoo this took a 2577-message cold pass from about 45 s to about
   34 s, with no session refused.
-  `BODYSTRUCTURE` feeds `Message.has_attachment` without downloading parts: explicit
-  attachments or named non-CID parts count; CID inline resources do not, a `text/plain`/
-  `text/html` body part is never counted on a bare `name=` alone, RFC 2231 split/encoded
-  filenames (`name*0*`) are recognized, and `message/global` is read like `message/rfc822`.
-  This keeps the list-time flag in step with `engine-mime::extract_attachments`. Flags → keywords:
+  `BODYSTRUCTURE` feeds `Message.has_attachment` without downloading parts, by the rule
+  `engine-mime::extract_attachments` applies to the bytes (RFC 8621's classification plus the
+  engine's exceptions, `bodystructure.rs`): every leaf counts, named or not, except a
+  `text/plain`/`text/html` body part (the first child, a version of an alternative, or an
+  unnamed part outside a `related`), an undispositioned `text/calendar` (the invitation
+  card), and a non-text, non-message part with a `Content-ID` (a `cid:` resource);
+  `Content-Disposition: attachment` always counts. RFC 2231 split/encoded filenames
+  (`name*0*`) are recognized, `message/global` is read like `message/rfc822`, and a nested
+  message is one part. The two agree on every shape in
+  `provider-imap/tests/fixtures/attachment-shapes/` (real Stalwart structures), which a test
+  enforces. Once the message's source is read, that answer replaces this one
+  (`store-and-sync.md`, "The source answers the row's paperclip"). Flags → keywords:
   `\Seen`/`\Flagged`/
   `\Answered`/`\Draft` map to their `$`-keywords; `\Deleted`/`\Recent` are
   deliberately not keywords (expunge/session model); custom keywords pass through.
@@ -348,8 +372,8 @@ is authoritative for the `provider-caldav` calendar client.
   attributes. `list_command` builds the clause, and asks for `SPECIAL-USE` only where the
   capability was advertised: an unadvertised return option is a `BAD`, which costs the
   whole folder list rather than only its roles.
-- **Unread counts** (`Mailbox::unread_count`, `unseen.rs`). `LIST` carries none, so the
-  folder-list sync asks for `UNSEEN` too: one round trip via
+- **Unread counts** (`Mailbox::unread_count`, `listing.rs`/`unseen.rs`). `LIST` carries none,
+  so the folder-list sync asks for `UNSEEN` too: one round trip via
   `LIST "" "*" RETURN (SPECIAL-USE STATUS (UNSEEN))` where the server advertised
   **LIST-STATUS** (RFC 5819), else one `STATUS <mailbox> (UNSEEN)` per selectable mailbox — capped at
   `MAX_STATUS_PROBES`, so a pathological account cannot turn a folder list into a
@@ -777,7 +801,9 @@ protocol on both dialects.
   it.
 - **Names.** A leaf carrying the delimiter would make levels nobody asked for, and a
   subfolder on a server whose delimiter is `NIL` has nowhere to go; both are `InvalidState`
-  before anything is sent, as is any edit of `INBOX` and a top-level folder called `INBOX`.
+  before anything is sent, as is any edit of the store's Inbox and a top-level folder called
+  `INBOX`. The top level is the store's: for a provider bound to a shared store it is below
+  the store's root (see "Shared mailboxes").
   Names go through `quoted_name`, so rev1 sends modified UTF-7 (`Reçus` → `Re&AOc-us`).
 - **`Create`** → `CREATE "<path>"`, then `SUBSCRIBE`. A path the `LIST` already holds is not
   created again, and `NO [ALREADYEXISTS]` is success: a retry meets what the first attempt
@@ -894,7 +920,14 @@ folders into Trash is proven offline only: all three servers file a folder insid
   The keep-alive interval is the one host-supplied
   knob (a protocol timer, clamped to a sane range; default 28 min, shorter on mobile to
   detect a dead link sooner), not a product policy — **scheduling and reconnect/backoff
-  live in the host**, not the engine.
+  live in the host**, not the engine. A change the server reports before it accepts an
+  `IDLE` (ahead of the `+` continuation) is not repeated once idling, so it is reported as
+  `Changed` too.
+- **A server's own `IDLE` delay is accepted, not polled around.** Yahoo reports changes over
+  `IDLE` only on a two-minute cycle, so its new mail shows up to two minutes late
+  (`spec-deviations.md`, YAHOO-15). A `NOOP` between short turns would show it sooner, at the
+  cost of a command every few seconds per watched folder per user, the load `IDLE` exists to
+  spare a server; it was tried and withdrawn.
 - **Coverage.** The `idle` primitives (continuation handling, untagged-line
   classification, `DONE` drain) are unit-tested over scripted transcripts; the watcher's
   keep-alive timing and stay-idling-across-events behavior are tested over a real
@@ -907,6 +940,106 @@ folders into Trash is proven offline only: all three servers file a folder insid
   it, and re-issues on the keep-alive (a `KeepAlive` heartbeat), and a draft `APPEND`ed by
   a second connection pushes a `Changed` — confirming the path across a second server
   implementation, like the QRESYNC delta was.
+
+## Shared mailboxes: namespaces, stores and rights
+
+`LIST "" "*"` answers for every principal at once: the credential's own folders and every
+folder shared with it, flat and interleaved. Before this was read against `NAMESPACE` two
+things went wrong — a folder list held two principals' folders, and the `\Sent` a sent copy
+was filed into was whichever the server listed first (Stalwart happens to list the
+credential's own first, which is why it looked right). `crate::store` is the fix, and
+everything below runs against Stalwart and both Dovecots (`live_imap_shared_contract.rs`).
+
+- **A provider covers one store** (`MailStore`): the credential's own — the whole tree minus
+  every foreign namespace — or one shared store, bound with
+  `ImapAccount::with_shared_mailbox`. The folder list, the Sent/Drafts placement (on a pooled
+  connection *and* the retry's checked one), a fallback folder's creation and a folder write's
+  top level are all scoped to it. A server without `NAMESPACE` yields the old behaviour
+  exactly: everything is the credential's own.
+- **A shared store spends its login's budget.** `with_shared_mailbox` is a view of the
+  credential's `ImapAccount`, not a second account: its providers and watches borrow from the
+  same pool. The store is opened by the same login, and a server's connection limit is per
+  login (Dovecot's `mail_max_userip_connections`), so a pool per store would spend that limit
+  once per store the user can open — the failure the pool exists to prevent.
+- **The namespaces are asked for lazily and kept** (`crate::folders`), once per account and
+  shared by every provider and store view of it. Most providers never need to know whose mail
+  is whose, so a `NAMESPACE` at connect would be a round trip per login for nothing. Prefixes
+  arrive in the wire dialect and are decoded like names, so they compare against decoded
+  mailbox ids.
+- **RFC 2342's two foreign positions are treated alike.** Both Stalwart and Dovecot put their
+  stores in *Other Users'*; the engine's only question is mine-or-not. A prefix match must end
+  at the delimiter: `Shared Foldersomething` is somebody's own folder.
+- **Where a store keeps its inbox is not assumable.** Stalwart makes the store's root a
+  `\Noselect` container with `INBOX` below it; Dovecot makes the **root itself** the inbox —
+  selectable, holding the mail, with `…/INBOX` an alias it never lists. So the store's `LIST`
+  pattern is `<root>*` (the root and everything below), and a selectable root is adopted as the
+  Inbox. Dropping it — which the first cut of this code did — lost Dovecot's Inbox, and made a
+  share of one INBOX list nothing at all. A shared store is re-rooted either way: its top
+  folders have no parent, and its `INBOX` is the Inbox (the reserved name is matched relative
+  to the store, not the full path).
+- **A shared store may have no roles.** Dovecot's shared namespace carries no SPECIAL-USE
+  attributes unless configured, so placing a draft there takes the fallback — the
+  conventional name, **qualified by the store** (`shared/support@test.local/Drafts`), which is
+  the folder Dovecot really has. Unqualified, the fallback would resolve among the credential's
+  own folders and file the store's mail there; on Stalwart, where a qualified `CREATE` in
+  someone else's store is refused (`NO [CANNOT]`), the refusal is the proof.
+- **Discovery** lists one level below each foreign prefix (`LIST "" "<prefix>/%"`): that level
+  is the owner, and the handle is the store's root path. `Enumerable` is advertised when the
+  session has `NAMESPACE` **and** `ACL` — a server without ACLs cannot share, and Gmail and
+  Outlook.com advertise `NAMESPACE` alone, so claiming a list there would offer a picker that
+  never fills. A credential nothing is shared with gets an empty list, not a refusal.
+- **Rights ride the folder `LIST` where the server has `LIST-MYRIGHTS`** (RFC 8440): the
+  `MYRIGHTS` return option joins `SPECIAL-USE` and `STATUS (UNSEEN)` on the one `LIST`
+  (`listing.rs`), and a `* MYRIGHTS` line follows each row it covers. Both Dovecots advertise it
+  and are live-proven to take this path; RFC 8440 lets a server leave a row out when it cannot
+  look the rights up, and such a row keeps `owner()`.
+- **Otherwise rights are one `MYRIGHTS` per selectable folder, pipelined** in batches of 64,
+  wherever the server has `ACL` alone (Stalwart), so a folder list pays one extra round trip
+  rather than one per folder. Answers are paired with folders **by the mailbox name on the
+  untagged line**, never by position: RFC 9051 §5.5 lets a server work on the next command
+  before finishing this one, and Stalwart does — the first live run paired by tag and failed on
+  `a21 OK` arriving while an earlier tag was pending. On either path a folder without an answer
+  (a `NO`, a row left out) keeps `owner()` ("unknown", never "no rights"); a server without
+  `ACL` is not asked at all. The letter mapping is in `crate::acl` — reading needs `l`+`r`,
+  removing needs `t`+`e`, and RFC 2086's `c`/`d` are **ignored**: RFC 4314 §2.1.1 has a server
+  add them when *any one* member right is set, so reading `lrtd` as "may expunge" would be wrong.
+- **A provider scoped to a shared store refuses to sync a folder outside it** (`InvalidState`),
+  since that would put the credential's own mail into the shared mailbox's account. And a store
+  the server lists nothing of is `Permanent` — access withdrawn — not an empty mailbox.
+- **A folder write stays in its store** (`crate::mailbox_write`). The folders an edit names come
+  from the store's own list, so only two things need the store: a folder made or moved to the
+  **top level** is qualified by it (`Shared Folders/support@test.local/Receipts`), since the bare
+  name would make it one of the credential's own; and the Inbox no edit may touch is the store's
+  — `…/INBOX`, or on Dovecot the root itself — which a comparison with the literal `INBOX` would
+  have let a host rename or delete. Both harness servers refuse a root folder in a shared store
+  even to a grantee with every right — Stalwart `NO [CANNOT]`, Dovecot `NO [NOPERM]` — which is
+  what proves the path named the share (`live_imap_shared_contract.rs`): unqualified, the
+  `CREATE` succeeds among the credential's own folders.
+
+## Gmail as one store (`GmailMail`)
+
+Gmail files a message under labels and shows each label to IMAP as a folder holding a copy, so
+the per-mailbox shape above downloads a message once per label and stores each copy as its own
+object. `ImapAccount::gmail` (offered only on a session advertising `X-GM-EXT-1`) returns a
+`GmailMail` instead: a reader of All Mail (`\All`), Spam (`\Junk`) and Trash (`\Trash`), the
+three folders that between them hold every message once. It reads and never writes; what a
+label means is `provider-google`'s (`google.md`, "Mail read over IMAP"), which is the only user.
+
+- **Gmail's items.** `X-GM-MSGID`, `X-GM-THRID` and `X-GM-LABELS` (`parse_gmail`) are the same
+  for a message in every folder; a message moving between the three keeps its Gmail id under a
+  new UID, so a caller keys by the id, never the UID. Labels arrive in modified UTF-7 on a rev1
+  session and are decoded; system labels keep their backslash names.
+- **CONDSTORE without QRESYNC.** Gmail offers `CONDSTORE` and no `QRESYNC`, so
+  `Connection::uid_fetch_changed` sends `CHANGEDSINCE` with no `VANISHED`, and opening a folder
+  is `SELECT (CONDSTORE)`. Nothing reports a removal; a caller compares counts.
+- **Every read names the `UIDVALIDITY` it planned against** and fails `NeedsResync` when the
+  folder was renumbered, rather than reading one message's UID as another's.
+- **Bounded commands.** A UID list is sent at most 1,000 UIDs a command, and a body read
+  locates at most 50 Gmail ids a command (`UID SEARCH OR X-GM-MSGID …`), so no command line
+  passes RFC 7162 §4's 8192 octets however scattered the UIDs. Bodies stream off the wire one
+  at a time under the stall bound, as `fetch_batch` does.
+- **Live proof** is `provider-google`'s `tests/live_imap_parity.rs`, which syncs one account
+  over this reader and over the Gmail API and compares every message.
 
 ## Known limitations (documented, not bugs)
 
@@ -1065,6 +1198,11 @@ whole rule:
 | Mailbox names in `LIST` rows | always quoted | unquoted atoms where quoting is unnecessary | quoted only where needed |
 | `* ENABLED` casing | `IMAP4rev2` | — | `IMAP4REV2` (atoms are case-insensitive) |
 | Tagged completion | `LIST completed` | `List completed (0.028 + 0.000 secs).` | same prose form |
+| Shared stores (RFC 2342) | *Other Users'*, prefix `Shared Folders` | *Other Users'*, prefix `shared/` (trailing delimiter) | same |
+| A shared store's inbox | `…/support@test.local/INBOX` below a `\Noselect` root | **the root itself**, selectable; `…/INBOX` an unlisted alias | same |
+| Roles in a shared store | the owner's SPECIAL-USE, as for their own | none — `harness.conf` configures them on the personal namespace only | same |
+| How rights are read | pipelined `MYRIGHTS` (`ACL` only), completed **out of order** | `LIST-MYRIGHTS`: on the folder `LIST` | same |
+| Full rights as reported | `rliteswkxpa` | `lrwstipekxacd` — RFC 2086's `c`/`d` alongside the members | same |
 
 Three asymmetries decide where a new test belongs.
 
@@ -1136,6 +1274,15 @@ behaviour broke; if the answer is none, the test is not proving what it claims.
   (which is the encode half). rev2, across **both** rev2 servers: a UTF-8 name needing no
   decoding, a `SELECT` sending it unencoded, and the roles surviving the dialect — which
   Stalwart cannot fail and Dovecot's rev2 fails the moment the client stops asking.
+- **Live, shared mailboxes (`tests/live_imap_shared_contract.rs`, every server;
+  `tests/live_shared.rs`, Stalwart):** the contract half — discovery, the credential's own list
+  holding none of a shared store, a full share reading like an account, a read-only share
+  saying so on its one folder, a non-ASCII folder inside a store, a draft landing in the
+  store's own Drafts, and a top-level folder made in a store never becoming the credential's
+  own — runs against Stalwart and both Dovecots, whose sharing differs in nearly
+  every detail (the table above). The Stalwart half needs what only that harness has: SMTP, to
+  prove a message sent as the group is filed in the group's Sent; a store that refuses a
+  qualified `CREATE`; and bob's credential, which nothing is shared with.
 
   A third gated file,A third gated file,
   `tests/live_imap_tls.rs`, covers the **TLS transports beyond that baseline** —

@@ -88,10 +88,19 @@ async fn the_read_takes_the_token_verbatim_never_the_field() {
     // The comma shape is a whole recipient field's text, not a token: the
     // read forwards it verbatim, and it matches nothing. A splitter here
     // would have found Émile.
-    assert!(app.recipient_suggestions("Zola, zo", 10).await.is_empty());
+    assert_eq!(
+        app.recipient_suggestions("Zola, zo", 10).await,
+        [] as [engine_api::RecipientSuggestion; 0]
+    );
     // A blank is not a search for everyone.
-    assert!(app.recipient_suggestions("", 10).await.is_empty());
-    assert!(app.recipient_suggestions("   ", 10).await.is_empty());
+    assert_eq!(
+        app.recipient_suggestions("", 10).await,
+        [] as [engine_api::RecipientSuggestion; 0]
+    );
+    assert_eq!(
+        app.recipient_suggestions("   ", 10).await,
+        [] as [engine_api::RecipientSuggestion; 0]
+    );
     // The token itself matches.
     assert_eq!(app.recipient_suggestions("zola", 10).await.len(), 1);
 }

@@ -118,7 +118,7 @@ async fn the_delivery_state_rides_the_progress_snapshot_and_moves_it() {
     app.dispatch(crate::Intent::RefreshMail).await.unwrap();
     let healthy = app.sync_progress();
     assert!(!healthy.delivery.offline_banner);
-    assert!(healthy.delivery.outages.is_empty());
+    assert_eq!(healthy.delivery.outages, [] as [engine_api::AccountId; 0]);
 
     // One network failure is not an outage; the second one is.
     app.record_pass_outcome(&work(), PassOutcome::NetworkFailure);

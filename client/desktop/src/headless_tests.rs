@@ -55,7 +55,10 @@ fn snapshot(folders: &[&str]) -> MailboxListSnapshot {
 #[test]
 fn the_tree_diff_is_empty_when_every_expected_folder_is_there() {
     let complete = snapshot(&["INBOX", "Sent", "Projects"]);
-    assert!(tree_diff(&complete, &["INBOX", "Projects"]).is_empty());
+    assert_eq!(
+        tree_diff(&complete, &["INBOX", "Projects"]),
+        [] as [std::string::String; 0]
+    );
 }
 
 #[test]
@@ -100,7 +103,10 @@ fn the_tree_diff_counts_a_folder_held_by_any_account() {
         ],
         ..Default::default()
     };
-    assert!(tree_diff(&split, &["INBOX", "Projects"]).is_empty());
+    assert_eq!(
+        tree_diff(&split, &["INBOX", "Projects"]),
+        [] as [std::string::String; 0]
+    );
 }
 
 #[test]

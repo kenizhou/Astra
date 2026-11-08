@@ -325,6 +325,6 @@ fn rows_outside_the_trailing_week_do_not_count_against_the_budget() {
 fn generated_correlation_ids_are_distinct_and_nonempty() {
     let first = CorrelationId::generate();
     let second = CorrelationId::generate();
-    assert!(!first.as_str().is_empty());
+    assert_ne!(first.as_str(), "");
     assert_ne!(first, second);
 }

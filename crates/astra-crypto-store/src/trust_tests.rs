@@ -247,7 +247,7 @@ fn list_decisions_for_email_returns_full_history_latest_first() {
 
     // An address with no history returns an empty Vec (not an error).
     let empty = list_decisions_for_email(&store, "a1", "smime", "nobody@x.com").unwrap();
-    assert!(empty.is_empty());
+    assert_eq!(empty, [] as [crate::trust::TrustDecisionRow; 0]);
 }
 
 #[test]

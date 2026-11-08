@@ -230,7 +230,7 @@ fn a_wire_with_no_list_fields_parses_to_the_at_rest_snapshot() {
     // The row's address is the same additive direction: absent on an old
     // emitter's wire, it reads back empty rather than failing the parse.
     assert_eq!(back.account_folders[0].address, "");
-    assert!(back.rows.is_empty());
+    assert_eq!(back.rows, [] as [crate::rows::MessageRowView; 0]);
     assert_eq!(back.selection, None);
     assert_eq!(back.visible_limit, 0);
     assert_eq!(back.view_mode, ViewMode::Flat);

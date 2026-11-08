@@ -18,7 +18,7 @@ use engine_core::{
         PropertyId, Title,
     },
     membership::Memberships,
-    sync::{SyncState, SyncUpdate},
+    sync::{SyncScope, SyncState, SyncUpdate},
     version::{ChangeKey, ETag, RevisionTokens},
 };
 use engine_provider::{
@@ -440,7 +440,7 @@ async fn people_paging_filters_cursor_validation_and_recipient_history_are_expos
 
     let suggestions = engine.recipient_suggestions("bob", 500).await.unwrap();
     assert_eq!(suggestions.suggestions[0].display_name, "Bob Builder");
-    assert!(suggestions.coverage.is_empty());
+    assert_eq!(suggestions.coverage, []);
     assert!(engine.forget_recipient("not-an-email").await.is_err());
     assert_eq!(
         engine.forget_recipient("bob@example.test").await.unwrap(),

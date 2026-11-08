@@ -23,7 +23,6 @@ pub(crate) type SignInCompletion = Box<
 /// The completion a begun flow's success runs, wired for one provider:
 /// a Microsoft sign-in becomes the real add over the graph seams, a
 /// Google one over the google seams.
-#[must_use]
 pub(crate) fn outcome_completion(
     state: &crate::AppState,
     runtime: &crate::runtime::AppRuntime,

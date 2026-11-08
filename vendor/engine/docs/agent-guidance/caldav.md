@@ -22,7 +22,8 @@ contact normalization share only the DAV transport/TLS layer.
 
 ## CardDAV contacts
 
-`CardDavProvider` starts at `/.well-known/carddav`, resolves the current
+`CardDavProvider` starts at the base URL's path, or at `/.well-known/carddav` when the
+base URL names only a server, resolves the current
 principal and `addressbook-home-set`, asks the home with `OPTIONS` whether it
 advertises the `addressbook` class (RFC 6352 §6.1), snapshots address-book
 collections and rights, then binds one adapter to one address book. A home that
@@ -32,17 +33,21 @@ a server with nothing to offer is a capability the host reads, not an error, and
 a `405` answer to the `OPTIONS` is read the same way. The connect observer
 (`CardDavConfig::with_connect_observer`) sees each redirect, the home, and the
 classes the home advertised. Cards sync with RFC 6578
-`sync-collection`; expired tokens restart with a snapshot. Servers without that
-report use a CTag check followed by a full `addressbook-query`, retaining each
-resource ETag. Direct canonical refetch uses `addressbook-multiget`.
+`sync-collection`; expired tokens restart with a snapshot. A server without that
+report is read through its CTag, as calendars are ("A server without
+`sync-collection`" below). Direct canonical refetch uses `addressbook-multiget`.
 
 vCard 3/4 input is unfolded and normalized into the JSContact-shaped
 `ContactCard` while retaining the complete raw vCard, including malformed legacy
 or extension lines the parser does not understand. Targeted writes edit the raw
 document and preserve untouched lines. Creates use `If-None-Match: *`; update
 and delete require the source ETag under `If-Match`, so the destination
-advertises `WriteGuard::Enforced`. Embedded data-URI and authenticated URI photo
-reads are supported; photo mutation is not.
+advertises `WriteGuard::Enforced`. Embedded photos (a `data:` URI, or vCard 3
+`ENCODING=b`) and URI photos are read; photo mutation is not. A URI photo on an origin
+the credential reaches is fetched with it; one elsewhere is fetched without, and a
+`401` or `403` there is a card without a picture rather than a failure. iCloud keeps
+its cards' photos on `gateway.icloud.com` behind the account's password, so they show
+as no picture: the password does not go to a URL a card names.
 
 Every written value is escaped — `KIND` included, because `ContactKind::Other`
 carries host text, and an unescaped line break there injects properties into the
@@ -91,17 +96,34 @@ are split escape-aware so the writer and the parser agree.
   see one representation regardless of transport. A resource with only an override
   (no master) yields that override as a standalone instance event
   (`calendar-semantics.md`).
-- **Calendar scope is per collection.** Like IMAP's per-mailbox email, CalDAV
-  state is per collection (a sync-token, RFC 6578). So a `CalDavProvider` is
-  **bound to one calendar collection** for events: `event_scope` is
-  `SyncScope::DavCollection{account, collection}` (the collection href), and
-  `sync_events` is a `sync-collection` REPORT over it. The account's **calendar
-  list** syncs under the new per-account container scope
-  `SyncScope::DavCollectionList{account}` — a `PROPFIND` of the calendar home
-  re-snapshots it each pass (no list cursor), applied before the per-collection
-  events it parents (`store-and-sync.md` referential apply order). This mirrors
-  IMAP's `ImapMailboxList` → `ImapMailbox` exactly. The cross-collection fan-out
-  (drive every calendar) is the later orchestrator's job.
+- **One provider, every calendar; one scope per collection.** Like IMAP's per-mailbox
+  email, CalDAV state is per collection (a sync-token, RFC 6578), so each calendar's
+  events sync under a scope of their own: `event_scope(account, calendar)` is
+  `SyncScope::DavCollection{account, collection}` (the calendar's href), and
+  `sync_events(account, calendar, cursor)` is a `sync-collection` REPORT over it. A
+  `CalDavProvider` binds no calendar: one connection, one discovery and one HTTP client
+  serve every calendar under the home, and `engine_sync::sync_calendar` drives them
+  (`store-and-sync.md`). The account's **calendar list** syncs under the per-account
+  container scope `SyncScope::DavCollectionList{account}`: a `PROPFIND` of the calendar
+  home re-snapshots it each pass (no list cursor), applied before the per-collection events
+  it parents (`store-and-sync.md` referential apply order), as IMAP's `ImapMailboxList`
+  parents `ImapMailbox`.
+- **Only a collection that can hold events is a calendar.** The listing asks for each
+  collection's `supported-calendar-component-set` (RFC 4791 §5.2.3) and leaves out one that names
+  components but not `VEVENT`: iCloud lists its reminders as a calendar collection of `VTODO`
+  alone, which takes no event and would otherwise be offered as a place to put one. A collection
+  that names none holds any component, events included.
+- **The listing carries each calendar's collection tag.** The same `PROPFIND` reads every
+  collection's `DAV:sync-token` (RFC 6578 §4) and CalendarServer `getctag`, and the
+  calendar's tag is the sync-token, or the CTag where the server has none. The tags travel
+  beside the calendars (`CalendarListing::tags`), never on a `Calendar`: they are sync
+  bookkeeping, recorded with each calendar's event cursor, and nothing a host reads. A
+  calendar whose tag equals the one recorded with its scope's cursor is not asked again, so
+  a quiet refresh costs one `PROPFIND` however many calendars the home holds. The token is
+  what a `sync-collection` report would answer, by definition, so equal tags mean equal
+  contents. **Stalwart's sync-token is account-wide**: every collection in a home reports the
+  same one and it moves when any of them changes, so on Stalwart the gate holds but skips
+  only when nothing at all has changed.
 - **Identity is the resource href.** An event's `EventId` is its resource href
   (URL-encoded, as the server returns it); the iCalendar `UID` is the separate
   cross-system `Uid`. The `getetag` is preserved in `event.revisions` (the `ETag`
@@ -124,8 +146,10 @@ are split escape-aware so the writer and the parser agree.
     error. A server may answer `OPTIONS` with a `405` and still read and write perfectly;
     failing the connect over one discovery question would refuse a working account. A
     transport failure still propagates, like every other discovery step.
-  - Both answers are live-pinned, and the pair is the evidence: **Stalwart advertises it,
-    the SabreDAV fixture does not** ("Which server proves what"). The SabreDAV negative is
+  - Both answers are live-pinned, and the pair is the evidence: **Stalwart and Nextcloud
+    advertise it, the SabreDAV fixture does not** ("Which server proves what"). Nextcloud
+    is SabreDAV with the scheduling plugin loaded, so the same server software answers both
+    ways. The SabreDAV negative is
     a property of that harness's configuration — `docker/sabredav/server.php` loads
     `Sabre\CalDAV\Plugin` and deliberately *not* `Sabre\CalDAV\Schedule\Plugin` — and it
     must stay that way: it is the only server here that can show the capability answering
@@ -147,8 +171,9 @@ are split escape-aware so the writer and the parser agree.
 
 ## CalDAV specifics implemented
 
-- **Discovery is the two-step RFC 6764 §6 flow.** `PROPFIND` the well-known path
-  (`/.well-known/caldav`) for the `current-user-principal`, then `PROPFIND` *that
+- **Discovery is the two-step RFC 6764 §6 flow.** `PROPFIND` the base URL's own path,
+  or the well-known path (`/.well-known/caldav`) when the base URL names only a server
+  (`href::discovery_start`), for the `current-user-principal`, then `PROPFIND` *that
   principal* for its `calendar-home-set` (the home-set is a property of the
   principal, not the root). A lenient server (Stalwart) returns the home-set
   directly at the well-known, short-circuiting the second step; a strict server
@@ -174,22 +199,40 @@ are split escape-aware so the writer and the parser agree.
   path is left for the executor to resolve onto the connection, but once a hop has moved
   to an absolute URL the next one belongs to *that* origin, and leaving it a path walks
   the chain silently back onto the connection base — a different server that answers
-  plausibly. When a hop does change origin the connection **follows** it
-  (`DavExecutor::adopt_origin`): the account's own server redirecting discovery is not the
-  case the `same_origin` credential guard exists for (`providers.md`), so credentials
-  travel to the new origin and the relative hrefs it then issues resolve there. A hop off
-  TLS is refused outright, since every one of these requests carries the credential, and
-  **that refusal lives in `adopt_origin`, not in `redirect_href`**: a walk starts at a bare
-  well-known path, which names no scheme, so on the first hop only the connection knows it
-  is being asked to give up TLS. A refusal fails the walk rather than continuing over it.
+  plausibly. Every href a discovery step *reads* (a principal, a home) is resolved the same
+  way, against the request that returned it (RFC 4918 §8.3, `href::resolve_reference`), so
+  the principal keeps the host that named it after the walk has moved on. Each origin the walk
+  is led to (a redirect target, the principal, the home: `discovery::follow`, in the CalDAV
+  and CardDAV walks alike) is **trusted**, not handed the credential: per RFC 9110 §11.5 a
+  protection space does not extend past its own server, so a trusted origin receives the
+  credential only once it answers `401` with a challenge in the credential's scheme, and an
+  untrusted one (a vCard photo URL) never does (`credential_scope.rs`). The start URL is
+  trusted the same way and gets no exception: nothing is sent the credential before it asks.
+  "Asks" covers the three shapes real servers use, each proven live against
+  `docker/sabredav` (`tests/live_challenges.rs`): a `401` offering the credential's scheme, a
+  `401` with no challenge at all (Yahoo, Google, AOL; `/bare/`), and a `207` naming the
+  requester `<DAV:unauthenticated/>` (RFC 5397 §3; `/open/`), which re-sends the request once
+  with the credential. A `401` offering only other schemes is
+  `CalDavError::UnsupportedAuthentication`, not a refused sign-in, and a home's DAV classes are
+  read only after its origin has the credential (`discovery::authenticate_before_reading`).
+  A host resumes at the principal it stored (`with_discovery_path` with the URL
+  `principal_url()` reported), never at a home. A plaintext origin after TLS is refused
+  outright (a redirect to the same host and port is first taken over TLS,
+  by `engine_provider::redirect_target`), and **that refusal lives in `DavExecutor::trust_origin`, not in
+  `redirect_href`**: a walk starts at a bare well-known path, which names no scheme, so on the
+  first hop only the connection knows it is being asked to give up TLS. A refusal fails the
+  walk rather than continuing over it. Once the home is found the connection settles on its
+  origin (`DavExecutor::settle_on`): iCloud answers the principal on `caldav.icloud.com` and
+  names the home on `pNN-caldav.icloud.com`, and every collection href the home returns is
+  relative to the latter. `crates/provider-caldav/README.md` draws the whole walk.
   A host may also confine the credential with a `CredentialHosts` policy
   (`CalDavConfig::with_credential_hosts`, the same on `CardDavConfig`): the configured base URL
-  and every origin a hop moves to must be a host it permits, or the connect fails before anything
-  is sent there. Which hosts qualify is the host's decision; for an OAuth token it is the token
+  and every origin discovery is led to must be a host it permits, or the connect fails before
+  anything is sent there. Which hosts qualify is the host's decision; for an OAuth token it is the token
   issuer's resources, which this adapter knows nothing of.
   CalDAV emits no `Authenticated` step —
-  credentials ride on every `PROPFIND`, so there is no discrete authentication
-  exchange to observe — and no `TlsEstablished`, because an HTTP adapter learns its TLS
+  credentials ride on every `PROPFIND` to an answered origin, so there is no discrete
+  authentication exchange to observe — and no `TlsEstablished`, because an HTTP adapter learns its TLS
   version from a *response*, too late for a connect-phase step; it lands in
   `ConnectionInfo::tls_version` instead (`tls.md`). Then `PROPFIND Depth:1` the home and keep the responses
   whose `resourcetype` marks them a `calendar`. Hrefs may be absolute paths or full
@@ -229,9 +272,54 @@ are split escape-aware so the writer and the parser agree.
   whose accumulated `present` set tombstones anything absent — while a **held**
   token returns only the changed (`2xx`, carrying inline `calendar-data`) and
   removed (a response-level `404`) resources — a **delta**. Either way the response
-  carries the next `sync-token`, which becomes the opaque cursor. No separate
-  `calendar-query`/`calendar-multiget` round trip: requesting `<C:calendar-data/>`
-  in the REPORT returns each resource's iCalendar inline.
+  carries the next `sync-token`, which becomes the opaque cursor. Requesting
+  `<C:calendar-data/>` in the REPORT returns each resource's iCalendar inline on most
+  servers, but RFC 6578 §3.2 lets a server return fewer properties than were asked
+  for, and iCloud returns every member with its `getetag` alone. A changed member
+  without `calendar-data` is fetched again with a `calendar-multiget`, a hundred hrefs
+  at a time and four of those in flight (`multiget::fill_bodies`), asking for exactly what
+  the sync asked for. Sent one after another, a first sync of 6,114 iCloud events took 55 s
+  in sixty-two round trips; four in flight took 14 s, and eight saved little more. The
+  member keeps the href the sync named it by and takes only the properties, since that
+  href is the key the store holds. The collection's own entry is not a member, and a
+  member that is listed but cannot be read (no body even after the multiget, or iCalendar
+  that does not parse) still counts as present, so a snapshot never deletes it locally.
+  CardDAV does the same with `addressbook-multiget`. A member the multiget answers with a
+  `404` was removed after the sync listed it, and is a removal. A failed multiget fails the
+  pass: advancing the cursor without the bodies would never fetch them.
+- **A server without `sync-collection`** is read through its CTag (`ctag_sync`), for
+  calendars and address books alike. It counts as one when the report is refused with the
+  `DAV:supported-report` precondition in a `403` or `409` (RFC 3253 §3.6, the answer the RFC
+  requires), with a `405` or `501`, or with a `400` to the first request of a collection (one
+  carrying a token is not read that way: a server that never did the report never issued
+  one), or when the answer carries no sync-token. Yahoo does the last for a calendar, an
+  empty `207`, and answers an address book's report with a `400`; it refuses
+  `addressbook-query` with a `400` too (`docs/spec-deviations.md`). So the fallback uses only what every server
+  answers: a `PROPFIND` of the collection's `getctag`, which while unchanged ends the pass
+  with an empty delta, and otherwise a Depth 1 `PROPFIND` listing each member's `getetag`,
+  then a multiget for the bodies. The result is a snapshot, and the cursor is `ctag:` and the CTag. A collection
+  with neither the report nor a CTag fails the pass.
+- **Every request carries the host's `User-Agent`** (`engine_http::client`), since reqwest sends
+  none and RFC 9110 §10.1.5 says a client should. Yahoo's address-book server answers an
+  `addressbook-multiget` without one with a `500`.
+- **A refused href with an octet encoded twice is asked once more, encoded once.** Yahoo
+  lists the events it names after their `UID` with the `%` of `%40` encoded again
+  (`%2540`) and answers a request to that href with a `400`; the resource answers at `%40`.
+  So a `400` to a URL holding `%25` and two hex digits is sent once more with that layer
+  removed (`href::single_encoded`, `DavClient::exchange`); a `400` applied nothing, so a
+  write is safe to repeat. Only a read or a guarded write is respelled: on a server that
+  meant the `%25`, the once-encoded URL is another resource, which a guard refuses and an
+  unguarded write would change. The stored key stays the href the server listed.
+- **A guarded `DELETE` reads the resource's ETag first** (`delete_guard`), or its
+  `schedule-tag` for a delete guarded by one, on every server:
+  Yahoo performs a delete whatever its `If-Match` says, while refusing the same guard on a
+  `PUT`. A different ETag is answered with a `412` without the delete being sent, so it
+  reads as the `Conflict` it is; an ETag that cannot be read lets the delete go with its own
+  guard. It costs one `PROPFIND` per delete, and a change between the two requests still
+  goes through on a server that ignores the guard.
+- **A `DAV` header may span several field lines.** Fastmail sends four, with
+  `addressbook` and `calendar-auto-schedule` on lines after the first; they are read as one
+  comma-separated list (RFC 9110 §5.3).
 - **Self-healing invalid token.** A server that rejects a stale token (RFC 6578
   §3.2 `valid-sync-token`, a `403`/`409` precondition) is recovered by re-running
   the REPORT with an empty token — a snapshot — **inside the adapter**, the same
@@ -388,8 +476,9 @@ are split escape-aware so the writer and the parser agree.
 
   `CalDavProvider::event_href` mints the conventional `<collection>/<uid>.ics` resource href
   for a create (percent-encoding the `UID` as one path segment) from the draft's `UID`; a
-  patch/delete reuses the stored `EventId`. A draft naming a calendar other than the bound
-  collection is **refused**, not silently written to the bound one — `rebind` first.
+  patch/delete reuses the stored `EventId`. A create lands in the calendar its draft names,
+  by the href the listing gave it; a bare name is refused, since it would be a second id for
+  a listed calendar, keyed to a scope of its own.
 - **The new `ETag` is read back where the server supplies it.** A successful PUT returns the
   resource's new entity tag in the `ETag` response header (RFC 4791 §5.3.4), surfaced on the
   receipt as `revisions`; when the server omits it the receipt carries an empty
@@ -514,7 +603,8 @@ adapter never sees — or miss one it does.
 
 ```sh
 cargo run -p dav-cli -- profiles                     # what is configured, and from where
-cargo run -p dav-cli -- -p stalwart info             # capabilities discovery concluded
+cargo run -p dav-cli -- -p stalwart info             # capabilities discovery concluded, and the principal
+cargo run -p dav-cli -- -p stalwart --start <principal> info   # resume there, as a host does
 cargo run -p dav-cli -- -p soverin list              # events + the reply verdict each carries
 cargo run -p dav-cli -- -p soverin get <uid>         # the stored document, verbatim
 cargo run -p dav-cli -- -p soverin store invite.eml  # guarded create from a real invitation
@@ -535,9 +625,9 @@ need when the adapter and the server disagree.
 `CALENDAR`. It lives outside every checkout for two reasons: it holds a password, and the
 engine and the product core are worked on in parallel, so a profile written while debugging
 one is usable from the other without being copied. `stalwart`, `stalwart-organizer` and
-`sabredav` need no file — they are this repo's own docker fixtures, and they follow
-`STALWART_HTTP_ADDR` / `SABREDAV_HTTP_ADDR` so the tool always points at the same server the
-live suite does. Nothing else is built in: the product core runs its *own* harness on its own
+`sabredav` and `nextcloud` need no file — they are this repo's own docker fixtures, and they
+follow `STALWART_HTTP_ADDR` / `SABREDAV_HTTP_ADDR` / `NEXTCLOUD_HTTP_ADDR` so the tool always
+points at the same server the live suite does. Nothing else is built in: the product core runs its *own* harness on its own
 ports as a separate compose project, and hard-coding that here would put product knowledge
 into a product-neutral engine.
 
@@ -586,14 +676,19 @@ what a client would assume:
   *and* the organizer (a `REPLY` arrives as "Accepted:…"), and the mail suites assert an exact
   INBOX count on Alice — so the whole exchange runs between two scratch accounts
   (`stalwart-harness.md`). This is why `bob`/`carol` exist.
-- **Neither server bounds concurrency; Stalwart bounds rate.** Measured on both harness
-  implementations (`tests/live_concurrency.rs`): at a fixed 25 requests/second, widths of 1, 4,
-  16 and 64 were refused 0% of the time on *both*. At a fixed width of 8, Stalwart begins
-  refusing somewhere between 50/s and 150/s with a proper `429`, and SabreDAV refused nothing
-  at all up to 400/s. So `provider-caldav` does **not** narrow the account
-  `engine_http::RequestGate` — not because nobody looked, which is what `http-throttling.md`
-  used to say, but because two independent implementations were asked and neither has a width
-  to narrow to. A future change to that needs to get past that suite.
+- **Stalwart bounds rate, and requests in flight too; SabreDAV bounds neither.** Measured on
+  both harness implementations (`tests/live_concurrency.rs`): at a fixed 25 requests/second,
+  widths of 1, 4, 16 and 64 were refused 0% of the time on *both*. At a fixed width of 8,
+  Stalwart begins refusing somewhere between 50/s and 150/s with a proper `429`, and SabreDAV
+  refused nothing at all up to 400/s. That suite never holds more than about one request in
+  flight, though, so it could not see that Stalwart caps an account at **4 in flight** — its
+  JMAP `maxConcurrentRequests` — and refuses past it with a `400` carrying JMAP's
+  `urn:ietf:params:jmap:error:limit` body. `DavThrottles` (`src/throttle.rs`) reads that body so
+  the send funnel waits the refusal out, and the error names it `RateLimited` if the funnel
+  gives up; `tests/live_concurrency_refusal.rs` offers 24 creates at once and requires all of
+  them to land (#332). `provider-caldav` still does **not** narrow the account
+  `engine_http::RequestGate`: nothing in DAV states the 4, so narrowing would cap every other
+  server at Stalwart's number (`http-throttling.md`).
 - **That mail is rate-limited, and exceeding the limit looks like nothing at all.** Stalwart's
   default inbound throttle is 25 messages/hour per (sender domain, recipient); past it the
   server abandons the **whole** iTIP delivery — calendar copy included — while still answering
@@ -659,9 +754,6 @@ what a client would assume:
 - **`RRULE UNTIL` with a `Z` (UTC) bound** is read as its wall-clock value;
   converting it to the event's zone needs tzdata and is staged. The supported seed
   uses `COUNT`, not `UNTIL`.
-- **Calendar CalDAV has no CTag fallback yet.** Calendar event sync still relies
-  on RFC 6578. CardDAV implements CTag + per-resource ETag snapshot fallback
-  when `sync-collection` is unavailable.
 - **Calendar events are fetched whole, not paged** — consistent with the JMAP
   calendar slice (events have no natural recency sort, and the REPORT returns the
   collection in one pass).
@@ -701,11 +793,12 @@ what a client would assume:
   accepted `PARTSTAT` and no transit-only `METHOD`), plus the security case that a
   parsed `REQUEST` whose `ORGANIZER` mismatches the authenticated sender is rejected,
   not written.
-- **Live, against two real servers.** `tests/live_caldav.rs` (gated on
-  `STALWART_HTTP_ADDR`, run by the `stalwart` CI job) and `tests/live_sabredav.rs`
-  (gated on `SABREDAV_HTTP_ADDR`, run by the `sabredav` job) both connect over HTTP, run
+- **Live, against three real servers.** `tests/live_caldav.rs` (gated on
+  `STALWART_HTTP_ADDR`, run by the `stalwart` CI job), `tests/live_sabredav.rs`
+  (gated on `SABREDAV_HTTP_ADDR`, run by the `sabredav` job) and `tests/live_nextcloud.rs`
+  (gated on `NEXTCLOUD_HTTP_ADDR`, run by the `nextcloud` job) all connect over HTTP, run
   discovery + `sync-collection`, and assert the seed invariants in the store plus an
-  idempotent **empty delta** on a second sync (the held sync-token). Both then run the
+  idempotent **empty delta** on a second sync (the held sync-token). All three then run the
   **same four write scenarios** from `tests/common/write.rs`. Every test in a binary
   **serializes** on a shared guard — each scenario transiently adds an event, which must
   not race the exact-count assertion or another scenario — and each pre-cleans its own
@@ -751,18 +844,19 @@ what a client would assume:
 
 ### Which server proves what
 
-The two fixtures are **not interchangeable as evidence**, and the difference decides how
-the preservation assertion is written. Observed against both:
+The fixtures are **not interchangeable as evidence**, and the difference decides how
+the preservation assertion is written. Observed against each:
 
-| | **Stalwart** | **SabreDAV** |
-| --- | --- | --- |
-| Stored iCalendar | **Reserializes** — keeps every property, but re-folds content lines and reorders `RRULE` parts | **Verbatim** — the bytes you `PUT` are the bytes you `GET` |
-| `ETag` on `PUT` | Yes (create + update) | Yes (create + update) |
-| Stale `If-Match` | `412` | `412` |
-| Master + `RECURRENCE-ID` in one resource | Accepted | Accepted |
-| Read-only collection | **Cannot produce one** — the harness account owns everything it can see | **The privilege fixture**: Bob's calendar, shared to Alice read-only |
-| Scheduling (RFC 6638) | **Full auto-schedule** — advertises `calendar-auto-schedule`, exposes `CALDAV:schedule-inbox-URL` | **None** — the fixture loads no `Schedule\Plugin`, so its `DAV:` header lists `calendar-access` and not `calendar-auto-schedule` |
-| `Capabilities::calendar_scheduling` | `true` | `false` — **the only negative case in the repo** |
+| | **Stalwart** | **SabreDAV** | **Nextcloud** |
+| --- | --- | --- | --- |
+| Stored iCalendar | **Reserializes** — keeps every property, but re-folds content lines and reorders `RRULE` parts | **Verbatim** — the bytes you `PUT` are the bytes you `GET` | **Verbatim** (SabreDAV underneath) |
+| `ETag` on `PUT` | Yes (create + update) | Yes (create + update) | Yes (create + update) |
+| Stale `If-Match` | `412` | `412` | `412` |
+| Master + `RECURRENCE-ID` in one resource | Accepted | Accepted | Accepted |
+| Read-only collection | **Cannot produce one** — the harness account owns everything it can see | **The privilege fixture**: Bob's calendar, shared to Alice read-only | Two **address books**: the instance's users and an app's recently contacted |
+| Scheduling (RFC 6638) | **Full auto-schedule** — advertises `calendar-auto-schedule`, exposes `CALDAV:schedule-inbox-URL` | **None** — the fixture loads no `Schedule\Plugin`, so its `DAV:` header lists `calendar-access` and not `calendar-auto-schedule` | Advertises `calendar-auto-schedule` |
+| `Capabilities::calendar_scheduling` | `true` | `false` — **the only negative case in the repo** | `true`: the positive answer on the same server software |
+| Home | `default` and `work` | `default` and `work`, beside Bob's read-only share | `harness` and `work`, beside `personal`, a generated birthday calendar, an inbox and an outbox, so a test names `harness` |
 
 Two consequences to keep in mind before touching these tests:
 

@@ -118,7 +118,7 @@ fn the_well_known_candidates_follow_the_autoconfig_route() {
         issuer_candidates("example.net", None),
         ["https://example.net".to_owned()]
     );
-    assert!(issuer_candidates("", None).is_empty());
+    assert_eq!(issuer_candidates("", None), [] as [std::string::String; 0]);
     // An issuer the detection already carried needs no domain at all.
     let detected_only = detected_with(Some("https://id.example.net".to_owned()));
     assert_eq!(

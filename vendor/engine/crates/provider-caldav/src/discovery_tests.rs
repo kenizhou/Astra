@@ -76,7 +76,7 @@ async fn a_relative_redirect_after_an_origin_change_stays_on_the_new_origin() {
 }
 
 /// A `Replay` whose connection refuses to move — what the live client answers when
-/// the hop names a plaintext origin (`DavExecutor::adopt_origin`).
+/// the hop names a plaintext origin (`DavExecutor::trust_origin`).
 struct RefusesToMove(Replay);
 
 #[async_trait::async_trait]
@@ -98,8 +98,9 @@ impl DavExecutor for RefusesToMove {
         self.0.send_write(request).await
     }
 
-    fn adopt_origin(&self, _url: &str) -> bool {
-        false
+    fn trust_origin(&self, url: &str) -> bool {
+        // A bare path names no host, so the live client accepts it too.
+        !url.contains("://")
     }
 }
 
@@ -118,6 +119,41 @@ async fn a_refused_origin_change_fails_the_walk_rather_than_following_it() {
     assert!(err.to_string().contains("left TLS"), "unexpected: {err}");
     // And nothing was sent to the plaintext host.
     assert_eq!(exec.0.seen().len(), 1);
+}
+
+#[tokio::test]
+async fn a_plaintext_redirect_to_the_same_host_is_followed_over_tls() {
+    // Nextcloud behind a TLS-terminating proxy: its `.well-known` rewrite answers with an
+    // `http://` URL on the host that just answered over TLS.
+    let exec = Replay::new(vec![
+        redirect_to("http://dav.example.com/remote.php/dav/"),
+        ok(include_str!("../tests/fixtures/principal.xml")),
+    ]);
+    discover_home(
+        &exec,
+        "https://dav.example.com/.well-known/caldav",
+        &IgnoreConnectSteps,
+    )
+    .await
+    .unwrap();
+    assert_eq!(exec.seen()[1].1, "https://dav.example.com/remote.php/dav/");
+}
+
+#[tokio::test]
+async fn a_plaintext_redirect_to_another_host_says_why_it_is_not_followed() {
+    let exec = Replay::new(vec![redirect_to("http://cal.example.net/dav/")]);
+    let err = discover_home(
+        &exec,
+        "https://dav.example.com/.well-known/caldav",
+        &IgnoreConnectSteps,
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("leaves HTTPS"),
+        "unexpected: {err}"
+    );
+    assert_eq!(exec.seen().len(), 1);
 }
 
 #[tokio::test]
@@ -213,8 +249,30 @@ async fn lists_only_calendar_collections() {
     // The home itself is a plain collection and is filtered out.
     assert_eq!(calendars.len(), 1);
     assert_eq!(
-        calendars[0].id.as_str(),
+        calendars[0].0.id.as_str(),
         "/dav/cal/alice%40test.local/default/"
+    );
+}
+
+/// A home the way iCloud lists one: a calendar of events, a reminders list that holds tasks
+/// alone, and a calendar that does not say which components it holds; and one whose component
+/// set is present but empty.
+const HOME_WITH_REMINDERS: &str = r#"<D:multistatus xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav"><D:response><D:href>/1/calendars/home/</D:href><D:propstat><D:prop><D:resourcetype><D:collection/><C:calendar/></D:resourcetype><C:supported-calendar-component-set><C:comp name="VEVENT"/></C:supported-calendar-component-set></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response><D:response><D:href>/1/calendars/tasks/</D:href><D:propstat><D:prop><D:resourcetype><D:collection/><C:calendar/></D:resourcetype><C:supported-calendar-component-set><C:comp name="VTODO"/></C:supported-calendar-component-set></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response><D:response><D:href>/1/calendars/silent/</D:href><D:propstat><D:prop><D:resourcetype><D:collection/><C:calendar/></D:resourcetype></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat><D:propstat><D:prop><C:supported-calendar-component-set/></D:prop><D:status>HTTP/1.1 404 Not Found</D:status></D:propstat></D:response><D:response><D:href>/1/calendars/empty/</D:href><D:propstat><D:prop><D:resourcetype><D:collection/><C:calendar/></D:resourcetype><C:supported-calendar-component-set/></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response></D:multistatus>"#;
+
+#[tokio::test]
+async fn a_collection_of_tasks_alone_is_not_listed_as_a_calendar() {
+    let exec = Replay::new(vec![ok(HOME_WITH_REMINDERS)]);
+    let calendars = list_calendars(&exec, "/1/calendars/").await.unwrap();
+    let hrefs: Vec<&str> = calendars.iter().map(|(c, _)| c.id.as_str()).collect();
+    // One that names no components, absent or empty, holds any of them (RFC 4791 §5.2.3),
+    // events included.
+    assert_eq!(
+        hrefs,
+        [
+            "/1/calendars/home/",
+            "/1/calendars/silent/",
+            "/1/calendars/empty/"
+        ]
     );
 }
 
@@ -392,5 +450,21 @@ async fn a_response_without_a_home_set_is_an_error() {
         discover_home(&exec, "/x", &IgnoreConnectSteps)
             .await
             .is_err()
+    );
+}
+
+#[tokio::test]
+async fn a_home_on_a_host_the_connection_may_not_move_to_fails_the_walk() {
+    // Listing it anyway would send the request without the credential and read the refusal as
+    // the server's answer about the account.
+    let exec = RefusesToMove(Replay::new(vec![ok(
+        r#"<?xml version="1.0"?><d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:response><d:href>/u/</d:href><d:propstat><d:prop><c:calendar-home-set><d:href>http://dav.example.net/u/calendars/</d:href></c:calendar-home-set></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>"#,
+    )]));
+    let err = discover_home(&exec, "/.well-known/caldav", &IgnoreConnectSteps)
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("may not go to"),
+        "unexpected: {err}"
     );
 }

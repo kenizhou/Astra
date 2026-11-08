@@ -70,7 +70,7 @@ async fn a_structured_card_seeds_the_editor_s_fields() {
         vec!["ada@ex.test".to_owned(), "ada.l@ex.test".to_owned()],
         "the addresses seed in card order"
     );
-    assert!(seed.phones.is_empty());
+    assert_eq!(seed.phones, [] as [std::string::String; 0]);
 }
 
 #[tokio::test]

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Tests for the refreshing Google calendar provider: the capability set
-//! it answers before any delegate exists, the bound scopes, and the
-//! rolling fetch window.
+//! it answers before any delegate exists, the per-calendar scopes, and
+//! the rolling fetch window.
 
 use engine_api::{AccountId, CalendarId, Provider, SyncScope, WriteGuard};
 use time::{Duration, OffsetDateTime};
@@ -20,17 +20,11 @@ fn tls() -> engine_tls::TlsClientConfig {
 }
 
 #[test]
-fn binds_a_calendar_provider_with_enforced_writes_and_the_bound_scopes() {
+fn serves_every_calendar_with_enforced_writes_and_per_calendar_scopes() {
     let (endpoint, _hits) = mock_token_endpoint(vec![]);
     let source = google_source_at(endpoint, None, None);
     let account = AccountId::try_from("alice@gmail.com@google").unwrap();
-    let calendar = CalendarId::try_from("primary").unwrap();
-    let provider = RefreshingGoogleCalendarProvider::new(
-        calendar.clone(),
-        source,
-        rolling_window().unwrap(),
-        tls(),
-    );
+    let provider = RefreshingGoogleCalendarProvider::new(source, rolling_window().unwrap(), tls());
     // Calendar capability with a server-enforced write guard, and no
     // mail capability.
     let info = provider.connection_info();
@@ -45,15 +39,18 @@ fn binds_a_calendar_provider_with_enforced_writes_and_the_bound_scopes() {
     // message of its own and send one beside the one Google's
     // `sendUpdates` already sent.
     assert!(info.capabilities.calendar_scheduling());
-    // The event scope names the bound calendar; the calendar-list scope
-    // is account-wide.
-    assert_eq!(
-        provider.event_scope(&account),
-        SyncScope::GoogleCalendar {
-            account: account.clone(),
-            calendar,
-        },
-    );
+    // Each calendar's events sync under a scope of that calendar's own;
+    // the calendar-list scope is account-wide.
+    for key in ["primary", "work"] {
+        let calendar = CalendarId::try_from(key).unwrap();
+        assert_eq!(
+            provider.event_scope(&account, &calendar),
+            SyncScope::GoogleCalendar {
+                account: account.clone(),
+                calendar,
+            },
+        );
+    }
     assert_eq!(
         provider.calendar_scope(&account),
         SyncScope::GoogleCalendarList { account },

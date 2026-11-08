@@ -1,20 +1,17 @@
 //! The [`Provider`] implementation, wiring CalDAV discovery and `sync-collection`
 //! into the engine's generic calendar sync.
 //!
-//! Like an [`ImapProvider`](provider_imap), a `CalDavProvider` is **bound to one
-//! calendar collection** for events ([`event_scope`](Provider::event_scope) is
-//! that collection's [`DavCollection`](engine_core::sync::SyncScope::DavCollection)),
-//! while [`sync_calendars`](Provider::sync_calendars) lists *all* of the account's
-//! calendars under the per-account
-//! [`DavCollectionList`](engine_core::sync::SyncScope::DavCollectionList) container
-//! scope. The collection list is re-snapshotted each pass (no list cursor),
-//! exactly as IMAP re-`LIST`s its folders. The cross-collection fan-out (drive
-//! every calendar) is the later orchestrator's job. The provider advertises
+//! One `CalDavProvider` serves **every calendar** under the calendar home its discovery
+//! found: [`sync_calendars`](Provider::sync_calendars) lists them under the per-account
+//! [`DavCollectionList`](engine_core::sync::SyncScope::DavCollectionList) container scope,
+//! each with the collection tag the same `PROPFIND` reads, and each calendar's events sync
+//! under its own [`DavCollection`](engine_core::sync::SyncScope::DavCollection) scope
+//! ([`event_scope`](Provider::event_scope)). The collection list is re-snapshotted each pass
+//! (no list cursor), exactly as IMAP re-`LIST`s its folders. A create lands in the calendar
+//! its draft names. The provider advertises
 //! [`Capabilities::calendars`] **and** [`Capabilities::calendar_writes`] — it both
 //! reads/syncs and writes (`PUT`/`DELETE`) over the same HTTP transport (`write`);
 //! the mail methods keep their unsupported defaults.
-
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use engine_core::{
@@ -23,19 +20,20 @@ use engine_core::{
     sync::{SyncScope, SyncState, SyncUpdate},
 };
 use engine_provider::{
-    CalendarUserAddresses, CalendarWrites, Capabilities, ConnectObserver, ConnectStep,
-    ConnectionInfo, EventDeletion, EventDraft, EventEdit, EventRsvp, EventWrite, EventWriteReceipt,
-    IgnoreConnectSteps, OverrideSurvival, Provider, ProviderError, ProviderResult, RsvpControls,
-    ScopeSync, WriteGuard,
+    CalendarListing, CalendarUserAddresses, CalendarWrites, Capabilities, ConnectObserver,
+    ConnectStep, ConnectionInfo, EventDeletion, EventDraft, EventEdit, EventRsvp, EventWrite,
+    EventWriteReceipt, IgnoreConnectSteps, OverrideSurvival, Provider, ProviderResult,
+    RsvpControls, ScopeSync, WriteGuard,
 };
-use engine_tls::TlsClientConfig;
 
 use crate::{
-    credential_hosts::{CredentialHosts, refuse_unpermitted_base},
+    caldav_config::CalDavConfig,
+    credential_hosts::refuse_unpermitted_base,
     discovery,
     error::CalDavError,
-    href::{bind_collection, encode_path_segment, ensure_bound_present},
-    transport::{Credentials, DavClient, DavExecutor},
+    href::{collection_href, encode_path_segment},
+    multiget::Multigets,
+    transport::{DavClient, DavExecutor},
 };
 
 /// What a CalDAV RSVP can and cannot control.
@@ -59,125 +57,6 @@ const CALDAV_RSVP: RsvpControls = RsvpControls {
 /// `tests/live_calendar_survival.rs` against both harness servers.
 const CALDAV_OVERRIDE_SURVIVAL: OverrideSurvival = OverrideSurvival::kept();
 
-/// Connection settings for a CalDAV account.
-#[derive(Clone)]
-pub struct CalDavConfig {
-    /// The server origin, e.g. `https://dav.example.com`.
-    pub base_url: String,
-    /// How to authenticate.
-    pub credentials: Credentials,
-    /// The URL to begin discovery at; defaults to the RFC 6764 well-known path.
-    pub discovery_path: String,
-    /// The calendar collection to bind events to — a name under the calendar home
-    /// (e.g. `default`) or an absolute collection path.
-    pub calendar: String,
-    /// The TLS trust policy for this account, shared with every other provider
-    /// (`docs/agent-guidance/tls.md`). Defaults to the hermetic bundled roots;
-    /// override with [`CalDavConfig::with_tls`].
-    pub tls: TlsClientConfig,
-    /// The throttling policy for this account, shared with every other provider
-    /// (`docs/agent-guidance/http-throttling.md`). Defaults to waiting a `429` out;
-    /// override with [`CalDavConfig::with_retry`].
-    pub retry: engine_http::RetryConfig,
-    /// Private, unlike its siblings: a `dyn` observer is neither `Debug` nor
-    /// meaningfully inspectable, so it is set through
-    /// [`CalDavConfig::with_connect_observer`] and read only by
-    /// [`CalDavProvider::connect`].
-    connect_observer: Option<Arc<dyn ConnectObserver>>,
-    /// Private for the same reason; set through [`CalDavConfig::with_credential_hosts`].
-    credential_hosts: Option<Arc<dyn CredentialHosts>>,
-}
-
-impl core::fmt::Debug for CalDavConfig {
-    /// Hand-written because the observer is a `dyn` trait object; the credentials
-    /// redact themselves (`Credentials`).
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("CalDavConfig")
-            .field("base_url", &self.base_url)
-            .field("credentials", &self.credentials)
-            .field("discovery_path", &self.discovery_path)
-            .field("calendar", &self.calendar)
-            .field("tls", &self.tls)
-            .field("retry", &self.retry)
-            .field("connect_observer", &self.connect_observer.is_some())
-            .field("credential_hosts", &self.credential_hosts.is_some())
-            .finish()
-    }
-}
-
-impl CalDavConfig {
-    /// Settings with the RFC 6764 well-known discovery path and the `default`
-    /// calendar.
-    #[must_use]
-    pub fn new(base_url: impl Into<String>, credentials: Credentials) -> Self {
-        Self {
-            base_url: base_url.into(),
-            credentials,
-            discovery_path: "/.well-known/caldav".to_owned(),
-            calendar: "default".to_owned(),
-            tls: TlsClientConfig::default(),
-            retry: engine_http::RetryConfig::default(),
-            connect_observer: None,
-            credential_hosts: None,
-        }
-    }
-
-    /// Lets `policy` decide which hosts receive the credential ([`CredentialHosts`]).
-    #[must_use]
-    pub fn with_credential_hosts(mut self, policy: Arc<dyn CredentialHosts>) -> Self {
-        self.credential_hosts = Some(policy);
-        self
-    }
-
-    /// Binds events to a different calendar collection (a home-relative name or an
-    /// absolute path).
-    #[must_use]
-    pub fn with_calendar(mut self, calendar: impl Into<String>) -> Self {
-        self.calendar = calendar.into();
-        self
-    }
-
-    /// Overrides the discovery starting path.
-    #[must_use]
-    pub fn with_discovery_path(mut self, path: impl Into<String>) -> Self {
-        self.discovery_path = path.into();
-        self
-    }
-
-    /// Sets the TLS trust policy (the host builds one and shares it across the
-    /// account's providers).
-    #[must_use]
-    pub fn with_tls(mut self, tls: TlsClientConfig) -> Self {
-        self.tls = tls;
-        self
-    }
-
-    /// Sets the throttling policy (the host builds one and shares it across the account's
-    /// providers, like the TLS policy above).
-    #[must_use]
-    pub fn with_retry(mut self, retry: engine_http::RetryConfig) -> Self {
-        self.retry = retry;
-        self
-    }
-
-    /// Observes the connect phase: one [`ConnectStep::Redirected`] per hop discovery
-    /// follows itself, then [`ConnectStep::Discovered`] naming the calendar home.
-    ///
-    /// No TLS step — the version arrives on a response, after the connect phase, so it
-    /// lands in `ConnectionInfo::tls_version` instead (`docs/agent-guidance/tls.md`) —
-    /// and no auth step, since CalDAV has no discrete authentication exchange;
-    /// credentials ride on each `PROPFIND`.
-    ///
-    /// The observer rides on the config, so a host that rebuilds this provider after a
-    /// dropped session observes the redial too. `Arc` so one host observer can be
-    /// shared across the account's providers.
-    #[must_use]
-    pub fn with_connect_observer(mut self, observer: Arc<dyn ConnectObserver>) -> Self {
-        self.connect_observer = Some(observer);
-        self
-    }
-}
-
 /// The opaque cursor the per-account calendar-list scope persists. Like IMAP's
 /// folder-list sentinel, it is a fixed, non-empty token: the list is re-discovered
 /// as a snapshot each pass (no real delta cursor), but an *empty* state must not be
@@ -185,34 +64,32 @@ impl CalDavConfig {
 /// must not overload.
 const CALENDAR_LIST_CURSOR: &str = "caldav-calendar-list";
 
-/// The CalDAV provider adapter (calendar read/sync).
+/// The CalDAV provider adapter (calendar read/sync and writes) for every calendar under one
+/// calendar home.
 ///
-/// The bound collection is held once as a [`DavCollectionId`]; the membership
-/// [`CalendarId`] and the transport href are derived from it, so the three views
-/// of one href cannot drift.
+/// A calendar's [`CalendarId`] is its collection href as the listing gave it, and its event
+/// scope's [`DavCollectionId`] is the same key, so the two views of one href cannot drift.
 pub struct CalDavProvider {
     executor: Box<dyn DavExecutor>,
     capabilities: Capabilities,
     home_href: String,
-    collection: DavCollectionId,
     /// The `current-user-principal` discovery found, asked for the address set on demand.
     principal: Option<String>,
     /// The address set, when discovery already read it off the principal.
     addresses: Option<CalendarUserAddresses>,
+    multigets: Multigets,
 }
 
 impl core::fmt::Debug for CalDavProvider {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("CalDavProvider")
             .field("home_href", &self.home_href)
-            .field("collection", &self.collection.as_str())
             .finish_non_exhaustive()
     }
 }
 
 impl CalDavProvider {
-    /// Connects to a CalDAV server, discovering the calendar home and binding to
-    /// the configured collection for events.
+    /// Connects to a CalDAV server, discovering the calendar home whose calendars it serves.
     ///
     /// # Errors
     ///
@@ -233,15 +110,10 @@ impl CalDavProvider {
             config.credentials,
             &config.tls,
             &config.retry,
+            &config.user_agent,
         )?
         .with_credential_hosts(config.credential_hosts);
-        Self::with_executor(
-            Box::new(client),
-            &config.discovery_path,
-            &config.calendar,
-            observer,
-        )
-        .await
+        Self::with_executor(Box::new(client), &config.discovery_path, observer).await
     }
 
     /// Builds a provider over an arbitrary executor (the live client, or a fake in
@@ -249,27 +121,26 @@ impl CalDavProvider {
     pub(crate) async fn with_executor(
         executor: Box<dyn DavExecutor>,
         discovery_path: &str,
-        calendar: &str,
         observer: &dyn ConnectObserver,
     ) -> Result<Self, CalDavError> {
         let home = discovery::discover_home(executor.as_ref(), discovery_path, observer).await?;
-        let home_href = home.href;
-        // The calendar home is where every collection — including the bound one — is
-        // resolved from: the endpoint this connect settled on.
-        observer.step(&ConnectStep::discovered(&home_href));
+        observer.step(&ConnectStep::discovered(&home.href));
+        // The calendar home is where every collection is resolved from: the endpoint this
+        // connect settles on, on whichever origin serves it.
+        let home_href = executor.settle_on(&home.href);
         // Whether the server schedules for itself is a property of *this* server, not of
         // CalDAV — RFC 4791 is calendar access and RFC 6638 a separate layer on top — so it
         // is asked rather than inferred from the fact that a PARTSTAT can be written
         // (`discovery.rs`).
         let scheduling = discovery::discover_scheduling(executor.as_ref(), &home_href).await?;
-        let collection = bind_collection(&home_href, calendar)?;
         // CalDAV *enforces* the lost-update guard: a stale `If-Match` is a `412` on
         // every server we have driven (proven live against both harness servers). It is
         // the transport that can actually promise it — contrast JMAP, which cannot.
         let capabilities = Capabilities::none()
             .with_calendars()
             .with_calendar_writes(WriteGuard::Enforced, CALDAV_OVERRIDE_SURVIVAL)
-            .with_calendar_rsvp(CALDAV_RSVP);
+            .with_calendar_rsvp(CALDAV_RSVP)
+            .with_conference_writes();
         Ok(Self {
             executor,
             capabilities: if scheduling {
@@ -278,35 +149,25 @@ impl CalDavProvider {
                 capabilities
             },
             home_href,
-            collection,
             principal: home.principal,
             addresses: home.addresses,
+            multigets: Multigets::default(),
         })
     }
 
-    /// Rebinds this provider to a different calendar collection **without** re-running
-    /// discovery — the calendar home is unchanged, only the bound collection moves.
-    /// Consumes `self` to reuse the existing executor (a host that lists calendars,
-    /// then picks one, avoids a second discovery round trip).
-    ///
-    /// # Errors
-    ///
-    /// Returns [`CalDavError`] if `calendar` does not form a valid collection href.
-    pub fn rebind(self, calendar: &str) -> Result<Self, CalDavError> {
-        let collection = bind_collection(&self.home_href, calendar)?;
-        Ok(Self { collection, ..self })
-    }
-
-    /// The href of the calendar collection events are bound to.
+    /// The principal URL the server named during discovery, absolute, when it named one: what a
+    /// host stores and starts the next connect from (RFC 6764 §6), rather than the calendar home,
+    /// which the principal names afresh on every connect.
     #[must_use]
-    pub fn collection_href(&self) -> &str {
-        self.collection.as_str()
+    pub fn principal_url(&self) -> Option<&str> {
+        self.principal.as_deref()
     }
 
-    /// Mints the resource href for a **new** event in the bound collection:
+    /// Mints the resource href for a **new** event in `calendar`:
     /// `<collection>/<uid>.ics`, the universal CalDAV convention (RFC 4791 §5.3.2 lets the
-    /// client choose the resource name). The `uid` is percent-encoded as a single path
-    /// segment, so an unusual `UID` still yields a valid href.
+    /// client choose the resource name). `calendar` is the href the listing gave it. The
+    /// `uid` is percent-encoded as a single path segment, so an unusual `UID` still yields a
+    /// valid href.
     ///
     /// [`create_event`](CalendarWrites::create_event) mints this itself, so a host does not need
     /// it — a create states an [`EventDraft`] and learns the resulting id from the receipt.
@@ -317,28 +178,15 @@ impl CalDavProvider {
     ///
     /// # Errors
     ///
-    /// Returns [`CalDavError`] if the resolved href is not a valid event key (the
-    /// bound collection href and the non-empty suffix make this unreachable in
-    /// practice, but the construction is fallible like the collection binding).
-    pub fn event_href(&self, uid: &Uid) -> Result<EventId, CalDavError> {
+    /// Returns [`CalDavError`] if `calendar` is not a calendar's href.
+    pub fn event_href(&self, calendar: &CalendarId, uid: &Uid) -> Result<EventId, CalDavError> {
         let href = format!(
             "{}{}.ics",
-            self.collection.as_str(),
+            collection_href(calendar.as_str())?,
             encode_path_segment(uid.as_str())
         );
         EventId::try_from(href.as_str())
             .map_err(|e| CalDavError::protocol(format!("bad event href {href:?}: {e}")))
-    }
-
-    /// The [`CalendarId`] of the bound collection (same href as
-    /// [`collection_href`](Self::collection_href), a distinct id type).
-    ///
-    /// This is the calendar an [`EventDraft`] must name to be created here — a draft
-    /// targeting any other is refused rather than silently written to this one.
-    #[must_use]
-    pub fn calendar_id(&self) -> CalendarId {
-        // The collection href already validated as a provider key when bound.
-        CalendarId::new(self.collection.key().clone())
     }
 }
 
@@ -361,10 +209,10 @@ impl Provider for CalDavProvider {
         }
     }
 
-    fn event_scope(&self, account: &AccountId) -> SyncScope {
+    fn event_scope(&self, account: &AccountId, calendar: &CalendarId) -> SyncScope {
         SyncScope::DavCollection {
             account: account.clone(),
-            collection: self.collection.clone(),
+            collection: DavCollectionId::new(calendar.key().clone()),
         }
     }
 
@@ -372,31 +220,36 @@ impl Provider for CalDavProvider {
         &self,
         _account: &AccountId,
         _cursor: Option<&SyncState>,
-    ) -> ProviderResult<ScopeSync<Calendar>> {
+    ) -> ProviderResult<CalendarListing> {
         // The collection list is re-discovered as a snapshot each pass (no list
         // cursor), so the store tombstones any calendar that has disappeared.
-        let mut calendars =
-            discovery::list_calendars(self.executor.as_ref(), &self.home_href).await?;
-        // Guarantee the bound collection is represented, so events synced under it
-        // never reference a calendar the container snapshot omits (a collection
-        // bound outside the home would otherwise be absent here).
-        ensure_bound_present(&mut calendars, &self.calendar_id());
+        let listed = discovery::list_calendars(self.executor.as_ref(), &self.home_href).await?;
+        let tags = listed
+            .iter()
+            .filter_map(|(calendar, tag)| Some((calendar.id.clone(), tag.clone()?)))
+            .collect();
+        let calendars: Vec<Calendar> = listed.into_iter().map(|(calendar, _)| calendar).collect();
         let present = calendars.iter().map(|c| c.id.key().clone()).collect();
-        Ok(ScopeSync::new(
-            SyncUpdate::snapshot(calendars, present),
-            SyncState::new(CALENDAR_LIST_CURSOR),
-        ))
+        Ok(CalendarListing {
+            sync: ScopeSync::new(
+                SyncUpdate::snapshot(calendars, present),
+                SyncState::new(CALENDAR_LIST_CURSOR),
+            ),
+            tags,
+        })
     }
 
     async fn sync_events(
         &self,
         _account: &AccountId,
+        calendar: &CalendarId,
         cursor: Option<&SyncState>,
     ) -> ProviderResult<ScopeSync<Event>> {
         Ok(crate::sync::sync_events(
             self.executor.as_ref(),
-            self.collection.as_str(),
-            &self.calendar_id(),
+            &self.multigets,
+            &collection_href(calendar.as_str())?,
+            calendar,
             cursor,
         )
         .await?)
@@ -406,25 +259,15 @@ impl engine_provider::MailboxWrites for CalDavProvider {}
 
 #[async_trait]
 impl CalendarWrites for CalDavProvider {
-    /// Mints the href from the draft's `UID` inside the **bound** collection, then `PUT`s
+    /// Mints the href from the draft's `UID` inside the calendar the draft names, then `PUT`s
     /// the built document there.
-    ///
-    /// A draft naming a different calendar is refused rather than silently written to the
-    /// bound one: this provider is collection-bound (`rebind` moves it), so honouring the
-    /// draft's calendar would mean writing the event where the host did not ask.
     async fn create_event(
         &self,
         _account: &AccountId,
         draft: &EventDraft,
     ) -> ProviderResult<EventWriteReceipt> {
-        if draft.calendar != self.calendar_id() {
-            return Err(ProviderError::invalid_state(format!(
-                "draft targets calendar {:?}, but this provider is bound to {:?}; rebind first",
-                draft.calendar.as_str(),
-                self.collection.as_str()
-            )));
-        }
-        let href = self.event_href(&draft.uid)?;
+        engine_provider::refuse_native_conference(draft.conference.as_ref())?;
+        let href = self.event_href(&draft.calendar, &draft.uid)?;
         Ok(crate::write::create_event(self.executor.as_ref(), href, draft).await?)
     }
 
@@ -434,6 +277,12 @@ impl CalendarWrites for CalDavProvider {
         base: &Event,
         edit: &EventEdit,
     ) -> ProviderResult<EventWriteReceipt> {
+        edit.refuse_conference_on_occurrence()?;
+        engine_provider::refuse_native_conference(
+            edit.patch
+                .conference_edit()
+                .and_then(engine_provider::ConferenceEdit::adds),
+        )?;
         Ok(crate::write::patch_event(self.executor.as_ref(), base, edit).await?)
     }
 
@@ -493,3 +342,7 @@ mod tests;
 #[cfg(test)]
 #[path = "imip_flow_tests.rs"]
 mod imip_flow_tests;
+
+#[cfg(test)]
+#[path = "conference_provider_tests.rs"]
+mod conference_provider_tests;

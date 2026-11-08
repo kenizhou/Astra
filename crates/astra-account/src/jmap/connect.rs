@@ -19,7 +19,7 @@ use engine_api::Provider as _;
 use engine_tls::TlsClientConfig;
 use provider_jmap::{Credentials, JmapConfig, JmapProvider};
 
-use crate::{throttle::account_retry, AccountConfig, AccountError, GraphTokenSource};
+use crate::{throttle::account_retry, user_agent, AccountConfig, AccountError, GraphTokenSource};
 
 /// Connects the one JMAP provider a JMAP account syncs through: the whole
 /// account's mailboxes and every folder's email in one account-wide
@@ -53,7 +53,7 @@ pub async fn dial_jmap_account(
     let id = account
         .account_id()
         .map_err(|err| AccountError::Jmap(err.to_string()))?;
-    let config = JmapConfig::new(section.base_url.clone(), credentials)
+    let config = JmapConfig::new(section.base_url.clone(), credentials, user_agent())
         .with_tls(tls.clone())
         .with_retry(account_retry(&id));
     let provider = JmapProvider::connect(config)
@@ -91,9 +91,13 @@ pub async fn dial_jmap_oauth_account(
         .as_ref()
         .ok_or_else(|| AccountError::Jmap("the account stores no [jmap] section".to_owned()))?;
     let token = tokens.access_token().await?;
-    let config = JmapConfig::new(section.base_url.clone(), Credentials::bearer(token.clone()))
-        .with_tls(tls.clone())
-        .with_retry(tokens.retry());
+    let config = JmapConfig::new(
+        section.base_url.clone(),
+        Credentials::bearer(token.clone()),
+        user_agent(),
+    )
+    .with_tls(tls.clone())
+    .with_retry(tokens.retry());
     let delegate = JmapProvider::connect(config)
         .await
         .map_err(|err| AccountError::from_jmap_connect(&err))?;

@@ -159,6 +159,9 @@ fn accounts_stay_in_account_order_whatever_the_events_arrive_in() {
 fn a_fresh_fold_snapshots_empty_and_signals_nothing() {
     let (progress, surfaces) = fold();
 
-    assert!(progress.snapshot().accounts.is_empty());
+    assert_eq!(
+        progress.snapshot().accounts,
+        [] as [astra_viewmodel::AccountSyncProgress; 0]
+    );
     assert!(surfaces.lock().unwrap().is_empty());
 }

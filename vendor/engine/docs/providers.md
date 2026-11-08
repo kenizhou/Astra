@@ -12,6 +12,8 @@ writes, guards, groups, and photos.
 
 All providers share one TLS trust policy via `engine_tls::TlsClientConfig`. See [`docs/agent-guidance/tls.md`](docs/agent-guidance/tls.md) for the trust model and platform guidance.
 
+Every HTTP provider (JMAP, CalDAV, CardDAV, Graph, Google) requires an `engine_http::UserAgent` in its constructor: the host's application and version, sent as `name/version` in every request's `User-Agent`. It names the application a person installed, so a provider can tell whose traffic it is; the engine adds no product token of its own. IMAP and SMTP send no `User-Agent`.
+
 ## Observing the connect phase
 
 `ConnectionInfo` describes a connection that already exists. To watch one being
@@ -78,6 +80,7 @@ the inputs — the `connect()` future, its result, the `FailureClass`, the
 | calendar write guard | absent | — | enforced ETag or schedule tag | enforced ETag | enforced ETag |
 | meeting invitations | yes, discovered account limit | — | yes, delivery needs RFC 6638 | yes, 500 attendees | yes, response propagation changes above 200 guests |
 | RSVP | yes | — | yes | yes | yes |
+| video meeting writes | made elsewhere | — | made elsewhere | Teams, or made elsewhere | Meet, or made elsewhere |
 | server-side scheduling | yes (asked for) | — | discovered (RFC 6638) | yes | yes |
 | contact read | yes | — | yes | personal + directory | owned + suggested + directory |
 | contact write guard | absent | — | enforced ETag | absent | enforced ETag |
@@ -134,8 +137,9 @@ read/write support, using JSCalendar and JSContact projections.
 - **RFC 8620** — JMAP Core (session resource, method calls, state changes, blob upload/download, EventSource push).
 - **RFC 8621** — JMAP Mail (`Mailbox`, `Email`, `EmailSubmission`, `Thread`).
 - **RFC 8984** — JSCalendar, the normalized calendar data model.
-- **draft-ietf-jmap-calendars-28** and **draft-ietf-calext-jscalendarbis-19**: current JMAP
-  Calendars and JSCalendar 2.0 write shapes. Reads remain compatible with RFC 8984 shapes.
+- **draft-ietf-jmap-calendars-33** and **draft-ietf-calext-jscalendarbis-22**: current JMAP
+  Calendars and JSCalendar 2.0 write shapes (written against -28 and -19; nothing the
+  adapter sends or reads changed between them). Reads remain compatible with RFC 8984 shapes.
 - **RFC 9610** — JMAP Contacts (`AddressBook`, `ContactCard`).
 - **RFC 8620 §7.3** — EventSource push notifications via `JmapWatcher`.
 
@@ -148,12 +152,16 @@ contact writes/groups/photos, plus `idle` when `eventSourceUrl` is advertised.
 
 ```rust
 use engine_tls::TlsClientConfig;
+use engine_http::UserAgent;
 use provider_jmap::{Credentials, JmapConfig, JmapProvider};
 
 let tls = TlsClientConfig::bundled();
+// The host's application, named in every request's `User-Agent`.
+let agent = UserAgent::new("example-mail", "1.4.0")?;
 let config = JmapConfig::new(
     "https://jmap.example.com",
     Credentials::basic("alice@example.com", "app-password"),
+    agent,
 )
 .with_tls(tls);
 
@@ -257,6 +265,7 @@ share HTTP/TLS/WebDAV transport only; normalization remains domain-specific.
 - **RFC 6638** — CalDAV scheduling (server auto-schedule).
 - **RFC 6047** — iMIP (iTIP over email), inbound parse + RSVP write primitive.
 - **RFC 6350 / RFC 6352** — vCard and CardDAV address-book access.
+- **Nextcloud Talk** (OCS `apps/spreed/api/v4/room`), for `TalkMeetings`, which makes a Talk conversation for an event on any calendar. Not DAV, but the same server and the same `Credentials`.
 
 ### Capabilities
 
@@ -277,17 +286,18 @@ not supported.
 
 ```rust
 use engine_tls::TlsClientConfig;
-use provider_caldav::{CalDavConfig, CalDavProvider, Credentials};
+use provider_caldav::{CalDavConfig, CalDavProvider, Credentials, UserAgent};
 
 let tls = TlsClientConfig::bundled();
+let agent = UserAgent::new("example-mail", "1.4.0")?;
 let config = CalDavConfig::new(
     "https://dav.example.com",
     Credentials::Basic {
         username: "alice@example.com".to_owned(),
         password: "app-password".to_owned(),
     },
+    agent.clone(),
 )
-.with_calendar("default")
 .with_tls(tls);
 
 let provider = CalDavProvider::connect(config).await?;
@@ -299,17 +309,18 @@ let contacts = provider_caldav::CardDavProvider::connect(
             username: "alice@example.com".to_owned(),
             password: "app-password".to_owned(),
         },
+        agent,
     )
     .with_tls(TlsClientConfig::bundled()),
 )
 .await?;
 ```
 
-The `with_calendar` argument is either a name relative to the calendar home (e.g. `"default"`) or an absolute collection path. After listing calendars with `sync_calendars`, you can `rebind` to a different collection without re-running discovery.
+One `CalDavProvider` serves every calendar under the home its discovery found. `sync_calendars` lists them, each with its collection tag; `Engine::sync_calendar` syncs the list and then every calendar's events; a write names its calendar on the draft.
 
 ### Notes
 
-- A `CalDavProvider` is **bound to one calendar collection** for events. The calendar list syncs at the account level; cross-collection fan-out is the host's job.
+- A `CalDavProvider` binds no calendar. Each calendar's events sync under a scope of their own, and a calendar whose listing tag has not moved since its last sync is skipped without a request.
 - A `CardDavProvider` is likewise bound to one address book. It preserves raw
   vCard and uses ETag-conditional `PUT`/`DELETE`. `rebind` switches books without
   repeating discovery and carries write capability with it, so a rebind onto a
@@ -334,6 +345,7 @@ personal contacts.
 - Calendar API (`/me/calendars`, `calendarView/delta` with `Prefer: outlook.timezone` so DST resolves server-side), `If-Match` conditional writes, and the RSVP action endpoints.
 - Contact folders/contacts delta, organizational contacts, and directory users.
 - `Prefer: IdType="ImmutableId"` so object ids are stable across folder moves.
+- Online meetings (`/me/onlineMeetings/createOrGet`), for `TeamsMeetings`, which makes a Teams meeting for an event on any calendar. It needs `OnlineMeetings.ReadWrite`, which only a work or school account can grant.
 
 ### Capabilities
 
@@ -351,17 +363,19 @@ Roster edits retain provider response fields and enforce Graph's 500-attendee li
 ```rust
 use engine_core::ids::MailboxId;
 use engine_tls::TlsClientConfig;
+use engine_http::{RetryConfig, UserAgent};
 use provider_graph::{GraphClient, GraphProvider};
 
 let tls = TlsClientConfig::bundled();
-let client = GraphClient::connect("oauth-access-token", &tls)?;
+let agent = UserAgent::new("example-mail", "1.4.0")?;
+let client = GraphClient::connect("oauth-access-token", &tls, &RetryConfig::default(), &agent)?;
 let provider = GraphProvider::new(
     client,
     MailboxId::try_from("inbox-folder-id")?,
 );
 ```
 
-Shared mailboxes can be accessed with `GraphClient::for_mailbox(token, MailboxPrincipal::user("shared@example.com"), &tls)`. Token acquisition and refresh are the host's responsibility.
+Shared mailboxes can be accessed with `GraphClient::for_mailbox(token, MailboxPrincipal::user("shared@example.com"), &tls, &retry, &agent)`. Token acquisition and refresh are the host's responsibility.
 
 ### Notes
 

@@ -393,7 +393,10 @@ async fn without_the_bundle_every_assist_pull_answers_quiet() {
     let surfaces = Arc::new(Mutex::new(Vec::new()));
     let app = fakes::app(Vec::new(), &surfaces);
 
-    assert!(app.knowledge_list(&account()).is_empty());
+    assert_eq!(
+        app.knowledge_list(&account()),
+        [] as [crate::ai_assist::drive::KnowledgeView; 0]
+    );
     assert_eq!(
         app.knowledge_extract(&account(), KNOWLEDGE_EXTRACT_LIMIT)
             .await,
@@ -404,8 +407,14 @@ async fn without_the_bundle_every_assist_pull_answers_quiet() {
         !app.knowledge_forget(&KnowledgeId::new("k1".to_owned())),
         "no bundle, nowhere to delete",
     );
-    assert!(app.snippet_list().is_empty());
-    assert!(app.snippet_search("anything").await.is_empty());
+    assert_eq!(
+        app.snippet_list(),
+        [] as [crate::ai_assist::snippets::Snippet; 0]
+    );
+    assert_eq!(
+        app.snippet_search("anything").await,
+        [] as [crate::ai_assist::snippets::Snippet; 0]
+    );
     assert_eq!(
         app.compose_autocomplete("Thanks", "").await,
         "",

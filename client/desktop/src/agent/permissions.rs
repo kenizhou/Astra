@@ -291,7 +291,10 @@ mod tests {
             .respond("perm-1", true, false)
             .expect("the answer consumes the ask");
         assert_eq!(consumed.correlation.as_deref(), Some("corr-1"));
-        assert!(bridge.pending().is_empty());
+        assert_eq!(
+            bridge.pending(),
+            [] as [crate::agent::permissions::PendingApproval; 0]
+        );
 
         let again = bridge.respond("perm-1", true, false);
         assert!(again.is_err(), "an answer is one-shot");
@@ -370,7 +373,10 @@ mod tests {
             .expect("registers");
         let drained = bridge.fail_close_all("sidecar died");
         assert_eq!(drained.len(), 1);
-        assert!(bridge.pending().is_empty());
+        assert_eq!(
+            bridge.pending(),
+            [] as [crate::agent::permissions::PendingApproval; 0]
+        );
 
         bridge.restore(drained[0].clone());
         assert_eq!(bridge.pending().len(), 1);

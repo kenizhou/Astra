@@ -43,6 +43,7 @@ impl HttpTransport {
         token: String,
         tls: &TlsClientConfig,
         retry: &RetryConfig,
+        user_agent: &engine_http::UserAgent,
     ) -> Result<Self, GoogleError> {
         let retry = retry
             .clone()
@@ -66,8 +67,10 @@ impl HttpTransport {
         // their own `MAX_CONCURRENT_GETS`-wide fan-out against one user's quota, and three
         // times the width drains it three times as fast.
         retry.gate().narrow_to(crate::fetch::MAX_CONCURRENT_GETS);
+        // The limit an ordinary pass actually meets is the rate, so the rate is bounded too.
+        crate::quota::pace(retry.gate());
         Ok(Self {
-            client: engine_http::client(tls).build()?,
+            client: engine_http::client(tls, user_agent).build()?,
             token,
             connection: ObservedConnection::default(),
             retry,
@@ -86,6 +89,7 @@ impl HttpTransport {
         body: Vec<u8>,
         exchange: Exchange<'_>,
     ) -> Result<engine_http::Sent, GoogleError> {
+        crate::quota::charge(self.retry.gate(), &method, url).await;
         let mut request = self.client.request(method, url).bearer_auth(&self.token);
         if let Some(content_type) = content_type {
             request = request.header("Content-Type", content_type);
@@ -134,6 +138,7 @@ async fn write_body(resp: engine_http::Sent) -> Result<Option<Value>, GoogleErro
 #[async_trait]
 impl GoogleTransport for HttpTransport {
     async fn get(&self, url: &str) -> Result<Value, GoogleError> {
+        crate::quota::charge(self.retry.gate(), &reqwest::Method::GET, url).await;
         let request = self.client.get(url).bearer_auth(&self.token);
         let resp = send_retrying(request, &self.retry, Exchange::Ordinary).await?;
         self.connection.record(&resp);
@@ -147,6 +152,7 @@ impl GoogleTransport for HttpTransport {
     }
 
     async fn get_bytes(&self, url: &str) -> Result<Vec<u8>, GoogleError> {
+        crate::quota::charge(self.retry.gate(), &reqwest::Method::GET, url).await;
         self.fetch_bytes(self.client.get(url).bearer_auth(&self.token))
             .await
     }
@@ -303,6 +309,7 @@ mod tests {
             "super-secret".to_owned(),
             crate::test_support::tls(),
             &crate::test_support::retry(),
+            &crate::test_support::user_agent(),
         )
         .unwrap();
 
@@ -348,6 +355,7 @@ mod tests {
             "tok".to_owned(),
             crate::test_support::tls(),
             &crate::test_support::retry(),
+            &crate::test_support::user_agent(),
         )
         .unwrap();
         let doc = transport.get(&base).await.unwrap();
@@ -363,6 +371,7 @@ mod tests {
             "tok".to_owned(),
             crate::test_support::tls(),
             &crate::test_support::retry(),
+            &crate::test_support::user_agent(),
         )
         .unwrap();
         assert_eq!(GoogleTransport::http_version(&transport), None);
@@ -386,6 +395,7 @@ mod tests {
             "tok".to_owned(),
             crate::test_support::tls(),
             &crate::test_support::retry(),
+            &crate::test_support::user_agent(),
         )
         .unwrap()
         .get(&base)
@@ -402,6 +412,7 @@ mod tests {
             "tok".to_owned(),
             crate::test_support::tls(),
             &crate::test_support::retry(),
+            &crate::test_support::user_agent(),
         )
         .unwrap()
         .get(&base)
@@ -422,6 +433,7 @@ mod tests {
             "tok".to_owned(),
             crate::test_support::tls(),
             &crate::test_support::retry(),
+            &crate::test_support::user_agent(),
         )
         .unwrap()
         .get("http://127.0.0.1:1/gmail/v1/users/me/labels")
@@ -439,6 +451,7 @@ mod tests {
             "tok".to_owned(),
             crate::test_support::tls(),
             &crate::test_support::retry(),
+            &crate::test_support::user_agent(),
         )
         .unwrap()
         .post(&base, "application/json", b"{}".to_vec())
@@ -451,6 +464,7 @@ mod tests {
             "tok".to_owned(),
             crate::test_support::tls(),
             &crate::test_support::retry(),
+            &crate::test_support::user_agent(),
         )
         .unwrap()
         .delete(&base, None)
@@ -466,6 +480,7 @@ mod tests {
             "tok".to_owned(),
             crate::test_support::tls(),
             &crate::test_support::retry(),
+            &crate::test_support::user_agent(),
         )
         .unwrap()
         .post(&base, "application/json", b"{}".to_vec())

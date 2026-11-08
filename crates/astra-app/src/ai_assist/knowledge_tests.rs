@@ -209,8 +209,14 @@ async fn a_failed_call_lands_nothing_and_never_crashes() {
         &store,
     )
     .await;
-    assert!(landed.is_empty());
-    assert!(store.knowledge_for_account("work").unwrap().is_empty());
+    assert_eq!(
+        landed,
+        [] as [crate::ai_assist::knowledge::KnowledgeEntry; 0]
+    );
+    assert_eq!(
+        store.knowledge_for_account("work").unwrap(),
+        [] as [astra_ai::KnowledgeEntryRow; 0]
+    );
 }
 
 #[tokio::test]
@@ -225,8 +231,14 @@ async fn garbage_output_lands_nothing() {
         &store,
     )
     .await;
-    assert!(landed.is_empty());
-    assert!(store.knowledge_for_account("work").unwrap().is_empty());
+    assert_eq!(
+        landed,
+        [] as [crate::ai_assist::knowledge::KnowledgeEntry; 0]
+    );
+    assert_eq!(
+        store.knowledge_for_account("work").unwrap(),
+        [] as [astra_ai::KnowledgeEntryRow; 0]
+    );
 }
 
 #[tokio::test]
@@ -257,7 +269,10 @@ async fn an_empty_batch_never_calls() {
         &store,
     )
     .await;
-    assert!(landed.is_empty());
+    assert_eq!(
+        landed,
+        [] as [crate::ai_assist::knowledge::KnowledgeEntry; 0]
+    );
     assert_eq!(complete.call_count(), 0, "no messages, no call");
 }
 

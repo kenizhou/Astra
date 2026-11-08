@@ -162,6 +162,6 @@ fn a_repeated_id_fails_loudly() {
 fn generated_rule_ids_are_distinct_and_nonempty() {
     let first = RuleId::generate();
     let second = RuleId::generate();
-    assert!(!first.as_str().is_empty());
+    assert_ne!(first.as_str(), "");
     assert_ne!(first, second);
 }

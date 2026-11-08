@@ -223,7 +223,10 @@ async fn an_empty_day_answers_the_no_meetings_state_and_spends_nothing() {
         .expect("the empty day answers, it does not fail");
     assert_eq!(view.state, MeetingBriefState::NoMeetings);
     assert_eq!(view.brief, "");
-    assert!(view.meetings.is_empty());
+    assert_eq!(
+        view.meetings,
+        [] as [crate::calendar::brief::BriefMeetingRow; 0]
+    );
     assert_eq!(complete.call_count(), 0, "no meetings, no call");
     let wire = serde_json::to_value(&view).expect("the view serialises");
     assert_eq!(

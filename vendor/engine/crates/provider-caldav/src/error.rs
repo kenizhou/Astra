@@ -46,6 +46,13 @@ pub enum CalDavError {
     #[error("malformed CalDAV response: {0}")]
     Protocol(String),
 
+    /// The server asked for credentials only in schemes this account's credential cannot answer:
+    /// a `401` whose challenges are all, say, `Digest` or `Negotiate` for a password, or `Basic`
+    /// for a token. The credential was never sent, so this says nothing about whether it is good,
+    /// and asking the person for it again would not help. Carries the schemes offered.
+    #[error("the server asks for an authentication method this account cannot use: {0}")]
+    UnsupportedAuthentication(String),
+
     /// A write that may have been applied: its request may have reached the server and no
     /// answer of the server's own came back. Becomes [`ProviderError::needs_confirmation`].
     #[error("{0}; the change may have been applied")]
@@ -118,7 +125,11 @@ impl CalDavError {
         let unknown = match &self {
             Self::Transport(err) => err.may_have_been_received(),
             Self::Status { status, .. } => engine_http::gateway_without_answer(*status),
-            Self::Xml(_) | Self::Ical(_) | Self::Protocol(_) | Self::Unconfirmed(_) => false,
+            Self::Xml(_)
+            | Self::Ical(_)
+            | Self::Protocol(_)
+            | Self::UnsupportedAuthentication(_)
+            | Self::Unconfirmed(_) => false,
         };
         if unknown {
             Self::Unconfirmed(Box::new(self))
@@ -135,7 +146,12 @@ impl CalDavError {
             Self::Status { status, body, .. } => status_class(*status, body),
             // A malformed response/object is a protocol-level incompatibility:
             // retrying the same request will not fix it.
-            Self::Xml(_) | Self::Ical(_) | Self::Protocol(_) => FailureClass::Permanent,
+            // An authentication method the credential cannot answer is permanent too: neither
+            // a retry nor a new password changes what the server wants.
+            Self::Xml(_)
+            | Self::Ical(_)
+            | Self::Protocol(_)
+            | Self::UnsupportedAuthentication(_) => FailureClass::Permanent,
             // Never retried as it stands: the first attempt may have landed.
             Self::Unconfirmed(_) => FailureClass::InvalidState,
         }
@@ -155,10 +171,16 @@ fn status_class(status: u16, body: &str) -> FailureClass {
             FailureClass::NeedsResync
         }
         401 => FailureClass::Authentication,
+        // Stalwart's concurrency refusal, which the send funnel has already waited out and is
+        // still a throttle when it gives up (`throttle.rs`).
+        400 if crate::throttle::is_concurrency_limit(body) => FailureClass::RateLimited,
         // `412 Precondition Failed` is an `If-Match`/ETag write conflict (RFC 4791
         // §5.3.2); a `409 Conflict` without the sync-token precondition is a
         // write-ordering conflict.
         409 | 412 => FailureClass::Conflict,
+        // `501 Not Implemented`: the server does not do what was asked (RFC 9110 §15.6.2), which a
+        // retry asks again. Before the server errors, which may pass.
+        501 => FailureClass::Permanent,
         423 | 500..=599 => FailureClass::Retryable, // Locked (RFC 4918 §11.3), or server error.
         429 => FailureClass::RateLimited,
         // A plain `403`, `404`, and anything else will not succeed unchanged.
@@ -185,19 +207,27 @@ impl From<reqwest::Error> for CalDavError {
 
 impl From<CalDavError> for ProviderError {
     fn from(err: CalDavError) -> Self {
-        if matches!(err, CalDavError::Unconfirmed(_)) {
-            return ProviderError::needs_confirmation(err.to_string()).with_source(err);
-        }
-        let class = err.failure_class();
         let detail = err.to_string();
+        err.into_provider_error(detail)
+    }
+}
+
+impl CalDavError {
+    /// This failure as a [`ProviderError`] saying `detail`: the classification is this
+    /// error's whatever the words, so a caller that names its own service (Talk) keeps it.
+    pub(crate) fn into_provider_error(self, detail: String) -> ProviderError {
+        if matches!(self, CalDavError::Unconfirmed(_)) {
+            return ProviderError::needs_confirmation(detail).with_source(self);
+        }
+        let class = self.failure_class();
         // A rate limit is the one class that carries *when*: the outbox obeys a provider's
         // instant outright, past its own derived cap, and a host schedules from it.
         let error = if class == FailureClass::RateLimited {
-            ProviderError::rate_limited(detail, err.retry_after().map(Into::into))
+            ProviderError::rate_limited(detail, self.retry_after().map(Into::into))
         } else {
             ProviderError::new(class, detail)
         };
-        error.with_source(err)
+        error.with_source(self)
     }
 }
 
@@ -226,6 +256,21 @@ mod tests {
         assert_eq!(
             CalDavError::status(404, "gone").failure_class(),
             FailureClass::Permanent
+        );
+    }
+
+    /// A `501 Not Implemented` is the server saying it does not do what was asked (RFC 9110
+    /// §15.6.2): a CardDAV `PROPFIND` to a server with no address books. Asking again is asking
+    /// for the same refusal, so it is no server error that may pass.
+    #[test]
+    fn a_method_the_server_does_not_implement_is_permanent() {
+        assert_eq!(
+            CalDavError::status(501, "").failure_class(),
+            FailureClass::Permanent
+        );
+        assert_eq!(
+            CalDavError::status(500, "").failure_class(),
+            FailureClass::Retryable
         );
     }
 

@@ -91,7 +91,10 @@ fn one_enable_carries_the_dialect_and_every_extension_that_needs_one() {
     assert_eq!(session.enable_arguments(), ["IMAP4rev2", "QRESYNC"]);
 
     // Nothing to enable at all is an empty list, and the caller issues no command.
-    assert!(caps(&["IMAP4rev1", "IDLE"]).enable_arguments().is_empty());
+    assert_eq!(
+        caps(&["IMAP4rev1", "IDLE"]).enable_arguments(),
+        [] as [&str; 0]
+    );
 }
 
 #[test]
@@ -120,6 +123,16 @@ fn special_use_is_asked_for_wherever_it_is_advertised_whatever_the_dialect() {
     folded_only.confirm_enabled(&["IMAP4rev2".to_owned()]);
     assert!(folded_only.has(Extension::SpecialUse));
     assert!(!folded_only.must_request_special_use());
+}
+
+#[test]
+fn list_myrights_is_had_only_where_advertised_on_either_dialect() {
+    // RFC 8440 is neither folded into rev2 nor announced with `ENABLE`: it only adds a
+    // `LIST` return option, which a server that never advertised it answers with `BAD`.
+    assert!(!Extension::ListMyrights.folded_into_rev2());
+    assert!(!Extension::ListMyrights.needs_enable());
+    assert!(caps(&["IMAP4rev1", "LIST-MYRIGHTS"]).has(Extension::ListMyrights));
+    assert!(!caps(&["IMAP4rev1", "ACL"]).has(Extension::ListMyrights));
 }
 
 /// Yahoo's capability line after login, verbatim.

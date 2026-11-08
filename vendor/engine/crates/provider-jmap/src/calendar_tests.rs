@@ -1,4 +1,4 @@
-use engine_core::calendar::RecurrenceSkip;
+use engine_core::calendar::{ConferenceOrigin, ConferenceUri, DetectedIn, RecurrenceSkip};
 use serde_json::json;
 
 use super::*;
@@ -78,7 +78,7 @@ fn recurring_event_maps_rule_and_overrides() {
 #[test]
 fn meeting_maps_participants() {
     let meeting = by_uid("meeting-2003@test.local");
-    assert!(!meeting.participants.is_empty());
+    assert_ne!(meeting.participants, []);
     let alice = meeting
         .participants
         .iter()
@@ -180,11 +180,44 @@ fn a_jscalendar_1_0_participant_still_has_an_address() {
 }
 
 #[test]
-fn virtual_location_maps_conference_uri() {
+fn a_meeting_link_in_a_location_or_the_description_is_detected() {
+    let event = event_from_json(&json!({
+        "id": "e1", "uid": "e1@test.local", "calendarIds": { "c1": true },
+        "start": "2026-06-01T09:00:00", "timeZone": "Europe/Amsterdam", "duration": "PT1H",
+        "locations": { "l": { "@type": "Location", "name": "Zoom: https://zoom.us/j/987" } },
+        "description": "Or by phone. https://zoom.us/j/987?pwd=x and https://meet.google.com/abc-defg-hij"
+    }))
+    .unwrap();
+    let found: Vec<_> = event
+        .conferences
+        .iter()
+        .map(|c| (c.join().map(ConferenceUri::as_str), c.origin))
+        .collect();
+    assert_eq!(
+        found,
+        [
+            (
+                Some("https://zoom.us/j/987?pwd=x"),
+                ConferenceOrigin::Detected {
+                    place: DetectedIn::Location
+                }
+            ),
+            (
+                Some("https://meet.google.com/abc-defg-hij"),
+                ConferenceOrigin::Detected {
+                    place: DetectedIn::Description
+                }
+            ),
+        ]
+    );
+}
+
+#[test]
+fn virtual_location_maps_to_a_conference() {
     let virt = by_uid("virtual-2004@test.local");
     assert_eq!(
-        virt.virtual_locations[0].uri,
-        "https://meet.example.com/harness-room"
+        virt.conferences[0].join().map(ConferenceUri::as_str),
+        Some("https://meet.example.com/harness-room")
     );
 }
 
@@ -249,7 +282,7 @@ fn nth_weekday_locations_and_keywords() {
     assert_eq!(rule.by_day[0].nth_of_period.unwrap().get(), -1);
     // A nameless location still normalizes; a virtual location without a uri is dropped.
     assert_eq!(event.locations.len(), 1);
-    assert!(event.virtual_locations.is_empty());
+    assert_eq!(event.conferences, []);
     assert!(event.keywords.contains("kw") && event.categories.contains("cat"));
     assert!(event.is_cancelled());
     assert_eq!(event.color.as_deref(), Some("#abc"));

@@ -92,7 +92,9 @@ async fn a_forward_prefills_the_carried_parts_as_removable_rows() {
 
     app.dispatch(Intent::Compose(ComposeIntent::Forward {
         message: m1(),
-        carry: vec![0],
+        // The PDF's MIME part number: the multipart root is 0, the text
+        // body 1, the PDF 2, and the engine's part ids are those numbers.
+        carry: vec![2],
     }))
     .await
     .unwrap();
@@ -112,7 +114,7 @@ async fn a_forward_prefills_the_carried_parts_as_removable_rows() {
         row.blob
             .as_ref()
             .map(astra_composer::DraftBlobHandle::as_str),
-        Some(handle_of(0).as_str()),
+        Some(handle_of(2).as_str()),
         "the row's handle names the original's part for the submit to resolve"
     );
     assert_eq!(row.data_url, None);

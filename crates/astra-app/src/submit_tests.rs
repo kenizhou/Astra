@@ -371,7 +371,9 @@ async fn a_forward_carries_the_originals_standing_parts_as_attachments() {
     let (app, submits) = app_over_attached(vec![ScriptedSend::Delivered], &surfaces).await;
     app.dispatch(Intent::Compose(ComposeIntent::Forward {
         message: m1(),
-        carry: vec![0],
+        // The PDF's MIME part number: the multipart root is 0, the text
+        // body 1, the PDF 2, and the engine's part ids are those numbers.
+        carry: vec![2],
     }))
     .await
     .unwrap();
@@ -403,7 +405,10 @@ async fn a_removed_carry_row_does_not_ride_the_send() {
     let (app, submits) = app_over_attached(vec![ScriptedSend::Delivered], &surfaces).await;
     app.dispatch(Intent::Compose(ComposeIntent::Forward {
         message: m1(),
-        carry: vec![0],
+        // Part 2 is the pdf's MIME part number (the root is 0, the text 1):
+        // the ordinal 0 this test once carried matched no part and removed
+        // nothing, proving the removal path vacuously.
+        carry: vec![2],
     }))
     .await
     .unwrap();

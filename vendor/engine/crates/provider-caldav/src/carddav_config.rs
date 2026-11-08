@@ -17,7 +17,8 @@ pub struct CardDavConfig {
     pub base_url: String,
     /// HTTP authentication.
     pub credentials: Credentials,
-    /// Discovery path, normally `/.well-known/carddav`.
+    /// The URL to begin discovery at: the base URL's path, or the RFC 6764 well-known path when
+    /// it names only a server.
     pub discovery_path: String,
     /// Home-relative name or absolute href of the bound address book.
     pub address_book: String,
@@ -25,6 +26,8 @@ pub struct CardDavConfig {
     pub tls: TlsClientConfig,
     /// Shared throttling policy (`docs/agent-guidance/http-throttling.md`).
     pub retry: engine_http::RetryConfig,
+    /// The product every request names in its `User-Agent`: the host's application.
+    pub user_agent: engine_http::UserAgent,
     /// Private, as on `CalDavConfig`: a `dyn` observer is neither `Debug` nor meaningfully
     /// inspectable, so it is set through [`CardDavConfig::with_connect_observer`].
     pub(crate) connect_observer: Option<Arc<dyn ConnectObserver>>,
@@ -43,6 +46,7 @@ impl core::fmt::Debug for CardDavConfig {
             .field("address_book", &self.address_book)
             .field("tls", &self.tls)
             .field("retry", &self.retry)
+            .field("user_agent", &self.user_agent)
             .field("connect_observer", &self.connect_observer.is_some())
             .field("credential_hosts", &self.credential_hosts.is_some())
             .finish()
@@ -50,16 +54,23 @@ impl core::fmt::Debug for CardDavConfig {
 }
 
 impl CardDavConfig {
-    /// Creates settings bound to the `default` address book.
+    /// Creates settings bound to the `default` address book, beginning discovery at `base_url`'s
+    /// path, or at the RFC 6764 well-known when it names only a server.
     #[must_use]
-    pub fn new(base_url: impl Into<String>, credentials: Credentials) -> Self {
+    pub fn new(
+        base_url: impl Into<String>,
+        credentials: Credentials,
+        user_agent: engine_http::UserAgent,
+    ) -> Self {
+        let base_url = base_url.into();
         Self {
-            base_url: base_url.into(),
+            discovery_path: crate::href::discovery_start(&base_url, "/.well-known/carddav"),
+            base_url,
             credentials,
-            discovery_path: "/.well-known/carddav".into(),
             address_book: "default".into(),
             tls: TlsClientConfig::default(),
             retry: engine_http::RetryConfig::default(),
+            user_agent,
             connect_observer: None,
             credential_hosts: None,
         }
@@ -69,6 +80,14 @@ impl CardDavConfig {
     #[must_use]
     pub fn with_credential_hosts(mut self, policy: Arc<dyn CredentialHosts>) -> Self {
         self.credential_hosts = Some(policy);
+        self
+    }
+
+    /// Starts discovery at `path` instead of `/.well-known/carddav`: a path on the base URL, or
+    /// an absolute URL such as a principal the host stored from an earlier connect.
+    #[must_use]
+    pub fn with_discovery_path(mut self, path: impl Into<String>) -> Self {
+        self.discovery_path = path.into();
         self
     }
 

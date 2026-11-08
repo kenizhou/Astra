@@ -22,10 +22,12 @@ use crate::{
     carddav_ops::{
         ADDRESSBOOK, advertised_classes, bind_collection, contact_id, contact_report,
         contact_update, decode_data_uri, discover_home, encode_segment, fallback_contact_sync,
-        list_address_books, multiget_report, normalize_response, require_writable, stable_suffix,
-        supported_fields,
+        list_address_books, normalize_response, require_writable, stable_suffix, supported_fields,
     },
+    ctag_sync::{is_ctag_cursor, refuses_sync_collection},
     error::CalDavError,
+    multiget::{Multigets, fill_bodies},
+    request::{addressbook_multiget_as_stored, addressbook_multiget_report},
     transport::{DavClient, DavExecutor, DavMethod, Precondition, WriteRequest},
     vcard_write,
 };
@@ -60,6 +62,8 @@ fn no_address_books() -> ContactUnavailable {
 pub struct CardDavProvider {
     executor: Box<dyn DavExecutor>,
     home_href: String,
+    /// The `current-user-principal` the server named during discovery, if it named one.
+    principal: Option<String>,
     collection: AddressBookId,
     /// Every address book the home listed as writable at connect time. Kept so
     /// [`CardDavProvider::rebind`] can answer "may I write here?" for the collection it
@@ -71,6 +75,7 @@ pub struct CardDavProvider {
     /// account has no contacts here, which is a capability the host reads, not an error.
     advertised: bool,
     capabilities: Capabilities,
+    multigets: Multigets,
 }
 
 impl core::fmt::Debug for CardDavProvider {
@@ -108,6 +113,7 @@ impl CardDavProvider {
             config.credentials,
             &config.tls,
             &config.retry,
+            &config.user_agent,
         )?
         .with_credential_hosts(config.credential_hosts);
         Self::with_executor(
@@ -125,8 +131,10 @@ impl CardDavProvider {
         address_book: &str,
         observer: &dyn ConnectObserver,
     ) -> Result<Self, CalDavError> {
-        let home_href = discover_home(executor.as_ref(), discovery_path, observer).await?;
-        observer.step(&ConnectStep::discovered(&home_href));
+        let home = discover_home(executor.as_ref(), discovery_path, observer).await?;
+        observer.step(&ConnectStep::discovered(&home.href));
+        let home_href = executor.settle_on(&home.href);
+        let principal = home.principal;
         let classes = advertised_classes(executor.as_ref(), &home_href).await?;
         let listed: Vec<&str> = classes.iter().map(String::as_str).collect();
         observer.step(&ConnectStep::negotiated("CardDAV", &listed));
@@ -149,12 +157,22 @@ impl CardDavProvider {
         Ok(Self {
             executor,
             home_href,
+            principal,
             capabilities: capabilities(advertised, writable),
             collection,
             writable_books,
             writable,
             advertised,
+            multigets: Multigets::default(),
         })
+    }
+
+    /// The principal URL the server named during discovery, absolute, when it named one: what a
+    /// host stores and starts the next connect from (RFC 6764 §6, RFC 6352 §9.3), rather than
+    /// the home, which the principal names afresh on every connect.
+    #[must_use]
+    pub fn principal_url(&self) -> Option<&str> {
+        self.principal.as_deref()
     }
 
     /// Rebinds to another address book in the same home, without repeating discovery.
@@ -248,9 +266,10 @@ impl ContactsProvider for CardDavProvider {
         if !self.advertised {
             return Ok(ContactSourceSync::Unavailable(no_address_books()));
         }
-        if cursor.is_some_and(|cursor| cursor.as_str().starts_with("ctag:")) {
+        if is_ctag_cursor(cursor) {
             let sync = fallback_contact_sync(
                 self.executor.as_ref(),
+                &self.multigets,
                 self.href(),
                 &self.collection,
                 self.writable,
@@ -265,13 +284,19 @@ impl ContactsProvider for CardDavProvider {
         let token = cursor.map_or("", SyncState::as_str);
         let mut recovered = false;
         let mut snapshot = token.is_empty();
-        let report = match contact_report(self.executor.as_ref(), self.href(), token).await {
-            Ok(report) => report,
-            Err(CalDavError::Status {
-                status: 405 | 501, ..
-            }) => {
+        let mut report = match contact_report(self.executor.as_ref(), self.href(), token).await {
+            Ok(report) if report.sync_token.is_some() => report,
+            Err(error) if !snapshot && error.failure_class() == FailureClass::NeedsResync => {
+                recovered = true;
+                snapshot = true;
+                contact_report(self.executor.as_ref(), self.href(), "").await?
+            }
+            Err(error) if !refuses_sync_collection(&error, snapshot) => return Err(error.into()),
+            // A refusal, or an answer without a sync-token: the server does not do the report.
+            _ => {
                 let sync = fallback_contact_sync(
                     self.executor.as_ref(),
+                    &self.multigets,
                     self.href(),
                     &self.collection,
                     self.writable,
@@ -283,13 +308,16 @@ impl ContactsProvider for CardDavProvider {
                     cursor_recovered: cursor.is_some(),
                 });
             }
-            Err(error) if !snapshot && error.failure_class() == FailureClass::NeedsResync => {
-                recovered = true;
-                snapshot = true;
-                contact_report(self.executor.as_ref(), self.href(), "").await?
-            }
-            Err(error) => return Err(error.into()),
         };
+        fill_bodies(
+            self.executor.as_ref(),
+            &self.multigets,
+            self.href(),
+            &mut report,
+            "address-data",
+            addressbook_multiget_report,
+        )
+        .await?;
         let next = report
             .sync_token
             .as_deref()
@@ -307,7 +335,7 @@ impl ContactsProvider for CardDavProvider {
         _account: &AccountId,
         contact: &ContactId,
     ) -> ProviderResult<ContactCard> {
-        let body = multiget_report(contact.as_str());
+        let body = addressbook_multiget_as_stored(&[contact.as_str().to_owned()]);
         let report = self
             .executor
             .send(DavMethod::Report, self.href(), "1", body)
@@ -419,6 +447,14 @@ impl ContactsProvider for CardDavProvider {
                 Err(CalDavError::Status {
                     status: 404 | 410, ..
                 }) => return Ok(None),
+                // A URL a card names never receives the account's credential (RFC 9110 §11.5:
+                // a protection space does not extend beyond its server), so a refusal there
+                // says only that the picture is not ours to fetch: iCloud keeps photos on
+                // another host, behind the password. On an origin the credential does reach,
+                // a refusal is the credential's, and stays an error.
+                Err(CalDavError::Status {
+                    status: 401 | 403, ..
+                }) if !self.executor.sends_credential_to(&media.uri) => return Ok(None),
                 Err(error) => return Err(error.into()),
             }
         };

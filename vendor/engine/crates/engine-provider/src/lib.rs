@@ -19,6 +19,11 @@
 //! observable through [`ConnectStep`] and [`ConnectObserver`], which an adapter's
 //! config carries.
 //!
+//! A credential often reaches more than its own mailbox. [`SharedMailboxes`] and
+//! [`SharedMailbox`] are the discovery seam for that (`shared`): they answer *which stores
+//! can I open*, and stop there — a discovered store becomes an ordinary account bound with
+//! the same credential, so no scope, cursor or account kind is added.
+//!
 //! The trait is deliberately **shaped by JMAP** and kept minimal: it covers the
 //! mail spine (mailboxes + email), calendar, submission, and contact contracts.
 //! It depends only on `engine-core`; network access
@@ -46,12 +51,14 @@ mod keyword_name;
 mod mail_edit;
 mod mailbox_edit;
 mod mailbox_write;
+mod meeting;
 mod mime_wrap;
 mod page;
 mod provider;
 #[cfg(feature = "http")]
 mod redirect;
 mod report;
+mod shared;
 mod sources;
 mod stream;
 mod submit;
@@ -60,10 +67,12 @@ mod watch;
 
 pub use calendar_user::CalendarUserAddresses;
 pub use calendar_write::{
-    CalendarAddress, CalendarWrites, DeleteTarget, DraftRecurrence, EventDeletion, EventDraft,
-    EventEdit, EventPatch, EventRsvp, EventWrite, EventWriteReceipt, InvitationError, Invitee,
-    InviteePatch, InviteeRole, MeetingDraft, Occurrence, PatchTarget, RecurrenceEdit,
-    ReplyDelivery, RsvpResponse, SchedulingIdentity, TextEdit, WritePrecondition,
+    AttachedConference, CalendarAddress, CalendarWrites, ConferenceEdit, DeleteTarget,
+    DraftRecurrence, EventDeletion, EventDraft, EventEdit, EventPatch, EventRsvp, EventWrite,
+    EventWriteReceipt, InvitationError, Invitee, InviteePatch, InviteeRole, MeetingDraft,
+    MeetingText, NewConference, Occurrence, PatchTarget, RecurrenceEdit, ReplyDelivery,
+    RsvpResponse, SchedulingIdentity, TextEdit, WritePrecondition, meeting_text,
+    refuse_native_conference,
 };
 pub use capability::Capabilities;
 pub use capability_calendar::{OverrideSurvival, RsvpControls, WriteGuard};
@@ -83,21 +92,25 @@ pub use keyword_name::{KeywordName, keyword_named};
 pub use mail_edit::{MailEdit, MailEditReceipt};
 pub use mailbox_edit::{MailboxEdit, MailboxEditReceipt};
 pub use mailbox_write::MailboxWrites;
+pub use meeting::{
+    JitsiMeetings, JitsiServerError, MeetingKey, MeetingKeyError, MeetingRequest, MeetingService,
+};
 pub use mime_wrap::{MimeWrapOutcome, MimeWrapper};
 pub use page::{PageToken, SyncKind, SyncPage};
 pub use provider::Provider;
 #[cfg(feature = "http")]
-pub use redirect::redirect_target;
+pub use redirect::{redirect_refused, redirect_target};
 pub use report::{
     MessageReport, ReportControls, ReportEvidence, ReportReceipt, ReportVerdict, ReportVerdicts,
 };
+pub use shared::{SharedMailbox, SharedMailboxes};
 pub use sources::{SourceStream, one_at_a_time};
 pub use stream::{EmailChunk, EmailStream, PassMode, split_page};
 pub use submit::{
     ContentIdError, ContentIdHeader, Draft, DraftAttachment, DraftAttachmentDisposition,
     DraftCalendar, SentCopy, SubmissionReceipt,
 };
-pub use sync::ScopeSync;
+pub use sync::{CalendarListing, ScopeSync};
 pub use watch::{Watch, WatchEvent};
 
 /// Default page size [`Provider::sync_email`] uses to drain

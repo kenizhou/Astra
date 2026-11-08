@@ -148,6 +148,26 @@ Consequences that the orchestrator must not paper over:
   it is enforced where every request passes — `engine_http::RequestGate`, one per account
   (`http-throttling.md`). Conflating them breaks in both directions: an IMAP folder holds its
   own socket, so its ceiling is per connection, while every Graph folder shares the mailbox's.
+- **A calendar provider serves every calendar of its account, and the engine owns the
+  fan-out.** `Provider::event_scope(account, calendar)` names the scope a calendar's events
+  sync under: one per calendar where the event delta is per collection (CalDAV, Graph,
+  Google), one shared by every calendar where it is account-wide (JMAP). `sync_calendar`
+  syncs the calendar list, groups the listed calendars by scope, and syncs each scope once,
+  concurrently and bounded (`MAX_CONCURRENT_EVENT_SCOPES`, a store bound like the folder
+  one). Each scope reports its own outcome, so one refused calendar never fails the others.
+  An event scope no listed calendar answers any more is forgotten whole, as a vanished
+  folder's is; an empty list judges nothing. A calendar that appears later seeds the window
+  the account's other scopes already hold, never the narrower horizon a pass was handed.
+- **A collection tag skips an unchanged collection.** Where the listing carries a marker for a
+  collection's contents (`CollectionTag`: a DAV sync-token or CTag), the store records the
+  one the listing showed **before** the fetch with the scope's cursor, in the same
+  transaction (`ApplyBatch::collection_tag`). A pass whose listing shows the recorded tag
+  skips the scope without a request; a tag read after the fetch could claim a change the pass
+  never saw. A streaming page leaves the recorded tag alone, a cursor written without one
+  clears it, and a forgotten scope loses it. A post-write reconcile records none, so the next
+  pass reads the calendar's new tag rather than trusting the old one. Clearing a cursor (a
+  `NORMALIZER_VERSION` change, `clear_scope_cursor`) clears the tag with it: an unchanged tag
+  says the server's contents have not moved, never that the stored projection is current.
 - **Referential apply order.** Container scopes (mailboxes, calendars, address
   books) are applied before the member scopes that reference them (emails,
   events, contacts). Membership rows resolve against already-applied containers,
@@ -174,6 +194,19 @@ are one mechanism here, not alternatives.
   and bumps the generation, and when the suspended worker resumes its apply is
   rejected as stale instead of corrupting state. Workers handle `StaleLease` by
   re-claiming and recomputing — never by retrying the stale write.
+- Clearing a cursor (`reset_sync`, `clear_scope_cursor`) also bumps the generation and frees
+  the lease. A host clears one to change what the next pass fetches, so the pass running under
+  the old terms must not commit its cursor back over the clear. The mail stream ends a pass
+  whose re-claim finds the cursor moved rather than starting it over under the window it
+  began with, and one whose re-claim finds the scope held ends the same way, not as busy: the
+  next pass takes the scope up.
+- A pass can outlast its lease: a backfill paced under a server's quota runs for as long as the
+  mailbox is large. Unrenewed, its lease lapses mid-pass, the next poll claims the scope, and the
+  two passes fence each other out commit by commit. So the mail stream renews its lease every
+  third of the TTL while it waits on its provider (`engine_sync::keep_alive`,
+  `Store::renew_sync_scope_lease`), the same shape as the outbox's renewal below. The
+  `SyncLease` handle keeps its claim-time expiry; only the stored lease moves, which is what lets
+  `read_since` read the pass's start off the handle.
 - `release_sync_scope` frees a scope before its TTL so a finished worker does not
   block the next sync for the full lease window.
 - **The claim → fetch → apply → release cycle lives in exactly one place**:
@@ -418,6 +451,10 @@ are different jobs:
   snapshot/backfill: IMAP `UID SEARCH SINCE`, JMAP an `Email/query` `after`, Graph a
   `receivedDateTime ge` `$filter`, Gmail `q: after:`. **No delta can carry one** — a
   `deltaLink`, a `startHistoryId` and `Email/changes` all take a cursor, not a query.
+- **Where a pass resumes.** The orchestrator stores each email cursor with the floor it was
+  fetched under (`engine_sync::window_cursor`), and a pass asking for an earlier floor starts
+  the folder over, since the cursor knows nothing of the mail between the two. A later floor
+  resumes: a host computes the floor from today, so it moves on every day.
 - **What a `PassMode::Additive` delta stores.** The orchestrator drops any incoming message
   the window does not admit (`SyncWindow::admits`) before the apply. A delta's "new arrival"
   is new to *us*, not recent: IMAP has no in-place edit, so filing a three-year-old message
@@ -567,6 +604,24 @@ through **separate, lease-free** traits in `engine-store` (beside `Store`), keye
   alongside the scope FTS (RRF-fused) and joins to the live `message` rows so stale rows
   for deleted messages drop out, and to `message_body.account` so IMAP keys that
   collide across accounts cannot cross over (`search.md`).
+- **The source answers the row's paperclip** — `MessageSourceCache::set_mail_has_attachment`.
+  A provider's `has_attachment` is a guess made without the bytes: Gmail's API fallback reads
+  `format=metadata`, which has no parts tree, so it never sets one; JMAP's `hasAttachment` and
+  Graph's `hasAttachments` are each server's own rule, which need not count what the opened
+  message lists (`engine_mime::extract_attachments`). **One funnel answers it**
+  (`engine_sync::source_answer`): a source a provider returns is answered as it enters the
+  cache, on every road that fetches one (open, warm, attachments, inline parts, scheduling,
+  export, `ensure_message_source`), and a cached source still owing an answer pays it when it
+  is next read — including a body served from its cached text, which reads the blob once for
+  that. That last case is every message cached before answers were recorded, so no backfill
+  is needed. Bytes that do not parse as a message (`has_downloadable_attachment` → `None`)
+  record nothing: a broken source must not clear a flag the server set correctly.
+  The answer lives in `source_attachment (account, provider_key)`, beside the body caches and
+  lease-free like them, and **wins over every later sync**: `derived_ops::upsert_message`
+  takes it in place of the value a whole object carries, since a key's source never changes
+  and a re-snapshot must not undo it. It is dropped with the other caches (tombstone, prune,
+  purge). Until a message's source is read its row keeps the provider's guess, and the warming
+  pass is what reaches mail nobody opened.
 - The fetch-throughs are `engine_sync::fetch_message_body` (text in SQLite → on-disk
   raw → one provider fetch; best-effort caching of both),
   `fetch_inline_parts`, `fetch_message_attachments`, and `fetch_message_attachment`
@@ -607,6 +662,16 @@ and tombstones them — so nothing is orphaned, and the durable outbox is untouc
 A fix to one adapter's **sync**, rather than to decoding, does not need this: the adapter
 versions its own cursor and reads an older one as no cursor, so only its scopes re-sync
 (IMAP: `CURSOR_VERSION`, `imap-smtp.md`).
+
+Version **6** is a bump that is not about decoding bytes: a mailbox now carries the caller's
+rights (`Mailbox::access`, `modeling.md`), read from JMAP `myRights` and the IMAP `MYRIGHTS`
+letters. A mailbox stored before that holds none and loads as the `owner()` default. IMAP and
+Graph re-list their folders every pass and would correct it on their own, but a JMAP folder
+list is a `Mailbox/changes` delta, so an unchanged mailbox would keep the default for good —
+the re-snapshot is what makes each one say what it really allows. The cost is the usual one
+and is not small: the clear is global, so every account's **mail** re-snapshots once too,
+not only its folder lists. A per-scope-kind invalidation would make a folder-only change
+cheaper; it does not exist, and building it belongs in its own change. (No schema change.)
 
 The **host-triggered reset** (`Engine::reset`) uses the same primitive: clear the cursors
 so the next sync is a full refetch. It is the manual counterpart of the automatic
@@ -782,8 +847,8 @@ one event never race on either provider.
   deliberately pure: they record the op, call the provider, record the outcome. They never
   touch the stored object — a write's response is a receipt, not a document, and the store's
   copy must keep coming from the **server** (`caldav.md`). So the read-your-writes step is a
-  separate primitive, `engine_sync::reconcile_calendar_events`: the **event-scope delta**,
-  which re-delivers the object the server now holds, tombstones a delete, and advances the
+  separate primitive, `engine_sync::reconcile_calendar_events`: the **event-scope delta** of
+  the calendar the write touched (never every calendar of the account), which re-delivers the object the server now holds, tombstones a delete, and advances the
   cursor — one round trip, no new provider verb. The `Engine` facade runs it after every
   calendar write (`engine-api.md`), so a host gets read-your-writes by construction while the
   drivers stay usable by a **headless** caller — the #60 drainer has no host `horizon`/zone
@@ -941,9 +1006,13 @@ one event never race on either provider.
   `PendingOpId` instead of creating a duplicate.
 - ⚠️ **A settled row is the idempotency record — do not prune one.** `UNIQUE (account,
   idempotency_key)` is the whole mechanism above, so deleting a `Succeeded` row re-arms a replay
-  of that op, and the ops include **sends**. Reclaiming the space needs a `settled_at` column and
-  a retention window rather than a `DELETE`, and it buys very little: a production store after a
-  five-account sync of 7,118 messages held **34** `Succeeded` rows in a 235 MB database.
+  of that op, and the ops include **sends**. Its **payload** is another matter: it lives beside
+  the row in `pending_op_payload` and goes when the op reaches a state nothing dispatches from,
+  by a trigger whose condition is `engine_store::stays_listed` negated, so a send that settled
+  `Failed` or awaits confirmation keeps it. The payload is where the size is (a draft carries
+  its attachments): one store with three weeks of drafts held 707 MB of settled payloads in
+  1.5 GB. Beside the row it is also written once, rather than again by every claim and outcome,
+  since SQLite rewrites a whole record on any `UPDATE` (schema v20).
 - **Claim returns only runnable ops.** `claim_pending_ops` excludes any op whose
   `depends_on` are not all in a terminal-success state, and any op whose
   `resource_key` collides with an already-leased op. This both honors offline

@@ -88,7 +88,10 @@ async fn the_prompt_answers_through_the_intent_both_ways() {
         submits.lock().unwrap().is_empty(),
         "declining to send sends nothing"
     );
-    assert!(app.calendar().reply_prompts.is_empty());
+    assert_eq!(
+        app.calendar().reply_prompts,
+        [] as [astra_viewmodel::ReplyPromptRow; 0]
+    );
 }
 
 #[tokio::test]

@@ -77,6 +77,7 @@ pub(crate) async fn parties(test: &str) -> Option<Parties> {
             username: organizer_auth.address.clone(),
             password: organizer_auth.password.clone(),
         },
+        engine_http::test_server::user_agent(),
     ))
     .await
     .expect("organizer connects over CalDAV");
@@ -101,6 +102,7 @@ async fn connect_jmap(base: &str, account: &ScratchAccount) -> JmapProvider {
     JmapProvider::connect(JmapConfig::new(
         base.to_owned(),
         Credentials::basic(&account.address, &account.password),
+        engine_http::test_server::user_agent(),
     ))
     .await
     .expect("connects over JMAP")
@@ -154,7 +156,7 @@ fn invitation_time(hour: u8) -> CalendarDateTime {
 /// Every event an account currently holds, over whichever protocol it speaks.
 pub(crate) async fn jmap_events(provider: &JmapProvider, account: &AccountId) -> Vec<Event> {
     let SyncUpdate::Snapshot { objects, .. } = provider
-        .sync_events(account, None)
+        .sync_events(account, &any_calendar(), None)
         .await
         .expect("sync events")
         .update
@@ -165,8 +167,31 @@ pub(crate) async fn jmap_events(provider: &JmapProvider, account: &AccountId) ->
 }
 
 pub(crate) async fn dav_events(provider: &CalDavProvider, account: &AccountId) -> Vec<Event> {
+    // The organizer's own calendar, named by the href its CalDAV home lists.
+    let SyncUpdate::Snapshot {
+        objects: calendars, ..
+    } = provider
+        .sync_calendars(account, None)
+        .await
+        .expect("sync calendars")
+        .sync
+        .update
+    else {
+        panic!("expected a calendar snapshot");
+    };
+    let default = calendars
+        .into_iter()
+        .find(|calendar| {
+            calendar
+                .id
+                .as_str()
+                .trim_end_matches('/')
+                .ends_with("/default")
+        })
+        .expect("the organiser lists a default calendar")
+        .id;
     let SyncUpdate::Snapshot { objects, .. } = provider
-        .sync_events(account, None)
+        .sync_events(account, &default, None)
         .await
         .expect("sync events")
         .update
@@ -270,6 +295,7 @@ pub(crate) async fn deliver_invitation(parties: &Parties) -> Event {
         .sync_calendars(&organizer_account(), None)
         .await
         .expect("sync organiser calendars")
+        .sync
         .update
     else {
         panic!("expected a calendar snapshot");
@@ -357,7 +383,7 @@ fn inbox_hrefs_of(harness: &Harness, who: (&str, &str), address: &str, uid: &str
     else {
         return Vec::new();
     };
-    let body = String::from_utf8_lossy(&listing.body).into_owned();
+    let body = String::from_utf8_lossy_owned(listing.body);
     body.split("<D:href>")
         .skip(1)
         .filter_map(|chunk| chunk.split("</D:href>").next())
@@ -411,4 +437,9 @@ pub(crate) async fn clean_up(parties: &Parties) {
             let _ = parties.harness.dav_delete_as(who.auth(), &href);
         }
     }
+}
+
+/// JMAP's event state is account-wide, so which calendar asks for it does not matter.
+fn any_calendar() -> engine_core::ids::CalendarId {
+    engine_core::ids::CalendarId::try_from("any").unwrap()
 }

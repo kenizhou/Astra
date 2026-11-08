@@ -7,7 +7,7 @@
 mod common;
 
 use common::*;
-use engine_core::{ids::CalendarId, sync::SyncUpdate};
+use engine_core::sync::SyncUpdate;
 use engine_provider::{CalendarWrites, Provider};
 #[tokio::test]
 async fn live_calendars_list() {
@@ -18,13 +18,30 @@ async fn live_calendars_list() {
     let sync = calendar_provider(token)
         .sync_calendars(&account(), None)
         .await
-        .expect("sync calendars");
+        .expect("sync calendars")
+        .sync;
     assert!(sync.is_snapshot());
     let SyncUpdate::Snapshot { objects, .. } = &sync.update else {
         panic!("expected a calendar snapshot");
     };
     // The account has at least its own primary calendar.
     assert!(objects.iter().any(|c| c.is_default), "a primary calendar");
+
+    // `accessRole` against the roles this account really holds. The primary calendar is
+    // `owner`: everything, the calendar's own sharing included.
+    let primary = objects.iter().find(|c| c.is_default).expect("primary");
+    assert!(primary.access.may_write && primary.access.may_share && primary.access.may_delete);
+    // The subscribed holiday calendar is `reader`: visible, immutable — a host that offered
+    // "add an event" there would have the write refused by the API. Found by its id, not as
+    // "the other one": an interrupted `live_calendar_roles.rs` run can leave more subscribed.
+    let subscribed = objects
+        .iter()
+        .find(|c| !c.is_default && c.id.as_str().contains("#holiday"))
+        .expect("the subscribed holiday calendar");
+    assert!(subscribed.access.may_read);
+    assert!(!subscribed.access.may_write && !subscribed.access.may_share);
+    // The roles only another account's calendar can carry — `writer`,
+    // `writerWithoutPrivateAccess`, `freeBusyReader` — are proven in `live_calendar_roles.rs`.
 }
 
 #[tokio::test]
@@ -36,21 +53,21 @@ async fn live_calendar_snapshot_then_delta_cycle() {
     let provider = calendar_provider(token);
     // A first sync is a reconciling snapshot; capture the per-calendar syncToken.
     let snapshot = provider
-        .sync_events(&account(), None)
+        .sync_events(&account(), &primary(&provider).await, None)
         .await
         .expect("snapshot");
     assert!(snapshot.is_snapshot());
     let cursor = snapshot.next_cursor.clone();
-    assert!(!cursor.as_str().is_empty());
+    assert_ne!(cursor.as_str(), "");
 
     // An immediate delta from that syncToken must not error and must not be a snapshot —
     // proving the real events.list?syncToken request shape is accepted.
     let delta = provider
-        .sync_events(&account(), Some(&cursor))
+        .sync_events(&account(), &primary(&provider).await, Some(&cursor))
         .await
         .expect("delta");
     assert!(!delta.is_snapshot(), "a delta from a live syncToken");
-    assert!(!delta.next_cursor.as_str().is_empty());
+    assert_ne!(delta.next_cursor.as_str(), "");
 }
 
 #[tokio::test]
@@ -70,11 +87,12 @@ async fn live_calendar_create_patch_delete() {
         return;
     };
     let provider = calendar_provider(token);
-    let cal = CalendarId::try_from("primary").unwrap();
+    let cal = primary(&provider).await;
     let calendars = provider
         .sync_calendars(&account(), None)
         .await
-        .expect("sync calendars");
+        .expect("sync calendars")
+        .sync;
     let SyncUpdate::Snapshot { objects, .. } = calendars.update else {
         panic!("expected a calendar snapshot");
     };
@@ -121,7 +139,7 @@ async fn live_calendar_create_patch_delete() {
     assert!(first_etag.is_some(), "the created event carries an ETag");
 
     let snapshot = provider
-        .sync_events(&account(), None)
+        .sync_events(&account(), &primary(&provider).await, None)
         .await
         .expect("read create");
     let SyncUpdate::Snapshot { objects, .. } = snapshot.update else {
@@ -155,7 +173,7 @@ async fn live_calendar_create_patch_delete() {
     );
 
     let snapshot = provider
-        .sync_events(&account(), None)
+        .sync_events(&account(), &primary(&provider).await, None)
         .await
         .expect("read patch");
     let SyncUpdate::Snapshot { objects, .. } = snapshot.update else {
@@ -172,7 +190,7 @@ async fn live_calendar_create_patch_delete() {
 
     // Delete it, guarded by the fresh ETag. Google sends the cancellation.
     provider
-        .delete_event(&account(), None, &EventDeletion::of(&base))
+        .delete_event(&account(), Some(&base), &EventDeletion::of(&base))
         .await
         .expect("delete");
     // NOTE: a *guarded* re-delete here returns 412 (conditionNotMet), not 404/410 — the

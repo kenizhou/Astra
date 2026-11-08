@@ -21,12 +21,16 @@ engine-provider = { workspace = true, features = ["http"] }
 # One throttling answer for every HTTP provider (docs/agent-guidance/http-throttling.md).
 engine-http = { workspace = true }
 engine-tls = { workspace = true, features = ["reqwest"] }
+bytes = { workspace = true }
 reqwest = { workspace = true }
 quick-xml = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
+futures-util = { workspace = true }
+# `sync` for the semaphore one provider's multigets share (`multiget::Multigets`).
+tokio = { workspace = true, features = ["sync"] }
 
 [features]
 # Exposes `fuzz_parse` for a cargo-fuzz target driving the iCalendar parser; off

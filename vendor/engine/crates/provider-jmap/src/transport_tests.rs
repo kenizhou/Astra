@@ -70,7 +70,7 @@ fn mock_server(responses: Vec<String>) -> (String, Arc<Mutex<Vec<Seen>>>) {
             }
             recorder.lock().unwrap().push(Seen {
                 authorization,
-                body: String::from_utf8_lossy(&body).into_owned(),
+                body: String::from_utf8_lossy_owned(body),
             });
 
             let response = responses
@@ -126,6 +126,7 @@ fn transport() -> Transport {
         Credentials::basic("alice@example.com", "s3cret"),
         tls(),
         &engine_http::RetryConfig::default(),
+        &engine_http::test_server::user_agent(),
     )
     .unwrap()
 }
@@ -200,6 +201,7 @@ async fn a_bearer_credential_is_not_downgraded_to_basic() {
         Credentials::bearer("tok"),
         tls(),
         &engine_http::RetryConfig::default(),
+        &engine_http::test_server::user_agent(),
     )
     .unwrap();
     let response = transport.get(&base).await.unwrap();

@@ -155,5 +155,8 @@ async fn an_account_with_no_calendar_provider_stays_exactly_as_it_was() {
         snapshot.calendars.is_empty(),
         "no provider of the account serves calendars, so none landed"
     );
-    assert!(snapshot.occurrences.is_empty());
+    assert_eq!(
+        snapshot.occurrences,
+        [] as [astra_viewmodel::OccurrenceRow; 0]
+    );
 }

@@ -23,7 +23,7 @@ use time::Date;
 use super::calendar::connect_graph_calendar_providers;
 use super::provider::RefreshingGraphProvider;
 use super::GraphTokenSource;
-use crate::{account_log_handle, account_tls, pass_syncs, AccountConfig, AccountError};
+use crate::{account_log_handle, account_tls, pass_syncs, user_agent, AccountConfig, AccountError};
 
 /// The providers a Microsoft account dials, and the two things about its
 /// calendar leg a caller may need to act on.
@@ -184,8 +184,14 @@ async fn list_folders(
     tls: &TlsClientConfig,
 ) -> Result<Vec<engine_api::Mailbox>, AccountError> {
     let token = tokens.access_token().await?;
-    let client = GraphClient::for_mailbox(token, MailboxPrincipal::Me, tls, &tokens.retry())
-        .map_err(|err| AccountError::Graph(err.to_string()))?;
+    let client = GraphClient::for_mailbox(
+        token,
+        MailboxPrincipal::Me,
+        tls,
+        &tokens.retry(),
+        &user_agent(),
+    )
+    .map_err(|err| AccountError::Graph(err.to_string()))?;
     let inbox =
         MailboxId::try_from("inbox").map_err(|err| AccountError::Mailbox(err.to_string()))?;
     // Both log lines carry the account's handle. One device holds several

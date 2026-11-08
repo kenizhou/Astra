@@ -32,9 +32,9 @@ bound from the send, connect included, which is only sound while the connect giv
   write goes out through `deadline::write`, 8 KiB a piece under `stall`; `smtp::converse`
   waits `submission` for the end of data.
 - **HTTP** (`engine-http/src/deadline.rs`): the client every adapter builds with
-  `engine_http::client(tls)` carries `dial` as reqwest's connect timeout, which covers the
-  lookup, the connect and the handshake together. `send_retrying` hands reqwest the request
-  body in pieces and watches them go: `stall` between pieces, then `reply` (or `submission`,
+  `engine_http::client(tls, user_agent)` carries `dial` as reqwest's connect timeout, which
+  covers the lookup, the connect and the handshake together. `send_retrying` hands reqwest
+  the request body in pieces and watches them go: `stall` between pieces, then `reply` (or `submission`,
   for an `Exchange::Submission`) once the last one is out. `Sent::bytes` and `Sent::text`
   read each chunk under `stall`.
 
@@ -107,7 +107,9 @@ time and a wait with none fails as a hang rather than hanging the run: `deadline
 in `engine-http`, each HTTP adapter and `provider-imap`, plus `deadline_imap_tests.rs`,
 `deadline_submit_tests.rs` and the watch suites. `engine_http::test_server` (behind the
 `test-server` feature, which only dev-dependencies turn on) is the silent and the trickling
-server the HTTP adapters share.
+server the HTTP adapters share, and its `read_request_blocking` is how their one-shot mocks
+read a request: a mock that answers after a single `read` can close with the body still
+unread, which resets the connection under the reply (a flaky `10053`/`10054` on Windows).
 
 ⚠️ **On the paused clock, bytes in flight lose to every timer.** tokio moves the paused clock
 to the next timer whenever every task is waiting, and a task waiting for a socket counts as

@@ -16,7 +16,7 @@ use crate::{
     deadline::{self, BOUNDS},
     error::{ImapError, ImapResult},
     parse::{self, FetchRow, ListRow},
-    transport_command::{list_command, quote},
+    transport_command::{ListReturn, list_command, quote},
 };
 
 /// A connected IMAP session over a generic async byte stream.
@@ -172,21 +172,13 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send> Connection<S> {
         }
     }
 
-    /// `LOGIN user password`. A `NO` here is an authentication failure, not a
-    /// generic invalid-state error, unless it carries `[LIMIT]`: the server is refusing
-    /// sessions for this account, and the credential was never judged.
-    ///
-    /// Only here, because RFC 5530's `LIMIT` is any implementation limit: on `STORE` it can
-    /// mean too many keywords, which no wait will fix. Before a session exists, the only
-    /// limit left to hit is on sessions.
+    /// `LOGIN user password`. A `NO` here is classed as a sign-in refusal
+    /// ([`ImapError::refused_sign_in`]), not as a generic invalid-state error.
     pub(crate) async fn login(&mut self, user: &str, password: &str) -> ImapResult<()> {
         let command = format!("LOGIN {} {}", quote(user), quote(password));
         match self.command(&command).await {
             Ok(_) => Ok(()),
-            Err(ImapError::No(detail)) if opens_with_code(&detail, "LIMIT") => {
-                Err(ImapError::rate_limited(detail))
-            }
-            Err(ImapError::No(detail)) => Err(ImapError::auth(detail)),
+            Err(ImapError::No(detail)) => Err(ImapError::refused_sign_in(detail)),
             Err(other) => Err(other),
         }
     }
@@ -259,6 +251,24 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send> Connection<S> {
         Ok((rows, vanished))
     }
 
+    /// `UID FETCH <set> (<items>) (CHANGEDSINCE <modseq>)` — the CONDSTORE form (RFC 7162
+    /// §3.1.4.1): every message in `set` whose mod-sequence is above `modseq`. Unlike
+    /// [`uid_fetch_changedsince`](Self::uid_fetch_changedsince) it names no `VANISHED`, which
+    /// only a QRESYNC session may ask for, so it says nothing of what was expunged.
+    pub(crate) async fn uid_fetch_changed(
+        &mut self,
+        set: &str,
+        items: &str,
+        modseq: u64,
+    ) -> ImapResult<Vec<FetchRow>> {
+        let response = self
+            .command(&format!(
+                "UID FETCH {set} ({items}) (CHANGEDSINCE {modseq})"
+            ))
+            .await?;
+        parse::parse_fetch(&response.untagged)
+    }
+
     /// `UID SEARCH <criteria>` in the selected mailbox — the matched UIDs (empty if none
     /// match), tolerating both the classic `* SEARCH` and the extended `* ESEARCH` reply.
     /// `criteria` is already-formed search syntax; a caller composing in a non-literal value
@@ -283,15 +293,18 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send> Connection<S> {
         Ok(crate::parse_body::parse_fetch_body(&response.untagged, uid))
     }
 
-    /// `LIST "" "*"`, returning every mailbox — asking for its SPECIAL-USE attributes
-    /// wherever the server advertised RFC 6154, on either dialect (see
+    /// `LIST "" <pattern>`, returning the mailboxes it matches — asking for their
+    /// SPECIAL-USE attributes wherever the server advertised RFC 6154, on either dialect (see
     /// [`Negotiated::must_request_special_use`]; [`crate::place`] resolves the Sent/Drafts
-    /// folder from them).
-    pub(crate) async fn list(&mut self) -> ImapResult<Vec<ListRow>> {
+    /// folder from them). `pattern` is a decoded name pattern, encoded here for the wire.
+    pub(crate) async fn list(&mut self, pattern: &str) -> ImapResult<Vec<ListRow>> {
         let response = self
             .command(&list_command(
-                self.negotiated.must_request_special_use(),
-                false,
+                &self.quoted_name(pattern),
+                ListReturn {
+                    special_use: self.negotiated.must_request_special_use(),
+                    ..ListReturn::default()
+                },
             ))
             .await?;
         parse::parse_list(response.untagged())
@@ -322,16 +335,6 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send> Connection<S> {
         self.command(&format!("UID EXPUNGE {set}")).await?;
         Ok(())
     }
-}
-
-/// Whether a completion's text opens with the argument-less response code `code`. A code
-/// is only a code at the start of the text (RFC 3501 `resp-text`), and it is an atom, so
-/// case does not matter.
-pub(crate) fn opens_with_code(detail: &str, code: &str) -> bool {
-    detail
-        .strip_prefix('[')
-        .and_then(|rest| rest.split_once(']'))
-        .is_some_and(|(found, _)| found.eq_ignore_ascii_case(code))
 }
 
 /// Extracts `(validity, uid)` from an `[APPENDUID validity uid]` response code
@@ -393,3 +396,7 @@ mod tests;
 #[cfg(test)]
 #[path = "transport_negotiate_tests.rs"]
 mod negotiate_tests;
+
+#[cfg(test)]
+#[path = "transport_refusal_tests.rs"]
+mod refusal_tests;

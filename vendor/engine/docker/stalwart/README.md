@@ -13,7 +13,7 @@ throwaway credentials and never holds real data.
 
 ## Run it
 
-One self-bootstrapping service. It completes Stalwart v0.16's first-run setup
+One self-bootstrapping service. It completes Stalwart's first-run setup
 through the management API, creates the accounts, and seeds the dataset inside
 its entrypoint, then reports healthy once seeding is done:
 
@@ -63,8 +63,8 @@ entrypoint provisions them via the management API to exercise the engine's START
 
 ## Seeded accounts
 
-Created at startup via Stalwart's management API (v0.16 has no declarative config
-file — see the design doc).
+Created at startup via Stalwart's management API (Stalwart has had no declarative config
+file since v0.16 — see the design doc).
 
 | Account             | Password           | Role                          |
 | ------------------- | ------------------ | ----------------------------- |
@@ -81,7 +81,10 @@ assert (`docs/agent-guidance/stalwart-harness.md`).
 The entrypoint also **raises Stalwart's inbound rate limiters** (`x:MtaInboundThrottle`)
 at bootstrap, logging `relaxed inbound rate limiters`. The default of 25 messages/hour
 per sender-domain→recipient otherwise breaks the scheduling suite after a few runs, and
-does so silently — see the harness guidance doc.
+does so silently — see the harness guidance doc. It raises the **anonymous HTTP rate limit**
+(`x:Http.rateLimitAnonymous`, 100/minute) too, logging `relaxed the anonymous HTTP rate
+limit`: readiness polls and the uncredentialed first request of each DAV connection spend it,
+and back-to-back runs used to exhaust it.
 
 ## Layout
 

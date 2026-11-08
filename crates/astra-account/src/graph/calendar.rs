@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! The refreshing Graph calendar provider: the engine's calendar-bound
+//! The refreshing Graph calendar provider: the engine's account-wide
 //! [`GraphCalendarProvider`] behind the same shared token source as the
 //! account's mail providers.
 //!
@@ -7,9 +7,9 @@
 //! token, so [`RefreshingGraphCalendarProvider`] mints a fresh access
 //! token before each network call and delegates to a freshly built
 //! provider (reusing its warm connection pool while the token is
-//! unchanged, rebuilt only when the token refreshes). The provider is
-//! bound to **one** calendar (the account's default) and carries a
-//! baked-in fetch window plus display zone: Graph's
+//! unchanged, rebuilt only when the token refreshes). The provider
+//! serves **every** calendar of the account, each under its own scope,
+//! and carries a baked-in fetch window plus display zone: Graph's
 //! `calendarView/delta` needs an explicit date range, and the
 //! `Prefer: outlook.timezone` read needs the host's display zone. The
 //! window is centred on today at connect time, so a reconnect re-centres
@@ -26,19 +26,19 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use engine_api::{
-    AccountId, Calendar, CalendarId, CalendarWrites, Capabilities, Event, EventDeletion,
-    EventDraft, EventEdit, EventWriteReceipt, MailboxWrites, OverrideSurvival, Provider, SyncScope,
-    TimeZoneId, WriteGuard,
+    AccountId, CalendarId, CalendarWrites, Capabilities, Event, EventDeletion, EventDraft,
+    EventEdit, EventWriteReceipt, MailboxWrites, OverrideSurvival, Provider, SyncScope, TimeZoneId,
+    WriteGuard,
 };
 use engine_core::sync::{SyncState, SyncUpdate};
-use engine_provider::{ConnectionInfo, ProviderError, ProviderResult, ScopeSync};
+use engine_provider::{CalendarListing, ConnectionInfo, ProviderError, ProviderResult, ScopeSync};
 use engine_tls::TlsClientConfig;
 use provider_graph::{CalendarWindow, GraphCalendarProvider, GraphClient, MailboxPrincipal};
 use time::{Duration, OffsetDateTime};
 
 use super::provider::{calendar_date, should_reconnect};
 use super::GraphTokenSource;
-use crate::{account_log_handle, AccountError};
+use crate::{account_log_handle, user_agent, AccountError};
 
 /// What a Graph series edit costs the occurrences the user changed by
 /// hand: moving the series' time **or** changing its rule destroys every
@@ -64,14 +64,12 @@ const WINDOW_DAYS_BACK: i64 = 120;
 /// How many days **ahead** the baked-in fetch window spans.
 const WINDOW_DAYS_AHEAD: i64 = 400;
 
-/// A [`Provider`] bound to one Graph calendar that refreshes its access
-/// token before every network call and delegates to a freshly built
-/// [`GraphCalendarProvider`]. Internal; the account layer hands callers
-/// `Box<dyn Provider>` from the dial, never the concrete type.
+/// A [`Provider`] serving every Graph calendar of the account that
+/// refreshes its access token before every network call and delegates to
+/// a freshly built [`GraphCalendarProvider`]. Internal; the account
+/// layer hands callers `Box<dyn Provider>` from the dial, never the
+/// concrete type.
 pub(crate) struct RefreshingGraphCalendarProvider {
-    /// The calendar this provider syncs and writes to (the account's
-    /// default).
-    calendar: CalendarId,
     /// The shared, self-refreshing token source, shared with the
     /// account's mail providers so one refresh serves them all.
     tokens: Arc<GraphTokenSource>,
@@ -96,28 +94,24 @@ pub(crate) struct RefreshingGraphCalendarProvider {
 
 impl core::fmt::Debug for RefreshingGraphCalendarProvider {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        // The cached token is a live credential: the debug form names the
-        // bound calendar and nothing else.
+        // The cached token is a live credential: the debug form names
+        // nothing it could leak.
         f.debug_struct("RefreshingGraphCalendarProvider")
-            .field("calendar", &self.calendar)
             .finish_non_exhaustive()
     }
 }
 
 impl RefreshingGraphCalendarProvider {
-    /// Binds a refreshing calendar provider to `calendar`, sharing
-    /// `tokens` (and its single refresh flight) with the account's mail
-    /// providers.
+    /// Builds a refreshing calendar provider over `tokens`, sharing the
+    /// source's single refresh flight with the account's mail providers.
     #[must_use]
     pub(crate) fn new(
-        calendar: CalendarId,
         tokens: Arc<GraphTokenSource>,
         window: CalendarWindow,
         display_zone: TimeZoneId,
         tls: TlsClientConfig,
     ) -> Self {
         Self {
-            calendar,
             tokens,
             capabilities: Capabilities::none()
                 .with_calendars()
@@ -163,11 +157,11 @@ impl RefreshingGraphCalendarProvider {
             MailboxPrincipal::Me,
             &self.tls,
             &self.tokens.retry(),
+            &user_agent(),
         )
         .map_err(ProviderError::from)?;
         let provider = Arc::new(GraphCalendarProvider::new(
             client,
-            self.calendar.clone(),
             self.window,
             self.display_zone.clone(),
         ));
@@ -212,10 +206,10 @@ impl Provider for RefreshingGraphCalendarProvider {
         }
     }
 
-    fn event_scope(&self, account: &AccountId) -> SyncScope {
+    fn event_scope(&self, account: &AccountId, calendar: &CalendarId) -> SyncScope {
         SyncScope::GraphCalendar {
             account: account.clone(),
-            calendar: self.calendar.clone(),
+            calendar: calendar.clone(),
         }
     }
 
@@ -223,7 +217,7 @@ impl Provider for RefreshingGraphCalendarProvider {
         &self,
         account: &AccountId,
         cursor: Option<&SyncState>,
-    ) -> ProviderResult<ScopeSync<Calendar>> {
+    ) -> ProviderResult<CalendarListing> {
         let mut provider = self.delegate().await?;
         let mut reconnected = false;
         loop {
@@ -242,12 +236,13 @@ impl Provider for RefreshingGraphCalendarProvider {
     async fn sync_events(
         &self,
         account: &AccountId,
+        calendar: &CalendarId,
         cursor: Option<&SyncState>,
     ) -> ProviderResult<ScopeSync<Event>> {
         let mut provider = self.delegate().await?;
         let mut reconnected = false;
         loop {
-            match provider.sync_events(account, cursor).await {
+            match provider.sync_events(account, calendar, cursor).await {
                 Ok(value) => return Ok(value),
                 Err(err) if !reconnected && should_reconnect(&err) => {
                     self.invalidate_delegate();
@@ -298,11 +293,11 @@ impl CalendarWrites for RefreshingGraphCalendarProvider {
 }
 
 /// Connects the Graph calendar provider a Microsoft account syncs its
-/// agenda through: **one** token-refreshing provider bound to the
-/// account's **default** calendar, the Graph parallel of a CalDAV
-/// account's primary-calendar bind. Enumerates `/me/calendars` once with
-/// a fresh token, picks the default (falling back to the first), and
-/// binds a shared-token refreshing provider carrying a fetch window
+/// agenda through: **one** token-refreshing provider serving every
+/// calendar of the account. Probes `/me/calendars` once with a fresh
+/// token, so a refused or unreachable calendar leg surfaces at the dial
+/// exactly as it did when the provider was bound to one calendar, and
+/// returns a shared-token refreshing provider carrying a fetch window
 /// centred on today and the host's `display_zone`.
 ///
 /// The dial connects this only for its non-fatal effect: a calendar
@@ -312,7 +307,9 @@ impl CalendarWrites for RefreshingGraphCalendarProvider {
 /// # Errors
 ///
 /// Returns [`AccountError`] if the initial token refresh or the
-/// calendar-list sync fails, or the account has no calendar at all.
+/// calendar-list probe fails; a scope-denied probe arrives as
+/// [`AccountError::CalendarAccessDenied`] for the caller to answer with
+/// a re-consent prompt.
 pub async fn connect_graph_calendar_providers(
     account_id: &AccountId,
     tokens: Arc<GraphTokenSource>,
@@ -320,15 +317,8 @@ pub async fn connect_graph_calendar_providers(
     tls: &TlsClientConfig,
 ) -> Result<Box<dyn Provider>, AccountError> {
     let window = rolling_window()?;
-    let calendars = list_calendars(account_id, &tokens, tls, window, display_zone.clone()).await?;
-    let calendar = calendars
-        .iter()
-        .find(|calendar| calendar.is_default)
-        .or_else(|| calendars.first())
-        .map(|calendar| calendar.id.clone())
-        .ok_or_else(|| AccountError::Graph("account has no calendar".to_owned()))?;
+    probe_calendar_list(account_id, &tokens, tls, window, display_zone.clone()).await?;
     Ok(Box::new(RefreshingGraphCalendarProvider::new(
-        calendar,
         tokens,
         window,
         display_zone,
@@ -336,25 +326,29 @@ pub async fn connect_graph_calendar_providers(
     )))
 }
 
-/// Enumerates the account's calendars (a full snapshot) with a one-off
-/// client on a fresh access token. The bound calendar is irrelevant to
-/// the `/me/calendars` list call, so any placeholder id serves to
-/// construct the probe: the parallel of the mail side's folder listing.
-async fn list_calendars(
+/// Probes the account's calendar list with a one-off client on a fresh
+/// access token: the connect-time proof the calendar leg works, and the
+/// parallel of the mail side's folder listing. An account with no
+/// calendars is an empty agenda, not a failure.
+async fn probe_calendar_list(
     account_id: &AccountId,
     tokens: &Arc<GraphTokenSource>,
     tls: &TlsClientConfig,
     window: CalendarWindow,
     display_zone: TimeZoneId,
-) -> Result<Vec<Calendar>, AccountError> {
+) -> Result<(), AccountError> {
     let token = tokens.access_token().await?;
-    let client = GraphClient::for_mailbox(token, MailboxPrincipal::Me, tls, &tokens.retry())
-        .map_err(|err| AccountError::Graph(err.to_string()))?;
-    let placeholder =
-        CalendarId::try_from("calendar").map_err(|err| AccountError::Graph(err.to_string()))?;
+    let client = GraphClient::for_mailbox(
+        token,
+        MailboxPrincipal::Me,
+        tls,
+        &tokens.retry(),
+        &user_agent(),
+    )
+    .map_err(|err| AccountError::Graph(err.to_string()))?;
     let handle = account_log_handle(account_id.as_str());
     log::debug!("graph[{handle}]: fetching the calendar list");
-    let listing = GraphCalendarProvider::new(client, placeholder, window, display_zone)
+    let listing = GraphCalendarProvider::new(client, window, display_zone)
         .sync_calendars(account_id, None)
         .await
         .map_err(|err| {
@@ -368,7 +362,7 @@ async fn list_calendars(
                 AccountError::Graph(err.to_string())
             }
         })?;
-    let calendars = match listing.update {
+    let calendars = match listing.sync.update {
         SyncUpdate::Snapshot { objects, .. } => objects,
         SyncUpdate::Delta { changed, .. } => changed,
     };
@@ -376,7 +370,7 @@ async fn list_calendars(
         "graph[{handle}]: the calendar list returned {} calendar(s)",
         calendars.len(),
     );
-    Ok(calendars)
+    Ok(())
 }
 
 /// The `calendarView` fetch window, centred on today: a few months back

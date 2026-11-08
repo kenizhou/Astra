@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/allodia-eu/email-calendar-sync-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/allodia-eu/email-calendar-sync-engine/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/allodia-eu/email-calendar-sync-engine/graph/badge.svg?token=43R3X4R59A)](https://codecov.io/gh/allodia-eu/email-calendar-sync-engine)
-![Rust 1.96+](https://img.shields.io/badge/rust-1.96%2B-orange.svg)
+![Rust 1.99+](https://img.shields.io/badge/rust-1.99%2B-orange.svg)
 
 A standalone **Rust engine for personal information management (PIM)**: local-first mail,
 calendar, and contact sync, search, indexing, and durable writes. Designed to be embedded by
@@ -83,14 +83,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ```rust
 use engine_tls::TlsClientConfig;
+use engine_http::UserAgent;
 use provider_jmap::{Credentials, JmapConfig, JmapProvider};
 
 // The bundled Mozilla roots (the engine default). For bundled ∪ OS store, custom roots, or
 // the platform verifier, build one from a policy: engine_tls::client_config(&TlsPolicy::…)?
 let tls = TlsClientConfig::bundled();
+// The host's application, named in every request's `User-Agent`.
+let agent = UserAgent::new("example-mail", "1.4.0")?;
 let config = JmapConfig::new(
     "https://jmap.example.com",
     Credentials::basic("alice@example.com", "app-password"),
+    agent,
 )
 .with_tls(tls);
 
@@ -339,7 +343,7 @@ the connection stops right there), see [`docs/outbox-and-sending.md`](docs/outbo
 │   ├── provider-google/          # Gmail + Google Calendar + People adapter
 │   ├── engine-cli/               # Headless debugging / fixture harness
 │   └── stalwart-harness/         # Docker-based protocol test harness
-├── docker/                       # Stalwart and SabreDAV test servers
+├── docker/                       # Stalwart, SabreDAV and Nextcloud test servers
 ├── tools/                        # OAuth helpers for the Graph and Google live tests
 ├── fuzz/                         # cargo-fuzz targets for the hostile-input parsers
 ├── scripts/ci/                   # The gate CI runs, runnable locally

@@ -1,4 +1,4 @@
-//! A host's credential policy over the live transport: discovery may move the connection to
+//! A host's credential policy over the live transport: discovery may lead the connection to
 //! another origin, and the credential goes there only when the policy permits that host.
 
 use std::sync::Arc;
@@ -31,20 +31,21 @@ fn port(origin: &str) -> &str {
 }
 
 #[tokio::test]
-async fn adopt_origin_refuses_a_host_the_policy_does_not_permit() {
+async fn trust_origin_refuses_a_host_the_policy_does_not_permit() {
     let (base, _) = mock_server_capturing(vec![]);
     let client = DavClient::new(
         &base,
         token(),
         &engine_tls::TlsClientConfig::default(),
         &engine_http::RetryConfig::default(),
+        &engine_http::test_server::user_agent(),
     )
     .expect("client")
     .with_credential_hosts(Some(Arc::new(Only("127.0.0.1"))));
 
-    assert!(client.adopt_origin("http://127.0.0.1:1/principals/"));
+    assert!(client.trust_origin("http://127.0.0.1:1/principals/"));
     assert!(
-        !client.adopt_origin("http://localhost:1/principals/"),
+        !client.trust_origin("http://localhost:1/principals/"),
         "a host outside the policy must not receive the credential"
     );
 }
@@ -58,8 +59,8 @@ async fn a_caldav_redirect_onto_a_refused_host_fails_the_connect_and_sends_it_no
     let (moved, moved_seen) = mock_server_capturing(vec![multistatus(EMPTY); 4]);
     let moved = format!("http://localhost:{}/dav/", port(&moved));
     let (base, _) = mock_server_capturing(vec![redirect(&moved)]);
-    let config =
-        CalDavConfig::new(base, token()).with_credential_hosts(Arc::new(Only("127.0.0.1")));
+    let config = CalDavConfig::new(base, token(), engine_http::test_server::user_agent())
+        .with_credential_hosts(Arc::new(Only("127.0.0.1")));
 
     assert!(CalDavProvider::connect(config).await.is_err());
     assert!(
@@ -74,8 +75,8 @@ async fn a_carddav_redirect_onto_a_refused_host_fails_the_connect_and_sends_it_n
     let (moved, moved_seen) = mock_server_capturing(vec![multistatus(EMPTY); 4]);
     let moved = format!("http://localhost:{}/dav/", port(&moved));
     let (base, _) = mock_server_capturing(vec![redirect(&moved)]);
-    let config =
-        CardDavConfig::new(base, token()).with_credential_hosts(Arc::new(Only("127.0.0.1")));
+    let config = CardDavConfig::new(base, token(), engine_http::test_server::user_agent())
+        .with_credential_hosts(Arc::new(Only("127.0.0.1")));
 
     assert!(CardDavProvider::connect(config).await.is_err());
     assert!(moved_seen.lock().expect("seen").is_empty());
@@ -85,22 +86,23 @@ async fn a_carddav_redirect_onto_a_refused_host_fails_the_connect_and_sends_it_n
 async fn a_base_url_on_a_refused_host_is_never_dialled() {
     let (base, seen) = mock_server_capturing(vec![multistatus(EMPTY); 4]);
     let base = format!("http://localhost:{}", port(&base));
-    let config =
-        CalDavConfig::new(base, token()).with_credential_hosts(Arc::new(Only("127.0.0.1")));
+    let config = CalDavConfig::new(base, token(), engine_http::test_server::user_agent())
+        .with_credential_hosts(Arc::new(Only("127.0.0.1")));
 
     assert!(CalDavProvider::connect(config).await.is_err());
     assert!(seen.lock().expect("seen").is_empty());
 }
 
 #[tokio::test]
-async fn without_a_policy_the_credential_follows_the_servers_redirect_as_before() {
+async fn without_a_policy_any_origin_the_server_leads_to_is_trusted() {
     let (base, _) = mock_server_capturing(vec![]);
     let client = DavClient::new(
         &base,
         token(),
         &engine_tls::TlsClientConfig::default(),
         &engine_http::RetryConfig::default(),
+        &engine_http::test_server::user_agent(),
     )
     .expect("client");
-    assert!(client.adopt_origin("http://localhost:1/principals/"));
+    assert!(client.trust_origin("http://localhost:1/principals/"));
 }

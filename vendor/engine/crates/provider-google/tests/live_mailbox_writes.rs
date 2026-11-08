@@ -42,6 +42,7 @@ fn provider(token: String) -> GmailProvider {
         token,
         &engine_tls::TlsClientConfig::bundled(),
         &engine_http::RetryConfig::default(),
+        &engine_http::test_server::user_agent(),
     )
     .expect("client");
     GmailProvider::new(client)
@@ -76,8 +77,11 @@ async fn membership(provider: &GmailProvider, key: &ProviderKey) -> Vec<String> 
         .sync_email(&account(), None)
         .await
         .expect("snapshot");
-    let SyncUpdate::Snapshot { objects, .. } = &snapshot.update else {
-        panic!("expected a snapshot");
+    let SyncUpdate::Delta {
+        changed: objects, ..
+    } = &snapshot.update
+    else {
+        panic!("a cursorless sync is an additive backfill");
     };
     objects
         .iter()

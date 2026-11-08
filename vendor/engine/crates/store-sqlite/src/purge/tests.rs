@@ -84,8 +84,8 @@ fn seed_two_accounts() -> Connection {
         .unwrap();
         conn.execute(
             "INSERT INTO pending_op
-                 (account, idempotency_key, resource_key, depends_on, payload, state, token)
-             VALUES (?1, 'idem', 'res', '[]', '{}', 'Queued', 1)",
+                 (account, idempotency_key, resource_key, depends_on, state, token)
+             VALUES (?1, 'idem', 'res', '[]', 'Queued', 1)",
             [account],
         )
         .unwrap();
@@ -124,6 +124,12 @@ fn seed_two_accounts() -> Connection {
         .unwrap();
         conn.execute(
             "INSERT INTO server_keywords (account, provider_key, keywords) VALUES (?1, ?2, '[]')",
+            (account, key),
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO source_attachment (account, provider_key, has_attachment)
+             VALUES (?1, ?2, 1)",
             (account, key),
         )
         .unwrap();

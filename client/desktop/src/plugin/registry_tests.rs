@@ -351,7 +351,7 @@ entrypoint = "echo.exe"
                 offer.privacy_policy_url.as_deref(),
                 Some("https://example.test/privacy")
             );
-            assert!(!offer.publisher_fingerprint.is_empty());
+            assert_ne!(offer.publisher_fingerprint, "");
 
             registry
                 .install(&bundle, &[Permission::ReadMailbox])

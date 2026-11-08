@@ -32,7 +32,7 @@ fn one_shared_file_becomes_one_attachment() {
     assert_eq!(prefill.attachments[0].path, "/cache/stage-1");
     assert_eq!(prefill.attachments[0].file_name, "report.pdf");
     assert_eq!(prefill.attachments[0].media_type, "application/pdf");
-    assert!(prefill.rejected.is_empty());
+    assert_eq!(prefill.rejected, [] as [crate::share::RejectedItem; 0]);
     assert!(!prefill.is_empty());
 }
 
@@ -42,7 +42,7 @@ fn an_empty_share_is_empty_rather_than_an_error() {
     // a client reads `is_empty` and ignores the launch.
     let prefill = prefill_from_share(ShareRequest::default());
     assert!(prefill.is_empty());
-    assert!(prefill.rejected.is_empty());
+    assert_eq!(prefill.rejected, [] as [crate::share::RejectedItem; 0]);
 }
 
 #[test]

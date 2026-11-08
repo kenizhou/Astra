@@ -143,7 +143,7 @@ fn an_exotic_rule_falls_back_to_the_bare_interval_and_frequency() {
     rule.bound = RecurrenceBound::Count(NonZeroU32::new(8).unwrap());
     let read = worded(rule).expect("a bare sentence still words");
     assert_eq!(read.sentence, "Repeats every month.");
-    assert!(read.days.is_empty());
+    assert_eq!(read.days, [] as [engine_api::Weekday; 0]);
     assert_eq!(read.end, None);
 }
 
@@ -169,7 +169,7 @@ fn a_day_set_on_a_long_frequency_stays_bare() {
     }];
     let read = worded(rule).expect("the cadence still words");
     assert_eq!(read.sentence, "Repeats every month.");
-    assert!(read.days.is_empty());
+    assert_eq!(read.days, [] as [engine_api::Weekday; 0]);
 }
 
 #[test]
@@ -182,7 +182,7 @@ fn a_recurrence_of_two_rules_words_only_the_first_cadence() {
     };
     let read = rule_read(&recurrence).expect("the union still words its first cadence");
     assert_eq!(read.sentence, "Repeats every week.");
-    assert!(read.days.is_empty());
+    assert_eq!(read.days, [] as [engine_api::Weekday; 0]);
     assert_eq!(read.end, None);
 }
 
@@ -194,7 +194,7 @@ fn an_exclusion_carrying_recurrence_stays_bare() {
         .push(RecurrenceRule::new(Frequency::Daily));
     let read = rule_read(&recurrence).expect("the base cadence still words");
     assert_eq!(read.sentence, "Repeats every week.");
-    assert!(read.days.is_empty());
+    assert_eq!(read.days, [] as [engine_api::Weekday; 0]);
     assert_eq!(read.end, None);
 }
 

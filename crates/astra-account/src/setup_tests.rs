@@ -172,7 +172,10 @@ fn an_accepted_certificate_is_stored_and_reaches_the_engine() {
 fn no_exception_is_written_when_none_was_accepted() {
     let toml = build_config_toml(&full_setup()).unwrap();
     assert!(!toml.contains("certificate_exception"));
-    assert!(load_str(&toml).unwrap().certificate_exceptions.is_empty());
+    assert_eq!(
+        load_str(&toml).unwrap().certificate_exceptions,
+        [] as [crate::tls::CertificateException; 0]
+    );
 }
 
 /// A sign-in grant builds an account that carries no stored password; the credential it

@@ -91,9 +91,12 @@ impl<P: Provider> App<P> {
             Err(err) if err.is_conflict() => {
                 log::info!("calendar: the meeting was already on the calendar; using it");
                 self.clear_calendar_write(account);
+                // The copy the server already deposited sits on the
+                // calendar the write named, so that one calendar's scope
+                // is the delta that finds it.
                 let _ = self
                     .engine
-                    .reconcile_calendar_events(provider, account)
+                    .reconcile_calendar_events(provider, account, &collection.id)
                     .await;
             }
             Err(err) => {

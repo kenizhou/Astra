@@ -143,7 +143,7 @@ fn no_decision_is_undecided_by_default() {
     insert_smime_leaf(&store, "peer@x.com");
     let status = resolve_recipient_status(&store, "a1", Standard::Smime, "peer@x.com");
     assert_eq!(status.state, RecipientTrustState::Undecided);
-    assert!(status.accepted_elsewhere.is_empty());
+    assert_eq!(status.accepted_elsewhere, [] as [std::string::String; 0]);
 }
 
 #[test]

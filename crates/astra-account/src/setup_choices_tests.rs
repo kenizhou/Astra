@@ -134,9 +134,12 @@ fn jmap_and_manual_routes_have_no_choices_before_sign_in() {
         caldav_url: Some(CALDAV.to_owned()),
         carddav_url: None,
     };
-    assert!(jmap.choices().is_empty());
+    assert_eq!(jmap.choices(), [] as [crate::setup_choices::SetupChoice; 0]);
     let manual = SetupRecommendation::Manual {
         reason: MissReason::NothingFound,
     };
-    assert!(manual.choices().is_empty());
+    assert_eq!(
+        manual.choices(),
+        [] as [crate::setup_choices::SetupChoice; 0]
+    );
 }

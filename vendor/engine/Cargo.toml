@@ -6,7 +6,7 @@ members = ["crates/*"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.96"
+rust-version = "1.99"
 publish = false
 license = "MPL-2.0"
 
@@ -70,6 +70,9 @@ debug = 0
 # `target/debugger/` rather than `target/debug/`, so turning it on does not evict the warm dev
 # cache — at the cost of a second target dir while it exists, so `cargo clean -p <crate>` it
 # afterwards.
+#
+# Not Cargo's built-in `debug` profile (new in 1.99): that one is `dev` under another name, and
+# writes to `target/debug/` beside it, which is the directory this profile exists to stay out of.
 [profile.debugger]
 inherits = "dev"
 debug = true
@@ -155,7 +158,12 @@ quick-xml = "0.42.0"
 # it is pure Rust so it cross-compiles to mobile like the rest of the stack. The
 # `full_encoding` feature (no longer default since 0.11.2) pulls the full legacy
 # charset tables so non-UTF-8 bodies decode correctly.
-mail-parser = { version = "0.11.4", default-features = false, features = ["full_encoding"] }
+mail-parser = { version = "1.0.1", default-features = false, features = ["full_encoding"] }
+# The RFC 2047 encoded-word decoder mail-parser itself runs on header text
+# (`engine-mime::encoded_word`), with mail-parser's charset table plugged in. 1.0 moved
+# the codecs out of mail-parser into this crate, which it already depends on, so this adds
+# nothing to the tree; it is kept on the same version mail-parser resolves.
+encodify = "1.0.2"
 # Content addressing for the on-disk raw-message/attachment blob area
 # (`store-sqlite`): blobs are named by the SHA-256 of their bytes, deduping IMAP
 # copies of one message and giving filesystem-safe, fixed-length names. Pure Rust,
@@ -203,7 +211,7 @@ missing_docs = "warn"
 missing_debug_implementations = "warn"
 unreachable_pub = "warn"
 
-# Rustdoc's lints, denied here rather than only through CI's `RUSTDOCFLAGS: -D warnings`. Without
+# Rustdoc's lints, denied here rather than only through CI's `CARGO_BUILD_WARNINGS: deny`. Without
 # this a broken doc link is a *warning* locally and an error on the runner, so the `cargo doc` line
 # in AGENTS.md — the one that exists to catch exactly this — cannot fail on a developer's machine.
 [workspace.lints.rustdoc]

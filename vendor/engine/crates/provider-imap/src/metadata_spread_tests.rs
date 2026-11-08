@@ -102,7 +102,7 @@ async fn each_connection_asks_for_its_own_share_and_the_answers_are_merged() {
 
     let settled = settle_across(&mut conn, helpers, &mut open).await.unwrap();
 
-    assert!(open.is_empty());
+    assert_eq!(open, []);
     let mut uids: Vec<_> = settled
         .iter()
         .map(|row| (row.uid, row.has_attachment))
@@ -200,5 +200,33 @@ async fn every_share_keeps_to_the_servers_message_limit() {
     assert!(
         helper.contains("a2 UID FETCH 6 (UID BODYSTRUCTURE)"),
         "{helper}"
+    );
+}
+
+/// A new connection signs in before it can help, which on Yahoo takes a second and a half, so
+/// the helpers are dialled at once: three in turn kept a first sync's rows waiting five seconds.
+#[tokio::test(start_paused = true)]
+async fn helpers_are_dialled_at_once() {
+    let scripts = Arc::new(Mutex::new(VecDeque::from(
+        (0..3).map(|_| examined("a1", 7)).collect::<Vec<_>>(),
+    )));
+    let dial: Dial<MockStream> = Arc::new(move || {
+        let next = scripts.lock().unwrap().pop_front().unwrap_or_default();
+        let (stream, _) = MockStream::new(script(&[GREETING, &next]));
+        Box::pin(async move {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            Connection::open(stream).await
+        })
+    });
+    let pool = ImapPool::new(dial, 5, NEVER_CHECK);
+    let started = tokio::time::Instant::now();
+
+    let helpers = spare_helpers(Some(&pool), "INBOX", 7, 500).await;
+
+    assert_eq!(helpers.len(), 3);
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "three helpers took {:?}",
+        started.elapsed()
     );
 }

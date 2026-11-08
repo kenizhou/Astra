@@ -102,7 +102,10 @@ mod tests {
 
     #[test]
     fn identifiers_are_not_flagged() {
-        assert!(super::find_americanisms("CategorizeSender and summarize_thread_id").is_empty());
+        assert_eq!(
+            super::find_americanisms("CategorizeSender and summarize_thread_id"),
+            [] as [std::string::String; 0]
+        );
         assert_eq!(super::find_americanisms("the color").len(), 1);
     }
 

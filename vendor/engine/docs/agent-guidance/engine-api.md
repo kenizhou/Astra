@@ -255,8 +255,11 @@ Step 6 lands in small, tested slices. Order and status:
      response is a *receipt*, not a document (a CalDAV `PUT` answers with an `ETag` and no
      body; a JMAP `/set` with an id and no object), so the driver alone would leave the row
      holding the **pre-write** projection, `raw_ical` and revision. Each facade write
-     therefore runs `engine_sync::reconcile_calendar_events` — an **event-scope delta**, one
-     round trip, the same primitive a sync reads through — the moment the write lands. The
+     therefore runs `engine_sync::reconcile_calendar_events` — an **event-scope delta** of the
+     calendar the write touched, one round trip, the same primitive a sync reads through —
+     the moment the write lands. A create reconciles its draft's calendar and an edit the
+     calendars of its base event; a write that names only an event id finds its calendars in
+     the store, and reconciles every listed calendar when the store does not hold the event. The
      store then holds what the **server** holds, a delete is tombstoned locally, and an edit
      that moved the event moves its occurrence rows. That is what makes "edit, re-read, edit
      again" work: the second edit's guard is the revision the *server* reported, not the
@@ -370,7 +373,11 @@ facade"*).
   not recorded), `false` for every other failure, which means the write was not applied
   (`providers.md`). For a calendar or contact write and a send it is the same answer on every
   provider, so a host never asks which one it was. Mail and folder edits do not classify a
-  lost answer, so for them `false` does not mean "not applied". The one deliberate exception is `ScopeHeld`,
+  lost answer, so for them `false` does not mean "not applied". A failed read of one item asks
+  `ApiError::item_unavailable()`: `true` only for a `ProviderError::item_unavailable`, an item
+  the provider stored but can never serve, so a host may stop asking for it. Any other
+  permanent failure may be about the account or the request, and says nothing about the item.
+  The one deliberate exception is `ScopeHeld`,
   which `map_sync_error` classifies as `ApiError::Busy` (a retryable race, not a
   failure) — classification, not restringing. Add similar classifications there if
   another error class deserves a distinct host signal.
@@ -381,12 +388,24 @@ facade"*).
   read when a host asks. What the engine owns there is the protocol.
   Passing a call straight to the provider is legitimate when the answer is not ours to
   keep; reach for the outbox when a side effect must survive a crash.
+  `list_shared_mailboxes`/`resolve_shared_mailbox` are the second pair: which mailboxes a
+  credential can open is the server's to say, and a discovered store becomes an account only
+  when the host onboards it — under an `AccountId` of its choosing, with a provider bound to
+  the returned handle through the adapter that produced it. Read
+  `Capabilities::shared_mailboxes()` first: `Enumerable` affords a list to pick from,
+  `ByAddress` needs the user to type an address, `Unsupported` means neither verb answers.
+  The re-exported `SharedMailbox`, `SharedMailboxes`, `SharedMailboxId` and `MailboxAccess`
+  are everything a host names along the way (`tests/shared_mailboxes.rs` imports nothing else).
 - **Reject host input at the facade, before any request.** `set_sender_name` refuses a
   name carrying a control character or longer than 128 characters, as
   `ApiError::InvalidInput`. The RFC 5322 assembler refuses the same bytes, but by then
   the user has a mailbox that cannot send and no idea why — and the error message names
   the offending codepoint rather than echoing it, since an error travels into logs and
   dialogs and would carry the injected payload with it.
+  `resolve_shared_mailbox` applies the same rule to the address a user typed: anything that is
+  not one `local@domain` of at most 254 octets, free of whitespace and control characters, is
+  `InvalidInput` before any request. A shape check, not a grammar — an adapter may refuse more
+  (Graph refuses the path separators it re-parses) — but nothing that fails it reaches one.
 - **The clock is a wall clock, not monotonic.** `now()` is whole-second and can
   step backward (NTP); do not write code or tests that assume monotonic `now()`.
   Lease safety across a step rests on the TTL + `StaleLease` reclaim in the sync

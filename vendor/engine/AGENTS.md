@@ -113,6 +113,7 @@ stop and check whether the other providers have the same hole.
 - If a new decision supersedes a doc's wording, rewrite the wording and record the rationale when it is non-obvious. Treat the docs as authoritative for the next agent: code and docs disagreeing is a bug to fix, not a discrepancy to leave.
 - In the final summary, list which guidance docs you updated and why — or state explicitly that none needed changes.
 - If the change came from a provider-specific symptom, the final summary also carries the cross-provider survey required by "Provider-neutral by default".
+- A server departing from the RFC that governs it is recorded in [`docs/spec-deviations.md`](docs/spec-deviations.md), the one authoritative list, in the same change that copes with it; the code that copes cites the entry's id. The doc says how to add one.
 
 ## Test-Driven Workflow
 
@@ -139,6 +140,7 @@ impractical:
 |---|---|---|
 | JMAP · IMAP · CalDAV · CardDAV | the Dockerized **Stalwart** harness (`docker/stalwart`) | `scripts/ci/stalwart-live.sh` / the `stalwart-live` skill; `crates/provider-{jmap,imap}/tests/live_*.rs` |
 | CalDAV (a second implementation) | the **SabreDAV** fixture (`docker/sabredav`) | `crates/provider-caldav/tests/live_sabredav.rs` |
+| CalDAV · CardDAV (a real deployment) | the **Nextcloud** fixture (`docker/nextcloud`) | `crates/provider-caldav/tests/live_nextcloud.rs`, `live_nextcloud_contacts.rs` |
 | Gmail · Google Calendar · Google People | a **throwaway Google test account** | `tools/google-oauth` mints the token; `crates/provider-google/tests/live_*.rs` |
 | Microsoft Graph | a **test Microsoft account** | `tools/graph-oauth` mints the token; `crates/provider-graph/tests/live_*.rs` |
 | IMAP/SMTP **SASL OAuth** (`OAUTHBEARER`, `XOAUTH2`) | a **throwaway Gmail account**; a **Yahoo test account** once its mail scope is approved | `tools/google-oauth token` (its default scope is already `https://mail.google.com/`) and `tools/yahoo-oauth` mint the tokens; `crates/provider-imap/tests/live_imap_oauth.rs`. Gmail advertises **both** mechanisms and so does Yahoo (observed — Yahoo's docs say otherwise), so the target does not pick the mechanism; the client's preference does. |
@@ -251,7 +253,7 @@ command non-interactively: `view` needs `--json`, `submit` needs `--auto`, and `
 
 **Run this full gate and make it pass before every `git push`** (not only at final hand-off). It
 mirrors the CI **"Format, lint, build, test, docs"** job *exactly* — same commands, same
-warnings-as-errors (`RUSTFLAGS`/`RUSTDOCFLAGS = -D warnings`) — so green here means green there.
+warnings-as-errors (`CARGO_BUILD_WARNINGS=deny`) — so green here means green there.
 Skipping `cargo fmt` (or running `--check` without fixing) has failed this job on many PRs; a
 freshly hand-written line that overflows the width is the usual culprit, and CI catches it even
 though the code compiles. So: **`cargo +nightly fmt --all` first, then verify.** Note that
@@ -262,7 +264,7 @@ it — hand-wrap those lines yourself.
 Format on **nightly**: the workspace [`rustfmt.toml`](rustfmt.toml) uses nightly-only options
 (crate-granular grouped imports, `wrap_comments`, `style_edition = "2024"`,
 `error_on_line_overflow`, …), so a plain stable `cargo fmt` silently ignores them and leaves the
-repo unformatted. CI runs the fmt check on a **pinned** nightly (`nightly-2026-07-07`, in
+repo unformatted. CI runs the fmt check on a **pinned** nightly (`nightly-2026-10-28`, in
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)) so its output is reproducible against what
 you run locally; bump that pin **and** re-run fmt when intentionally adopting a newer nightly.
 
@@ -276,11 +278,10 @@ where those get fixed rather than a red build on someone's unrelated change. The
 MSRV — that floor is `rust-version` in the root `Cargo.toml` and moves independently.
 
 ```sh
-scripts/dev/claim-build-dir.sh        # make what follows judge THIS checkout (see below)
 scripts/ci/check-file-length.sh       # every tracked *.rs must be <= 500 lines
 scripts/ci/check-fixture-identifiers.sh   # no real domains in fixtures or docs
 cargo +nightly fmt --all              # fix formatting first (nightly rustfmt.toml)
-export RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings"   # match CI: warnings are errors
+export CARGO_BUILD_WARNINGS=deny      # match CI: warnings are errors
 cargo +nightly fmt --all --check      # must now be clean
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo build --workspace --all-features
@@ -288,22 +289,24 @@ cargo test --workspace --all-features
 cargo doc --workspace --all-features --no-deps
 ```
 
-⚠️ **`claim-build-dir.sh` is not decoration on the first line either.**
-[`.cargo/config.toml`](.cargo/config.toml) points `build.build-dir` at one directory every checkout
-shares, so the dependency compile is paid for once rather than once per worktree. **Cargo cannot
-tell those checkouts apart.** It names an artifact, and the fingerprint guarding it, from the
-workspace-*relative* path, so they all land on the same `deps/<crate>-<hash>` and the same
-fingerprint entry, and freshness then comes down to mtimes against a relative file list. A checkout
-whose sources predate the build another checkout last ran is declared **fresh** and is handed that
-checkout's binary: a suite reports `ok` for an assertion this tree cannot satisfy, and a worktree
-created before another worktree built is exactly the shape that collects it.
+**Every checkout builds in its own `target/`**, Cargo's default, so a new worktree's first build
+compiles the whole dependency tree and holds several GB of its own. ⚠️ Never point two checkouts at
+one build directory, a personal `build-dir` or `CARGO_TARGET_DIR` included: Cargo cannot tell them
+apart and hands one the other's binaries, so a suite passes for code this tree does not contain
+([`.cargo/config.toml`](.cargo/config.toml)). Sharing compile work between worktrees is kache's
+job, set up once per machine
+([`docs/agent-guidance/rust.md`](docs/agent-guidance/rust.md) → "Share the compile work with
+kache").
 
-The script leaves a marker naming the checkout whose artifacts are in there, and runs
-`cargo clean --workspace` when the marker names someone else, which drops the *members'* artifacts
-and leaves every dependency compiled. So it costs a rebuild of this repository's own crates after a
-switch, and nothing at all when you built here last. Everything outside the gate — a `cargo test`
-typed by hand — claims nothing and is not covered, so when a result cannot be squared with the diff,
-run the gate, or re-run the step with `CARGO_BUILD_BUILD_DIR` pointed somewhere private.
+**Warnings are denied through Cargo, not through `RUSTFLAGS`.** `CARGO_BUILD_WARNINGS=deny`
+(Cargo's `build.warnings`) fails any build, clippy, test or doc run in which one of this
+workspace's crates emits a lint warning, including one replayed from a crate that was already
+built. `RUSTFLAGS="-D warnings"`, which this gate used to export, does the same job but is part of
+every unit's fingerprint, dependencies included: measured on `engine-http`, turning it on
+recompiled all 129 units, and turning it off again compiled none, because the two settings keep
+**two complete sets of artifacts** side by side. So every checkout that ran both the gate and a
+plain `cargo test` held the dependency tree twice. `build.warnings` changes no fingerprint, so the
+gate and a hand-typed command share one set.
 
 **`--all-features` is not decoration on the test line.** A plain `cargo test --workspace` builds 32
 test binaries here; with `--all-features` it builds 91. The difference is whole suites — the scale

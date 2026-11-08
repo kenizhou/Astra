@@ -254,10 +254,16 @@ fn the_default_snapshot_crosses_as_an_empty_object() {
     // key except by being present, so a cold host renders an empty list, not a
     // zeroed one.
     let snapshot = PeopleSnapshot::default();
-    assert!(snapshot.rows.is_empty());
+    assert_eq!(snapshot.rows, [] as [crate::people::PersonRow; 0]);
     assert!(snapshot.detail.is_none());
-    assert!(snapshot.write_states.is_empty());
-    assert!(snapshot.create_targets.is_empty());
+    assert_eq!(
+        snapshot.write_states,
+        [] as [crate::people::PeopleWriteRow; 0]
+    );
+    assert_eq!(
+        snapshot.create_targets,
+        [] as [crate::people::CreateTargetRow; 0]
+    );
 
     let wire = serde_json::to_value(&snapshot).expect("the default serialises");
     assert_eq!(wire, serde_json::json!({}));

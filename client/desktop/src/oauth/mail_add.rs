@@ -281,7 +281,6 @@ pub(crate) type MailCompletion = Box<
 /// The completion over the real exchange and the account half: the
 /// document the exchange answers is registered, dialled, and persisted
 /// exactly as the wizard's password leg adds an account.
-#[must_use]
 pub(crate) fn production_mail_completion(
     state: &crate::AppState,
     runtime: &AppRuntime,
