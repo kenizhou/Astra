@@ -58,7 +58,12 @@ as reviewable merges instead of a manual re-pin. The loop:
   dependencies (`Cargo.toml`, `Cargo.lock`), behaviour, security. The
   dependencies bucket names rusqlite/libsqlite3-sys explicitly: the two
   stores share one libsqlite3-sys, so an upstream rusqlite bump can break
-  Astra in the same build.
+  Astra in the same build. Every `gh` call names the repository (`-R`): the
+  scheduled shell starts in no repository at all, and gh's own git
+  discovery fails there (the bug that once left five revisions pushed with
+  no PR). A range with no security classification opens READY and arms
+  GitHub auto-merge (`--auto --merge`, a merge commit, green gate); a
+  security-classified range opens as a draft and waits for morning review.
 - **Sync PRs merge with a merge commit, never squash.** A squash merge
   means the branch tip never becomes an ancestor of main, every later sync
   re-diffs the whole tree, and the conflict-surfacing mechanism dies. (The

@@ -56,7 +56,12 @@ Astra 如何跟踪其四个参考项目。规则手册（AGENTS.md）链接到�
   分类 digest：docs only、tests only、ci-docker、dependencies
   （`Cargo.toml`、`Cargo.lock`）、behaviour、security。dependencies
   桶显式点名 rusqlite/libsqlite3-sys：两家存储共享一个 libsqlite3-sys，
-  上游 bump rusqlite 可能在同一次构建中打坏 Astra。
+  上游 bump rusqlite 可能在同一次构建中打坏 Astra。每次 `gh` 调用都
+  显式命名仓库（`-R`）：计划任务的 shell 起始于任何仓库之外，gh 自己
+  的 git 发现会在那里失败（这个 bug 曾让五个版本推送后没有 PR）。无
+  security 分类的区间以 READY 开启并武装 GitHub auto-merge（`--auto
+  --merge`，merge commit，绿门）；带 security 分类的区间以草稿开启，
+  等早晨审阅。
 - **同步 PR 一律用 merge commit 合并，绝不 squash。** squash 意味着分
   支尖端永远不是 main 的祖先，此后每次同步都会重新全量 diff，冲突显
   形机制随之失效。（备选 —— 每次 squash 后在 `vendor-sync` 上
