@@ -156,6 +156,6 @@ fn delete_removes_the_snippet_and_reports_an_unknown_id() {
 fn generated_snippet_ids_are_distinct_and_nonempty() {
     let first = SnippetId::generate();
     let second = SnippetId::generate();
-    assert!(!first.as_str().is_empty());
+    assert_ne!(first.as_str(), "");
     assert_ne!(first, second);
 }

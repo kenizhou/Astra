@@ -159,6 +159,6 @@ fn forget_removes_the_entry_and_reports_an_unknown_id() {
 fn generated_knowledge_ids_are_distinct_and_nonempty() {
     let first = KnowledgeId::generate();
     let second = KnowledgeId::generate();
-    assert!(!first.as_str().is_empty());
+    assert_ne!(first.as_str(), "");
     assert_ne!(first, second);
 }

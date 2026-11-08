@@ -77,7 +77,10 @@ fn colleagues_are_asked_for_only_beside_contacts() {
 #[test]
 fn a_grant_nobody_recorded_withholds_nothing() {
     let all = Capability::ALL.to_vec();
-    assert!(withheld(&GOOGLE, &all, None).is_empty());
+    assert_eq!(
+        withheld(&GOOGLE, &all, None),
+        [] as [crate::setup_choices::Capability; 0]
+    );
 }
 
 #[test]
@@ -104,11 +107,17 @@ fn a_missing_scope_that_serves_one_feature_withholds_nothing() {
         "https://www.googleapis.com/auth/calendar".to_owned(),
     ];
     let chosen = [Capability::Mail, Capability::Calendar];
-    assert!(withheld(&GOOGLE, &chosen, Some(&granted)).is_empty());
+    assert_eq!(
+        withheld(&GOOGLE, &chosen, Some(&granted)),
+        [] as [crate::setup_choices::Capability; 0]
+    );
 }
 
 #[test]
 fn a_use_nobody_chose_is_never_withheld() {
     let granted = vec!["https://mail.google.com/".to_owned()];
-    assert!(withheld(&GOOGLE, &[Capability::Mail], Some(&granted)).is_empty());
+    assert_eq!(
+        withheld(&GOOGLE, &[Capability::Mail], Some(&granted)),
+        [] as [crate::setup_choices::Capability; 0]
+    );
 }

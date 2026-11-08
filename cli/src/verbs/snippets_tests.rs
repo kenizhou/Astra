@@ -155,7 +155,7 @@ fn the_create_preview_prints_the_exact_snippet_a_run_stores() {
         .data()
         .unwrap()["snippets"][0]
         .clone();
-    assert!(!stored["id"].as_str().unwrap().is_empty());
+    assert_ne!(stored["id"].as_str().unwrap(), "");
     assert_eq!(stored["title"], shown["title"]);
     assert_eq!(stored["body"], shown["body"]);
 }

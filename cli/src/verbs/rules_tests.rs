@@ -275,7 +275,7 @@ fn the_create_preview_prints_the_exact_rule_a_run_stores() {
         .data()
         .unwrap()["rules"][0]
         .clone();
-    assert!(!stored["id"].as_str().unwrap().is_empty());
+    assert_ne!(stored["id"].as_str().unwrap(), "");
     assert_eq!(stored["name"], shown["name"]);
     assert_eq!(stored["condition"], shown["condition"]);
     assert_eq!(stored["enabled"], shown["enabled"]);

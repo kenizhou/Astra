@@ -273,7 +273,10 @@ async fn clearing_the_section_tears_the_legs_and_their_domains_down() {
     app.dispatch(Intent::Calendar(CalendarIntent::Refresh))
         .await
         .unwrap();
-    assert!(!app.calendar().calendars.is_empty());
+    assert_ne!(
+        app.calendar().calendars,
+        [] as [astra_viewmodel::CalendarRow; 0]
+    );
 
     save(&app, None).await;
 

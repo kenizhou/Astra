@@ -152,7 +152,7 @@ fn a_bodyless_reading_snapshot_parses_without_optional_keys() {
     .unwrap();
     assert_eq!(back.html, None);
     assert_eq!(back.plain, None);
-    assert!(back.attachments.is_empty());
+    assert_eq!(back.attachments, [] as [crate::reading::AttachmentRow; 0]);
 }
 
 #[test]

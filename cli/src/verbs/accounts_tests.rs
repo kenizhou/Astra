@@ -72,7 +72,7 @@ fn a_generated_correlation_id_lands_when_none_was_passed() {
     );
     let rows = audit_rows(&dir);
     assert_eq!(rows.len(), 1);
-    assert!(!rows[0].0.is_empty());
+    assert_ne!(rows[0].0, "");
 }
 
 #[test]

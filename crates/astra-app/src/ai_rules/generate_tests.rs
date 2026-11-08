@@ -173,7 +173,7 @@ async fn an_empty_rules_array_is_an_honest_empty_result() {
     let rules = prompt_to_rules("nothing applicable", &CorrelationId::generate(), &seam)
         .await
         .expect("an empty array parses");
-    assert!(rules.is_empty());
+    assert_eq!(rules, [] as [crate::ai_rules::Rule; 0]);
 }
 
 #[tokio::test]

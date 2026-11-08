@@ -96,7 +96,10 @@ fn an_entry_without_a_detail_omits_the_field_on_the_wire() {
 fn a_fresh_snapshot_is_empty_and_round_trips() {
     let snapshot = SyncProgressSnapshot::default();
 
-    assert!(snapshot.accounts.is_empty());
+    assert_eq!(
+        snapshot.accounts,
+        [] as [crate::sync_progress::AccountSyncProgress; 0]
+    );
     let back: SyncProgressSnapshot =
         serde_json::from_value(serde_json::to_value(&snapshot).expect("serialises"))
             .expect("reads back");

@@ -207,7 +207,10 @@ async fn the_visible_set_hides_and_shows_whole_calendars() {
     }))
     .await
     .unwrap();
-    assert!(app.calendar().occurrences.is_empty());
+    assert_eq!(
+        app.calendar().occurrences,
+        [] as [astra_viewmodel::OccurrenceRow; 0]
+    );
 }
 
 #[tokio::test]

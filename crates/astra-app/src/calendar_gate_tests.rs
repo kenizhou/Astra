@@ -174,7 +174,10 @@ async fn a_refused_write_surfaces_the_failed_with_retry_row() {
     app.dispatch(Intent::Calendar(CalendarIntent::Refresh))
         .await
         .unwrap();
-    assert!(app.calendar().write_states.is_empty());
+    assert_eq!(
+        app.calendar().write_states,
+        [] as [astra_viewmodel::CalendarWriteRow; 0]
+    );
     assert_eq!(
         app.calendar()
             .occurrences

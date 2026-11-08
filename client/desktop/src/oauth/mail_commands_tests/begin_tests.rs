@@ -321,5 +321,5 @@ fn a_setup_that_cannot_build_refuses_the_begin() {
         matches!(error, OAuthCommandError::Discover(_)),
         "the unbuildable setup is a discovery refusal: {error}"
     );
-    assert!(browser.urls().is_empty());
+    assert_eq!(browser.urls(), [] as [std::string::String; 0]);
 }

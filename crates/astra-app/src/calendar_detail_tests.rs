@@ -181,7 +181,10 @@ async fn a_one_off_crosses_no_rule_and_no_roll_call() {
         .await
         .expect("the appointment read");
     assert_eq!(detail.rule, None, "a one-off carries no rule to word");
-    assert!(detail.participants.is_empty());
+    assert_eq!(
+        detail.participants,
+        [] as [astra_viewmodel::ParticipantRow; 0]
+    );
     assert_eq!(detail.folded_participants, 0);
 }
 

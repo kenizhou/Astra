@@ -359,7 +359,7 @@ async fn a_scope_that_searches_no_account_states_a_zero_depth() {
     .unwrap();
     let snapshot = app.mailbox_list();
     let state = snapshot.search.as_ref().unwrap();
-    assert!(state.rows.is_empty());
+    assert_eq!(state.rows, [] as [astra_viewmodel::MessageRowView; 0]);
     assert_eq!(
         state.depth_months, 0,
         "no account was searched, so the horizon claims nothing"

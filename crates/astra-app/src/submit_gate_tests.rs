@@ -216,7 +216,7 @@ async fn a_prompt_send_anyway_queues_and_a_deny_drops_the_hold() {
     .await
     .unwrap();
     assert_eq!(submits.lock().unwrap().len(), 1, "Send Anyway queued it");
-    assert!(app.sending().held.is_empty());
+    assert_eq!(app.sending().held, [] as [astra_viewmodel::HeldSend; 0]);
 }
 
 #[tokio::test]
@@ -246,7 +246,7 @@ async fn a_retry_re_gates_the_held_send() {
         .unwrap();
 
     assert_eq!(submits.lock().unwrap().len(), 1, "the retry went out");
-    assert!(app.sending().held.is_empty());
+    assert_eq!(app.sending().held, [] as [astra_viewmodel::HeldSend; 0]);
     assert_eq!(
         gate.seen.lock().unwrap().len(),
         2,
@@ -349,5 +349,5 @@ async fn without_a_gate_installed_the_submit_costs_nothing() {
     app.dispatch(send("Agreed")).await.unwrap();
 
     assert_eq!(submits.lock().unwrap().len(), 1);
-    assert!(app.sending().held.is_empty());
+    assert_eq!(app.sending().held, [] as [astra_viewmodel::HeldSend; 0]);
 }

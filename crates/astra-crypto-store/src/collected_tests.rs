@@ -49,15 +49,13 @@ fn stage_then_list_for_peer_newest_first() {
     assert!(!rows[0].seen_at.is_empty(), "seen_at stamped server-side");
 
     // Filters scope correctly: another peer / standard sees nothing.
-    assert!(
-        list_collected_keys_for_peer(&store, "a1", "other@x.com", "openpgp")
-            .unwrap()
-            .is_empty()
+    assert_eq!(
+        list_collected_keys_for_peer(&store, "a1", "other@x.com", "openpgp").unwrap(),
+        [] as [crate::collected::CollectedKeyRow; 0]
     );
-    assert!(
-        list_collected_keys_for_peer(&store, "a1", "peer@x.com", "smime")
-            .unwrap()
-            .is_empty()
+    assert_eq!(
+        list_collected_keys_for_peer(&store, "a1", "peer@x.com", "smime").unwrap(),
+        [] as [crate::collected::CollectedKeyRow; 0]
     );
 }
 
@@ -135,9 +133,10 @@ fn remove_and_clear_scoped_to_the_account() {
 
     let cleared = clear_collected_keys(&store, "a1").unwrap();
     assert_eq!(cleared, 1);
-    assert!(list_collected_keys_for_account(&store, "a1", "openpgp")
-        .unwrap()
-        .is_empty());
+    assert_eq!(
+        list_collected_keys_for_account(&store, "a1", "openpgp").unwrap(),
+        [] as [crate::collected::CollectedKeyRow; 0]
+    );
 }
 
 #[test]

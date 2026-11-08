@@ -91,7 +91,6 @@ pub(crate) type JmapCompletion = Box<
 /// The completion over the real exchange and the account half: the
 /// document the exchange answers is added exactly as the wizard's
 /// password leg adds one.
-#[must_use]
 pub(crate) fn production_jmap_completion(state: &AppState, runtime: &AppRuntime) -> JmapCompletion {
     let wiring = super::jmap_add::JmapAccountWiring::from_state(state, runtime);
     let dial = super::jmap_add::production_jmap_dial();

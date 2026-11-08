@@ -56,7 +56,7 @@ async fn a_ranked_search_answers_the_matched_snippets_in_order() {
 async fn an_empty_library_answers_without_a_call() {
     let complete = FixtureComplete::scripted(&[]);
     let matched = search_snippets("anything", &[], &CorrelationId::generate(), &complete).await;
-    assert!(matched.is_empty());
+    assert_eq!(matched, [] as [crate::ai_assist::snippets::Snippet; 0]);
     assert_eq!(complete.call_count(), 0, "nothing to rank, no call");
 }
 

@@ -238,7 +238,7 @@ async fn a_key_naming_no_message_is_a_runtime_error() {
         message.contains("no message"),
         "the failure names the missing message: {message}"
     );
-    assert!(provider.mail_edits().is_empty());
+    assert_eq!(provider.mail_edits(), [] as [engine_api::MailEdit; 0]);
 }
 
 #[tokio::test]

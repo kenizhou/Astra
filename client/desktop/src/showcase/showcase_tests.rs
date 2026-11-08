@@ -159,14 +159,17 @@ fn every_dispatch_settles_and_the_async_pulls_answer_their_empties() {
         let key = engine_api::ProviderKey::new("imap:v1:u42").expect("a provider key");
         app.draft_chips(&account, &key).await
     });
-    assert!(chips.is_empty());
-    assert!(app.snippet_list().is_empty());
-    assert!(app.knowledge_list(&account).is_empty());
+    assert_eq!(chips, [] as [astra_app::Chip; 0]);
+    assert_eq!(app.snippet_list(), [] as [astra_app::Snippet; 0]);
+    assert_eq!(
+        app.knowledge_list(&account),
+        [] as [astra_app::KnowledgeView; 0]
+    );
     let composition = astra_app::CompositionId::new("c-1".to_owned()).expect("a composition id");
     let resumed =
         runtime.block_on(|| async { app.resume_latest_draft(&account, composition).await });
     assert!(resumed.is_none());
-    assert!(app.sending().rows.is_empty());
+    assert_eq!(app.sending().rows, [] as [astra_viewmodel::QueuedRow; 0]);
 }
 
 #[test]

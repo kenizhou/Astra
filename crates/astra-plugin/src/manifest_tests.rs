@@ -271,7 +271,7 @@ fields = [
         section.fields[1].options,
         vec!["pgp".to_string(), "smime".to_string()]
     );
-    assert!(section.fields[0].options.is_empty());
+    assert_eq!(section.fields[0].options, [] as [std::string::String; 0]);
     // Strict: an unknown field beside the table is rejected.
     let bad = format!("{text}stray = true\n");
     assert!(PluginManifest::parse(&bad).is_err());

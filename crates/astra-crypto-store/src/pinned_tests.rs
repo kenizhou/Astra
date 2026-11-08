@@ -96,7 +96,7 @@ fn list_tolerates_malformed_blobs_and_legacy_data_member() {
         )
         .unwrap();
     let pins = list_pinned_keys(&store, "broken@x.com").unwrap();
-    assert!(pins.is_empty());
+    assert_eq!(pins, [] as [crate::pinned::PinnedKey; 0]);
 }
 
 #[test]

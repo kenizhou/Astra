@@ -179,6 +179,9 @@ mod tests {
     #[test]
     fn tauri_generated_schemas_are_skipped() {
         let root = fixture(&[("client/desktop/gen/schemas/desktop-schema.json", "{}\n")]);
-        assert!(super::walk_files(&root, &["json"]).is_empty());
+        assert_eq!(
+            super::walk_files(&root, &["json"]),
+            [] as [std::path::PathBuf; 0]
+        );
     }
 }

@@ -106,7 +106,10 @@ fn nothing_while_the_window_is_focused() {
     // noise beside it.
     let (bridge, focus, record) = bridge(true);
     bridge.deliver(&batch(2), true);
-    assert!(shown(&record).is_empty());
+    assert_eq!(
+        shown(&record),
+        [] as [(std::string::String, std::string::String); 0]
+    );
     focus.store(false, Ordering::SeqCst);
     bridge.deliver(&batch(2), true);
     assert_eq!(shown(&record).len(), 2, "the next unfocused pass announces");
@@ -126,7 +129,10 @@ fn nothing_while_the_switch_is_off() {
 fn nothing_for_an_empty_batch() {
     let (bridge, _focus, record) = bridge(false);
     bridge.deliver(&NewMailBatch::default(), true);
-    assert!(shown(&record).is_empty());
+    assert_eq!(
+        shown(&record),
+        [] as [(std::string::String, std::string::String); 0]
+    );
 }
 
 #[test]

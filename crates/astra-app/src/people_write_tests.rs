@@ -143,7 +143,10 @@ async fn a_patch_names_only_changed_fields_and_nothing_changed_sends_nothing() {
         1,
         "an edit that changed nothing sent nothing"
     );
-    assert!(app.people().write_states.is_empty());
+    assert_eq!(
+        app.people().write_states,
+        [] as [astra_viewmodel::PeopleWriteRow; 0]
+    );
 }
 
 #[tokio::test]
@@ -314,7 +317,10 @@ async fn an_unfindable_create_is_refused_as_invalid_and_a_findable_one_lands() {
     // No surname: the name travels formatted alone, never components the
     // form never held.
     let name = card.name.as_ref().expect("the name was written");
-    assert!(name.components.is_empty());
+    assert_eq!(
+        name.components,
+        [] as [engine_core::contact::NameComponent; 0]
+    );
     assert_eq!(name.full.as_deref(), Some("New Person"));
     assert!(
         card.emails
