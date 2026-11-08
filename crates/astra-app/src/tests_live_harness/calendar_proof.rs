@@ -229,6 +229,7 @@ pub(super) async fn suite_apps(
                 username: login,
                 password: password.to_owned(),
             },
+            astra_account::user_agent(),
         ))
         .await
         .expect("the CalDAV dial and discovery")

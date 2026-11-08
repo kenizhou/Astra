@@ -371,7 +371,9 @@ async fn a_forward_carries_the_originals_standing_parts_as_attachments() {
     let (app, submits) = app_over_attached(vec![ScriptedSend::Delivered], &surfaces).await;
     app.dispatch(Intent::Compose(ComposeIntent::Forward {
         message: m1(),
-        carry: vec![0],
+        // The PDF's MIME part number: the multipart root is 0, the text
+        // body 1, the PDF 2, and the engine's part ids are those numbers.
+        carry: vec![2],
     }))
     .await
     .unwrap();

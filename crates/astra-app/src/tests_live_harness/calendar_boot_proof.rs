@@ -63,6 +63,7 @@ async fn the_boot_join_fetches_the_calendar_without_the_view_open() {
             username: user.clone(),
             password: password.clone(),
         },
+        astra_account::user_agent(),
     ))
     .await
     .expect("the CalDAV dial and discovery");

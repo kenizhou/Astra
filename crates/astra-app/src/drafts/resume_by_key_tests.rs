@@ -165,7 +165,9 @@ async fn the_named_draft_opens_with_its_parts_as_removable_rows() {
         row.blob
             .as_ref()
             .map(astra_composer::DraftBlobHandle::as_str),
-        Some("carry:0"),
+        // The PDF's MIME part number: the multipart root is 0, the text
+        // body 1, the PDF 2, and the engine's part ids are those numbers.
+        Some("carry:2"),
         "the row's handle names the stored copy's part"
     );
     assert_eq!(row.data_url, None);

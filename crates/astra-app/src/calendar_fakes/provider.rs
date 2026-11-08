@@ -6,7 +6,7 @@
 
 use async_trait::async_trait;
 use engine_api::{
-    apply_reply, AccountId, Calendar, CalendarWrites, Capabilities, Draft, Duration, Event,
+    apply_reply, AccountId, CalendarId, CalendarWrites, Capabilities, Draft, Duration, Event,
     EventDeletion, EventDraft, EventEdit, EventId, EventRsvp, EventWrite, EventWriteReceipt,
     Mailbox, MailboxEdit, MailboxEditReceipt, MailboxWrites, Message, Provider, ProviderKey,
     Recurrence, RsvpControls, SubmissionReceipt, SyncWindow, Uid, WriteGuard,
@@ -18,8 +18,8 @@ use engine_core::{
     version::{ETag, RevisionTokens},
 };
 use engine_provider::{
-    ConnectionInfo, EmailChunk, EmailStream, HandOver, ProviderError, ProviderResult, ScopeSync,
-    TextEdit,
+    CalendarListing, ConnectionInfo, EmailChunk, EmailStream, HandOver, ProviderError,
+    ProviderResult, ScopeSync, TextEdit,
 };
 
 use super::CalendarFake;
@@ -101,7 +101,7 @@ impl Provider for CalendarFake {
         &self,
         _account: &AccountId,
         _cursor: Option<&SyncState>,
-    ) -> ProviderResult<ScopeSync<Calendar>> {
+    ) -> ProviderResult<CalendarListing> {
         if !self.calendar_leg {
             // The mail half refuses the calendar domain the way a provider
             // that does not override the trait's default does.
@@ -115,12 +115,14 @@ impl Provider for CalendarFake {
         Ok(ScopeSync::new(
             SyncUpdate::snapshot(self.calendars.clone(), present),
             SyncState::new("cal-1"),
-        ))
+        )
+        .into())
     }
 
     async fn sync_events(
         &self,
         _account: &AccountId,
+        _calendar: &CalendarId,
         _cursor: Option<&SyncState>,
     ) -> ProviderResult<ScopeSync<Event>> {
         if let Some(gate) = &self.event_gate {

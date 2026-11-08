@@ -66,7 +66,9 @@ async fn the_read_answers_the_rows_file_name_and_the_decoded_bytes() {
     let (account, key) = parts();
 
     let content = app
-        .attachment_content(&account, &key, 0)
+        // The PDF's MIME part number: the multipart root is 0, the text
+        // body 1, the PDF 2, and the engine's part ids are those numbers.
+        .attachment_content(&account, &key, 2)
         .await
         .expect("the read answers")
         .expect("the part matches");

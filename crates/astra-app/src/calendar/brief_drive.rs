@@ -273,7 +273,7 @@ fn line_of(participant: &engine_api::Participant) -> Option<String> {
 }
 
 /// The event's location as one line: the first named place, else its
-/// description, else the first virtual location's join URI.
+/// description, else the first conference's join URI.
 fn location_of(event: &Event) -> Option<String> {
     event
         .locations
@@ -286,9 +286,9 @@ fn location_of(event: &Event) -> Option<String> {
         })
         .or_else(|| {
             event
-                .virtual_locations
-                .first()
-                .map(|virtual_location| virtual_location.uri.clone())
+                .conferences
+                .iter()
+                .find_map(|conference| conference.join().map(std::string::ToString::to_string))
         })
 }
 
