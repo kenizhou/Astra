@@ -14,7 +14,7 @@ use std::{
     },
 };
 
-use engine_api::{AccountId, FailureClass, Provider};
+use engine_api::{AccountId, CalendarId, FailureClass, Provider};
 use engine_core::sync::JmapDataType;
 use time::{Duration, OffsetDateTime};
 
@@ -112,6 +112,7 @@ async fn wrapper_over(
     let config = provider_jmap::JmapConfig::new(
         base_url.to_owned(),
         provider_jmap::Credentials::bearer(access_token.to_owned()),
+        crate::user_agent(),
     )
     .with_tls(tls())
     .with_retry(tokens.retry());
@@ -239,7 +240,7 @@ fn the_scopes_are_the_account_wide_jmap_ones() {
         }
     );
     assert_eq!(
-        wrapper.event_scope(&account),
+        wrapper.event_scope(&account, &CalendarId::try_from("cal-1").unwrap()),
         engine_api::SyncScope::JmapType {
             account,
             data_type: JmapDataType::CalendarEvent,

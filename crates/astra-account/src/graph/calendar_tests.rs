@@ -21,13 +21,11 @@ fn tls() -> engine_tls::TlsClientConfig {
 }
 
 #[test]
-fn binds_a_calendar_provider_with_enforced_writes_and_the_bound_scopes() {
+fn serves_every_calendar_with_enforced_writes_and_per_calendar_scopes() {
     let (endpoint, _hits) = mock_token_endpoint(vec![]);
     let source = source_at(endpoint, None);
     let account = AccountId::try_from("alice@example.com@graph.microsoft.com").unwrap();
-    let calendar = CalendarId::try_from("cal-123").unwrap();
     let provider = RefreshingGraphCalendarProvider::new(
-        calendar.clone(),
         source,
         rolling_window().unwrap(),
         TimeZoneId::utc(),
@@ -45,15 +43,18 @@ fn binds_a_calendar_provider_with_enforced_writes_and_the_bound_scopes() {
     // here would conclude the answer needs an iMIP message of its own and send one
     // *beside* the one Graph already sent, so the organiser gets the reply twice.
     assert!(info.capabilities.calendar_scheduling());
-    // The event scope names the bound calendar; the calendar-list scope is
-    // account-wide.
-    assert_eq!(
-        provider.event_scope(&account),
-        SyncScope::GraphCalendar {
-            account: account.clone(),
-            calendar,
-        },
-    );
+    // Each calendar's events sync under a scope of that calendar's own; the
+    // calendar-list scope is account-wide.
+    for key in ["cal-123", "cal-456"] {
+        let calendar = CalendarId::try_from(key).unwrap();
+        assert_eq!(
+            provider.event_scope(&account, &calendar),
+            SyncScope::GraphCalendar {
+                account: account.clone(),
+                calendar,
+            },
+        );
+    }
     assert_eq!(
         provider.calendar_scope(&account),
         SyncScope::GraphCalendarList { account },

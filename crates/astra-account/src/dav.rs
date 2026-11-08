@@ -13,7 +13,7 @@ use engine_api::{ContactsProvider, Provider};
 use provider_caldav::{CalDavConfig, CalDavProvider, CardDavConfig, CardDavProvider, Credentials};
 use serde::Deserialize;
 
-use crate::{account_tls, AccountConfig, AccountError, ConfigError, Secret};
+use crate::{account_tls, user_agent, AccountConfig, AccountError, ConfigError, Secret};
 
 /// The optional `[dav]` section of a stored account: the origins both legs
 /// dial and the credential they present.
@@ -133,7 +133,8 @@ pub async fn connect_dav_providers(config: &AccountConfig) -> Result<DavProvider
     let mut failure = None;
     if let Some(origin) = dav.caldav_origin() {
         match CalDavProvider::connect(
-            CalDavConfig::new(origin.to_owned(), credentials.clone()).with_tls(tls.clone()),
+            CalDavConfig::new(origin.to_owned(), credentials.clone(), user_agent())
+                .with_tls(tls.clone()),
         )
         .await
         {
@@ -146,7 +147,7 @@ pub async fn connect_dav_providers(config: &AccountConfig) -> Result<DavProvider
     }
     if let Some(origin) = dav.carddav_origin() {
         match CardDavProvider::connect(
-            CardDavConfig::new(origin.to_owned(), credentials).with_tls(tls),
+            CardDavConfig::new(origin.to_owned(), credentials, user_agent()).with_tls(tls),
         )
         .await
         {

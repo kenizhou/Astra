@@ -70,6 +70,15 @@ pub use setup_choices::{Capability, SetupChoice};
 pub use tls::{account_tls, setup_trust_policy, CertificateException};
 pub use watch::{open_watch, Watch, WatchEvent, WatchFace};
 
+/// The product every HTTP provider this host connects names in its
+/// `User-Agent`, as the engine's constructors require: the host's
+/// application and its version, one identity shared by every leg the way
+/// the TLS policy is.
+pub fn user_agent() -> engine_api::UserAgent {
+    engine_api::UserAgent::new("Astra-Mail", env!("CARGO_PKG_VERSION"))
+        .expect("the product name and version are HTTP tokens")
+}
+
 /// An error shaping an account's connection config or connecting its providers.
 #[derive(Debug, thiserror::Error)]
 pub enum AccountError {

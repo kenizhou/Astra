@@ -8,7 +8,7 @@
 
 use engine_core::sync::JmapDataType;
 
-use crate::{AccountConfig, AccountError, ImapConnections};
+use crate::{user_agent, AccountConfig, AccountError, ImapConnections};
 
 /// Re-exported so a host drives the session without depending on the
 /// engine's provider crate directly.
@@ -66,9 +66,10 @@ pub async fn open_watch(
         let id = account
             .account_id()
             .map_err(|err| AccountError::Jmap(err.to_string()))?;
-        let config = provider_jmap::JmapConfig::new(jmap.base_url.clone(), credentials)
-            .with_tls(tls)
-            .with_retry(crate::throttle::account_retry(&id));
+        let config =
+            provider_jmap::JmapConfig::new(jmap.base_url.clone(), credentials, user_agent())
+                .with_tls(tls)
+                .with_retry(crate::throttle::account_retry(&id));
         let types = [JmapDataType::Email, JmapDataType::Mailbox];
         return match provider_jmap::JmapWatcher::connect(
             config,

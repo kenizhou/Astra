@@ -207,7 +207,6 @@ fn the_calendar_wrapper_s_debug_form_carries_no_token() {
         time::OffsetDateTime::now_utc() + time::Duration::hours(1),
     );
     let calendar = crate::google::calendar::RefreshingGoogleCalendarProvider::new(
-        engine_api::CalendarId::try_from("cal-1").unwrap(),
         source,
         crate::google::calendar::tests_window().unwrap(),
         tls(),

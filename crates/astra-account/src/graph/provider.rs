@@ -33,7 +33,7 @@ use provider_graph::{GraphClient, GraphProvider, MailboxPrincipal};
 use time::Date;
 
 use super::GraphTokenSource;
-use crate::AccountError;
+use crate::{user_agent, AccountError};
 
 /// A [`Provider`] bound to one Graph mail folder that refreshes its access
 /// token before every network call and delegates to a freshly built
@@ -138,6 +138,7 @@ impl RefreshingGraphProvider {
             MailboxPrincipal::Me,
             &self.tls,
             &self.tokens.retry(),
+            &user_agent(),
         )
         .map_err(ProviderError::from)?;
         let mut graph = GraphProvider::new(client, self.folder.clone());
