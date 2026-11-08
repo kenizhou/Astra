@@ -3,23 +3,15 @@
   "productName": "Astra Mail",
   "identifier": "com.kenizhou.astra",
   "build": {
-    "beforeDevCommand": {
-      "script": "node client/desktop/scripts/stage-cli.mjs --placeholder-ok && npm --prefix sidecar run build",
-      "cwd": "../.."
-    },
-    "beforeBuildCommand": {
-      "script": "node client/desktop/scripts/stage-cli.mjs --placeholder-ok && cargo build --release --bin astra-cli && node client/desktop/scripts/stage-cli.mjs && npm --prefix sidecar ci && npm --prefix sidecar run build",
-      "cwd": "../.."
-    },
     "devUrl": "http://localhost:5173",
     "frontendDist": "../web/dist",
     "beforeDevCommand": {
-      "script": "npm run dev",
-      "cwd": "../web"
+      "script": "node client/desktop/scripts/stage-cli.mjs --placeholder-ok && npm --prefix sidecar run build && npm --prefix client/web run dev",
+      "cwd": "../.."
     },
     "beforeBuildCommand": {
-      "script": "npm run build",
-      "cwd": "../web"
+      "script": "npm --prefix client/web run build && cargo build --release --bin astra-cli && node client/desktop/scripts/stage-cli.mjs && npm --prefix sidecar ci && npm --prefix sidecar run build",
+      "cwd": "../.."
     }
   },
   "app": {
