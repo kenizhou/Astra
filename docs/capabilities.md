@@ -149,7 +149,7 @@ this row ports.
 | Gated mutating verbs with --preview | 🚧 | drafts save and discard, rules create and delete, knowledge forget, snippets create and delete; the model-class spellings (`ai style rebuild`, `ai digest generate`, `ai report generate`, `knowledge extract`, `snippets search`) parse and refuse; cli.md |
 | Every invocation audited with a correlation id | 🚧 | ai.sqlite ledger; cli.md |
 | Send-class verbs parsed but refused | 🚧 | exit 3; cli.md |
-| Virtual permission tools mapping | ⬜ | SPA0 |
+| Virtual permission tools mapping | ✅ | the gating map in cli.md: ten tools pinned to verb, level, and preview shape on host and sidecar; the confirm_preview production leg is a recorded gap |
 | Shell completions | ⬜ | SP-CLI |
 
 ## Astra: AI foundation (SPA0)

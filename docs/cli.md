@@ -206,6 +206,54 @@ reach the ledger, and the correlation id already ties the whole line to its
 turn. When the ledger cannot be opened or written the invocation is not
 answered: the CLI prints a runtime error and exits `1`.
 
+## The permission gating map
+
+A virtual permission tool is a gated tool-surface entry whose execution
+suspends behind a human approval card. The sidecar's bridge fails closed
+on any tool absent from the policy table: an absent row means
+needs-approval there. Adding a tool forces this map, the host's policy
+table (`default_policy()` in `client/desktop/src/agent/mod.rs`), and the
+preview vocabulary (`shaped_arg_preview` in
+`client/desktop/src/agent/permissions.rs`, mirroring `cli/src/audit.rs`)
+to answer for it, the exhaustive-match precedent `docs/plugins.md`
+states for permissions.
+
+| Tool | CLI verb | Level | Redacted preview shape |
+|---|---|---|---|
+| `list_folders` | `folders list` | `auto` | `account=<id>` |
+| `list_messages` | `messages list` | `auto` | `account=<id> [folder=<key>] [limit=<n>]` |
+| `read_message` | `messages read` | `auto` | `account=<id> keys=<n>` |
+| `search_messages` | `messages search` | `auto` | `query_chars=<n> [account=<id>] [folder=<key>] [offset=<n>]` |
+| `save_draft` | `drafts save` | `confirm` | `account=<id> from=<n> to=<n> cc=<n> subject_chars=<n> body_chars=<n>` |
+| `discard_draft` | `drafts discard` | `confirm` | `account=<id> key=<id>` |
+| `mark_read` | `messages mark-read` | `confirm` | `account=<id> key=<id> read=<bool>` |
+| `set_flagged` | `messages set-flagged` | `confirm` | `account=<id> key=<id> flagged=<bool>` |
+| `archive_message` | `messages archive` | `confirm` | `account=<id> key=<id>` |
+| `move_to_trash` | `messages trash` | `confirm` | `account=<id> key=<id>` |
+
+The four reads run; the six writes ask. The preview shape is the host's
+`shaped_arg_preview` output for an ask, the redacted argument preview
+the permission audit row carries: shapes and store ids only, never
+addresses, subjects, or body text, the same vocabulary the CLI's own
+audit rows carry. Optional fields ride only when the ask's args carry
+them; the search preview carries no `limit`, because the tool spells
+`--limit` on the argv but its approval args hold only the query, the
+optional account and folder, and the optional offset. Three pins hold
+the map: `policy_tests.rs` holds the policy table to exactly these ten
+rows, `permissions_tests.rs` holds every preview shape, and the
+sidecar's `mailToolsMap.test.ts` holds the ten names and every verb and
+subverb.
+
+Known gap, recorded rather than left silent: the `confirm_preview`
+level and the approval `preview` payload exist end to end in the
+protocol and the bridge, but nothing produces them yet. `runGated`
+passes no preview to `requestApproval`, the sidecar never spells
+`--preview`, `default_policy()` uses no `ConfirmPreview`, and the
+approval card renders the ask's raw args, not the action preview.
+Wiring the `--preview` output onto the card is a deeper slice (the
+confirm_preview cluster), distinct from the redacted-args preview this
+table documents.
+
 ## Where the stores live
 
 `ASTRA_DATA_DIR` names the data dir; unset, the CLI uses the platform's
@@ -248,7 +296,7 @@ known interaction, not a gap to close.
 | Send-class verbs beyond refusal (none ship) | N/A | the send class is the refusal |
 | The mail action verbs (mark-read, set-flagged, archive, trash) with the MCP search contract's scoping | ✅ | `cli/src/verbs/{message_writes,messages}.rs` |
 | A permanent-delete verb (never ships; the row's trash is the ceiling) | N/A | the app layer's delete stays unexposed |
-| Virtual permission tools over the verbs | ✅ | the sidecar's bridge and tool surface, gated per row |
+| Virtual permission tools over the verbs | ✅ | the permission gating map above: ten tools pinned to verb, level, and preview shape |
 
 Known gaps, recorded rather than left silent:
 

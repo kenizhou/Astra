@@ -155,6 +155,45 @@ id、数量、长度。地址、主题与正文文本绝不进入账本。解析
 相关性 id 已经把整行绑定到其轮次。账本无法打开或写入时调用不被应答：CLI 打印
 运行时错误并以 `1` 退出。
 
+## 权限门控映射
+
+虚拟权限工具是工具面上受门控的条目，其执行悬停在人工审批卡片之后。
+sidecar 的桥对策略表中缺席的任何工具一律失败关闭：缺席的行在那里意味着
+needs-approval。新增一个工具会迫使本映射、宿主的策略表
+（`client/desktop/src/agent/mod.rs` 的 `default_policy()`）与预览词汇
+（`client/desktop/src/agent/permissions.rs` 的 `shaped_arg_preview`，
+镜像 `cli/src/audit.rs`）为它作答，即 `docs/plugins.md` 为权限陈述的
+穷尽匹配先例。
+
+| 工具 | CLI 动词 | 级别 | 脱敏预览形状 |
+|---|---|---|---|
+| `list_folders` | `folders list` | `auto` | `account=<id>` |
+| `list_messages` | `messages list` | `auto` | `account=<id> [folder=<key>] [limit=<n>]` |
+| `read_message` | `messages read` | `auto` | `account=<id> keys=<n>` |
+| `search_messages` | `messages search` | `auto` | `query_chars=<n> [account=<id>] [folder=<key>] [offset=<n>]` |
+| `save_draft` | `drafts save` | `confirm` | `account=<id> from=<n> to=<n> cc=<n> subject_chars=<n> body_chars=<n>` |
+| `discard_draft` | `drafts discard` | `confirm` | `account=<id> key=<id>` |
+| `mark_read` | `messages mark-read` | `confirm` | `account=<id> key=<id> read=<bool>` |
+| `set_flagged` | `messages set-flagged` | `confirm` | `account=<id> key=<id> flagged=<bool>` |
+| `archive_message` | `messages archive` | `confirm` | `account=<id> key=<id>` |
+| `move_to_trash` | `messages trash` | `confirm` | `account=<id> key=<id>` |
+
+四个读取直接运行；六个写入先询问。预览形状是宿主对一次询问的
+`shaped_arg_preview` 输出，即权限审计行携带的脱敏参数预览：只有形状与
+存储 id，绝无地址、主题或正文文本，与 CLI 自己的审计行携带同一词汇。
+可选字段只在询问的参数携带它们时出现；搜索预览不带 `limit`，因为工具
+在 argv 上拼写 `--limit`，但其审批参数只持有查询、可选的账户与文件夹、
+以及可选的 offset。三个测试钉住映射：`policy_tests.rs` 把策略表钉在
+恰好这十行，`permissions_tests.rs` 钉住每一个预览形状，sidecar 的
+`mailToolsMap.test.ts` 钉住十个名字与每一个动词和子动词。
+
+已知缺口，记录而非静默：`confirm_preview` 级别与审批 `preview` 载荷在
+协议与桥中端到端存在，但尚无物生产它们。`runGated` 不向
+`requestApproval` 传预览，sidecar 从不拼写 `--preview`，
+`default_policy()` 不用 `ConfirmPreview`，审批卡片渲染的是询问的原始参数而
+非动作预览。把 `--preview` 的输出接上卡片是更深的切片
+（confirm_preview 集群），与本表记录的脱敏参数预览不同。
+
 ## 存储在哪里
 
 `ASTRA_DATA_DIR` 指定数据目录；未设置时，CLI 使用应用标识符下平台级的用户数据
@@ -189,7 +228,7 @@ id、数量、长度。地址、主题与正文文本绝不进入账本。解析
 | 拒绝之外的发送类动词（不交付） | N/A | 发送类就是拒绝本身 |
 | 邮件动作动词（mark-read、set-flagged、archive、trash）与 MCP 搜索契约的作用域 | ✅ | `cli/src/verbs/{message_writes,messages}.rs` |
 | 永久删除动词（永不交付；行级废纸篓即上限） | N/A | 应用层的 delete 保持不暴露 |
-| 建立在动词之上的虚拟权限工具 | ✅ | sidecar 的桥与工具面，逐行门控 |
+| 建立在动词之上的虚拟权限工具 | ✅ | 上文的权限门控映射：十个工具钉住动词、级别与预览形状 |
 
 已知缺口，记录而非静默：
 

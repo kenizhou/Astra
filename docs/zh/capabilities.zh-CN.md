@@ -151,7 +151,7 @@
 | 带门控的变更动词与 --preview | 🚧 | drafts save 与 discard、rules create 与 delete、knowledge forget、snippets create 与 delete；模型类拼写（`ai style rebuild`、`ai digest generate`、`ai report generate`、`knowledge extract`、`snippets search`）先解析后拒绝；cli.md |
 | 每次调用带相关性 id 审计 | 🚧 | ai.sqlite 账本；cli.md |
 | 发送类动词先解析后拒绝 | 🚧 | 退出码 3；cli.md |
-| 虚拟权限工具映射 | ⬜ | SPA0 |
+| 虚拟权限工具映射 | ✅ | cli.md 的门控映射：十个工具在宿主与 sidecar 上钉住动词、级别与预览形状；confirm_preview 的生产腿是已记录的缺口 |
 | Shell 补全 | ⬜ | SP-CLI |
 
 ## Astra：AI 基础（SPA0）
