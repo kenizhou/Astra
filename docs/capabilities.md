@@ -150,7 +150,7 @@ this row ports.
 | Every invocation audited with a correlation id | 🚧 | ai.sqlite ledger; cli.md |
 | Send-class verbs parsed but refused | 🚧 | exit 3; cli.md |
 | Virtual permission tools mapping | ✅ | the gating map in cli.md: ten tools pinned to verb, level, and preview shape on host and sidecar; the confirm_preview production leg is a recorded gap |
-| Shell completions | ⬜ | SP-CLI |
+| Shell completions | ✅ | `completions <shell>` generates bash, zsh, fish, and pwsh scripts from the CLI's own vocabulary (`Verb::name()`, the subverb words, a per-verb flag descriptor pinned to the parser by a drift test); raw script by default, the standard envelope under `--json`; cli.md |
 
 ## Astra: AI foundation (SPA0)
 

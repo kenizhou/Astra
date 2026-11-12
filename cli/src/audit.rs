@@ -65,6 +65,9 @@ pub(crate) fn arg_preview(verb: &Verb) -> String {
         | Verb::KnowledgeExtract
         | Verb::SnippetsList
         | Verb::SnippetsSearch => String::new(),
+        // The completion generator previews the shell it targets, a shape
+        // from the closed shell set, never caller text.
+        Verb::Completions { shell } => format!("shell={}", shell.word()),
         // Every id-carrying verb previews the id alone.
         Verb::RulesDelete { id } | Verb::KnowledgeForget { id } | Verb::SnippetsDelete { id } => {
             format!("id={id}")

@@ -15,14 +15,15 @@
 
 ## 动词
 
-今天交付三十一个：十四个邮件、草稿与规则动词，十个 `ai` 动词，七个
-`knowledge` 与 `snippets` 动词。语法是两个位置词（`verb
-subverb`）加标志，且标志顺序自由：sidecar 应拼写为
+今天交付三十二个：十四个邮件、草稿与规则动词，十个 `ai` 动词，七个
+`knowledge` 与 `snippets` 动词，以及 `completions` 生成器。语法是两个位置词
+（`verb subverb`）加标志，且标志顺序自由：sidecar 应拼写为
 `astra-cli [--json] [--correlation-id <id>] <verb> <subverb> [--flag <value> ...]`，
 始终传 `--json` 与轮次的 `--correlation-id`，并把两个位置词之后的一切都当作
 具名标志。`ai` 存储动词改为以裸位置词接受其余操作数，即其界面钉住的
 语法；`knowledge` 与 `snippets` 动词像邮件动词一样经具名标志读写其存储。
-一次调用在文本中、在审计行里都不含糊。
+`completions` 动词把 shell 词放在第二个位置词槽（`completions <shell>`），
+取 bash、zsh、fish、pwsh 之一。一次调用在文本中、在审计行里都不含糊。
 
 | 动词 | 读取 | 应答的 `data` |
 |---|---|---|
@@ -57,6 +58,7 @@ subverb`）加标志，且标志顺序自由：sidecar 应拼写为
 | `snippets create --title <t> (--body <text> 或 --body-file <path>)` | 向片段存储写入一个片段 | `snippet`（id、title、body、库的 stamps）与 `state: created`；`--preview` 打印存储将接收的确切片段；正文只来自一个来源，同时给两个是用法错误 |
 | `snippets delete --id <id>` | 删除一条存储的片段 | `id`、`state: deleted`；`--preview` 点名确切的删除；无片段携带的 id 是点名它的运行时错误 |
 | `snippets search` | 无：该拼写被解析后拒绝 | 以 `3` 退出并附永不拨号规则的拒绝消息（见下）；排序搜索在应用的编写器选择器里运行，agent 自行过滤 `snippets list` |
+| `completions <shell>` | 无：CLI 自身的动词词汇，不读存储、不经引擎 | 默认原样输出补全脚本（`eval "$(astra-cli completions bash)"` 惯用法）；`--json` 下为 `shell` 与 `script`（脚本为 JSON 字符串）。未知或缺失的 shell 是用法错误 |
 
 约束每个动词的规则：
 
@@ -111,11 +113,21 @@ subverb`）加标志，且标志顺序自由：sidecar 应拼写为
 - **封闭动作集刻意拼写两遍。** CLI 的 `CLOSED_ACTIONS` 与应用层的
   `Action::ALL` 在两个互不依赖的 crate 里携带同样的线词；两者各有自己的测试
   钉住，任一处变更都要落进两处。重复的句子与其代价见 `docs/ai-rules.md`。
+- **补全生成器读取词汇，而非 clap。** `completions <shell>` 从
+  `Verb::name()`、子动词词与每动词标志描述符构建每个脚本，描述符是对 `Verb`
+  的穷尽匹配，因此新动词不可能在没有补全词汇的情况下交付。每个脚本还补全
+  生成器自身的 shell 参数，在 `completions` 动词的第二个槽位提供四个 shell
+  词。创始规格中 clap_complete 的句子已被取代：解析器是手写且无 clap 的，因此脚本改为从
+  现有词汇生成，即代码库以测试钉住的单一事实源纪律。标志描述符把解析臂的
+  标志拼写第二遍，即封闭动作集自身的先例，由一个漂移测试把两处拼写钉在
+  一起。该动词是非变更的（共享门拒绝 `--preview`）且不经引擎应答，即走存储
+  动词的纪律，因此对冷数据目录可用。
 
 ## 信封与退出码
 
-每次调用在 stdout 打印一个 JSON 信封。`--json` 固定单行形式；不带它时终端得到
-缩进形式、管道得到单行形式，因此两类读者解析的值始终相同。
+每次调用在 stdout 打印一个 JSON 信封，唯一的生成器例外见下文。`--json` 固定
+单行形式；不带它时终端得到缩进形式、管道得到单行形式，因此两类读者解析的值
+始终相同。
 
 ```json
 {"schema": 1, "ok": true, "data": { ... }}
@@ -126,6 +138,13 @@ subverb`）加标志，且标志顺序自由：sidecar 应拼写为
   随同一变更移动。
 - `error.code` 是 `usage`、`runtime`、`refused` 之一。
 - 退出状态跟随代码：`0` 成功、`1` 运行时、`2` 用法、`3` 拒绝。
+
+**唯一的生成器例外：`completions`。** 信封规则只有一个例外，即 sidecar 从不
+调用的人类面向补全生成器。`completions <shell>` 默认原样输出脚本，即
+`eval "$(astra-cli completions bash)"` 惯用法，并在 `--json` 下把它包进标准
+信封（`data` 携带 `shell` 与 `script`，脚本为 JSON 字符串，schema 仍为 `1`）。
+面向 agent 的统一信封完好无损，因为 sidecar 从不调用 completions；sidecar
+驱动的每个动词都按上文原样打印信封。
 
 **发送类动词先解析后被拒绝。** `send` 与 `queue`（以及之后被划入发送类的任何
 词）解析到足以知道被请求了什么，然后以 `3` 退出，消息点明人发规则：由人决定并
@@ -215,7 +234,7 @@ needs-approval。新增一个工具会迫使本映射、宿主的策略表
 
 | 规则 | 状态 | 位置 |
 |---|---|---|
-| 三十一个动词与固定信封 | ✅ | `cli/src/verbs` |
+| 三十二个动词与固定信封 | ✅ | `cli/src/verbs` |
 | 每个变更动词（messages 动作、drafts、rules、knowledge 与 snippets）上的 `--preview`，各共享一个构建器 | ✅ | `cli/src/verbs/{messages,drafts,rules,knowledge,snippets}.rs` 与 `message_writes.rs` |
 | 每次调用带相关性 id 审计 | ✅ | `cli/src/audit.rs`、`cli/src/verbs/mod.rs` |
 | 发送类动词先解析后拒绝，退出码 3 | ✅ | `cli/src/verbs/mod.rs` |
@@ -229,6 +248,7 @@ needs-approval。新增一个工具会迫使本映射、宿主的策略表
 | 邮件动作动词（mark-read、set-flagged、archive、trash）与 MCP 搜索契约的作用域 | ✅ | `cli/src/verbs/{message_writes,messages}.rs` |
 | 永久删除动词（永不交付；行级废纸篓即上限） | N/A | 应用层的 delete 保持不暴露 |
 | 建立在动词之上的虚拟权限工具 | ✅ | 上文的权限门控映射：十个工具钉住动词、级别与预览形状 |
+| 来自动词词汇的 shell 补全（`completions <shell>`：bash、zsh、fish、pwsh） | ✅ | `cli/src/verbs/completions.rs`，信封规则的唯一生成器例外 |
 
 已知缺口，记录而非静默：
 
