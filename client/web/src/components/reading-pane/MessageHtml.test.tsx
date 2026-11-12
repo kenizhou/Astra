@@ -176,6 +176,66 @@ describe('the message body', () => {
   });
 });
 
+describe('the quote fold', () => {
+  const quotedHtml =
+    '<p>My reply</p><p>On Tue, 1 Nov 2026, B wrote:</p>' +
+    '<blockquote><img data-astra-src="https://x.example/q.png"><p>the original</p></blockquote>';
+
+  it('carries the collapsed details in the srcdoc for a quoted body', () => {
+    render(<Harness html={quotedHtml} count={1} />);
+
+    const doc = frameDoc();
+    expect(doc).toContain('<details class="astra-quote"><summary>Show quoted text</summary>');
+    expect(doc).toContain('<p>My reply</p><details');
+    expect(doc).toContain('wrote:</p><blockquote>');
+    expect(doc).not.toMatch(/<details[^>]*\bopen\b/i);
+  });
+
+  it('restores the remote placeholders inside the details on opt-in', () => {
+    render(<Harness html={quotedHtml} count={1} />);
+
+    expect(frameDoc()).toContain('data-astra-src="https://x.example/q.png"');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show remote images' }));
+
+    const doc = frameDoc();
+    expect(doc).toContain('<details class="astra-quote">');
+    expect(doc).toContain('src="https://x.example/q.png"');
+    expect(doc).not.toContain('data-astra-src');
+  });
+
+  it('carries a hostile quoted fragment verbatim, no re-encoding', () => {
+    const hostileTail = '<blockquote><p>"> quoted</p><p></iframe><script>never runs</script></p></blockquote>';
+    render(<Harness html={`<p>My reply</p>${hostileTail}`} count={0} />);
+
+    // The fold wraps the tail without touching a byte of it: the quote and
+    // the closing tag ride inside the details exactly as the snapshot sent
+    // them, so no client-side escape or breakout creeps in.
+    expect(frameDoc()).toContain(
+      `<p>My reply</p><details class="astra-quote"><summary>Show quoted text</summary>${hostileTail}</details>`,
+    );
+  });
+
+  it('leaves a quote-free body srcdoc exactly as the wrapper alone builds it', () => {
+    render(<Harness html="<p>Plain.</p>" count={0} />);
+
+    expect(frameDoc()).toBe(wrapBodyDocument('<p>Plain.</p>', 'default'));
+    expect(frameDoc()).not.toContain('<details');
+  });
+
+  it('keeps print full: the wrapper alone never folds', () => {
+    const doc = wrapBodyDocument(quotedHtml, 'default');
+    expect(doc).toBe(
+      '<!DOCTYPE html><html><head>' +
+        '<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">' +
+        '<style>html{font-size:16px}body{margin:0}body>*{max-width:100% !important}' +
+        'img,video,table{max-width:100% !important}img,video{height:auto}</style>' +
+        `</head><body>${quotedHtml}</body></html>`,
+    );
+    expect(doc).not.toContain('<details');
+  });
+});
+
 describe('the reading zoom wrapper', () => {
   it('scales the document base font-size by the standing step', () => {
     render(<Harness zoom="small" />);

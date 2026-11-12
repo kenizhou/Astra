@@ -28,6 +28,8 @@ import { isTauri } from '@/events/surfaceEvents';
 import { askMailtoOpen, isMailtoHref } from '@/features/composer/mailtoOpen';
 import type { ReadingZoomStep } from '@/services/appearance';
 
+import { collapseQuoted } from './collapseQuoted';
+
 /** The framed document's barrier while remote references stay gated. */
 export const READING_CSP_GATED =
   "default-src 'none'; img-src data:; style-src 'unsafe-inline'";
@@ -214,8 +216,12 @@ export function MessageHtml({
   onShowRemoteImages,
   zoom = 'default',
 }: MessageHtmlProps) {
+  // The quote fold wraps the gated html before the wrapper, so the remote
+  // placeholders ride inside the details and the opt-in rewrite still finds
+  // them; print calls the wrapper alone and keeps the full body.
+  const folded = collapseQuoted(html).html;
   const doc = wrapBodyDocument(
-    showRemoteImages ? enableRemoteImages(html) : html,
+    showRemoteImages ? enableRemoteImages(folded) : folded,
     zoom,
   );
   const csp = showRemoteImages ? READING_CSP_REMOTE : READING_CSP_GATED;
