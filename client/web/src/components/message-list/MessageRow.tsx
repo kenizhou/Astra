@@ -4,9 +4,10 @@
 // first line, the subject with its state icons on the second, the A3
 // hairline under every row. The read state is carried by the weight stops
 // alone (560 unread, 450 read; the A3 type voice), so the column needs no
-// ribbons. The row's own actions (mark read, flag) ride the trailing edge
-// and show while the row is hovered or selected, with a flagged row
-// keeping its flag visible so the state never hides. The whole row drags:
+// ribbons. The row's own actions (archive, trash, flag, mark read) ride the
+// trailing edge and show while the row is hovered, selected, or holds the
+// focus, with a flagged row keeping its flag visible so the state never
+// hides and a draft row suppressing the mail four. The whole row drags:
 // the drag carries the selection it rides in (itself alone otherwise), keys
 // only, never content. The touch pointer owns the horizontal swipe: the
 // gesture translates the content over the revealed action and fires it past
@@ -68,9 +69,10 @@ interface MessageRowProps {
 
 export function MessageRow({ row, selected, multiSelected = false, draft = false, now, onSelect, onContextMenu }: MessageRowProps) {
   const [hovered, setHovered] = useState(false);
+  const [focusWithin, setFocusWithin] = useState(false);
   const density = useListStore((s) => s.density);
   const swipe = useRowSwipe(row);
-  const actionsVisible = hovered || selected;
+  const actionsVisible = hovered || selected || focusWithin;
   const sender = row.sender_name || row.sender_address;
   const count = row.thread_count;
   const countLabel =
@@ -86,6 +88,14 @@ export function MessageRow({ row, selected, multiSelected = false, draft = false
   const toggleFlag = (event: React.MouseEvent) => {
     event.stopPropagation();
     void dispatch(intents.setFlagged(row.key, !row.flagged));
+  };
+  const archive = (event: React.MouseEvent) => {
+    event.stopPropagation();
+    void dispatch(intents.archiveMessage(row.key));
+  };
+  const moveToTrash = (event: React.MouseEvent) => {
+    event.stopPropagation();
+    void dispatch(intents.moveToTrash(row.key));
   };
 
   // The drag carries the selection when the row rides it, itself otherwise:
@@ -137,6 +147,16 @@ export function MessageRow({ row, selected, multiSelected = false, draft = false
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      // Focus capture keeps the slot revealed while a button inside holds
+      // the focus; the row itself stays out of the tab order. The blur only
+      // clears when the focus leaves the row outright, so stepping between
+      // the row's own buttons never hides them mid-move.
+      onFocus={() => setFocusWithin(true)}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          setFocusWithin(false);
+        }
+      }}
       style={{ touchAction: 'pan-y' }}
       className={`relative flex w-full cursor-pointer items-start gap-2.5 overflow-hidden border-b border-[var(--hairline)] ${DENSITY_ROW_CLASS[density]} ${
         selected ? 'bg-selected' : multiSelected ? 'bg-selected/60' : 'hover:bg-hover'
@@ -202,7 +222,29 @@ export function MessageRow({ row, selected, multiSelected = false, draft = false
                   <PaperclipIcon size={14} />
                 </span>
               )}
-              {(actionsVisible || row.flagged) && (
+              {!draft && actionsVisible && (
+                <button
+                  type="button"
+                  aria-label="Archive"
+                  title="Archive"
+                  onClick={archive}
+                  className="inline-flex rounded-[var(--radius-xs)] p-0.5 hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <ArchiveIcon size={14} />
+                </button>
+              )}
+              {!draft && actionsVisible && (
+                <button
+                  type="button"
+                  aria-label="Delete"
+                  title="Delete"
+                  onClick={moveToTrash}
+                  className="inline-flex rounded-[var(--radius-xs)] p-0.5 hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <TrashIcon size={14} />
+                </button>
+              )}
+              {!draft && (actionsVisible || row.flagged) && (
                 <button
                   type="button"
                   aria-label={row.flagged ? 'Unflag' : 'Flag'}
@@ -215,7 +257,7 @@ export function MessageRow({ row, selected, multiSelected = false, draft = false
                   <FlagIcon size={14} />
                 </button>
               )}
-              {actionsVisible && (
+              {!draft && actionsVisible && (
                 <button
                   type="button"
                   aria-label={row.unread ? 'Mark as read' : 'Mark as unread'}
