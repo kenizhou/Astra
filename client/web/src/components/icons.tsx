@@ -10,6 +10,7 @@ import {
   ArchiveArrowUpIcon as ArchiveArrowUpIconData,
   ArchiveIcon as ArchiveIconData,
   ArrowExpandDiagonal01Icon as PopOutIconData,
+  BellIcon as BellIconData,
   PuzzleIcon as PluginIconData,
   BookOpen02Icon as ReadingIconData,
   Calendar03Icon,
@@ -115,3 +116,4 @@ export const PopOutIcon = makeIcon(PopOutIconData);
 export const PluginIcon = makeIcon(PluginIconData);
 export const DiagnosticsIcon = makeIcon(Activity01Icon);
 export const PrivacyIcon = makeIcon(Shield01Icon);
+export const BellIcon = makeIcon(BellIconData);

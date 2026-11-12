@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The composition root: hydrate both surfaces once, mount the surface_changed,
-// agent, draft-pool, mailto, and share event listeners for the session,
+// agent, draft-pool, mailto, new-mail, and share event listeners for the session,
 // report the device's own zone through the core's arm, and hand the
 // screen to the shell. The listener mounts are StrictMode safe: a dispose that
 // lands before the registration resolves is handled inside each mount, not
@@ -8,8 +8,9 @@
 // store whether or not the panel is up, the draft-pool listener so a landed
 // pool row refreshes the reading pane's chips whether or not it is open, the
 // mailto listener so a parsed open reaches the composer's route whatever
-// surface stands, and the share listener so a shared file hand-off reaches
-// the composer's route the same way.
+// surface stands, the share listener so a shared file hand-off reaches
+// the composer's route the same way, and the new-mail listener so a notified
+// batch lands in the history whether or not the bell's panel is open.
 
 import { useEffect } from 'react';
 
@@ -17,6 +18,7 @@ import { AppShell } from '@/components/layout/AppShell';
 import { mountDraftPoolEvents } from '@/events/draftPoolEvents';
 import { mountAgentEvents } from '@/events/agentEvents';
 import { mountMailtoEvents } from '@/events/mailtoEvents';
+import { mountNewMailEvents } from '@/events/newMailEvents';
 import { mountShareEvents } from '@/events/shareEvents';
 import { hydrate, mountSurfaceEvents } from '@/events/surfaceEvents';
 import { reportDeviceZone } from '@/features/settings/deviceZone';
@@ -45,6 +47,8 @@ export default function App() {
   useEffect(() => mountDraftPoolEvents(), []);
 
   useEffect(() => mountMailtoEvents(), []);
+
+  useEffect(() => mountNewMailEvents(), []);
 
   useEffect(() => mountShareEvents(), []);
 
