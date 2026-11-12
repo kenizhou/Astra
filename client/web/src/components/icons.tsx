@@ -39,6 +39,7 @@ import {
   Note01Icon,
   PanelLeftIcon as PanelLeftIconData,
   PaperclipIcon as PaperclipIconData,
+  Pin02Icon,
   RedoIcon as RedoIconData,
   RefreshIcon as RefreshIconData,
   Robot01Icon,
@@ -89,6 +90,7 @@ export const JunkIcon = makeIcon(SpamIcon);
 export const FolderIcon = makeIcon(Folder01Icon);
 export const FlagIcon = makeIcon(Flag02Icon);
 export const PaperclipIcon = makeIcon(PaperclipIconData);
+export const PinIcon = makeIcon(Pin02Icon);
 export const ReplyIcon = makeIcon(MailReply01Icon);
 export const ReplyAllIcon = makeIcon(MailReplyAll01Icon);
 export const ForwardIcon = makeIcon(MailSend02IconData);

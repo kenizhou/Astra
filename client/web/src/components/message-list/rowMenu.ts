@@ -7,6 +7,8 @@
 // pop-out reading window for a single message; the spam report rides the
 // report family's mark_junk and stands only where the account's provider
 // can report; items the host cannot serve yet stand as named placeholders.
+// The pin entry is the exception: pure view state over the local pin set,
+// no intent, the batch landing one pin state.
 
 import {
   ArchiveIcon,
@@ -16,6 +18,7 @@ import {
   ForwardIcon,
   JunkIcon,
   MarkReadIcon,
+  PinIcon,
   PopOutIcon,
   ReplyAllIcon,
   ReplyIcon,
@@ -25,7 +28,9 @@ import { type ContextMenuItem } from '@/components/ui/ContextMenu';
 import { dispatch, intents, type MessageRef } from '@/services/ipc';
 import { openMessageWindow } from '@/features/reader/readerWindows';
 import { openDraftRow, openDraftRowWindow } from '@/features/composer/draftOpen';
+import { usePinnedRowsStore } from '@/features/list-pin/pinnedRowsStore';
 import { useSweepStore } from '@/features/sweep/sweepStore';
+import { rowKeyId } from '@/components/message-list/rowIdentity';
 import type { FolderRow, MessageRowView, ViewMode } from '@/services/surfaces';
 
 /** The account context the menu holds: the account the picker and the
@@ -97,6 +102,27 @@ function openWindowItem(
         context?.currentKey ?? null,
       );
     },
+  };
+}
+
+/** The pin verb: pure view state over the local pin set, no intent. The
+ *  label flips on the targets' pin state (Unpin only when every target is
+ *  pinned), and the batch lands one state: Unpin clears every target, Pin
+ *  pins the unpinned ones and leaves the already pinned alone. */
+function pinItem(targets: MessageRowView[]): ContextMenuItem {
+  const allPinned = targets.every((row) => usePinnedRowsStore.getState().isPinned(rowKeyId(row.key)));
+  const pin = !allPinned;
+  return {
+    label: allPinned ? 'Unpin' : 'Pin',
+    icon: PinIcon,
+    onSelect: () =>
+      forEach(targets, (row) => {
+        const store = usePinnedRowsStore.getState();
+        const id = rowKeyId(row.key);
+        if (store.isPinned(id) !== pin) {
+          store.toggle(id);
+        }
+      }),
   };
 }
 
@@ -250,6 +276,7 @@ export function buildRowMenu(
 
   return [
     openWindowItem(one, oneMessage, context),
+    pinItem(targets),
     { separator: true },
     {
       label: 'Reply',
