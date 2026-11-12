@@ -7,7 +7,8 @@
 // ribbons. The row's own actions (archive, trash, flag, mark read) ride the
 // trailing edge and show while the row is hovered, selected, or holds the
 // focus, with a flagged row keeping its flag visible so the state never
-// hides and a draft row suppressing the mail four. The whole row drags:
+// hides and a draft row suppressing the mail four. A pinned row keeps its
+// pin glyph beside the paperclip, persistent the same way. The whole row drags:
 // the drag carries the selection it rides in (itself alone otherwise), keys
 // only, never content. The touch pointer owns the horizontal swipe: the
 // gesture translates the content over the revealed action and fires it past
@@ -21,13 +22,16 @@ import {
   FlagIcon,
   MarkReadIcon,
   PaperclipIcon,
+  PinIcon,
   TrashIcon,
 } from '@/components/icons';
 import { dispatch, intents } from '@/services/ipc';
 import { Avatar } from '@/features/people/Avatar';
+import { usePinnedRowsStore } from '@/features/list-pin/pinnedRowsStore';
 import { useListStore } from '@/stores/listStore';
 import type { RowKey, MessageRowView } from '@/services/surfaces';
 import { resolveTargets } from './listSelection';
+import { rowKeyId } from './rowIdentity';
 import { SWIPE_ACTIONS, swipeRevealClass } from './rowSwipe';
 import { useRowSwipe } from './useRowSwipe';
 import { DENSITY_ROW_CLASS } from './density';
@@ -71,6 +75,7 @@ export function MessageRow({ row, selected, multiSelected = false, draft = false
   const [hovered, setHovered] = useState(false);
   const [focusWithin, setFocusWithin] = useState(false);
   const density = useListStore((s) => s.density);
+  const pinned = usePinnedRowsStore((s) => s.isPinned(rowKeyId(row.key)));
   const swipe = useRowSwipe(row);
   const actionsVisible = hovered || selected || focusWithin;
   const sender = row.sender_name || row.sender_address;
@@ -220,6 +225,11 @@ export function MessageRow({ row, selected, multiSelected = false, draft = false
               {row.has_attachments && (
                 <span title="Has attachments" aria-label="Has attachments" className="inline-flex">
                   <PaperclipIcon size={14} />
+                </span>
+              )}
+              {pinned && (
+                <span title="Pinned" aria-label="Pinned" className="inline-flex text-primary">
+                  <PinIcon size={14} />
                 </span>
               )}
               {!draft && actionsVisible && (

@@ -112,6 +112,22 @@ concrete folder belongs to one account). The filing verbs stop at trash and
 there is no undo, matching the bulk toolbar. Snooze, keyboard slots, role
 targets, and multi-leg sequences are named follow-ups.
 
+## Pin
+
+Pinned rows float to the top of the list. The pin set is device-local
+(localStorage), keyed by the row identity (account and key), so pins are
+scoped per account and a message pin and a conversation pin are distinct. A
+pure stable partition floats the pinned rows first, preserving the engine
+order within each partition (no date re-sort); it applies to the folder and
+unified list only, after the filter and before the date headers, leaving the
+snapshot, the engine order, the key-based selection, and ShowMore untouched.
+Search results keep their own order. The row menu carries a Pin / Unpin
+toggle (batch-capable, idempotent), and a pinned row shows a persistent pin
+indicator. Pins float only within the loaded window; a pin beyond the
+visible limit appears once ShowMore loads it. A cross-mode map between flat
+message pins and threaded conversation pins needs thread ids on flat rows
+(engine work), a named follow-up; there is no Pinned filter tab yet.
+
 ## Known gaps
 
 - **A conversation cannot be moved**; the verb disables with its reason.

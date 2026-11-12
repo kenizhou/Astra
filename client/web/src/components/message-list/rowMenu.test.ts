@@ -92,6 +92,7 @@ describe('buildRowMenu', () => {
   it('holds the ported order', () => {
     expect(labels(buildRowMenu([m1], 'flat', accountCtx))).toEqual([
       'Open in New Window',
+      'Pin',
       '|',
       'Reply',
       'Reply All',
