@@ -26,12 +26,16 @@ import { AccountSetupFlow } from '@/features/account-setup/AccountSetupFlow';
 import { AiPanel } from '@/features/ai-panel/AiPanel';
 import { AgentPanel } from '@/features/agent/AgentPanel';
 import { CalendarPane } from '@/features/calendar/CalendarPane';
+import { CommandPalette } from '@/features/command-palette/CommandPalette';
+import { useCommandPaletteOpener } from '@/features/command-palette/useCommandPaletteOpener';
 import { useDraftResumeAtStart } from '@/features/composer/Composer';
 import { useComposerStore } from '@/features/composer/composerStore';
 import { useComposeRequestHydration } from '@/features/composer/useComposeRequest';
 import { SendResultToast } from '@/features/outbox/SendResultToast';
 import { PeoplePane } from '@/features/people/PeoplePane';
 import { SettingsScreen } from '@/features/settings/SettingsScreen';
+import { ShortcutsHelp } from '@/features/shortcuts-help/ShortcutsHelp';
+import { useShortcutsHelpOpener } from '@/features/shortcuts-help/useShortcutsHelpOpener';
 import { FolderPane } from '@/components/folder-pane/FolderPane';
 import { useWindowStage } from '@/hooks/useWindowSize';
 import { useAppearanceStore } from '@/services/appearance';
@@ -198,6 +202,8 @@ export function AppShell() {
   const stage = useWindowStage();
   useDraftResumeAtStart();
   useComposeRequestHydration();
+  useCommandPaletteOpener();
+  useShortcutsHelpOpener();
 
   const viewContent = (
     <div className="relative h-full">
@@ -267,6 +273,8 @@ export function AppShell() {
       <SendResultToast />
       <SettingsScreen />
       <AccountSetupFlow />
+      <CommandPalette />
+      <ShortcutsHelp />
     </div>
   );
 }

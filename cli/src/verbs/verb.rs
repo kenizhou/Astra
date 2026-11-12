@@ -4,11 +4,14 @@
 //! `--preview` binds. A module of its own so the dispatch stays under
 //! the gate's file-length cap.
 
+use super::completions::Shell;
 use super::{DraftArgs, SnippetArgs};
 
 /// The verbs, with their arguments: the mail reads and writes, the rules
-/// verbs over the rules store, and the AI reads over the results,
-/// draft-pool, cache, profile, and document tables.
+/// verbs over the rules store, the AI reads over the results,
+/// draft-pool, cache, profile, and document tables, and the shell
+/// completion generator.
+#[derive(PartialEq)]
 pub(crate) enum Verb {
     /// List the account index's ids.
     AccountsList,
@@ -181,6 +184,11 @@ pub(crate) enum Verb {
     AiDigestGenerate,
     /// The refused report generation: the model seam lives in the app.
     AiReportGenerate,
+    /// Generate one shell's completion script from the verb vocabulary.
+    Completions {
+        /// The shell whose completion idiom the script targets.
+        shell: Shell,
+    },
 }
 
 impl Verb {
@@ -218,6 +226,7 @@ impl Verb {
             Self::AiReport { .. } => "ai report",
             Self::AiDigestGenerate => "ai digest generate",
             Self::AiReportGenerate => "ai report generate",
+            Self::Completions { .. } => "completions",
         }
     }
 

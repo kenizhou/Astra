@@ -14,6 +14,11 @@ mod ai_docs_tests;
 mod ai_replies_tests;
 #[cfg(test)]
 mod ai_tests;
+pub(crate) mod completions;
+#[cfg(test)]
+mod completions_drift_tests;
+#[cfg(test)]
+mod completions_tests;
 pub(crate) mod drafts;
 #[cfg(test)]
 mod drafts_tests;
@@ -76,6 +81,9 @@ pub(crate) struct Run {
     pub(crate) code: Code,
     /// Whether `--json` asked for the one-line form.
     pub(crate) json: bool,
+    /// The raw script a generator verb prints instead of the envelope when
+    /// `--json` is absent; `None` for every other verb.
+    pub(crate) raw: Option<String>,
 }
 
 /// One parsed invocation.
@@ -89,6 +97,7 @@ pub(crate) struct Invocation {
 /// `snippets create`'s arguments, with the body text resolved at parse
 /// time so the audit preview can count it and execution cannot fail
 /// reading it, the drafts precedent.
+#[derive(PartialEq)]
 pub(crate) struct SnippetArgs {
     /// The snippet's short title, the picker's label.
     pub(crate) title: String,
@@ -100,6 +109,7 @@ pub(crate) struct SnippetArgs {
 
 /// `drafts save`'s arguments, with the body text resolved at parse time so
 /// the audit preview can count it and execution cannot fail reading it.
+#[derive(PartialEq)]
 pub(crate) struct DraftArgs {
     /// The account id from the index.
     pub(crate) account: String,
@@ -156,15 +166,21 @@ async fn dispatch(args: &[String], data_dir: &Path, stdin: &mut dyn Read) -> Run
                 ),
                 code: Code::Runtime,
                 json,
+                raw: None,
             }
         }
     };
     let run = match parsed {
         Ok(ref invocation) => {
             let outcome = execute(invocation, data_dir, &store).await;
-            to_run(outcome, json)
+            let raw = if json {
+                None
+            } else {
+                raw_script(&invocation.verb, &outcome)
+            };
+            to_run(outcome, json, raw)
         }
-        Err(ref failure) => to_run(Err((failure.code, failure.message.clone())), json),
+        Err(ref failure) => to_run(Err((failure.code, failure.message.clone())), json, None),
     };
     // Fail closed: an invocation that cannot be audited is not answered,
     // whatever the verb itself achieved.
@@ -186,23 +202,39 @@ async fn dispatch(args: &[String], data_dir: &Path, stdin: &mut dyn Read) -> Run
             envelope: Envelope::failure(Code::Runtime, "the audit ledger could not be written"),
             code: Code::Runtime,
             json,
+            raw: None,
         };
     }
     run
 }
 
+/// The raw script a generator verb prints in place of the envelope when
+/// `--json` is absent: the completions verb's script, and nothing for any
+/// other verb.
+fn raw_script(verb: &Verb, outcome: &Answer) -> Option<String> {
+    match (verb, outcome) {
+        (Verb::Completions { .. }, Ok(data)) => data
+            .get("script")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        _ => None,
+    }
+}
+
 /// Wraps one verb's answer as the run `main` prints.
-fn to_run(outcome: Answer, json: bool) -> Run {
+fn to_run(outcome: Answer, json: bool, raw: Option<String>) -> Run {
     match outcome {
         Ok(data) => Run {
             envelope: Envelope::success(data),
             code: Code::Ok,
             json,
+            raw,
         },
         Err((code, message)) => Run {
             envelope: Envelope::failure(code, message),
             code,
             json,
+            raw: None,
         },
     }
 }
@@ -224,6 +256,12 @@ fn audit_outcome(run: &Run) -> &'static str {
 async fn execute(invocation: &Invocation, data_dir: &Path, store: &AiStore) -> Answer {
     match &invocation.verb {
         Verb::AccountsList => return accounts::list(data_dir),
+        Verb::Completions { shell } => {
+            return Ok(serde_json::json!({
+                "shell": shell.word(),
+                "script": completions::script(*shell),
+            }));
+        }
         Verb::RulesList => return rules::list(store),
         Verb::RulesCreate {
             name,
@@ -285,6 +323,7 @@ async fn execute(invocation: &Invocation, data_dir: &Path, store: &AiStore) -> A
     };
     match &invocation.verb {
         Verb::AccountsList
+        | Verb::Completions { .. }
         | Verb::RulesList
         | Verb::RulesCreate { .. }
         | Verb::RulesDelete { .. }

@@ -1,18 +1,28 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The Shortcuts page: a static inventory of the shortcuts the shell wires
 // today, rendered from the SHORTCUTS table so a new shortcut lands here in
-// the same change that wires it. Nothing on the page is editable.
+// the same change that wires it. The shortcuts help overlay reads the same
+// table. Nothing on the page is editable.
 
 /** One row: the keys, what they do, and where they answer. */
-interface ShortcutEntry {
+export interface ShortcutEntry {
   keys: string;
   action: string;
   context: string;
 }
 
 /** Every shortcut wired in the shell today, grouped by where it answers. */
-const SHORTCUTS: ReadonlyArray<ShortcutEntry> = [
+export const SHORTCUTS: ReadonlyArray<ShortcutEntry> = [
   { keys: 'Ctrl+K', action: 'Open the search island', context: 'Everywhere' },
+  { keys: 'Ctrl+Shift+P', action: 'Open the command palette', context: 'Everywhere' },
+  { keys: '?', action: 'Open the shortcuts help', context: 'Everywhere' },
+  {
+    keys: 'Arrow Up / Arrow Down',
+    action: 'Move through the commands',
+    context: 'Command palette',
+  },
+  { keys: 'Enter', action: 'Run the selected command', context: 'Command palette' },
+  { keys: 'Escape', action: 'Close the command palette', context: 'Command palette' },
   { keys: 'Enter', action: 'Run the typed search', context: 'Search island' },
   {
     keys: 'Escape',
@@ -33,8 +43,8 @@ const SHORTCUTS: ReadonlyArray<ShortcutEntry> = [
   { keys: 'Enter or Space', action: 'Open the event editor', context: 'Calendar event' },
 ];
 
-/** The key combo, drawn as a key cap. */
-function Kbd({ children }: { children: React.ReactNode }) {
+/** The key combo, drawn as a key cap; the help overlay shares it. */
+export function Kbd({ children }: { children: React.ReactNode }) {
   return (
     <kbd className="inline-flex h-6 min-w-7 items-center justify-center rounded-[var(--radius-xs)] border border-border bg-background px-1.5 text-xs font-medium text-foreground shadow-[var(--shadow-sm)]">
       {children}

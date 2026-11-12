@@ -66,6 +66,52 @@ keeps its own surface. Nothing recovers a permanent delete; the engine's
 verb is irreversible. The bulk toolbar's Delete follows the same rule as
 the row menu's.
 
+## Hover actions
+
+The message row's trailing edge carries quick actions revealed on hover:
+archive, delete (move to trash), flag, and mark read/unread. Each acts on
+the hovered row alone, never the multi-selection (the bulk toolbar and the
+row menu own batches), and a button click never selects or opens the row.
+The slot also reveals on selection and on focus-within, so a keyboard user
+who has selected a row can tab into the buttons; the rows themselves stay
+non-focusable, and the ribbon, palette, and row menu remain the primary
+keyboard paths. Draft rows suppress the mail actions (the draft menu's
+verbs are Open and Delete Draft). A flagged row keeps its flag button
+visible without hover. The hover slot offers no undo, matching the row
+menu and the ribbon; swipe owns undo. Touch users (no hover) keep swipe,
+the row menu, and the bulk toolbar.
+
+## Sweep
+
+The row menu's "Clean up sender" entry opens a dialog that sweeps one
+sender's mail in the current folder. It filters the loaded rows by the
+sender's address (the list filter's own predicate), previews the count "in
+this folder" with the honest note that it counts the loaded rows only, and
+shows a bounded preview of the matching subjects. The action is Archive
+(the default) or Move to Trash; Confirm loops the chosen intent over the
+matching rows, the bulk toolbar's own batch pattern, and closes. Cancel and
+Escape close without dispatching; an empty match disables Confirm with its
+reason. The act stops at the row's trash (no permanent delete), and there is
+no undo, matching the bulk toolbar and the row menu: the confirm is the
+guard. v1 sweeps the current folder's loaded window only; a cross-folder
+sweep over the search intent is a named follow-up.
+
+## Quick steps
+
+Quick steps are user-defined macros that run one mail action over the
+selected rows in a click. A step is a name, an action (archive, trash, mark
+read, mark unread, flag, unflag, or move to a concrete folder), and an
+optional mark-read-first modifier; up to five are saved device-local
+(localStorage). The ribbon carries a button per step (disabled without a
+selection) and a Manage button opening the editor. The runner maps the
+action to the existing intent and loops it over the selection (the bulk
+selection, else the single anchor); mark-read runs first, because filed
+rows leave the snapshot. A move skips conversation rows and foreign-account
+rows with a counted toast (a move batch cannot name a conversation, and a
+concrete folder belongs to one account). The filing verbs stop at trash and
+there is no undo, matching the bulk toolbar. Snooze, keyboard slots, role
+targets, and multi-leg sequences are named follow-ups.
+
 ## Known gaps
 
 - **A conversation cannot be moved**; the verb disables with its reason.

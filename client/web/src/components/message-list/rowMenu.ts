@@ -10,6 +10,7 @@
 
 import {
   ArchiveIcon,
+  CleanIcon,
   ComposeIcon,
   FlagIcon,
   ForwardIcon,
@@ -24,6 +25,7 @@ import { type ContextMenuItem } from '@/components/ui/ContextMenu';
 import { dispatch, intents, type MessageRef } from '@/services/ipc';
 import { openMessageWindow } from '@/features/reader/readerWindows';
 import { openDraftRow, openDraftRowWindow } from '@/features/composer/draftOpen';
+import { useSweepStore } from '@/features/sweep/sweepStore';
 import type { FolderRow, MessageRowView, ViewMode } from '@/services/surfaces';
 
 /** The account context the menu holds: the account the picker and the
@@ -203,6 +205,27 @@ function permanentDeleteItem(targets: MessageRowView[]): ContextMenuItem {
   };
 }
 
+/** The sweep entry: opens the clean-up dialog over the one row's sender,
+ *  the dialog previewing that sender's loaded rows in the sitting folder
+ *  before a confirmed batch. A batch cannot name one sender, so the entry
+ *  stands disabled with the reason. */
+function sweepItem(targets: MessageRowView[]): ContextMenuItem {
+  const one = single(targets);
+  const reason = one === null ? 'Pick one row for this' : undefined;
+  return {
+    label: 'Clean up sender…',
+    icon: CleanIcon,
+    disabled: reason !== undefined ? true : undefined,
+    title: reason,
+    description: reason,
+    onSelect: () => {
+      if (one !== null) {
+        useSweepStore.getState().open(one.sender_address);
+      }
+    },
+  };
+}
+
 /** The menu one message row (or a batch of them) opens. */
 export function buildRowMenu(
   targets: MessageRowView[],
@@ -278,6 +301,7 @@ export function buildRowMenu(
       icon: ArchiveIcon,
       onSelect: () => forEach(targets, (row) => void dispatch(intents.archiveMessage(row.key))),
     },
+    sweepItem(targets),
     { separator: true },
     {
       label: 'Copy Subject',

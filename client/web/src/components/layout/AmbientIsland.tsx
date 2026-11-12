@@ -23,6 +23,7 @@ import type { SearchScope } from '@/services/surfaces';
 import { useListStore } from '@/stores/listStore';
 import { useSearchHistoryStore } from '@/stores/searchHistoryStore';
 import { useUiStore } from '@/stores/uiStore';
+import { registerSearchIslandOpener } from './searchIsland';
 
 /** How long the search field sits quiet before its query crosses. */
 export const SEARCH_DEBOUNCE_MS = 500;
@@ -107,6 +108,13 @@ export function AmbientIsland() {
       inputRef.current?.focus();
     }
   }, [expanded]);
+
+  // The palette's Search mail command opens the island through this seam;
+  // the registration lives only while the island stands mounted.
+  useEffect(() => {
+    registerSearchIslandOpener(() => setExpanded(true));
+    return () => registerSearchIslandOpener(null);
+  }, []);
 
   // Ctrl+K opens the island from anywhere; a handler that claimed the key
   // first (a preventDefault upstream) keeps it.

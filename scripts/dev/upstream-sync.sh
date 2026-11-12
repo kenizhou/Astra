@@ -49,13 +49,17 @@ NEW=$(git -C "$UPSTREAM" rev-parse origin/main)
 # last_ported, so an open sync PR neither resends a stale digest nor skips
 # a revision.
 git -C "$WT" fetch origin --quiet
-CUR=$(git -C "$WT" log -1 --format=%B -- vendor/engine | grep -oE '[0-9a-f]{40}' | head -1 || true)
+# CUR greps only the `vendor: upstream` commits: a port commit touching
+# vendor/engine also becomes "the last commit on the path", and its message
+# carries no hash, so an unfiltered read falls to the baseline.
+CUR=$(git -C "$WT" log --grep='^vendor: upstream ' -1 --format=%B -- vendor/engine | grep -oE '[0-9a-f]{40}' | head -1 || true)
 [ -z "$CUR" ] && CUR="$BASELINE"
-# MERGED is refs-lock's `last_ported`: the contract's own record of what
-# main holds (advanced on every sync merge). Message-derived anchors fail
-# under a squash-merged sync PR (no 40-hex to read), and tree-exact anchors
-# fail by design (main's vendor/engine carries Astra's in-tree edits).
-MERGED=$(awk '/name = "email-calendar-sync-engine"/{f=1} f && /^last_ported = /{print; exit}' "$LOCK" | cut -d'"' -f2)
+# MERGED is refs-lock's `last_ported` read from ORIGIN/MAIN's copy (the
+# local checkout can sit stale behind a merge): the contract's own record
+# of what main holds. Message-derived anchors fail under a squash-merged
+# sync PR (no 40-hex to read), and tree-exact anchors fail by design
+# (main's vendor/engine carries Astra's in-tree edits).
+MERGED=$(git -C "$WT" show origin/main:refs/refs-lock.toml | awk '/name = "email-calendar-sync-engine"/{f=1} f && /^last_ported = /{print; exit}' | cut -d'"' -f2)
 [ -z "$MERGED" ] && MERGED="$BASELINE"
 OPEN_PR=$(gh pr list -R "$GH_REPO" --head vendor-sync --state open --json number --jq '.[0].number' 2>/dev/null || true)
 if ! git -C "$UPSTREAM" cat-file -e "$CUR^{commit}" 2>/dev/null; then
@@ -67,17 +71,32 @@ fi
 # still names an older revision. The advance is the merge's own bookkeeping
 # (the reviewed content is already on main), so it commits straight to main
 # as the contract's step 7; without it the next night would re-PR the same
-# range.
-if [ -z "$OPEN_PR" ] && [ "$MERGED" != "$CUR" ] \
+# range. The commit builds without a checkout (this worktree cannot hold
+# main; the primary checkout owns it): a temporary index over origin/main,
+# the one blob replaced, commit-tree, push.
+if [ "$DRY_RUN" -eq 0 ] && [ -z "$OPEN_PR" ] && [ "$MERGED" != "$CUR" ] \
    && git -C "$WT" merge-base --is-ancestor vendor-sync origin/main 2>/dev/null; then
-    git -C "$WT" checkout --quiet main
-    git -C "$WT" pull --ff-only --quiet
-    sed -i "s/^last_ported = \"$MERGED\"/last_ported = \"$CUR\"/" "$WT/refs/refs-lock.toml"
-    git -C "$WT" add refs/refs-lock.toml
-    git -C "$WT" commit --quiet -m "vendor: advance last_ported to ${CUR:0:12}"
-    git -C "$WT" push --quiet origin main
-    git -C "$WT" checkout --quiet vendor-sync
-    log "the sync merged; advanced last_ported to $CUR"
+    TMPIDX=$(mktemp)
+    trap 'rm -f "$TMPIDX"' EXIT
+    git -C "$WT" show origin/main:refs/refs-lock.toml \
+        | sed "s/^last_ported = \"$MERGED\"/last_ported = \"$CUR\"/" > "$TMPIDX.content"
+    BLOB=$(git -C "$WT" hash-object -w "$TMPIDX.content")
+    rm -f "$TMPIDX.content"
+    # A no-op advance (the sed matched nothing) commits nothing: an empty
+    # bookkeeping commit on main is noise, never bookkeeping.
+    OLD_BLOB=$(git -C "$WT" rev-parse "origin/main:refs/refs-lock.toml")
+    if [ "$BLOB" != "$OLD_BLOB" ]; then
+        GIT_INDEX_FILE="$TMPIDX" git -C "$WT" read-tree origin/main
+        GIT_INDEX_FILE="$TMPIDX" git -C "$WT" update-index --cacheinfo "100644,$BLOB,refs/refs-lock.toml"
+        TREE=$(GIT_INDEX_FILE="$TMPIDX" git -C "$WT" write-tree)
+        COMMIT=$(git -C "$WT" commit-tree "$TREE" -p origin/main \
+            -m "vendor: advance last_ported to ${CUR:0:12}")
+        git -C "$WT" push --quiet origin "$COMMIT:main"
+        log "the sync merged; advanced last_ported to $CUR"
+    else
+        log "the sync merged but last_ported already stands; nothing to advance"
+    fi
+    rm -f "$TMPIDX"
     exit 0
 fi
 
@@ -156,29 +175,34 @@ if [ "$DRY_RUN" -eq 1 ]; then
     exit 0
 fi
 
-# 4. Land the new revision in the vendor-sync worktree, conversion off (the
-# pristine rule from the vendor import: archive with core.autocrlf=false,
-# vendor/** marked -text).
-git -C "$WT" checkout --quiet vendor-sync
-git -C "$WT" pull --ff-only --quiet
-rm -rf "$WT/vendor/engine"
-mkdir -p "$WT/vendor/engine"
-git -c core.autocrlf=false -C "$UPSTREAM" archive "$NEW" | tar -x -C "$WT/vendor/engine"
+# 4-6 land the new revision; the standing-pile path (the branch already at
+# NEW) skips them: there is nothing to land, and a re-archive of the same
+# revision commits nothing.
+if [ "$NEW" != "$CUR" ]; then
+    # 4. Land the new revision in the vendor-sync worktree, conversion off
+    # (the pristine rule from the vendor import: archive with
+    # core.autocrlf=false, vendor/** marked -text).
+    git -C "$WT" checkout --quiet vendor-sync
+    git -C "$WT" pull --ff-only --quiet
+    rm -rf "$WT/vendor/engine"
+    mkdir -p "$WT/vendor/engine"
+    git -c core.autocrlf=false -C "$UPSTREAM" archive "$NEW" | tar -x -C "$WT/vendor/engine"
 
-# 5. Pristine proof by blob hash (never working-tree bytes: autocrlf
-# materialises CRLF for extensions .gitattributes does not pin).
-git -C "$WT" add -A vendor/engine
-git -C "$WT" ls-files -s vendor/engine | awk '{print $2"\t"$4}' | sed 's|\tvendor/engine/|\t|' | sort -k2 > /tmp/sync-astra-vendor.txt
-git -C "$UPSTREAM" ls-tree -r "$NEW" --format='%(objectname)%x09%(path)' | sort -k2 > /tmp/sync-upstream-tree.txt
-if ! diff -q /tmp/sync-astra-vendor.txt /tmp/sync-upstream-tree.txt > /dev/null; then
-    diff /tmp/sync-astra-vendor.txt /tmp/sync-upstream-tree.txt | head -10 >&2 || true
-    die "the landed tree is not byte-pristine with $NEW (blob hashes differ); refusing to commit"
+    # 5. Pristine proof by blob hash (never working-tree bytes: autocrlf
+    # materialises CRLF for extensions .gitattributes does not pin).
+    git -C "$WT" add -A vendor/engine
+    git -C "$WT" ls-files -s vendor/engine | awk '{print $2"\t"$4}' | sed 's|\tvendor/engine/|\t|' | sort -k2 > /tmp/sync-astra-vendor.txt
+    git -C "$UPSTREAM" ls-tree -r "$NEW" --format='%(objectname)%x09%(path)' | sort -k2 > /tmp/sync-upstream-tree.txt
+    if ! diff -q /tmp/sync-astra-vendor.txt /tmp/sync-upstream-tree.txt > /dev/null; then
+        diff /tmp/sync-astra-vendor.txt /tmp/sync-upstream-tree.txt | head -10 >&2 || true
+        die "the landed tree is not byte-pristine with $NEW (blob hashes differ); refusing to commit"
+    fi
+
+    # 6. Commit and push.
+    git -C "$WT" commit --quiet -m "vendor: upstream $NEW $(date +%F)" -m "$(git -C "$UPSTREAM" log --oneline "$BASE..$NEW")"
+    git -C "$WT" push --quiet origin vendor-sync
+    log "pushed vendor-sync at $NEW"
 fi
-
-# 6. Commit and push.
-git -C "$WT" commit --quiet -m "vendor: upstream $NEW $(date +%F)" -m "$(git -C "$UPSTREAM" log --oneline "$BASE..$NEW")"
-git -C "$WT" push --quiet origin vendor-sync
-log "pushed vendor-sync at $NEW"
 
 # 7. Open the PR, or leave the open one to its updated diff. Every gh call
 # names the repository: the scheduled shell starts in no repository at all,
