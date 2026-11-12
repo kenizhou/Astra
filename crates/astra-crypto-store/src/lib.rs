@@ -35,6 +35,7 @@ mod keystore;
 mod password;
 mod pinned;
 mod policy;
+mod receive;
 mod resolve;
 mod store;
 mod trust;
@@ -64,6 +65,7 @@ pub use keystore::SqliteKeyStore;
 pub use password::apply_password_crypto;
 pub use pinned::{list_pinned_keys, remove_pinned_key, set_pinned_key, PinnedKey};
 pub use policy::StoreCryptoPolicy;
+pub use receive::{receive_openpgp, ReceiveOutcome, ReceiveState};
 pub use resolve::{
     key_material_expired, pin_preferred_handle, recipient_trust_failures, resolve_recipient_status,
     resolve_recipient_status_at, RecipientTrustFailure, RecipientTrustState, RecipientTrustStatus,

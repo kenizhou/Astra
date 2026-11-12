@@ -625,11 +625,20 @@ fn encrypt_impl(
 ///   signer key. The caller maps this to the framework's
 ///   `SignatureState::UnknownKey` ("unknown-key" persisted state) instead of
 ///   dropping the message on the floor.
+/// - `signer_fingerprints` - the distinct issuer fingerprints of every embedded
+///   signature noticed during verification (verified OR missing-key), in
+///   encounter order. Empty when the ciphertext carries no embedded signature
+///   (encrypt-only). The receive orchestrator resolves these to the signer's
+///   primary fingerprint + email and uses non-emptiness to tell a signed
+///   message (`ValidVerified`) from an unsigned one (`NotSigned`). These are the
+///   signatures' issuer fingerprints, which may name a signing SUBKEY rather
+///   than the cert primary.
 #[derive(Debug)]
 pub struct DecryptOutcome {
     pub payload: DecryptedPayload,
     pub weak_warning: Option<String>,
     pub unverifiable_signature: bool,
+    pub signer_fingerprints: Vec<openpgp::Fingerprint>,
 }
 
 /// Streaming decrypt of an [`EncryptedEnvelope`] back into plaintext parts
@@ -718,6 +727,7 @@ fn decrypt_impl(
         card_decryptor,
         weak_warning: None,
         unverifiable_signature: false,
+        signer_fingerprints: Vec::new(),
     };
     // `DecryptorBuilder::from_bytes` returns `openpgp::Result<DecryptorBuilder>`;
     // `b.with_policy(...)` returns `openpgp::Result<Decryptor<...>>`. The
@@ -763,6 +773,7 @@ fn decrypt_impl(
         },
         weak_warning: helper.weak_warning,
         unverifiable_signature: helper.unverifiable_signature,
+        signer_fingerprints: helper.signer_fingerprints,
     })
 }
 
@@ -991,6 +1002,7 @@ pub fn decrypt_symmetric(
         pgp_policy,
         weak_warning: None,
         unverifiable_signature: false,
+        signer_fingerprints: Vec::new(),
     };
     let builder = map_sequoia(DecryptorBuilder::from_bytes(ciphertext))?;
     // `with_policy` invokes `DecryptionHelper::decrypt` → route through
@@ -1021,6 +1033,7 @@ pub fn decrypt_symmetric(
         },
         weak_warning: helper.weak_warning,
         unverifiable_signature: helper.unverifiable_signature,
+        signer_fingerprints: helper.signer_fingerprints,
     })
 }
 
@@ -1080,6 +1093,10 @@ struct PasswordHelper<'a> {
     /// Surfaced on [`DecryptOutcome::unverifiable_signature`] - the caller
     /// maps it to the framework's `SignatureState::UnknownKey`.
     unverifiable_signature: bool,
+    /// Distinct issuer fingerprints of every embedded signature noticed during
+    /// `check()` (verified or missing-key). Surfaced on
+    /// [`DecryptOutcome::signer_fingerprints`].
+    signer_fingerprints: Vec<openpgp::Fingerprint>,
 }
 
 impl<'a> VerificationHelper for PasswordHelper<'a> {
@@ -1107,14 +1124,16 @@ impl<'a> VerificationHelper for PasswordHelper<'a> {
                     match r {
                         Ok(good) => {
                             found_good = true;
+                            note_signer_issuers(good.sig, &mut self.signer_fingerprints);
                             if self.weak_warning.is_none() {
                                 if let Some(w) = self.pgp_policy.note_weak(good.sig) {
                                     self.weak_warning = Some(w);
                                 }
                             }
                         }
-                        Err(VerificationError::MissingKey { .. }) => {
+                        Err(VerificationError::MissingKey { sig }) => {
                             found_missing_key = true;
+                            note_signer_issuers(sig, &mut self.signer_fingerprints);
                         }
                         Err(e) => {
                             return Err(sequoia_openpgp::Error::from(e).into());
@@ -1486,6 +1505,17 @@ fn extract_issuer_fingerprints(sig: &openpgp::packet::Signature) -> Vec<openpgp:
     out
 }
 
+/// Accumulate one embedded signature's issuer fingerprints into `acc`,
+/// de-duplicated across signatures by fingerprint. Used by the decrypt
+/// verification helpers to surface [`DecryptOutcome::signer_fingerprints`].
+fn note_signer_issuers(sig: &openpgp::packet::Signature, acc: &mut Vec<openpgp::Fingerprint>) {
+    for fp in extract_issuer_fingerprints(sig) {
+        if !acc.contains(&fp) {
+            acc.push(fp);
+        }
+    }
+}
+
 /// Extract the distinct issuer fingerprint(s) from a detached signature's
 /// packet bytes - the same parse [`verify_detached`] performs internally.
 ///
@@ -1580,6 +1610,10 @@ struct Helper<'a> {
     /// [`DecryptOutcome::unverifiable_signature`] - the caller maps it to the
     /// framework's `SignatureState::UnknownKey`.
     unverifiable_signature: bool,
+    /// Distinct issuer fingerprints of every embedded signature noticed during
+    /// `check()` (verified or missing-key). Surfaced on
+    /// [`DecryptOutcome::signer_fingerprints`].
+    signer_fingerprints: Vec<openpgp::Fingerprint>,
 }
 
 impl<'a> VerificationHelper for Helper<'a> {
@@ -1619,6 +1653,7 @@ impl<'a> VerificationHelper for Helper<'a> {
                     match r {
                         Ok(good) => {
                             found_good = true;
+                            note_signer_issuers(good.sig, &mut self.signer_fingerprints);
                             // Capture the FIRST weak-algo warning (engine-core
                             // surface; multiple-weak-algo aggregation lands
                             // with Task 8's framework wiring).
@@ -1628,8 +1663,9 @@ impl<'a> VerificationHelper for Helper<'a> {
                                 }
                             }
                         }
-                        Err(VerificationError::MissingKey { .. }) => {
+                        Err(VerificationError::MissingKey { sig }) => {
                             found_missing_key = true;
+                            note_signer_issuers(sig, &mut self.signer_fingerprints);
                         }
                         // Surface the first verification failure verbatim.
                         // A bad embedded signature MUST fail the decrypt.
