@@ -68,8 +68,6 @@ path, and the palette offers no send-class verb.
 - The full shortcut engine (remappable bindings, sequences, persisted
   overrides) is out: the palette ships the one fixed binding, the shape
   open for a keyMap later.
-- The shortcuts-help overlay is a separate backlog item; the static
-  settings Shortcuts inventory carries the list today.
 - Deferred commands, named not silent: per-account switch, outbox
   navigation, list density and filter, mark as spam, delete permanently,
   undo (no Astra counterpart).
@@ -83,4 +81,5 @@ path, and the palette offers no send-class verb.
 | The command set over the existing intents and setters, no new wire type | ✅ | `commands.ts` |
 | Opens above the other modals (`--z-modal`, mounts last) | ✅ | `CommandPalette.tsx`, `AppShell.tsx` |
 | Send is never a command | ✅ | the send class is the composer's submit path |
-| The full shortcut engine, shortcuts help, recents/fuzzy/grouping | N/A | deferred, the gaps above |
+| The shortcuts-help overlay (`?` opens the keyboard reference) | ✅ | shortcuts-help.md |
+| The full shortcut engine, recents/fuzzy/grouping | N/A | deferred, the gaps above |
