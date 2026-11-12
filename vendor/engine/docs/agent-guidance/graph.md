@@ -364,6 +364,10 @@ not run against a mailbox yet.
 
 ## Shared mailboxes (the multi-mailbox model)
 
+The neutral seam is `SharedAccounts` (`providers.md`). The mail provider's Inbox probe reports
+a store with `StoreDomains` mail; the calendar provider's calendar probe (below) reports its
+calendar. A host wanting both asks both providers and onboards the store once.
+
 One signed-in user (one OAuth credential) can access several mailboxes: their own
 and any shared/other mailbox they hold delegate access to — Graph addresses the
 latter as `…/users/{address}/mailFolders('Inbox')/messages`, using the user's
@@ -396,10 +400,10 @@ So adding a shared mailbox is, for the engine, just another account pointed at a
 so it skips for the personal account the rest of the live suite uses — and so no real
 address is ever written into the repository).
 
-### Onboarding: `resolve_shared_mailbox`, and only that
+### Onboarding: `resolve_shared_account`, and only that
 
 - **There is no list route.** Nothing in Graph answers "which mailboxes have been shared with
-  me", so the adapter advertises `SharedMailboxes::ByAddress`, leaves `list_shared_mailboxes`
+  me", so the adapter advertises `SharedAccounts::ByAddress`, leaves `list_shared_accounts`
   at its rejecting default, and a host asks the user to type an address. The resolver probes
   `GET /users/{addr}/mailFolders/inbox?$select=id` — a mail-folder read, needing only the
   `Mail.Read*.Shared` scope a sync of that mailbox needs anyway.
@@ -422,6 +426,47 @@ address is ever written into the repository).
   `/users/{own upn}` and `/users/{own address in upper case}`, and different for the shared
   mailbox. So the resolver reads `/me/mailFolders/inbox?$select=id` too and refuses a match;
   a credential with no mailbox of its own (`404`) stands the check down.
+
+### The shared mailbox's calendar
+
+Probed live on a work tenant (2026-11-10 and 11), a delegate with Full Access, token with
+`Calendars.ReadWrite.Shared`; pinned in `tests/live_shared_calendar.rs`:
+
+- **Not in the delegate's `/me/calendars`.** A shared mailbox's calendar is reachable only
+  under its own principal, so it is onboarded like its mail: `GraphCalendarProvider` advertises
+  `SharedAccounts::ByAddress` and resolves with `GET /users/{addr}/calendar?$select=id`
+  (`crate::shared::resolve_calendar`). Same address check, same `404` = not resolvable by you
+  (an unknown address is `ErrorInvalidUser`; a group, `ErrorItemNotFound` "Default folder
+  Calendar not found"), same `403` = a grant shortfall.
+- **The own-store check compares calendar ids.** The default calendar's id differs between the
+  shared mailbox and the delegate's own, and is the same through `/me` and
+  `/users/{own address}` in any case, so the resolver refuses a match with
+  `/me/calendar?$select=id`, as the Inbox probe does with Inbox ids.
+- **Everything else is the provider under `/users/{address}`, unchanged.** The default calendar
+  lists `canEdit` and `owner.address` the shared mailbox (read into `Calendar::owner`);
+  `calendarView/delta` ends in a `deltaLink`; create, `If-Match` patch and delete work, a stale
+  `If-Match` being `412 ErrorIrresolvableConflict`; a meeting made there is organised by the
+  shared mailbox and its Teams meeting (`isOnlineMeeting`) is the calendar's own; and
+  `POST /users/{shared}/events/{id}/accept` answers for the shared mailbox, the organiser's copy
+  turning accepted. An event id is per mailbox: the shared one's is `404` under `/me/events`.
+- **The calendar user is the shared mailbox**: `calendar_user_addresses` reads the principal's
+  identity (`crate::identity`), which is the bound mailbox — where the delegate may edit its
+  default calendar. Bound, the provider first reads that calendar's `canEdit` and answers
+  `NotEnabled` when it is `false`: a read-only delegate schedules as nobody there
+  (`engine_provider::calendar_user`). Live, Full Access reads `canEdit: true`; the `false` case is
+  the documented field, unobserved, like the read-only delegate below.
+- **Two oddities, pinned rather than relied on.** The delegate's own copy of a meeting they
+  made from the shared calendar reads *accepted* before anyone answered — every run since
+  2026-11-10. And once (not reproduced since) the shared mailbox received two acceptance
+  replies for it, the sent copy of the invitation naming the delegate's X.500
+  `legacyExchangeDN`, not an SMTP address, as `sender`.
+- **A standalone Teams meeting is the delegate's.** `TeamsMeetings` posts to
+  `/me/onlineMeetings` on the global root whatever principal its client is rooted at, since
+  Graph makes online meetings for the signed-in user alone; live, one made through a client
+  bound to the shared mailbox was found and deleted by the delegate's own. An event-attached
+  Teams meeting (`isOnlineMeeting`, above) is the shared mailbox's.
+- **Not verified**: a delegate granted the calendar alone, or granted it read-only. The test
+  tenant has no such share yet, so what `/calendar` and `canEdit` answer there is unobserved.
 
 ### An address is a URL path segment: validate, then encode
 

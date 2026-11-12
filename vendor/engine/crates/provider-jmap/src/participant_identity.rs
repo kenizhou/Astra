@@ -15,6 +15,8 @@ use crate::{
     error::JmapError,
     executor::Executor,
     request::{Request, capability},
+    session_accounts::SessionAccount,
+    shared::looks_like_address,
 };
 
 /// Reads the calendar account's participant identities as the addresses it schedules as.
@@ -37,6 +39,47 @@ pub(crate) async fn calendar_user_addresses(
             Ok(CalendarUserAddresses::Unknown)
         }
         Err(err) => Err(err),
+    }
+}
+
+/// The calendar user of a shared account, from the user's identities (`answer`).
+///
+/// `ParticipantIdentity/get` answers with the **user's** identities whichever account it is
+/// asked on (pinned in `stalwart-harness/tests/smoke_shared_stores.rs`), so it never says who a
+/// shared store's owner is. The owner is the account's `name` when that is an address (RFC
+/// 8620 §1.6.2: "usually the primary email address"); the answer keeps the identities that are
+/// the owner's. None of them is when the user may not schedule as the owner — a calendar
+/// shared read-only — and that is [`CalendarUserAddresses::NotEnabled`]: in this store the
+/// user schedules as nobody — unless the answer was partial (`Including`), which cannot rule the
+/// owner out and so is `Unknown`. A store whose name is no address cannot be answered for.
+pub(crate) fn for_store(
+    answer: CalendarUserAddresses,
+    store: &SessionAccount,
+) -> CalendarUserAddresses {
+    let Some(owner) = store
+        .name
+        .as_deref()
+        .filter(|name| looks_like_address(name))
+    else {
+        return CalendarUserAddresses::Unknown;
+    };
+    let the_owners: Vec<String> = answer
+        .addresses()
+        .iter()
+        .filter(|address| addresses_match(address, owner))
+        .cloned()
+        .collect();
+    match answer {
+        // A whole set without the owner rules the owner out; a partial one cannot.
+        CalendarUserAddresses::Known(_) if the_owners.is_empty() => {
+            CalendarUserAddresses::NotEnabled
+        }
+        CalendarUserAddresses::Including(_) if the_owners.is_empty() => {
+            CalendarUserAddresses::Unknown
+        }
+        CalendarUserAddresses::Known(_) => CalendarUserAddresses::Known(the_owners),
+        CalendarUserAddresses::Including(_) => CalendarUserAddresses::Including(the_owners),
+        other => other,
     }
 }
 
@@ -107,6 +150,21 @@ mod tests {
                 "a.smith@example.org".to_owned(),
             ])
         );
+    }
+
+    #[test]
+    fn a_partial_answer_without_the_owner_cannot_rule_the_owner_out() {
+        let store = crate::session_accounts::parse_accounts(&json!({ "accounts": {
+            "g": { "name": "support@example.org", "isPersonal": false }
+        }}))
+        .unwrap()
+        .remove(0);
+        // "These addresses, maybe more": the owner may be among the ones not named.
+        let partial = CalendarUserAddresses::Including(vec!["alice@example.org".to_owned()]);
+        assert_eq!(for_store(partial, &store), CalendarUserAddresses::Unknown);
+        // A whole set that misses the owner does rule it out.
+        let whole = CalendarUserAddresses::Known(vec!["alice@example.org".to_owned()]);
+        assert_eq!(for_store(whole, &store), CalendarUserAddresses::NotEnabled);
     }
 
     #[test]

@@ -63,6 +63,15 @@ AOL's CalDAV endpoint. Last observed October 2026.
 |---|---|---|---|---|
 | AOL-1 | Answers a request without credentials with `401` and no `WWW-Authenticate` header. | RFC 9110 §15.5.2, as YAHOO-1. | As YAHOO-1. | Not yet |
 
+## Stalwart
+
+Stalwart's JMAP server, as the engine's harness runs it (`docker/stalwart`). Last observed on
+v1.0.2, November 2026.
+
+| Id | What the server does | What the RFC requires | How the engine copes | Reported |
+|---|---|---|---|---|
+| STALWART-1 | JMAP: lists the same `accountCapabilities` (mail, calendars, contacts and more) on every account shared with the user, whatever was shared. An account shared for one INBOX answers `Calendar/get` with `accountNotSupportedByMethod`; one shared for one calendar answers `Mailbox/get` the same way. Pinned in `stalwart-harness/tests/smoke_shared_stores.rs`. | RFC 8620 §1.6.2: `accountCapabilities` is "the set of capability URIs for the methods supported in this account", and §3.6.2 defines `accountNotSupportedByMethod` as the error for an account that "does not support this method". | The shared-account list asks each claimed domain with a `get` for no objects, in one request, and lists a domain only where it answers (`provider-jmap/src/shared.rs`). A client bound to such an account still advertises the overclaimed domains; a host dials only those the list named. | Not yet |
+
 ## Resolved
 
 None yet.

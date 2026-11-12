@@ -19,8 +19,8 @@
 //! observable through [`ConnectStep`] and [`ConnectObserver`], which an adapter's
 //! config carries.
 //!
-//! A credential often reaches more than its own mailbox. [`SharedMailboxes`] and
-//! [`SharedMailbox`] are the discovery seam for that (`shared`): they answer *which stores
+//! A credential often reaches more than its own mailbox and calendar. [`SharedAccounts`] and
+//! [`SharedAccount`] are the discovery seam for that (`shared`): they answer *which stores
 //! can I open*, and stop there — a discovered store becomes an ordinary account bound with
 //! the same credential, so no scope, cursor or account kind is added.
 //!
@@ -43,7 +43,6 @@ mod connect_observer;
 mod connection;
 mod contact;
 mod deadline;
-mod draft_attachment;
 mod error;
 mod hand_over;
 mod identity;
@@ -52,7 +51,6 @@ mod mail_edit;
 mod mailbox_edit;
 mod mailbox_write;
 mod meeting;
-mod mime_wrap;
 mod page;
 mod provider;
 #[cfg(feature = "http")]
@@ -95,7 +93,6 @@ pub use mailbox_write::MailboxWrites;
 pub use meeting::{
     JitsiMeetings, JitsiServerError, MeetingKey, MeetingKeyError, MeetingRequest, MeetingService,
 };
-pub use mime_wrap::{MimeWrapOutcome, MimeWrapper};
 pub use page::{PageToken, SyncKind, SyncPage};
 pub use provider::Provider;
 #[cfg(feature = "http")]
@@ -103,7 +100,7 @@ pub use redirect::{redirect_refused, redirect_target};
 pub use report::{
     MessageReport, ReportControls, ReportEvidence, ReportReceipt, ReportVerdict, ReportVerdicts,
 };
-pub use shared::{SharedMailbox, SharedMailboxes};
+pub use shared::{SharedAccount, SharedAccounts, StoreDomains};
 pub use sources::{SourceStream, one_at_a_time};
 pub use stream::{EmailChunk, EmailStream, PassMode, split_page};
 pub use submit::{
