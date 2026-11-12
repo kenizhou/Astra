@@ -20,12 +20,14 @@ use engine_core::{
 use engine_provider::{
     CalendarListing, CalendarUserAddresses, CalendarWrites, Capabilities, ConnectionInfo,
     EventDeletion, EventDraft, EventEdit, EventRsvp, EventWriteReceipt, OverrideSurvival,
-    PageToken, Provider, ProviderResult, RsvpControls, ScopeSync, SyncKind, WriteGuard,
+    PageToken, Provider, ProviderResult, RsvpControls, ScopeSync, SharedAccount, SharedAccounts,
+    SyncKind, WriteGuard,
 };
 
 use crate::{
     cal_fetch::{self, CalendarWindow, EventsPage},
     cal_override, cal_write,
+    principal::MailboxPrincipal,
     transport::GraphClient,
 };
 
@@ -105,7 +107,9 @@ impl GraphCalendarProvider {
                 .with_calendar_writes(WriteGuard::Enforced, GRAPH_OVERRIDE_SURVIVAL)
                 .with_calendar_rsvp(GRAPH_RSVP)
                 .with_calendar_scheduling()
-                .with_conference_writes(),
+                .with_conference_writes()
+                // `/users/{address}/calendar` answers or it does not (`crate::shared`).
+                .with_shared_accounts(SharedAccounts::ByAddress),
         }
     }
 
@@ -217,6 +221,13 @@ impl Provider for GraphCalendarProvider {
         };
         Ok(ScopeSync::new(update, next_cursor))
     }
+
+    /// Checks that this credential can open the calendar of the mailbox at `address`, and that
+    /// it is not the credential's own (`crate::shared`). As for mail, no route lists the
+    /// stores shared with a credential, so enumeration stays at its rejecting default.
+    async fn resolve_shared_account(&self, address: &str) -> ProviderResult<SharedAccount> {
+        crate::shared::resolve_calendar(&self.client, address).await
+    }
 }
 impl engine_provider::MailboxWrites for GraphCalendarProvider {}
 
@@ -266,6 +277,18 @@ impl CalendarWrites for GraphCalendarProvider {
         &self,
         _account: &AccountId,
     ) -> ProviderResult<CalendarUserAddresses> {
+        // Bound to a shared mailbox, the delegate schedules as that mailbox only where they may
+        // write its calendar; read-only, they schedule as nobody there
+        // (`engine_provider::calendar_user`). The default calendar's `canEdit` says which.
+        if !matches!(self.client.principal(), MailboxPrincipal::Me) {
+            let calendar = self
+                .client
+                .get(&self.client.url("/calendar?$select=canEdit"))
+                .await?;
+            if calendar.get("canEdit").and_then(serde_json::Value::as_bool) == Some(false) {
+                return Ok(CalendarUserAddresses::NotEnabled);
+            }
+        }
         let identities = crate::identity::sender_identity(&self.client).await?;
         Ok(CalendarUserAddresses::Including(
             identities

@@ -17,7 +17,7 @@ use std::{
 
 use async_trait::async_trait;
 use engine_core::{
-    ids::{AccountId, MailboxId, ProviderKey, SharedMailboxId},
+    ids::{AccountId, MailboxId, ProviderKey, SharedAccountId},
     mail::{Mailbox, Message},
     sync::{SyncScope, SyncState, SyncUpdate, SyncWindow},
     time::CalendarDate,
@@ -25,7 +25,7 @@ use engine_core::{
 use engine_provider::{
     CalendarWrites, ConnectionInfo, Draft, EmailStream, MailEdit, MailEditReceipt, MailboxEdit,
     MailboxEditReceipt, MailboxWrites, MessageReport, Provider, ProviderError, ProviderResult,
-    ReportReceipt, ScopeSync, SharedMailbox, SharedMailboxes, SourceStream, SubmissionReceipt,
+    ReportReceipt, ScopeSync, SharedAccount, SharedAccounts, SourceStream, SubmissionReceipt,
 };
 use futures_util::StreamExt;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -61,10 +61,10 @@ pub struct ImapProvider<S> {
     /// version of the **IMAP** session. SMTP submission re-dials per send
     /// (`SmtpSender::ImplicitTls`), so its handshake is not a fact of this provider.
     connection_info: ConnectionInfo,
-    /// The shared mail store this provider covers (`ImapAccount::with_shared_mailbox`), or
+    /// The shared mail store this provider covers (`ImapAccount::with_shared_account`), or
     /// `None` for the credential's own. `pub(crate)` for `crate::folders`, which turns it
     /// into the store every folder list and placement is scoped to.
-    pub(crate) shared_mailbox: Option<SharedMailboxId>,
+    pub(crate) shared_account: Option<SharedAccountId>,
     /// The server's `NAMESPACE` answer, learned the first time something needs it
     /// (`crate::folders`) — never at connect, which most providers would pay for nothing —
     /// and shared by every provider of the account, so the login asks once.
@@ -77,7 +77,7 @@ impl<S> core::fmt::Debug for ImapProvider<S> {
             .field("mailbox", &self.mailbox)
             .field("since", &self.since)
             .field("connection_info", &self.connection_info)
-            .field("shared_mailbox", &self.shared_mailbox)
+            .field("shared_account", &self.shared_account)
             .finish_non_exhaustive()
     }
 }
@@ -85,6 +85,7 @@ impl<S> core::fmt::Debug for ImapProvider<S> {
 impl<S> ImapProvider<S> {
     /// A provider bound to `mailbox`, borrowing from `pool`. The account computes the rest once
     /// for all of its providers (`crate::account`).
+    #[allow(clippy::too_many_arguments)] // the account facts a provider borrows are all distinct
     pub(crate) fn new(
         pool: Arc<ImapPool<S>>,
         mailbox: MailboxId,
@@ -92,7 +93,7 @@ impl<S> ImapProvider<S> {
         mime_wrapper: Option<Arc<dyn engine_provider::MimeWrapper>>,
         since: Option<time::Date>,
         connection_info: ConnectionInfo,
-        shared_mailbox: Option<SharedMailboxId>,
+        shared_account: Option<SharedAccountId>,
         namespaces: Arc<OnceLock<Namespaces>>,
     ) -> Self {
         Self {
@@ -102,7 +103,7 @@ impl<S> ImapProvider<S> {
             mime_wrapper,
             since,
             connection_info,
-            shared_mailbox,
+            shared_account,
             namespaces,
         }
     }
@@ -243,7 +244,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static> Provider for Ima
             // A provider scoped to a shared store syncs that store's folders only. Binding any
             // other folder to it would put that folder's mail in the shared mailbox's account
             // — refused, not synced.
-            if self.shared_mailbox.is_some()
+            if self.shared_account.is_some()
                 && let Err(refusal) = self.check_in_store(&mut connection, &self.mailbox).await
             {
                 connection.discard();
@@ -403,8 +404,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static> Provider for Ima
     /// prefix is the empty string, which is no handle — and the answer is the same
     /// whichever store this provider covers. Resolving an address reads this list through
     /// the trait's default.
-    async fn list_shared_mailboxes(&self) -> ProviderResult<Vec<SharedMailbox>> {
-        if self.connection_info.capabilities.shared_mailboxes() != SharedMailboxes::Enumerable {
+    async fn list_shared_accounts(&self) -> ProviderResult<Vec<SharedAccount>> {
+        if self.connection_info.capabilities.shared_accounts() != SharedAccounts::Enumerable {
             return Err(ProviderError::invalid_state(
                 "provider does not support listing shared mailboxes",
             ));

@@ -20,7 +20,7 @@ use engine_core::{
 use engine_provider::{
     CalendarListing, Capabilities, ConnectionInfo, Draft, EmailChunk, EmailStream, HandOver,
     MessageReport, PassMode, Provider, ProviderResult, ReportReceipt, ScopeSync, SenderIdentity,
-    SenderIdentityId, SharedMailbox, SourceStream, SubmissionReceipt, SyncKind, split_page,
+    SenderIdentityId, SharedAccount, SourceStream, SubmissionReceipt, SyncKind, split_page,
 };
 use serde_json::json;
 
@@ -415,9 +415,9 @@ impl Provider for JmapProvider {
         Ok(crate::identity::set_name(executor, &account, identity, name).await?)
     }
 
-    /// The session's shared accounts (`crate::shared`); the session was fetched at connect.
-    async fn list_shared_mailboxes(&self) -> ProviderResult<Vec<SharedMailbox>> {
-        Ok(crate::shared::list(self.executor.session()))
+    /// The session's shared accounts, each asked what it holds (`crate::shared`).
+    async fn list_shared_accounts(&self) -> ProviderResult<Vec<SharedAccount>> {
+        Ok(crate::shared::list(self.executor.as_ref()).await?)
     }
 
     async fn report_message(
