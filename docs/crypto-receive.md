@@ -2,11 +2,11 @@
 
 **Scope.** Decrypting incoming encrypted mail through the reading pipeline
 and surfacing the security state. The receive half of the crypto feature
-(SP4c); the send half (SP4b+ECS) ships separately. This first sub-slice
-(SP4c-1) covers OpenPGP PGP/MIME encrypted mail. Binding on the reading
-pipeline and the crypto store. The engine is crypto-ignorant by design: it
-transports bytes, Astra interprets the crypto framing (the send precedent's
-mirror).
+(SP4c); the send half (SP4b+ECS) ships separately. SP4c-1 covers OpenPGP
+PGP/MIME encrypted mail; SP4c-2 covers S/MIME enveloped-data (including the
+nested sign-then-encrypt shape). Binding on the reading pipeline and the
+crypto store. The engine is crypto-ignorant by design: it transports bytes,
+Astra interprets the crypto framing (the send precedent's mirror).
 
 ## The path
 
@@ -14,13 +14,15 @@ mirror).
    `engine.message_source` read (cache-first, offline-capable). No new
    engine seam: receive rides the byte hand-off the decode seam already
    consumes.
-2. A built-in `MessageDecoder` (the crypto decoder) calls the receive
-   orchestrator (`astra-crypto-store::receive_openpgp`), which detects and
-   unwraps the PGP/MIME `multipart/encrypted` framing (protocol
-   `application/pgp-encrypted`), resolves the account's private OpenPGP key,
-   and decrypts through `OpenpgpBackend::decrypt_with_signers` directly
-   (offering the keystore signers and the collected certs, so an embedded
-   signature verifies against known peers).
+2. A built-in `MessageDecoder` (the crypto decoder) calls the unified
+   receive dispatcher (`astra-crypto-store::receive`), which sniffs the
+   framing once and routes: PGP/MIME `multipart/encrypted` (protocol
+   `application/pgp-encrypted`) to `receive_openpgp`, S/MIME
+   `application/pkcs7-mime; smime-type=enveloped-data` to `receive_smime`.
+   The OpenPGP path resolves the account's private key and decrypts through
+   `OpenpgpBackend::decrypt_with_signers` directly (offering the keystore
+   signers and the collected certs, so an embedded signature verifies
+   against known peers).
 3. The orchestrator writes `message_crypto_results` (its first writer): the
    crypto kind, the decrypt state (ok / no-key / failed), the signature
    state, the signer fingerprint and email, keyed by (account, message) with
@@ -58,12 +60,48 @@ the engine's. Crypto-envelope detection and interpretation are Astra's
 crypto layer, exactly as the send gate's MIME framing lives in Astra. The
 engine tree stays untouched.
 
+## The S/MIME path (SP4c-2)
+
+`receive_smime` unwraps the enveloped-data, resolves the account's S/MIME
+private leaf (the p12-imported cert; a token-held key routes to the W6 token
+path), and decrypts through `SmimeBackend::decrypt`. A sign-then-encrypt
+message's plaintext is itself an opaque CMS SignedData; the eContent is
+extracted and verified through `verify_with_context` with the inputs
+resolved from the store: the From address (the From↔SAN binding), the trust
+anchors, the intermediates (stored merged with the embedded cert set,
+deduped by fingerprint), the CRL cache, and the signer's latest trust
+decision. The discovered signer leaf is harvested (never auto-trusted).
+
+The signature state ladder is precise:
+
+- Chain invalid (a missing or untrusted anchor, an expired cert, a revoked
+  cert) → **Invalid**.
+- Chain valid but the From address does not match the signer certificate's
+  SAN → **Mismatch**.
+- Chain valid, identity matches, and the signer trust displays as verified
+  (Verified or Personal) → **ValidVerified**.
+- Otherwise (chains to a trusted anchor, signer not explicitly accepted) →
+  **ValidUnverified**.
+
+The result row carries the `standard` discriminator and the chain fields
+(`chain_valid`, `revocation_state`, the granular `failure_reason` and
+`revocation_reason`), added by a backward-compatible table-rebuild
+migration. The banner states the verdict (the revoked case is
+distinguished); the no-key / failed arms fail closed exactly as OpenPGP.
+The p12 intermediates are stored `key_type='intermediate'`, never through
+the keystore's cert path (which would leak them into the anchor set).
+
 ## Known gaps, recorded rather than left silent
 
-- This sub-slice is OpenPGP PGP/MIME encrypted only. Inline PGP armor and
-  multipart/signed (detached signatures) are follow-ups; S/MIME receive is
-  SP4c-2; Autocrypt consume, CRL fetching, and the W9 password flow are
+- Encrypted receive only, per standard: OpenPGP PGP/MIME (SP4c-1) and S/MIME
+  enveloped-data (SP4c-2). Inline PGP armor and the detached-signature shapes
+  (PGP multipart/signed, S/MIME multipart/signed and opaque signed-data) are
+  follow-ups; Autocrypt consume, CRL fetching, and the W9 password flow are
   SP4c-3; encrypted drafts at rest are SP4c-4.
+- S/MIME revocation is cache-only: the CRL cache is empty until the SP4c-3
+  fetcher lands, so revocation reads unchecked in practice (a revoked cert
+  still hard-fails the chain when a CRL is present). The chain's Stale
+  revocation state persists as unchecked until the fetcher lands.
 - No key-management surface yet (SP4d): the live proof seeds the recipient
   key programmatically. A minimal import path is the load-bearing follow-up
   that makes receive usable beyond tests.
@@ -82,10 +120,13 @@ engine tree stays untouched.
 | Rule | Status | Where |
 |---|---|---|
 | OpenPGP PGP/MIME receive: detect, unwrap, decrypt, verify-state | ✅ | `astra-crypto-store/src/receive.rs` |
-| The result rows (the first writer of message_crypto_results) | ✅ | `receive.rs`, `results.rs` |
+| S/MIME enveloped receive: unwrap, decrypt, chain verify, the state ladder | ✅ | `astra-crypto-store/src/receive_smime.rs` |
+| The unified receive dispatcher (PGP/MIME vs S/MIME routing) | ✅ | `receive.rs` |
+| The result rows (the first writer of message_crypto_results) | ✅ | `receive.rs`, `receive_smime.rs`, `results.rs` |
+| The chain-field schema (standard, revocation 'stale', table rebuild) | ✅ | `migrations/0004_smime_receive.sql` |
 | The reading integration: legs, banner, restored subject, hidden chip | ✅ | `astra-app/src/crypto_decode.rs`, `reading.rs` |
 | The composite decoder (crypto verdict precedence, plugin fall-through) | ✅ | `client/desktop/src/decode.rs` |
 | Fail closed: no key / failure / tamper never renders ciphertext | ✅ | the closed arms + the structural seam clear |
-| The live proof (send encrypted, open, decrypt, the no-key arm) | ✅ | `tests_live_harness/crypto_receive.rs` |
-| S/MIME receive, inline armor, detached signatures, drafts at rest | N/A | SP4c-2/3/4, the gaps above |
+| The live proofs (send encrypted, open, decrypt, the negative arms) | ✅ | `tests_live_harness/crypto_receive.rs`, `crypto_receive_smime.rs` |
+| Inline armor, detached signatures, CRL fetch, drafts at rest | N/A | SP4c-3/4, the gaps above |
 | Key management, the token registry, the native security UI | N/A | SP4d |
