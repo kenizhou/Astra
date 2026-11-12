@@ -66,6 +66,21 @@ keeps its own surface. Nothing recovers a permanent delete; the engine's
 verb is irreversible. The bulk toolbar's Delete follows the same rule as
 the row menu's.
 
+## Hover actions
+
+The message row's trailing edge carries quick actions revealed on hover:
+archive, delete (move to trash), flag, and mark read/unread. Each acts on
+the hovered row alone, never the multi-selection (the bulk toolbar and the
+row menu own batches), and a button click never selects or opens the row.
+The slot also reveals on selection and on focus-within, so a keyboard user
+who has selected a row can tab into the buttons; the rows themselves stay
+non-focusable, and the ribbon, palette, and row menu remain the primary
+keyboard paths. Draft rows suppress the mail actions (the draft menu's
+verbs are Open and Delete Draft). A flagged row keeps its flag button
+visible without hover. The hover slot offers no undo, matching the row
+menu and the ribbon; swipe owns undo. Touch users (no hover) keep swipe,
+the row menu, and the bulk toolbar.
+
 ## Known gaps
 
 - **A conversation cannot be moved**; the verb disables with its reason.
