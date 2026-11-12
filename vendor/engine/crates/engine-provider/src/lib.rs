@@ -43,6 +43,7 @@ mod connect_observer;
 mod connection;
 mod contact;
 mod deadline;
+mod draft_attachment;
 mod error;
 mod hand_over;
 mod identity;
@@ -51,6 +52,7 @@ mod mail_edit;
 mod mailbox_edit;
 mod mailbox_write;
 mod meeting;
+mod mime_wrap;
 mod page;
 mod provider;
 #[cfg(feature = "http")]
@@ -93,6 +95,7 @@ pub use mailbox_write::MailboxWrites;
 pub use meeting::{
     JitsiMeetings, JitsiServerError, MeetingKey, MeetingKeyError, MeetingRequest, MeetingService,
 };
+pub use mime_wrap::{MimeWrapOutcome, MimeWrapper};
 pub use page::{PageToken, SyncKind, SyncPage};
 pub use provider::Provider;
 #[cfg(feature = "http")]

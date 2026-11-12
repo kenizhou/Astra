@@ -8,6 +8,7 @@ fn retryable() -> PendingOutcome {
     PendingOutcome::Failed {
         class: FailureClass::Retryable,
         retry_after: None,
+        detail: String::new(),
     }
 }
 
@@ -29,10 +30,16 @@ fn a_class_no_retry_fixes_settles_a_send_at_once() {
     let refused = PendingOutcome::Failed {
         class: FailureClass::Authentication,
         retry_after: None,
+        detail: "the server said who it refused".to_owned(),
     };
     let recorded = record_outcome(Some(PendingOpKind::MailSubmit), 0, &refused, now()).unwrap();
     assert_eq!(recorded.state, PendingOpState::Failed);
     assert_eq!(recorded.failure_class, Some(FailureClass::Authentication));
+    assert_eq!(
+        recorded.detail.as_deref(),
+        Some("the server said who it refused"),
+        "the refusal's own words reach the row the host shows"
+    );
     assert!(!recorded.keeps_hand_over);
 }
 

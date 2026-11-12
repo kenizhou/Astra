@@ -58,9 +58,14 @@ async fn guarded(
 async fn a_send_to_a_server_that_never_greets_is_retried_by_the_outbox() {
     let (smtp, _) = MockStream::silent_after(script(&[]));
 
+    let draft = draft();
+    let sub = crate::wrap::prepare_submission(&draft, None)
+        .await
+        .expect("prepare");
     let err = guarded(provider().submit_over(
         smtp,
-        &draft(),
+        &sub,
+        &draft,
         None,
         &engine_provider::HandOver::new(&engine_provider::Unrecorded),
     ))
@@ -80,9 +85,14 @@ async fn a_send_whose_end_of_data_goes_unanswered_needs_confirmation_and_is_neve
         "354 go ahead\r\n",
     ]));
 
+    let draft = draft();
+    let sub = crate::wrap::prepare_submission(&draft, None)
+        .await
+        .expect("prepare");
     let err = guarded(provider().submit_over(
         smtp,
-        &draft(),
+        &sub,
+        &draft,
         None,
         &engine_provider::HandOver::new(&engine_provider::Unrecorded),
     ))

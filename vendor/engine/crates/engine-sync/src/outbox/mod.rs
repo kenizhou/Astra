@@ -176,6 +176,7 @@ async fn record_failure<S: Store>(
             PendingOutcome::Failed {
                 class: err.class(),
                 retry_after: err.retry_after(),
+                detail: err.detail().to_owned(),
             },
         )
         .await?;

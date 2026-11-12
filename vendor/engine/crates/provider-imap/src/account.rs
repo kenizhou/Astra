@@ -19,8 +19,8 @@ use std::{
 
 use engine_core::ids::{MailboxId, SharedAccountId};
 use engine_provider::{
-    Capabilities, ConnectionInfo, ProviderResult, ReportControls, ReportEvidence, ReportVerdicts,
-    SharedAccounts, TlsVersion,
+    Capabilities, ConnectionInfo, MimeWrapper, ProviderResult, ReportControls, ReportEvidence,
+    ReportVerdicts, SharedAccounts, TlsVersion,
 };
 use tokio::{
     io::{AsyncRead, AsyncWrite},
@@ -53,6 +53,10 @@ pub struct ImapAccount<S> {
     pool: Arc<ImapPool<S>>,
     /// Shared by every provider this account binds; each send dials its own SMTP connection.
     smtp: Option<Arc<SmtpSender>>,
+    /// The host-installed MIME wrapper every folder's submissions consult when a
+    /// draft asks for crypto ([`engine_provider::Draft::sign`],
+    /// [`engine_provider::Draft::encrypt`]); `None` sends plainly.
+    mime_wrapper: Option<Arc<dyn MimeWrapper>>,
     /// The sync-depth floor from `ImapConfig::with_since`, handed to every provider.
     since: Option<time::Date>,
     /// The capabilities and TLS version the first connection negotiated. Every connection in
@@ -105,6 +109,7 @@ impl ImapAccount<TlsStream<TcpStream>> {
             connection,
             dial,
             smtp,
+            config.mime_wrapper.clone(),
             config.since,
             tls_version,
         ))
@@ -136,6 +141,7 @@ impl<S> ImapAccount<S> {
         connection: Connection<S>,
         dial: Dial<S>,
         smtp: Option<SmtpSender>,
+        mime_wrapper: Option<Arc<dyn MimeWrapper>>,
         since: Option<time::Date>,
         tls_version: Option<TlsVersion>,
     ) -> Self {
@@ -146,6 +152,7 @@ impl<S> ImapAccount<S> {
         Self {
             pool,
             smtp: smtp.map(Arc::new),
+            mime_wrapper,
             since,
             connection_info: ConnectionInfo {
                 tls_version,
@@ -164,6 +171,19 @@ impl<S> ImapAccount<S> {
     where
         S: 'static,
     {
+        Self::offline_wrapped(connection, smtp, None)
+    }
+
+    /// [`offline`](Self::offline), with a MIME wrapper installed for the wrap-seam tests.
+    #[cfg(test)]
+    pub(crate) fn offline_wrapped(
+        connection: Connection<S>,
+        smtp: Option<SmtpSender>,
+        mime_wrapper: Option<Arc<dyn MimeWrapper>>,
+    ) -> Self
+    where
+        S: 'static,
+    {
         let dial: Dial<S> = Arc::new(|| {
             Box::pin(async {
                 Err(ImapError::Io(std::io::Error::new(
@@ -172,7 +192,7 @@ impl<S> ImapAccount<S> {
                 )))
             })
         });
-        Self::build(connection, dial, smtp, None, None)
+        Self::build(connection, dial, smtp, mime_wrapper, None, None)
     }
 
     /// The same account, covering a mail store shared **with** the credential rather than the
@@ -195,6 +215,7 @@ impl<S> ImapAccount<S> {
         Self {
             pool: Arc::clone(&self.pool),
             smtp: self.smtp.clone(),
+            mime_wrapper: self.mime_wrapper.clone(),
             since: self.since,
             connection_info: self.connection_info,
             shared_account: Some(handle),
@@ -220,6 +241,7 @@ impl<S> ImapAccount<S> {
             Arc::clone(&self.pool),
             mailbox,
             self.smtp.clone(),
+            self.mime_wrapper.clone(),
             self.since,
             self.connection_info,
             self.shared_account.clone(),
