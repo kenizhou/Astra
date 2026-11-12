@@ -43,6 +43,21 @@ A plain-text body scales with the same steps and the same three values, so
 one control moves every message. Unifying the legs moves the plain body's
 default from 13px to 16px, the frame document's own medium.
 
+## Quote collapse
+
+The reading pane folds the quoted original behind a native details/summary
+toggle, so a reply or forward opens on the new words. A pure transform
+(collapseQuoted) runs after sanitisation and before the wrapper: it detects
+a trailing blockquote chain (with the preceding "On ... wrote:" attribution
+folded in) or a trailing gmail_quote container, and wraps that tail in
+`<details class="astra-quote"><summary>Show quoted text</summary>`,
+collapsed by default. The fragment rides verbatim, wrapped never reparsed;
+the injected markup is a fixed constant, so the sanitiser, the CSP, and the
+scriptless sandbox do not move. A body with no trailing quote, or one that
+is entirely a quote, is never folded. The fold is reading-only: print calls
+the wrapper alone and keeps the full body. The remote-image placeholders
+ride inside the details and the opt-in rewrite still restores them.
+
 ## Known gaps
 
 - The steps are three, matching the app font steps; a free percentage is
