@@ -18,6 +18,7 @@ import {
   CheckIcon as CheckIconData,
   ChevronLeftIcon as ChevronLeftIconData,
   ChevronRightIcon as ChevronRightIconData,
+  CleanIcon as CleanIconData,
   Delete02Icon,
   EllipsisVerticalIcon as MoreIconData,
   Flag02Icon,
@@ -83,6 +84,7 @@ export const SentIcon = makeIcon(SentIconData);
 export const DraftsIcon = makeIcon(MailEdit01Icon);
 export const TrashIcon = makeIcon(Delete02Icon);
 export const ArchiveIcon = makeIcon(ArchiveIconData);
+export const CleanIcon = makeIcon(CleanIconData);
 export const JunkIcon = makeIcon(SpamIcon);
 export const FolderIcon = makeIcon(Folder01Icon);
 export const FlagIcon = makeIcon(Flag02Icon);

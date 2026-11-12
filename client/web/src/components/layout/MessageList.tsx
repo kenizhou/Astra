@@ -37,6 +37,7 @@ import { buildDraftMenu, buildRowMenu, type RowAccountContext } from '@/componen
 import { SwipeToast } from '@/components/message-list/SwipeToast';
 import { sameRowKey } from '@/components/message-list/rowIdentity';
 import { OutboxQueue } from '@/features/outbox/OutboxQueue';
+import { SweepDialog } from '@/features/sweep/SweepDialog';
 import { dispatch, intents } from '@/services/ipc';
 import { useFolderStore } from '@/stores/folderStore';
 import { useListFilterStore } from '@/stores/listFilterStore';
@@ -381,6 +382,7 @@ export function MessageList() {
         />
       )}
       <SwipeToast />
+      <SweepDialog />
     </section>
   );
 }

@@ -13,6 +13,7 @@ const draftOpen = vi.hoisted(() => ({
   openDraftRow: vi.fn(),
   openDraftRowWindow: vi.fn(),
 }));
+const sweep = vi.hoisted(() => ({ open: vi.fn() }));
 
 vi.mock('@/services/ipc', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -26,6 +27,10 @@ vi.mock('@/features/reader/readerWindows', () => ({
 vi.mock('@/features/composer/draftOpen', () => ({
   openDraftRow: draftOpen.openDraftRow,
   openDraftRowWindow: draftOpen.openDraftRowWindow,
+}));
+
+vi.mock('@/features/sweep/sweepStore', () => ({
+  useSweepStore: { getState: () => ({ open: sweep.open }) },
 }));
 
 import { buildDraftMenu, buildRowMenu, type RowAccountContext } from './rowMenu';
@@ -74,6 +79,7 @@ beforeEach(() => {
   window.openMessageWindow.mockResolvedValue(undefined);
   draftOpen.openDraftRow.mockReset();
   draftOpen.openDraftRowWindow.mockReset();
+  sweep.open.mockReset();
 });
 
 // The confirm spy restores after each test, so a refused click in one
@@ -99,10 +105,33 @@ describe('buildRowMenu', () => {
       'Delete',
       'Delete Permanently',
       'Archive',
+      'Clean up sender…',
       '|',
       'Copy Subject',
       'Copy Sender',
     ]);
+  });
+
+  it('opens the sweep dialog prefilled with the row sender', () => {
+    const items = buildRowMenu([m1], 'flat', accountCtx);
+    const entry = items.find((item) => item.label === 'Clean up sender…')!;
+
+    expect(entry.disabled).toBeUndefined();
+    entry.onSelect!();
+
+    expect(sweep.open).toHaveBeenCalledTimes(1);
+    expect(sweep.open).toHaveBeenCalledWith('ada@example.test');
+    expect(ipc.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('disables the sweep entry on a batch, with the reason', () => {
+    const items = buildRowMenu([m1, m2], 'flat', accountCtx);
+    const entry = items.find((item) => item.label === 'Clean up sender…')!;
+
+    expect(entry.disabled).toBe(true);
+    expect(entry.description).toContain('Pick one row');
+    entry.onSelect?.();
+    expect(sweep.open).not.toHaveBeenCalled();
   });
 
   it('opens the message in its own window from the single-message item', () => {
