@@ -26,6 +26,8 @@ import { AccountSetupFlow } from '@/features/account-setup/AccountSetupFlow';
 import { AiPanel } from '@/features/ai-panel/AiPanel';
 import { AgentPanel } from '@/features/agent/AgentPanel';
 import { CalendarPane } from '@/features/calendar/CalendarPane';
+import { CommandPalette } from '@/features/command-palette/CommandPalette';
+import { useCommandPaletteOpener } from '@/features/command-palette/useCommandPaletteOpener';
 import { useDraftResumeAtStart } from '@/features/composer/Composer';
 import { useComposerStore } from '@/features/composer/composerStore';
 import { useComposeRequestHydration } from '@/features/composer/useComposeRequest';
@@ -198,6 +200,7 @@ export function AppShell() {
   const stage = useWindowStage();
   useDraftResumeAtStart();
   useComposeRequestHydration();
+  useCommandPaletteOpener();
 
   const viewContent = (
     <div className="relative h-full">
@@ -267,6 +270,7 @@ export function AppShell() {
       <SendResultToast />
       <SettingsScreen />
       <AccountSetupFlow />
+      <CommandPalette />
     </div>
   );
 }

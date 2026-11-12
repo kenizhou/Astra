@@ -13,6 +13,14 @@ interface ShortcutEntry {
 /** Every shortcut wired in the shell today, grouped by where it answers. */
 const SHORTCUTS: ReadonlyArray<ShortcutEntry> = [
   { keys: 'Ctrl+K', action: 'Open the search island', context: 'Everywhere' },
+  { keys: 'Ctrl+Shift+P', action: 'Open the command palette', context: 'Everywhere' },
+  {
+    keys: 'Arrow Up / Arrow Down',
+    action: 'Move through the commands',
+    context: 'Command palette',
+  },
+  { keys: 'Enter', action: 'Run the selected command', context: 'Command palette' },
+  { keys: 'Escape', action: 'Close the command palette', context: 'Command palette' },
   { keys: 'Enter', action: 'Run the typed search', context: 'Search island' },
   {
     keys: 'Escape',
