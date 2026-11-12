@@ -73,8 +73,8 @@ tool budget.
   and conditional formats, quote collapse, shortcuts help, the attachment
   browser, notification history, the crypto plugin surface) each become
   their own slice beside this ladder. The owner delegated the picking to
-  the loop (2026-11-12); the command palette, shortcuts help, and hover
-  actions have shipped, and the rest follow in turn.
+  the loop (2026-11-12); the command palette, shortcuts help, hover
+  actions, and quote collapse have shipped, and the rest follow in turn.
 - **The AI remainder**: the assistant chat with tool budget was the one
   unstarted inbox-zero row; SP2y shipped it (2026-11-08, PR #60), live-proven
   armed over the harness and the model endpoint.
