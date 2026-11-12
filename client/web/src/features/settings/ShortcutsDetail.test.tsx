@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The Shortcuts page: a static table of the shortcuts the shell wires
-// today; Ctrl+K's search island and Ctrl+Shift+P's command palette head the
-// list, and every row renders its key cap, its action, and where the keys
-// answer.
+// today; Ctrl+K's search island, Ctrl+Shift+P's command palette, and the
+// bare ? help opener head the list, and every row renders its key cap, its
+// action, and where the keys answer.
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -33,6 +33,13 @@ describe('the Shortcuts detail', () => {
     expect(screen.getByText('Close the open menu')).toBeTruthy();
   });
 
+  it('lists ? for the shortcuts help', () => {
+    render(<ShortcutsDetail />);
+
+    expect(screen.getByText('?')).toBeTruthy();
+    expect(screen.getByText('Open the shortcuts help')).toBeTruthy();
+  });
+
   it('renders one row per entry under the three column heads', () => {
     render(<ShortcutsDetail />);
 
@@ -41,6 +48,6 @@ describe('the Shortcuts detail', () => {
       .getAllByRole('columnheader')
       .map((head) => head.textContent);
     expect(heads).toEqual(['Shortcut', 'Action', 'Where']);
-    expect(within(table).getAllByRole('row')).toHaveLength(16);
+    expect(within(table).getAllByRole('row')).toHaveLength(17);
   });
 });
