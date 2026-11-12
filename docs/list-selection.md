@@ -96,6 +96,22 @@ no undo, matching the bulk toolbar and the row menu: the confirm is the
 guard. v1 sweeps the current folder's loaded window only; a cross-folder
 sweep over the search intent is a named follow-up.
 
+## Quick steps
+
+Quick steps are user-defined macros that run one mail action over the
+selected rows in a click. A step is a name, an action (archive, trash, mark
+read, mark unread, flag, unflag, or move to a concrete folder), and an
+optional mark-read-first modifier; up to five are saved device-local
+(localStorage). The ribbon carries a button per step (disabled without a
+selection) and a Manage button opening the editor. The runner maps the
+action to the existing intent and loops it over the selection (the bulk
+selection, else the single anchor); mark-read runs first, because filed
+rows leave the snapshot. A move skips conversation rows and foreign-account
+rows with a counted toast (a move batch cannot name a conversation, and a
+concrete folder belongs to one account). The filing verbs stop at trash and
+there is no undo, matching the bulk toolbar. Snooze, keyboard slots, role
+targets, and multi-leg sequences are named follow-ups.
+
 ## Known gaps
 
 - **A conversation cannot be moved**; the verb disables with its reason.

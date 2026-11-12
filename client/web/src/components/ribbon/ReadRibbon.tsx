@@ -4,7 +4,8 @@
 // compose family for the message the reading pane has open (the landed
 // request routes to a pop-out window of its own), and Mark read/unread
 // and Flag/unflag act on the list's selected row, their labels naming the
-// state the click leaves behind. Without an open message or a selection the
+// state the click leaves behind. The quick steps group runs the saved
+// macros over the selection. Without an open message or a selection the
 // matching verbs stand disabled: there is nothing to compose from or act
 // on, and the core would have nothing to prefill.
 
@@ -21,6 +22,7 @@ import {
 } from '@/components/icons';
 import { sameRowKey } from '@/components/message-list/rowIdentity';
 import { openNewMessageComposer } from '@/features/composer/composeWindow';
+import { QuickStepsRibbonGroup } from '@/features/quick-steps/QuickStepsRibbonGroup';
 import { dispatch, intents, type Intent, type MessageRef } from '@/services/ipc';
 import { useAccountStore } from '@/stores/accountStore';
 import { useListStore } from '@/stores/listStore';
@@ -108,6 +110,7 @@ export function ReadRibbon({ iconOnly }: { iconOnly: boolean }) {
           }}
         />
       </RibbonGroup>
+      <QuickStepsRibbonGroup iconOnly={iconOnly} />
     </>
   );
 }
