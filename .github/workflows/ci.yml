@@ -27,7 +27,7 @@ jobs:
       # The desktop agent tests spawn the stub sidecar under a real Node,
       # version gated at 22 or newer; the runner's default node is older,
       # so the suite runs against a pinned one.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       # The offline agent e2e hosts the real sidecar bundle: install the
@@ -55,7 +55,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - name: Install sidecar dependencies
@@ -83,7 +83,7 @@ jobs:
       # sidecar/dist exists on every cargo invocation of the crate,
       # clippy included, so the bundle is built before any compiling
       # step; this node setup also serves the web client steps below.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - name: Build the sidecar bundle for the Tauri resource
