@@ -12,13 +12,11 @@
 use std::sync::Arc;
 
 use astra_crypto_core::{CryptoBackend, CryptoMethod, CryptoPolicy};
-use astra_crypto_smime::testing::{
-    build_intermediate_signed_by, build_leaf_signed_by, build_self_signed_ca, BuiltCert,
-};
+use astra_crypto_smime::testing::{build_leaf_signed_by, build_self_signed_ca, BuiltCert};
 use astra_crypto_smime::{fingerprint_of_cert_der, SmimeBackend};
 use astra_crypto_store::{
-    put_trust_decision, set_default_signing_key, upsert_crypto_key, upsert_intermediate_cert,
-    CryptoKeyRecord, CryptoKeyRow, CryptoStore, SqliteKeyStore,
+    put_trust_decision, set_default_signing_key, upsert_crypto_key, CryptoKeyRecord, CryptoKeyRow,
+    CryptoStore, SqliteKeyStore,
 };
 use engine_api::{EmailAddress, Engine};
 
@@ -164,12 +162,12 @@ async fn the_smime_receive_opens_the_delivered_mail_through_the_reading_pipeline
     };
     astra_crypto_store::vault::set_test_master_key([0x42u8; 32]);
 
-    // The CA chain: root → intermediate → sender leaf (SAN = From). The
-    // recipient leaf is signed directly by the root so the send gate's
-    // recipient-cert validation links it with no intermediate.
+    // Both leaves are signed directly by the root: the send gate's
+    // recipient-cert validation chains with no intermediates, so every leaf
+    // it validates (the recipient's and the sender's own) must link straight
+    // to the anchored root.
     let root = build_self_signed_ca("CN=Harness Root");
-    let inter = build_intermediate_signed_by("CN=Harness Inter", &root);
-    let leaf = build_leaf_signed_by("astra1@example.test", &inter);
+    let leaf = build_leaf_signed_by("astra1@example.test", &root);
     let recipient = build_leaf_signed_by(proof::RECIPIENT, &root);
     let leaf_fp = fingerprint_of_cert_der(&leaf.cert_der).unwrap();
     let recip_fp = fingerprint_of_cert_der(&recipient.cert_der).unwrap();
@@ -220,7 +218,6 @@ async fn the_smime_receive_opens_the_delivered_mail_through_the_reading_pipeline
         &root.cert_der,
         "imported",
     );
-    upsert_intermediate_cert(&store, recipient_id.as_str(), &inter.cert_der).unwrap();
     put_trust_decision(
         &store,
         recipient_id.as_str(),
@@ -415,7 +412,6 @@ async fn the_smime_receive_opens_the_delivered_mail_through_the_reading_pipeline
         .register_account(recipient_id.as_str(), proof::RECIPIENT)
         .unwrap();
     import_identity(&untrusted_store, recipient_id.as_str(), &recipient).await;
-    upsert_intermediate_cert(&untrusted_store, recipient_id.as_str(), &inter.cert_der).unwrap();
     let invalid = Box::pin(open_main_with(untrusted_store, &host, &port, &password)).await;
     let invalid_banner = invalid
         .security_banner
@@ -439,7 +435,7 @@ async fn the_smime_receive_opens_the_delivered_mail_through_the_reading_pipeline
     );
 
     // The From-SAN mismatch arm: a second send whose leaf SAN ≠ From.
-    let mismatch_leaf = build_leaf_signed_by("other@example.test", &inter);
+    let mismatch_leaf = build_leaf_signed_by("other@example.test", &root);
     let mismatch_fp = import_identity(&store, sender_id.as_str(), &mismatch_leaf).await;
     set_default_signing_key(&store, sender_id.as_str(), "smime", &mismatch_fp).unwrap();
     app.dispatch(Intent::SubmitRichMail {
