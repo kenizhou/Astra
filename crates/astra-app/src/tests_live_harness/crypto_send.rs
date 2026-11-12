@@ -44,7 +44,8 @@ const WORDS: &str = "Sealed by the built-in gate through the harness outbox.";
 
 /// The sender dial, with the store-bound MIME wrapper installed at connect
 /// time: the boot's own ordering (the crypto store opens before the dial).
-async fn dial_wrapped(
+/// The receive proof shares it: the same wrapped sender, the same wire.
+pub(super) async fn dial_wrapped(
     host: &str,
     port: &str,
     user: &str,

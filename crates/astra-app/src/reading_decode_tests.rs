@@ -72,6 +72,7 @@ async fn a_decode_replaces_both_legs_and_the_banner_rides() {
                 level: SecurityLevelView::Warning,
                 text: "Signature invalid".to_owned(),
             }),
+            ..Default::default()
         }),
         seen: Mutex::new(Vec::new()),
     });
@@ -110,6 +111,7 @@ async fn decoded_html_takes_the_same_sanitise_pipeline_as_any_body() {
             html: Some(r#"<p onclick="steal()">safe words</p><script>steal()</script>"#.to_owned()),
             plain: None,
             banner: None,
+            ..Default::default()
         }),
         seen: Mutex::new(Vec::new()),
     });

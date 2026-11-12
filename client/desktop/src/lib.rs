@@ -23,6 +23,7 @@ mod calendar_timer;
 mod commands;
 mod credential_store;
 mod crypto_wrapper;
+mod decode;
 mod delivery;
 mod detection;
 mod dial_table;

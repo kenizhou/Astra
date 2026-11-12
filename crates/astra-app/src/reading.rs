@@ -293,13 +293,28 @@ pub(crate) async fn render_reading<P: Provider>(
     // pipeline above), its banner riding the snapshot. No answer, an error, or
     // a missing source leaves the store's own rendering untouched.
     let mut security_banner = None;
+    let mut restored_subject = None;
+    let mut crypto_verdict = false;
     if let Some(decoder) = decoder {
         if let Ok(source) = engine
             .message_source(provider, &message.account, &original)
             .await
         {
             if let Some(outcome) = decoder.decode(message, source.as_bytes()).await {
-                if outcome.html.is_some() || outcome.plain.is_some() || outcome.banner.is_some() {
+                if outcome.crypto_verdict {
+                    // A recognised crypto message: the store's outer-framing
+                    // read never renders beside the verdict (fail closed,
+                    // structural regardless of the answer's shape).
+                    html = None;
+                    plain = None;
+                    remote_image_count = 0;
+                    crypto_verdict = true;
+                }
+                if outcome.html.is_some()
+                    || outcome.plain.is_some()
+                    || outcome.banner.is_some()
+                    || outcome.subject.is_some()
+                {
                     if let Some(decoded) = outcome.html {
                         let (leg, count) = render_html_leg(
                             engine,
@@ -316,23 +331,29 @@ pub(crate) async fn render_reading<P: Provider>(
                         plain = Some(text);
                     }
                     security_banner = outcome.banner;
+                    restored_subject = outcome.subject;
                 }
             }
         }
     }
-    let attachments = engine
+    let mut attachments: Vec<AttachmentRow> = engine
         .message_attachments(provider, &message.account, &original)
         .await
         .unwrap_or_default()
         .iter()
         .map(attachment_row)
         .collect();
+    if crypto_verdict {
+        crate::crypto_decode::hide_crypto_parts(&mut attachments);
+    }
     Some(ReadingSnapshot {
         message: MessageKey {
             account: message.account.clone(),
             key: message.key.clone(),
         },
-        subject: original.envelope.subject.clone().unwrap_or_default(),
+        subject: restored_subject
+            .or_else(|| original.envelope.subject.clone())
+            .unwrap_or_default(),
         // The sender the reading header names, split the way the snapshot
         // carries it: the display name (the bare address when the header
         // carried none) beside the address itself.

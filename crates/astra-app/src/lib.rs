@@ -25,6 +25,7 @@ mod calendar;
 mod compose_open;
 mod compose_request;
 mod crypto;
+mod crypto_decode;
 mod decode;
 mod dispatch;
 mod drafts;
@@ -151,6 +152,7 @@ pub use calendar::{
 };
 pub use compose_request::OpenDraftError;
 pub use crypto::CryptoFlags;
+pub use crypto_decode::CryptoDecoder;
 pub use decode::{DecodeOutcome, MessageDecoder};
 pub use dispatch::AppError;
 pub use drafts::{DraftResume, DRAFT_AUTOSAVE_IDLE};

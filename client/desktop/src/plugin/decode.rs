@@ -87,6 +87,7 @@ impl MessageDecoder for PluginDecoder {
                     level: banner_level(banner.level),
                     text: banner.text,
                 }),
+            ..Default::default()
         };
         for part in response.decoded_parts {
             match part.mime_type.as_str() {

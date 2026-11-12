@@ -22,7 +22,7 @@ use astra_viewmodel::SecurityBannerView;
 /// One decode's answer: the replacement legs and the banner, each optional.
 /// Both legs absent and no banner is the decoder saying nothing, which the
 /// pipeline treats as no answer at all.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DecodeOutcome {
     /// The decoded HTML leg, sanitised by the same pipeline as any body
     /// before it renders.
@@ -31,14 +31,26 @@ pub struct DecodeOutcome {
     pub plain: Option<String>,
     /// The security banner for the reading pane.
     pub banner: Option<SecurityBannerView>,
+    /// The restored subject, when the decoder recovered one from inside the
+    /// message (the crypto receive path's protected headers). `None` keeps
+    /// the envelope's subject.
+    pub subject: Option<String>,
+    /// Whether the answer is a built-in crypto verdict over a message the
+    /// crypto layer recognises. The answer's legs are then the whole body
+    /// (the store's own outer-framing read never renders beside them, fail
+    /// closed), and the ciphertext pseudo-attachment chips hide.
+    pub crypto_verdict: bool,
 }
 
-/// The message decoder: the host's plugin decode, one call per open.
+/// The message decoder: one call per open, the host's plugin decode or the
+/// built-in crypto decode (the desktop installs a composite of both).
 #[async_trait::async_trait]
 pub trait MessageDecoder: Send + Sync {
     /// Decodes one message's raw source. `None` leaves the store's own
-    /// rendering in place: decode fails open because a plugin being down must
-    /// not blank the user's mail.
+    /// rendering in place: the plugin decode fails open because a plugin
+    /// being down must not blank the user's mail. The built-in crypto decode
+    /// is the fail-closed exception: a message it recognises keeps its
+    /// verdict, and a failed decrypt answers the banner alone, never `None`.
     async fn decode(
         &self,
         message: &crate::reference::MessageRef,
@@ -47,7 +59,7 @@ pub trait MessageDecoder: Send + Sync {
 }
 
 impl<P: engine_api::Provider> crate::App<P> {
-    /// Names the plugin decoder every reading open consults, or `None` (the
+    /// Names the decoder every reading open consults, or `None` (the
     /// default) to render the store's own read. Call it before the first
     /// dispatch; the host's decoder reads its plugin registry at call time,
     /// so plugins enabled later join without a reinstall.
