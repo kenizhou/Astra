@@ -22,6 +22,17 @@ pub struct MessageCryptoResult {
     pub signer_fingerprint: Option<String>,
     /// The signer's email, when one was identified.
     pub signer_email: Option<String>,
+    /// The crypto standard's column spelling (`openpgp` / `smime`), when known.
+    pub standard: Option<String>,
+    /// Whether the signer chain validated (S/MIME); `None` for OpenPGP.
+    pub chain_valid: Option<bool>,
+    /// The revocation verdict's column spelling (`good` / `revoked` /
+    /// `unchecked` / `stale`).
+    pub revocation_state: String,
+    /// The granular cert-chain failure reason (S/MIME), when the chain failed.
+    pub failure_reason: Option<String>,
+    /// The structured RFC 5280 CRLReason name (S/MIME, revoked only).
+    pub revocation_reason: Option<String>,
 }
 
 /// The verdict row for `(account_id, message_id)`, or `None` when no receive
@@ -36,7 +47,8 @@ pub fn get_message_crypto_result(
     store
         .conn()
         .query_row(
-            "SELECT crypto_kind, decrypt_state, signature_state, signer_fingerprint, signer_email
+            "SELECT crypto_kind, decrypt_state, signature_state, signer_fingerprint, signer_email,
+                    standard, chain_valid, revocation_state, failure_reason, revocation_reason
              FROM message_crypto_results WHERE account_id = ?1 AND message_id = ?2",
             rusqlite::params![account_id, message_id],
             |row| {
@@ -46,6 +58,11 @@ pub fn get_message_crypto_result(
                     signature_state: row.get(2)?,
                     signer_fingerprint: row.get(3)?,
                     signer_email: row.get(4)?,
+                    standard: row.get(5)?,
+                    chain_valid: row.get(6)?,
+                    revocation_state: row.get(7)?,
+                    failure_reason: row.get(8)?,
+                    revocation_reason: row.get(9)?,
                 })
             },
         )

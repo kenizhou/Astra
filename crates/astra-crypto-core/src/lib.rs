@@ -24,6 +24,7 @@ pub mod util;
 pub mod apply;
 pub mod mime;
 pub mod pgp_mime;
+pub mod smime_mime;
 
 // W6: closure-driven TokenProvider mock for hardware-free tests. Compiled for
 // this crate's own tests and for sibling crates that enable the `testing`

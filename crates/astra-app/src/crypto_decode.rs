@@ -1,25 +1,26 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! The built-in crypto decoder: the reading pipeline's OpenPGP receive leg.
-//! Where the plugin decoder fails open (a plugin being down must not blank
-//! the user's mail), this decoder fails CLOSED: a message the crypto layer
-//! recognises keeps its verdict, and no key or a failed decrypt renders the
-//! banner alone, never the ciphertext and never the plugin's answer.
+//! The built-in crypto decoder: the reading pipeline's receive leg for both
+//! standards (OpenPGP PGP/MIME and S/MIME enveloped). Where the plugin decoder
+//! fails open (a plugin being down must not blank the user's mail), this
+//! decoder fails CLOSED: a message the crypto layer recognises keeps its
+//! verdict, and no key or a failed decrypt renders the banner alone, never the
+//! ciphertext and never the plugin's answer.
 //!
-//! The orchestrator (`astra_crypto_store::receive_openpgp`) does the detect,
-//! unwrap, decrypt, verify, and result-row work; this module maps its neutral
-//! outcome onto the decode port: the decrypted legs (the seam re-runs the
-//! identical sanitise pipeline on the HTML), the security banner, and the
-//! restored protected subject. A source that is not the crypto framing
-//! answers `None`, leaving the store's rendering and the plugin fold
-//! untouched.
+//! The unified orchestrator (`astra_crypto_store::receive`) sniffs the framing
+//! once and routes to the matching per-standard orchestrator, which does the
+//! detect, unwrap, decrypt, verify, and result-row work; this module maps its
+//! neutral outcome onto the decode port: the decrypted legs (the seam re-runs
+//! the identical sanitise pipeline on the HTML), the security banner, and the
+//! restored protected subject. A source that is not the crypto framing answers
+//! `None`, leaving the store's rendering and the plugin fold untouched.
 //!
 //! **Privacy.** A message is the user's. Nothing here logs its content; the
 //! legs flow only to the reading snapshot.
 
 use std::sync::Arc;
 
-use astra_crypto_core::SignatureState;
-use astra_crypto_store::{receive_openpgp, CryptoStore, ReceiveOutcome, ReceiveState};
+use astra_crypto_core::{SignatureState, Standard};
+use astra_crypto_store::{receive, CryptoStore, ReceiveOutcome, ReceiveState};
 use astra_viewmodel::{AttachmentRow, SecurityBannerView, SecurityLevelView};
 
 use crate::{DecodeOutcome, MessageDecoder, MessageRef};
@@ -44,7 +45,7 @@ impl CryptoDecoder {
 #[async_trait::async_trait]
 impl MessageDecoder for CryptoDecoder {
     async fn decode(&self, message: &MessageRef, raw: &[u8]) -> Option<DecodeOutcome> {
-        let outcome = receive_openpgp(
+        let outcome = receive(
             &self.store,
             message.account.as_str(),
             message.key.as_str(),
@@ -83,23 +84,7 @@ fn closed(text: &str) -> DecodeOutcome {
 /// stating the signature verdict. An unknown signer degrades to a warning,
 /// never a failure: the words still render.
 fn decrypted(outcome: &ReceiveOutcome) -> DecodeOutcome {
-    let (level, text) = match outcome.signature_state {
-        SignatureState::ValidVerified => (
-            SecurityLevelView::Info,
-            "Encrypted message; signature verified.",
-        ),
-        SignatureState::UnknownKey => (
-            SecurityLevelView::Warning,
-            "Encrypted message; signature unverified (unknown signer).",
-        ),
-        SignatureState::NotSigned => (SecurityLevelView::Info, "Encrypted message; not signed."),
-        // The remaining verdicts (unverified, invalid, mismatch) are the
-        // honest warning: decrypted, but the signature did not verify.
-        _ => (
-            SecurityLevelView::Warning,
-            "Encrypted message; signature unverified.",
-        ),
-    };
+    let (level, text) = banner_words(outcome);
     DecodeOutcome {
         html: outcome.html.clone(),
         plain: outcome.plain.clone(),
@@ -109,6 +94,73 @@ fn decrypted(outcome: &ReceiveOutcome) -> DecodeOutcome {
         }),
         subject: outcome.subject.clone(),
         crypto_verdict: true,
+    }
+}
+
+/// The banner level and words for a decrypted outcome. The standard
+/// discriminator drives the wording: S/MIME names the cert-chain verdicts,
+/// OpenPGP keeps the key-trust vocabulary.
+fn banner_words(outcome: &ReceiveOutcome) -> (SecurityLevelView, &'static str) {
+    if matches!(outcome.standard, Standard::Smime) {
+        return smime_words(outcome);
+    }
+    openpgp_words(outcome.signature_state)
+}
+
+/// The S/MIME banner arms: the cert-chain verdicts (verified / unverified /
+/// mismatch / invalid). A revoked chain hard-failure is distinguished by the
+/// revocation state. Every non-verified arm is a warning, never a failure: the
+/// words still render.
+fn smime_words(outcome: &ReceiveOutcome) -> (SecurityLevelView, &'static str) {
+    match outcome.signature_state {
+        SignatureState::ValidVerified => (
+            SecurityLevelView::Info,
+            "Encrypted message; signature verified.",
+        ),
+        SignatureState::ValidUnverified | SignatureState::UnknownKey => (
+            SecurityLevelView::Warning,
+            "Encrypted message; signature unverified.",
+        ),
+        SignatureState::Mismatch => (
+            SecurityLevelView::Warning,
+            "Encrypted message; From address does not match the signer certificate.",
+        ),
+        SignatureState::Invalid => {
+            if outcome.revocation_state.as_deref() == Some("revoked") {
+                (
+                    SecurityLevelView::Warning,
+                    "Encrypted message; signature invalid (certificate revoked).",
+                )
+            } else {
+                (
+                    SecurityLevelView::Warning,
+                    "Encrypted message; signature invalid.",
+                )
+            }
+        }
+        SignatureState::NotSigned => (SecurityLevelView::Info, "Encrypted message; not signed."),
+    }
+}
+
+/// The OpenPGP banner arms (the key-trust vocabulary). An unknown signer
+/// degrades to a warning; the remaining verdicts (unverified, invalid,
+/// mismatch) are the honest warning: decrypted, but the signature did not
+/// verify.
+fn openpgp_words(state: SignatureState) -> (SecurityLevelView, &'static str) {
+    match state {
+        SignatureState::ValidVerified => (
+            SecurityLevelView::Info,
+            "Encrypted message; signature verified.",
+        ),
+        SignatureState::UnknownKey => (
+            SecurityLevelView::Warning,
+            "Encrypted message; signature unverified (unknown signer).",
+        ),
+        SignatureState::NotSigned => (SecurityLevelView::Info, "Encrypted message; not signed."),
+        _ => (
+            SecurityLevelView::Warning,
+            "Encrypted message; signature unverified.",
+        ),
     }
 }
 
@@ -128,6 +180,7 @@ fn is_crypto_pseudo_part(row: &AttachmentRow) -> bool {
     let name = row.file_name.to_ascii_lowercase();
     name == "encrypted.asc"
         || name == "smime.p7m"
+        || name == "smime.p7s"
         || row
             .media_type
             .eq_ignore_ascii_case("application/pgp-encrypted")
@@ -142,3 +195,7 @@ fn is_crypto_pseudo_part(row: &AttachmentRow) -> bool {
 #[cfg(test)]
 #[path = "crypto_decode_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "crypto_decode_smime_tests.rs"]
+mod smime_tests;

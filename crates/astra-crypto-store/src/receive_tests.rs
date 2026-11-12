@@ -391,3 +391,18 @@ async fn recognised_but_unextractable_framing_fails_closed_not_untouched() {
     let row = read_result(&store, "a2", "msg7").expect("a recognised message writes a failed row");
     assert_eq!(row.decrypt, "failed");
 }
+
+// --- The unified dispatcher (SP4c-2): sniff the framing, route ---
+
+#[tokio::test]
+async fn the_unified_dispatcher_routes_pgp_and_leaves_plain_untouched() {
+    let (store, a1, a2) = two_accounts(true).await;
+    let source = encrypt_source(&store, "a1", &a2, Some(&a1), PLAIN_ENTITY, "...").await;
+    let out = crate::receive(&store, "a2", "d1", &source).await;
+    assert_eq!(out.state, ReceiveState::Decrypted);
+    assert_eq!(out.standard, Standard::OpenPgp);
+
+    let plain = b"From: a1@x.com\r\nContent-Type: text/plain\r\n\r\nhi";
+    let out = crate::receive(&store, "a2", "d2", plain).await;
+    assert_eq!(out.state, ReceiveState::NotEncrypted);
+}

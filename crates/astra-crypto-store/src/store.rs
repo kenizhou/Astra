@@ -32,6 +32,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "drop_crypto_outbox",
         sql: include_str!("migrations/0003_drop_crypto_outbox.sql"),
     },
+    Migration {
+        version: 4,
+        name: "smime_receive",
+        sql: include_str!("migrations/0004_smime_receive.sql"),
+    },
 ];
 
 /// The sqlite-backed crypto store. All query layers in this crate take a
@@ -149,3 +154,7 @@ impl CryptoStore {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "migrations_tests.rs"]
+mod migrations_tests;

@@ -586,6 +586,36 @@ fn collect_legs(entity: &[u8], plain: &mut Option<String>, html: &mut Option<Str
     }
 }
 
+/// The RFC 5322 `From:` address of a full message source, parsed to a bare
+/// email (the receive orchestrator's From↔SAN binding input). `None` when the
+/// message is not UTF-8, carries no `From:` header, or the header holds no
+/// parseable address. Accepts the angle-bracket form (`Name <addr>`) and the
+/// bare form (`addr`); a folded header is unfolded by [`header_value`].
+pub fn from_email(source: &[u8]) -> Option<String> {
+    let (outer, _entity) = split_message(source).ok()?;
+    let from = header_value(&outer.headers, "from")?;
+    parse_from_address(&from)
+}
+
+/// Parse a bare email out of a `From:` value: the angle-bracket form
+/// (`Name <addr>`) wins, else a bare `addr` with no whitespace. `None` when
+/// neither shape carries an `@`.
+fn parse_from_address(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if let (Some(start), Some(end)) = (trimmed.rfind('<'), trimmed.rfind('>')) {
+        if end > start {
+            let inner = trimmed[start + 1..end].trim();
+            if inner.contains('@') {
+                return Some(inner.to_string());
+            }
+        }
+    }
+    if trimmed.contains('@') && !trimmed.contains(char::is_whitespace) {
+        return Some(trimmed.to_string());
+    }
+    None
+}
+
 #[cfg(test)]
 #[path = "mime_tests.rs"]
 mod mime_tests;
