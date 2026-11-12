@@ -11,7 +11,7 @@ use std::sync::{
 use astra_app::{NewMailBatch, NewMailNotice};
 use engine_api::{AccountId, EmailAddress, ProviderKey};
 
-use super::{NotifyBridge, OsNotifier};
+use super::{HistoryEmitter, NotifyBridge, OsNotifier, NEW_MAIL_EVENT};
 
 /// Every notification the sink was asked to show.
 #[derive(Default)]
@@ -161,4 +161,198 @@ fn a_message_without_a_sender_or_subject_still_announces_itself() {
         shown[0],
         ("New mail".to_owned(), "You have a new message".to_owned())
     );
+}
+
+/// Every batch the history channel was asked to emit, and whether the
+/// channel refuses its crossings.
+#[derive(Default)]
+struct Emitted {
+    batches: Mutex<Vec<NewMailBatch>>,
+    refused: AtomicBool,
+}
+
+/// The history channel the bridge holds a second handle to, so the test
+/// reads what crossed.
+#[derive(Clone, Default)]
+struct SharedEmitted(Arc<Emitted>);
+
+impl HistoryEmitter for SharedEmitted {
+    fn emit(&self, batch: &NewMailBatch) -> Result<(), String> {
+        if self.0.refused.load(Ordering::SeqCst) {
+            return Err("the channel is closed".to_owned());
+        }
+        self.0.batches.lock().unwrap().push(batch.clone());
+        Ok(())
+    }
+}
+
+/// A recording history channel and the handle the test reads it through.
+fn emitter() -> (SharedEmitted, Arc<Emitted>) {
+    let sink = SharedEmitted::default();
+    let record = Arc::clone(&sink.0);
+    (sink, record)
+}
+
+/// What the history channel has carried so far.
+fn emitted(record: &Arc<Emitted>) -> Vec<NewMailBatch> {
+    record.batches.lock().unwrap().clone()
+}
+
+#[test]
+fn the_notified_batch_crosses_on_the_new_mail_event() {
+    assert_eq!(NEW_MAIL_EVENT, "new-mail", "the web listens on this name");
+    let (bridge, _focus, record) = bridge(false);
+    let (sink, channel) = emitter();
+    let bridge = bridge.with_history(Box::new(sink));
+    let mut landed = batch(2);
+    landed.overflow = 1;
+    bridge.deliver(&landed, true);
+    assert_eq!(
+        emitted(&channel),
+        vec![landed],
+        "the whole drained batch crosses, overflow included"
+    );
+    assert_eq!(shown(&record).len(), 2, "the OS notifications still cross");
+}
+
+#[test]
+fn the_whole_batch_crosses_even_when_the_os_shows_a_summary() {
+    let (bridge, _focus, record) = bridge(false);
+    let (sink, channel) = emitter();
+    let bridge = bridge.with_history(Box::new(sink));
+    let mut landed = batch(3);
+    landed.overflow = 2;
+    bridge.deliver(&landed, true);
+    assert_eq!(shown(&record).len(), 1, "one summary, not a storm");
+    assert_eq!(
+        emitted(&channel),
+        vec![landed],
+        "the history records the messages the summary folded"
+    );
+}
+
+#[test]
+fn nothing_crosses_while_the_switch_is_off() {
+    let (bridge, _focus, _record) = bridge(false);
+    let (sink, channel) = emitter();
+    let bridge = bridge.with_history(Box::new(sink));
+    bridge.deliver(&batch(2), false);
+    assert!(
+        emitted(&channel).is_empty(),
+        "the kill switch beats the history"
+    );
+}
+
+#[test]
+fn nothing_crosses_while_the_window_is_focused() {
+    let (bridge, _focus, _record) = bridge(true);
+    let (sink, channel) = emitter();
+    let bridge = bridge.with_history(Box::new(sink));
+    bridge.deliver(&batch(2), true);
+    assert!(
+        emitted(&channel).is_empty(),
+        "a focused window records nothing: the history is of notified mail"
+    );
+}
+
+#[test]
+fn nothing_crosses_for_an_empty_batch() {
+    let (bridge, _focus, _record) = bridge(false);
+    let (sink, channel) = emitter();
+    let bridge = bridge.with_history(Box::new(sink));
+    bridge.deliver(&NewMailBatch::default(), true);
+    assert_eq!(emitted(&channel), [] as [NewMailBatch; 0]);
+}
+
+#[test]
+fn a_history_failure_never_suppresses_the_os_notification() {
+    let (bridge, _focus, record) = bridge(false);
+    let (sink, channel) = emitter();
+    channel.refused.store(true, Ordering::SeqCst);
+    let bridge = bridge.with_history(Box::new(sink));
+    bridge.deliver(&batch(2), true);
+    assert_eq!(
+        shown(&record).len(),
+        2,
+        "the OS notification crosses whatever the history channel answers"
+    );
+    assert_eq!(emitted(&channel), [] as [NewMailBatch; 0]);
+}
+
+#[test]
+fn the_headless_bridge_logs_the_notification_and_carries_no_history() {
+    // A subject unique to this test, so the shared log buffer's concurrent
+    // lines never answer for it: the headless sink logs the notification
+    // and nothing else, the history channel being absent by construction.
+    let probe = NewMailNotice {
+        account: AccountId::try_from("work").unwrap(),
+        key: ProviderKey::new("headless-probe").unwrap(),
+        from: Some(EmailAddress::named("Headless Probe", "probe@example.test")),
+        subject: Some("headless-history-probe".to_owned()),
+        preview: None,
+    };
+    let lines = crate::log_capture::captured();
+    let before = lines.lock().unwrap().len();
+    let bridge = NotifyBridge::logged();
+    bridge.deliver(
+        &NewMailBatch {
+            messages: vec![probe],
+            overflow: 0,
+        },
+        true,
+    );
+    let slice = lines.lock().unwrap()[before..].to_vec();
+    let own: Vec<&(log::Level, String)> = slice
+        .iter()
+        .filter(|(_, line)| line.contains("headless-history-probe"))
+        .collect();
+    assert_eq!(
+        own.len(),
+        1,
+        "the headless path logs exactly its one notification for the batch, \
+         no history crossing beside it (the channel is absent by construction): {own:?}"
+    );
+    assert!(
+        own[0]
+            .1
+            .contains("notification: Headless Probe: headless-history-probe"),
+        "the headless sink logs what would have crossed: {own:?}"
+    );
+}
+
+#[test]
+fn the_event_payload_serialises_the_batch_snake_case() {
+    let mut landed = batch(1);
+    landed.overflow = 2;
+    let json = serde_json::to_value(&landed).unwrap();
+    assert_eq!(
+        json,
+        serde_json::json!({
+            "messages": [{
+                "account": "work",
+                "key": "k0",
+                "from": { "name": "Sender 0", "email": "sender0@example.test" },
+                "subject": "Subject 0",
+                "preview": "Preview 0"
+            }],
+            "overflow": 2
+        })
+    );
+}
+
+#[test]
+fn a_bare_notice_serialises_its_absent_fields_as_null() {
+    let bare = NewMailNotice {
+        account: AccountId::try_from("work").unwrap(),
+        key: ProviderKey::new("k").unwrap(),
+        from: None,
+        subject: None,
+        preview: None,
+    };
+    let json = serde_json::to_value(&bare).unwrap();
+    assert_eq!(json["from"], serde_json::Value::Null);
+    assert_eq!(json["subject"], serde_json::Value::Null);
+    assert_eq!(json["preview"], serde_json::Value::Null);
+    assert_eq!(json["account"], "work");
+    assert_eq!(json["key"], "k");
 }

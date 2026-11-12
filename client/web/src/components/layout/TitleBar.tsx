@@ -10,10 +10,13 @@
 // between two drag regions. The strip wears the glass treatment with no
 // underline: the tonal step and the carved junctions carry the separation.
 
+import { useState } from 'react';
+
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
-import { MoonIcon, PlusIcon, SettingsIcon, SunIcon } from '@/components/icons';
+import { BellIcon, MoonIcon, PlusIcon, SettingsIcon, SunIcon } from '@/components/icons';
 import { WindowTitleControls } from '@/components/ui/WindowTitleControls';
+import { NotificationHistoryPanel } from '@/features/notification-history/NotificationHistoryPanel';
 import { dispatch, intents } from '@/services/ipc';
 import { nextThemeMode, useUiStore } from '@/stores/uiStore';
 
@@ -28,6 +31,7 @@ const TITLE_ICON_CLASS =
 
 export function TitleBar() {
   const themeMode = useUiStore((s) => s.themeMode);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const openSetup = () => useUiStore.getState().setAccountSetupOpen(true);
   const openSettings = () => useUiStore.getState().setSettingsOpen(true);
   const cycleTheme = () => {
@@ -72,6 +76,24 @@ export function TitleBar() {
         className="h-full min-w-[40px] flex-1"
       />
 
+      <div className="relative">
+        <button
+          type="button"
+          onClick={() => setHistoryOpen((open) => !open)}
+          aria-label="Notification history"
+          aria-expanded={historyOpen}
+          title="Notification history"
+          data-notification-bell
+          className={TITLE_ICON_CLASS}
+        >
+          <BellIcon size={16} />
+        </button>
+        {historyOpen && (
+          <div className="absolute right-0 top-full z-[var(--z-popover)] mt-1">
+            <NotificationHistoryPanel onClose={() => setHistoryOpen(false)} />
+          </div>
+        )}
+      </div>
       <button
         type="button"
         onClick={openSetup}

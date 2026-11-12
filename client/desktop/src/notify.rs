@@ -12,11 +12,15 @@ use std::sync::Arc;
 
 use astra_app::NewMailBatch;
 use astra_app::NewMailNotice;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 /// How many messages one pass may land before the bridge folds them into a
 /// single summary notification.
 pub(crate) const SUMMARY_AFTER: usize = 3;
+
+/// The event the notified batch crosses to the web on: the notification
+/// history's recording channel, the name the web's listener subscribes to.
+pub(crate) const NEW_MAIL_EVENT: &str = "new-mail";
 
 /// Where an OS notification goes: the notification plugin in the running
 /// app, a recorder in a test.
@@ -25,27 +29,52 @@ pub(crate) trait OsNotifier: Send + Sync {
     fn show(&self, title: &str, body: &str);
 }
 
+/// Where the notified batch crosses to the web history: the running app's
+/// event channel, a recorder in a test. An error is the channel's own
+/// failure; the bridge logs it and never lets it suppress the OS
+/// notification that already crossed.
+pub(crate) trait HistoryEmitter: Send + Sync {
+    /// Emits one notified batch on the history channel.
+    fn emit(&self, batch: &NewMailBatch) -> Result<(), String>;
+}
+
 /// Reads whether the main window is focused: the suppression the rules
 /// rest on, probed at delivery time for the batch in hand.
 pub(crate) type FocusProbe = Arc<dyn Fn() -> bool + Send + Sync>;
 
 /// The bridge: one OS sink and one focus probe, driving the rules over
-/// whatever batch a pass drained.
+/// whatever batch a pass drained, plus the history channel the notified
+/// batch crosses to the web on (the windowed host only).
 pub(crate) struct NotifyBridge {
     /// Where the notifications cross.
     sink: Box<dyn OsNotifier>,
     /// Whether the main window is focused right now.
     focused: FocusProbe,
+    /// Where the notified batch crosses to the web history; the headless
+    /// host holds none.
+    history: Option<Box<dyn HistoryEmitter>>,
 }
 
 impl NotifyBridge {
-    /// A bridge over `sink`, answering focus from `focused`.
+    /// A bridge over `sink`, answering focus from `focused`, carrying no
+    /// history channel until one is attached.
     pub(crate) fn new(sink: Box<dyn OsNotifier>, focused: FocusProbe) -> Self {
-        Self { sink, focused }
+        Self {
+            sink,
+            focused,
+            history: None,
+        }
+    }
+
+    /// Attaches the history channel the notified batch crosses on.
+    pub(crate) fn with_history(mut self, history: Box<dyn HistoryEmitter>) -> Self {
+        self.history = Some(history);
+        self
     }
 
     /// The windowed host's bridge: the notification plugin over the
-    /// shell's handle, focus read off the main window.
+    /// shell's handle, focus read off the main window, and the notified
+    /// batch crossing to the web on the new-mail event.
     pub(crate) fn windowed(handle: tauri::AppHandle) -> Self {
         let focus: FocusProbe = {
             let handle = handle.clone();
@@ -56,7 +85,13 @@ impl NotifyBridge {
                     .unwrap_or(false)
             })
         };
-        Self::new(Box::new(TauriNotifier { handle }), focus)
+        Self::new(
+            Box::new(TauriNotifier {
+                handle: handle.clone(),
+            }),
+            focus,
+        )
+        .with_history(Box::new(TauriHistoryEmitter { handle }))
     }
 
     /// The headless host's bridge: notifications land in the log, so the
@@ -68,7 +103,10 @@ impl NotifyBridge {
 
     /// Delivers one drained batch under the rules: nothing while the
     /// switch is off or the window is focused, one notification per
-    /// message up to [`SUMMARY_AFTER`], and a single summary past it.
+    /// message up to [`SUMMARY_AFTER`], and a single summary past it. The
+    /// notified batch then crosses to the web history; a channel failure
+    /// is logged, never raised, so it cannot suppress the OS notification
+    /// that already crossed.
     pub(crate) fn deliver(&self, batch: &NewMailBatch, enabled: bool) {
         if !enabled || (self.focused)() {
             return;
@@ -79,10 +117,15 @@ impl NotifyBridge {
         }
         if total > SUMMARY_AFTER {
             self.sink.show("New mail", &summary_body(total));
-            return;
+        } else {
+            for message in &batch.messages {
+                self.sink.show(&title(message), &body(message));
+            }
         }
-        for message in &batch.messages {
-            self.sink.show(&title(message), &body(message));
+        if let Some(history) = &self.history {
+            if let Err(err) = history.emit(batch) {
+                log::warn!("notifications: the new-mail history event could not be emitted: {err}");
+            }
         }
     }
 }
@@ -112,6 +155,21 @@ impl OsNotifier for TauriNotifier {
         {
             log::warn!("notifications: a new-mail notification could not be shown: {err}");
         }
+    }
+}
+
+/// The running app's history channel: the notified batch crosses to the
+/// web on the new-mail event, the share and mailto channels' sibling.
+struct TauriHistoryEmitter {
+    /// The handle the event answers on.
+    handle: tauri::AppHandle,
+}
+
+impl HistoryEmitter for TauriHistoryEmitter {
+    fn emit(&self, batch: &NewMailBatch) -> Result<(), String> {
+        self.handle
+            .emit(NEW_MAIL_EVENT, batch)
+            .map_err(|err| err.to_string())
     }
 }
 

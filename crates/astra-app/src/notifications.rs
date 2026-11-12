@@ -28,6 +28,7 @@ use std::{
 use engine_api::{
     AccountId, EmailAddress, Engine, MailboxId, MailboxRole, Message, ProviderKey, SyncCommit,
 };
+use serde::Serialize;
 
 /// How many notices the queue holds at once; rows a pass delivers beyond
 /// this fold into the batch's overflow count, which the host's summary
@@ -36,8 +37,9 @@ pub(crate) const NEW_MAIL_QUEUE_CAP: usize = 5;
 
 /// One message the queue holds for the host bridge to notify: who it is
 /// from, what it is about, and how it begins, beside the ids a host needs
-/// to open the row.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// to open the row. Serialises snake_case as the fields stand, the shape
+/// the host's new-mail event carries to the web history.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct NewMailNotice {
     /// The account the message landed in.
     pub account: AccountId,
@@ -52,8 +54,9 @@ pub struct NewMailNotice {
 }
 
 /// One drained batch: the notices the queue holds, and how many further
-/// qualifying rows arrived beyond its bound.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// qualifying rows arrived beyond its bound. Serialises as the new-mail
+/// event's payload: the messages plus the overflow count.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct NewMailBatch {
     /// The notices to show, oldest first.
     pub messages: Vec<NewMailNotice>,

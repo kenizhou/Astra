@@ -72,6 +72,15 @@ arrived in a pass, none while the window is focused, and none at all
 when the General page's switch is off (on by default, read at every
 delivery).
 
+The bridge also emits the notified batch as a `new-mail` event after the
+window rules pass, and the web shell records it into a device-local
+notification history (localStorage, capped at the hundred newest, deduped
+by account and key). A bell in the title bar opens the history: clicking an
+entry opens its message, and entries dismiss individually or clear at once.
+The history records the mail that was notified, so a focused window or a
+disabled switch records nothing; it rides the running web view, not the
+host, and an emit failure never suppresses the OS notification.
+
 ## The warm and cap pass
 
 After every pass, the account's in-window mail missing a body is warmed
