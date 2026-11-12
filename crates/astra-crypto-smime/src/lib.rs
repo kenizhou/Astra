@@ -63,7 +63,9 @@ pub use chain::{validate_signer_chain, ChainOutcome, RevocationState};
 // `chain::validate_signer_chain`'s visibility pattern) so it can be re-exported
 // here; external callers reach it only through this crate-root alias, never via
 // `cms_parse::extract_intermediates` directly.
-pub use cms_parse::extract_intermediates;
+pub use cms_parse::{
+    extract_intermediates, extract_signed_content, extract_signer_cert, is_signed_data,
+};
 
 // Persist + Use `.p12` Chain Intermediates (2026-07-18): re-export the shared
 // fingerprint helper so the backend persistence layer (`upsert_intermediate_cert`)

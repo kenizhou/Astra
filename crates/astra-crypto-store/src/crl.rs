@@ -84,6 +84,29 @@ pub fn get_crl(store: &CryptoStore, crl_url: &str) -> Result<Option<CrlCacheRow>
         })
 }
 
+/// Return the raw DER bytes of every cached CRL (the whole cache, no URL
+/// filter). The SP4c-2 receive orchestrator feeds these to
+/// `SmimeBackend::verify_with_context`'s `crls` argument. Cache only: there is
+/// no fetcher (SP4c-3), so an empty cache means revocation is unchecked in
+/// practice. Rows are returned in `crl_url` order for deterministic output.
+///
+/// # Errors
+/// Fails on a database error.
+pub fn list_crls(store: &CryptoStore) -> Result<Vec<Vec<u8>>, String> {
+    let conn = store.conn();
+    let mut stmt = conn
+        .prepare("SELECT crl_der FROM crl_cache ORDER BY crl_url")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, Vec<u8>>(0))
+        .map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for der in rows {
+        out.push(der.map_err(|e| e.to_string())?);
+    }
+    Ok(out)
+}
+
 /// Delete cached CRLs whose `next_update` is strictly less than `now_epoch`
 /// (string comparison on epoch-second strings is correct for equal-length
 /// numeric strings). Returns the number of rows deleted. Idempotent.

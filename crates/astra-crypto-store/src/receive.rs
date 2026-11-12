@@ -21,8 +21,8 @@
 use std::sync::Arc;
 
 use astra_crypto_core::{
-    mime, pgp_mime, CryptoError, CryptoPolicy, EncryptedEnvelope, EncryptedPart, Fingerprint,
-    KeyHandle, KeyHandleRef, KeyId, KeyUsage, PartId, PartKind, SerializationStrategy,
+    mime, pgp_mime, smime_mime, CryptoError, CryptoPolicy, EncryptedEnvelope, EncryptedPart,
+    Fingerprint, KeyHandle, KeyHandleRef, KeyId, KeyUsage, PartId, PartKind, SerializationStrategy,
     SignatureState, Standard, TokenKeyId,
 };
 use astra_crypto_openpgp::{keymap, OpenpgpBackend};
@@ -72,12 +72,40 @@ pub struct ReceiveOutcome {
     pub plain: Option<String>,
     /// The decrypted HTML leg.
     pub html: Option<String>,
+    /// Which crypto standard produced this outcome (the dispatcher's routing
+    /// discriminator). OpenPGP for [`receive_openpgp`], S/MIME for
+    /// [`crate::receive_smime`].
+    pub standard: Standard,
+    /// Whether the signer cert chain validated (S/MIME only; `None` for
+    /// OpenPGP, which has no X.509 chain, and on the non-decrypt arms).
+    pub chain_valid: Option<bool>,
+    /// The revocation verdict's column spelling (`good` / `revoked` /
+    /// `unchecked` / `stale`), when a chain assessment ran (S/MIME only).
+    pub revocation_state: Option<String>,
+    /// The granular cert-chain failure reason, when the chain failed (S/MIME
+    /// only). Surfaced by the signature-details dialog.
+    pub failure_reason: Option<String>,
+    /// The structured RFC 5280 CRLReason name, when the chain hard-failed on a
+    /// revocation (S/MIME only).
+    pub revocation_reason: Option<String>,
 }
 
 impl ReceiveOutcome {
     /// A fail-closed answer: the state and signature verdict, empty legs. No
     /// plaintext, ciphertext, or subject is released on any non-decrypt arm.
+    /// OpenPGP is the default standard (the [`receive_openpgp`] caller).
     fn closed(state: ReceiveState, signature_state: SignatureState) -> Self {
+        Self::closed_with_standard(state, signature_state, Standard::OpenPgp)
+    }
+
+    /// The fail-closed answer for an explicit standard (the S/MIME orchestrator
+    /// passes [`Standard::Smime`]). The chain fields stay `None`: no chain
+    /// assessment ran on a non-decrypt arm.
+    pub(crate) fn closed_with_standard(
+        state: ReceiveState,
+        signature_state: SignatureState,
+        standard: Standard,
+    ) -> Self {
         Self {
             state,
             signature_state,
@@ -87,6 +115,11 @@ impl ReceiveOutcome {
             subject: None,
             plain: None,
             html: None,
+            standard,
+            chain_valid: None,
+            revocation_state: None,
+            failure_reason: None,
+            revocation_reason: None,
         }
     }
 }
@@ -119,13 +152,7 @@ pub async fn receive_openpgp(
                 store,
                 account_id,
                 message_id,
-                ResultVerdict {
-                    crypto_kind: "encrypted",
-                    decrypt_state: "failed",
-                    signature_state: SignatureState::Invalid,
-                    signer_fingerprint: None,
-                    signer_email: None,
-                },
+                ResultVerdict::openpgp("encrypted", "failed", SignatureState::Invalid, None, None),
             );
             return ReceiveOutcome::closed(ReceiveState::Failed, SignatureState::Invalid);
         }
@@ -149,13 +176,7 @@ pub async fn receive_openpgp(
             store,
             account_id,
             message_id,
-            ResultVerdict {
-                crypto_kind: "encrypted",
-                decrypt_state: "no-key",
-                signature_state: SignatureState::NotSigned,
-                signer_fingerprint: None,
-                signer_email: None,
-            },
+            ResultVerdict::openpgp("encrypted", "no-key", SignatureState::NotSigned, None, None),
         );
         return ReceiveOutcome::closed(ReceiveState::NoKey, SignatureState::NotSigned);
     }
@@ -204,13 +225,7 @@ pub async fn receive_openpgp(
             store,
             account_id,
             message_id,
-            ResultVerdict {
-                crypto_kind: "encrypted",
-                decrypt_state: "failed",
-                signature_state: SignatureState::Invalid,
-                signer_fingerprint: None,
-                signer_email: None,
-            },
+            ResultVerdict::openpgp("encrypted", "failed", SignatureState::Invalid, None, None),
         );
         return ReceiveOutcome::closed(ReceiveState::Failed, SignatureState::Invalid);
     };
@@ -252,13 +267,13 @@ pub async fn receive_openpgp(
         store,
         account_id,
         message_id,
-        ResultVerdict {
+        ResultVerdict::openpgp(
             crypto_kind,
-            decrypt_state: "ok",
+            "ok",
             signature_state,
-            signer_fingerprint: signer_fingerprint.as_deref(),
-            signer_email: signer_email.as_deref(),
-        },
+            signer_fingerprint.as_deref(),
+            signer_email.as_deref(),
+        ),
     );
     ReceiveOutcome {
         state: ReceiveState::Decrypted,
@@ -269,6 +284,12 @@ pub async fn receive_openpgp(
         subject,
         plain,
         html,
+        standard: Standard::OpenPgp,
+        // OpenPGP has no X.509 chain: the chain fields stay absent.
+        chain_valid: None,
+        revocation_state: None,
+        failure_reason: None,
+        revocation_reason: None,
     }
 }
 
@@ -387,23 +408,62 @@ fn signature_state_db(state: SignatureState) -> &'static str {
 }
 
 /// The verdict fields persisted into `message_crypto_results` for one message.
+/// The chain fields (`chain_valid`, `revocation_state`, `failure_reason`,
+/// `revocation_reason`) and the `standard` discriminator are S/MIME additions
+/// (SP4c-2); OpenPGP leaves the chain fields absent and `revocation_state`
+/// `unchecked`.
 #[derive(Clone, Copy)]
-struct ResultVerdict<'a> {
-    crypto_kind: &'a str,
-    decrypt_state: &'a str,
-    signature_state: SignatureState,
-    signer_fingerprint: Option<&'a str>,
-    signer_email: Option<&'a str>,
+pub(crate) struct ResultVerdict<'a> {
+    pub(crate) crypto_kind: &'a str,
+    pub(crate) decrypt_state: &'a str,
+    pub(crate) signature_state: SignatureState,
+    pub(crate) signer_fingerprint: Option<&'a str>,
+    pub(crate) signer_email: Option<&'a str>,
+    /// The crypto standard's column spelling (`openpgp` / `smime`), when known.
+    pub(crate) standard: Option<&'a str>,
+    /// Whether the signer chain validated (S/MIME); `None` for OpenPGP.
+    pub(crate) chain_valid: Option<bool>,
+    /// The revocation verdict's column spelling.
+    pub(crate) revocation_state: &'a str,
+    /// The granular chain failure reason (S/MIME).
+    pub(crate) failure_reason: Option<&'a str>,
+    /// The structured CRLReason name (S/MIME, revoked only).
+    pub(crate) revocation_reason: Option<&'a str>,
+}
+
+impl<'a> ResultVerdict<'a> {
+    /// An OpenPGP verdict: no X.509 chain, revocation unchecked. The historical
+    /// five-field shape, kept so [`receive_openpgp`]'s call sites stay terse.
+    pub(crate) fn openpgp(
+        crypto_kind: &'a str,
+        decrypt_state: &'a str,
+        signature_state: SignatureState,
+        signer_fingerprint: Option<&'a str>,
+        signer_email: Option<&'a str>,
+    ) -> Self {
+        Self {
+            crypto_kind,
+            decrypt_state,
+            signature_state,
+            signer_fingerprint,
+            signer_email,
+            standard: Some("openpgp"),
+            chain_valid: None,
+            revocation_state: "unchecked",
+            failure_reason: None,
+            revocation_reason: None,
+        }
+    }
 }
 
 /// Persist the per-message result, upserting on the `(account_id, message_id)`
 /// primary key. The schema drops the foreign key to the engine's messages
 /// table, so the linkage is enforced here in Rust: an empty account or message
-/// id is an orphan row and is refused. `chain_valid` stays NULL (OpenPGP has no
-/// X.509 chain) and `revocation_state` stays `unchecked` (CRL fetching is a
-/// later slice). A store write failure is swallowed: the verdict still reaches
-/// the caller, and the next open re-persists.
-fn write_result(
+/// id is an orphan row and is refused. The chain fields ride the verdict
+/// (S/MIME populates them; OpenPGP leaves `chain_valid` NULL and
+/// `revocation_state` `unchecked`). A store write failure is swallowed: the
+/// verdict still reaches the caller, and the next open re-persists.
+pub(crate) fn write_result(
     store: &CryptoStore,
     account_id: &str,
     message_id: &str,
@@ -415,8 +475,9 @@ fn write_result(
     let _ = store.conn().execute(
         "INSERT INTO message_crypto_results
             (account_id, message_id, crypto_kind, decrypt_state, signature_state,
-             signer_fingerprint, signer_email, chain_valid, revocation_state, verified_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, 'unchecked', strftime('%s','now'))
+             signer_fingerprint, signer_email, chain_valid, revocation_state,
+             standard, failure_reason, revocation_reason, verified_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, strftime('%s','now'))
          ON CONFLICT(account_id, message_id) DO UPDATE SET
             crypto_kind = excluded.crypto_kind,
             decrypt_state = excluded.decrypt_state,
@@ -425,6 +486,9 @@ fn write_result(
             signer_email = excluded.signer_email,
             chain_valid = excluded.chain_valid,
             revocation_state = excluded.revocation_state,
+            standard = excluded.standard,
+            failure_reason = excluded.failure_reason,
+            revocation_reason = excluded.revocation_reason,
             verified_at = excluded.verified_at",
         rusqlite::params![
             account_id,
@@ -434,8 +498,33 @@ fn write_result(
             signature_state_db(verdict.signature_state),
             verdict.signer_fingerprint,
             verdict.signer_email,
+            verdict.chain_valid,
+            verdict.revocation_state,
+            verdict.standard,
+            verdict.failure_reason,
+            verdict.revocation_reason,
         ],
     );
+}
+
+/// The unified receive entry (SP4c-2): sniff the crypto framing once and route
+/// to the matching orchestrator. An S/MIME enveloped source routes to
+/// [`crate::receive_smime`]; everything else (PGP/MIME, plain, unrecognised)
+/// routes to [`receive_openpgp`], whose own detection answers `NotEncrypted`
+/// for a non-crypto source. The reading pipeline's `CryptoDecoder` calls this
+/// single entry; the per-standard orchestrators stay self-contained.
+pub async fn receive(
+    store: &Arc<CryptoStore>,
+    account_id: &str,
+    message_id: &str,
+    source: &[u8],
+) -> ReceiveOutcome {
+    if let Ok((_outer, entity)) = mime::split_message(source) {
+        if smime_mime::is_smime_enveloped(&entity.0) {
+            return crate::receive_smime(store, account_id, message_id, source).await;
+        }
+    }
+    receive_openpgp(store, account_id, message_id, source).await
 }
 
 #[cfg(test)]

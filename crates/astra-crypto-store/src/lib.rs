@@ -36,6 +36,7 @@ mod password;
 mod pinned;
 mod policy;
 mod receive;
+mod receive_smime;
 mod resolve;
 mod results;
 mod store;
@@ -52,7 +53,7 @@ pub use collected::{
     list_collected_keys_for_peer, promote_collected_key, remove_collected_key, stage_collected_key,
     stage_collected_key_if_absent, CollectedKeyRow,
 };
-pub use crl::{get_crl, prune_stale_crls, upsert_crl, CrlCacheRow};
+pub use crl::{get_crl, list_crls, prune_stale_crls, upsert_crl, CrlCacheRow};
 pub use default::{
     backfill_cert_summaries, delete_crypto_key, get_default_signing_key, set_default_signing_key,
     DefaultKeyRow,
@@ -66,7 +67,8 @@ pub use keystore::SqliteKeyStore;
 pub use password::apply_password_crypto;
 pub use pinned::{list_pinned_keys, remove_pinned_key, set_pinned_key, PinnedKey};
 pub use policy::StoreCryptoPolicy;
-pub use receive::{receive_openpgp, ReceiveOutcome, ReceiveState};
+pub use receive::{receive, receive_openpgp, ReceiveOutcome, ReceiveState};
+pub use receive_smime::receive_smime;
 pub use resolve::{
     key_material_expired, pin_preferred_handle, recipient_trust_failures, resolve_recipient_status,
     resolve_recipient_status_at, RecipientTrustFailure, RecipientTrustState, RecipientTrustStatus,

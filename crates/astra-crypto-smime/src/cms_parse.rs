@@ -981,6 +981,70 @@ pub fn extract_intermediates(signed_data_der: &[u8]) -> Result<Vec<Vec<u8>>> {
     Ok(intermediates)
 }
 
+/// Recover the eContent (the covered payload bytes) of an opaque, encapsulated
+/// CMS `SignedData` (wrapped in `ContentInfo`, id-signed-data). The SP4c-2
+/// receive orchestrator calls this on a sign-then-encrypt message's decrypted
+/// plaintext to restore the inner MIME entity (the protected subject + legs).
+///
+/// # Errors
+/// `Malformed` when the DER is not a SignedData ContentInfo, or the SignedData
+/// is detached (no `eContent` to extract). CMS parsing stays in this crate.
+pub fn extract_signed_content(signed_data_der: &[u8]) -> Result<Vec<u8>> {
+    let ci = ContentInfo::from_der(signed_data_der).map_err(|e| cms_err("parse ContentInfo", e))?;
+    if ci.content_type != const_oid::db::rfc5911::ID_SIGNED_DATA {
+        return Err(CryptoError::Malformed(
+            "extract_signed_content: ContentInfo is not id-signed-data".into(),
+        ));
+    }
+    let inner = ci
+        .content
+        .to_der()
+        .map_err(|e| cms_err("re-derive ContentInfo content", e))?;
+    let sd = SignedData::from_der(&inner).map_err(|e| cms_err("parse SignedData", e))?;
+    let econtent = sd.encap_content_info.econtent.as_ref().ok_or_else(|| {
+        CryptoError::Malformed("extract_signed_content: detached SignedData has no eContent".into())
+    })?;
+    Ok(econtent.value().to_vec())
+}
+
+/// Whether `der` is a CMS `SignedData` ContentInfo (id-signed-data). The SP4c-2
+/// orchestrator sniffs a decrypted plaintext with this to decide whether the
+/// message is the nested sign-then-encrypt shape (verify) or encrypt-only.
+/// `false` on any parse failure or a different content type.
+pub fn is_signed_data(der: &[u8]) -> bool {
+    ContentInfo::from_der(der)
+        .map(|ci| ci.content_type == const_oid::db::rfc5911::ID_SIGNED_DATA)
+        .unwrap_or(false)
+}
+
+/// Recover the signer leaf cert DER from a CMS `SignedData`'s `certificates`
+/// set, identified by the first `SignerInfo`'s `SignerIdentifier`. The SP4c-2
+/// orchestrator harvests this leaf via `insert_harvested_cert` (never
+/// auto-trusted). Mirrors [`extract_intermediates`]'s parse idiom but returns
+/// the signer leaf instead of the non-signer certs.
+///
+/// # Errors
+/// `Malformed` when the DER is not a SignedData ContentInfo, the certificates
+/// set is absent, or no cert matches the signer identifier.
+pub fn extract_signer_cert(signed_data_der: &[u8]) -> Result<Vec<u8>> {
+    let ci = ContentInfo::from_der(signed_data_der).map_err(|e| cms_err("parse ContentInfo", e))?;
+    let inner = ci
+        .content
+        .to_der()
+        .map_err(|e| cms_err("re-derive ContentInfo content", e))?;
+    let sd = SignedData::from_der(&inner).map_err(|e| cms_err("parse SignedData", e))?;
+    let cert_set = sd.certificates.as_ref().ok_or_else(|| {
+        CryptoError::Malformed("extract_signer_cert: certificates set absent".into())
+    })?;
+    let sid = sd
+        .signer_infos
+        .0
+        .get(0)
+        .map(|si| &si.sid)
+        .ok_or_else(|| CryptoError::Malformed("extract_signer_cert: no signer infos".into()))?;
+    locate_signer_cert(cert_set, sid)
+}
+
 /// RFC 5280 method-1 SubjectKeyIdentifier = SHA-1 of the SPKI DER, hex-lower.
 /// Mirrors `cert.rs::build_self_signed_smime_cert`'s SKI computation so a
 /// generated cert's fingerprint round-trips.
@@ -2166,5 +2230,71 @@ mod tests {
         let ok384 = verify_ecdsa_p384_signature_inner(&p384_cert, b"signed-attrs", &[0x00])
             .expect("malformed P-384 sig must NOT be a hard error");
         assert!(!ok384, "malformed P-384 signature must yield sig_ok=false");
+    }
+
+    // ──── SP4c-2: the eContent extractor + the SignedData sniff ────
+
+    /// An opaque (encapsulated) SignedData's eContent is the covered payload;
+    /// the extractor recovers it byte-for-byte so the orchestrator can restore
+    /// the protected subject and legs of a sign-then-encrypt message.
+    #[test]
+    fn extract_signed_content_recovers_the_econtent() {
+        let (cert_der, priv_pkcs8) = p256_test_cert_and_key(50);
+        let payload = b"the signed inner entity";
+        let signed_data_der =
+            crate::cms_build::build_signed_data(payload, false, &cert_der, &priv_pkcs8)
+                .expect("build SignedData");
+        let recovered = extract_signed_content(&signed_data_der).expect("extract eContent");
+        assert_eq!(recovered.as_slice(), payload);
+    }
+
+    /// A detached SignedData carries no eContent: extraction is an error (the
+    /// orchestrator only ever meets the encapsulated sign-then-encrypt shape).
+    #[test]
+    fn extract_signed_content_detached_is_error() {
+        let (cert_der, priv_pkcs8) = p256_test_cert_and_key(51);
+        let signed_data_der =
+            crate::cms_build::build_signed_data(b"detached", true, &cert_der, &priv_pkcs8)
+                .expect("build detached SignedData");
+        assert!(extract_signed_content(&signed_data_der).is_err());
+    }
+
+    #[test]
+    fn extract_signed_content_malformed_input_is_error() {
+        assert!(extract_signed_content(&[0x00, 0x01, 0x02]).is_err());
+    }
+
+    /// The sniff recognises a SignedData ContentInfo and rejects an
+    /// EnvelopedData one (the orchestrator routes on this after decrypt).
+    #[test]
+    fn is_signed_data_sniffs_the_content_type() {
+        let (cert_der, priv_pkcs8) = p256_test_cert_and_key(52);
+        let signed_data_der =
+            crate::cms_build::build_signed_data(b"x", false, &cert_der, &priv_pkcs8)
+                .expect("build SignedData");
+        assert!(is_signed_data(&signed_data_der));
+
+        let recip = crate::cms_build::recipient_input_from_cert(&cert_der).expect("recipient");
+        let enveloped_der =
+            crate::cms_build::build_enveloped_data(b"x", std::slice::from_ref(&recip))
+                .expect("build EnvelopedData");
+        assert!(!is_signed_data(&enveloped_der));
+        assert!(!is_signed_data(&[0x00, 0x01]));
+    }
+
+    /// The signer leaf DER is recoverable for harvesting (the orchestrator
+    /// persists it via insert_harvested_cert, never auto-trusted).
+    #[test]
+    fn extract_signer_cert_returns_the_signer_leaf() {
+        let (cert_der, priv_pkcs8) = p256_test_cert_and_key(53);
+        let (inter_der, _) = p256_test_cert_and_key(54);
+        let signed_data_der = build_signed_data_with_extra_certs(
+            b"harvest payload",
+            &cert_der,
+            &priv_pkcs8,
+            std::slice::from_ref(&inter_der),
+        );
+        let leaf = extract_signer_cert(&signed_data_der).expect("extract signer leaf");
+        assert_eq!(leaf, cert_der, "the signer leaf DER round-trips verbatim");
     }
 }
