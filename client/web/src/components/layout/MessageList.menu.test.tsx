@@ -3,7 +3,7 @@
 // folder-switch reset) and the row context menu (targets on right-click,
 // the batch loops, the draft folder's own menu). The list's main tests
 // live in MessageList.test.tsx, its groups in MessageList.groups.test.tsx.
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const ipc = vi.hoisted(() => ({
@@ -31,6 +31,7 @@ vi.mock('@tanstack/react-virtual', () => ({
 }));
 
 import { MessageList } from './MessageList';
+import { useSweepStore } from '@/features/sweep/sweepStore';
 import { useFolderStore } from '@/stores/folderStore';
 import { useListStore } from '@/stores/listStore';
 import { useReadingStore } from '@/stores/readingStore';
@@ -98,6 +99,7 @@ beforeEach(() => {
   });
   useReadingStore.setState({ snapshot: null, showRemoteImages: false });
   useSplitStore.setState({ entries: {} });
+  useSweepStore.setState({ sender: null });
 });
 
 afterEach(() => {
@@ -229,6 +231,21 @@ describe('the row context menu', () => {
 
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  it('opens the sweep dialog prefilled with the row sender, counting only that sender', () => {
+    applyList({ rows: [row(), digest], visible_limit: 50 });
+
+    render(<MessageList />);
+    fireEvent.contextMenu(optionWith('Quarterly report'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Clean up sender…' }));
+
+    expect(screen.queryByRole('menu')).toBeNull();
+    const dialog = screen.getByRole('dialog', { name: 'Clean up sender' });
+    expect(within(dialog).getByText('ada@example.test')).toBeTruthy();
+    expect(within(dialog).getByText('1 message in this folder')).toBeTruthy();
+    expect(within(dialog).queryByText('Your weekly digest')).toBeNull();
+    expect(ipc.dispatch).not.toHaveBeenCalled();
   });
 
   it('shows the draft menu in the drafts folder', () => {
