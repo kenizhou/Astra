@@ -30,6 +30,13 @@ fn main() -> std::process::ExitCode {
     };
     let stdin = std::io::stdin();
     let run = verbs::run(&args, &data_dir, &mut stdin.lock());
+    // The one generator exception to the envelope rule: a raw script prints
+    // as itself when `--json` is absent, the `eval "$(...)"` idiom. Under
+    // `--json` the standard envelope carries it instead.
+    if let (Some(raw), false) = (&run.raw, run.json) {
+        print!("{raw}");
+        return std::process::ExitCode::from(run.code.exit());
+    }
     print(&run.envelope, !run.json && std::io::stdout().is_terminal());
     std::process::ExitCode::from(run.code.exit())
 }

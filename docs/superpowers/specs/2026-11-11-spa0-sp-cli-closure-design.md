@@ -107,7 +107,7 @@ notes the generator exception.
   (protocol.ts:89-97, protocol.rs:56, permissions.rs:31), but nothing
   produces them: `runGated` passes no preview to `requestApproval`, the
   sidecar never spells `--preview`, `default_policy()` uses no
-  `ConfirmPreview`, and the approval card renders the redacted args, not
+  `ConfirmPreview`, and the approval card renders the ask's raw args, not
   the action preview. Wiring `--preview` output onto the card is a deeper
   slice (the confirm_preview cluster); this slice documents the redacted
   preview shape the map carries and records the production leg as the gap.

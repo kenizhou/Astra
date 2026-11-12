@@ -171,6 +171,20 @@ pub(super) fn parse(args: &[String], stdin: &mut dyn Read) -> Result<Invocation,
         (Some("ai"), Some(sub @ ("digest" | "report"))) => {
             ai::document_verb(&ai::ai_positionals(args), sub)?
         }
+        (Some("completions"), Some(word)) => Verb::Completions {
+            shell: super::completions::Shell::from_word(word).ok_or_else(|| {
+                usage(&format!(
+                    "completions wants a shell: {}",
+                    super::completions::shell_words()
+                ))
+            })?,
+        },
+        (Some("completions"), None) => {
+            return Err(usage(&format!(
+                "completions wants a shell: {}",
+                super::completions::shell_words()
+            )));
+        }
         (Some(_), Some(_)) => return Err(usage("unknown verb")),
         _ => {
             return Err(usage(
@@ -393,8 +407,9 @@ pub(super) fn correlation_from(args: &[String]) -> CorrelationId {
     CorrelationId::generate()
 }
 
-/// The subverbs the verbs spell: the CLI's own vocabulary, the only
-/// second positional the ledger may capture beside a verb word.
+/// The second positionals the verbs spell: the subverbs and the
+/// completion shells, the CLI's own vocabulary, the only second
+/// positional the ledger may capture beside a verb word.
 const SUBVERBS: &[&str] = &[
     "list",
     "read",
@@ -416,6 +431,10 @@ const SUBVERBS: &[&str] = &[
     "set-flagged",
     "archive",
     "trash",
+    "bash",
+    "zsh",
+    "fish",
+    "pwsh",
 ];
 
 /// The verb word of an unparsable line, best effort: the first positional,

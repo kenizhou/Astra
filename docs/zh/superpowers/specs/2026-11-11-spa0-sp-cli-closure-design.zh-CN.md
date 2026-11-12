@@ -86,7 +86,7 @@ cli.md 的门控映射。预览的「生产」腿是另一回事，作为已知�
   与审批 `preview` 载荷（protocol.ts:89-97、protocol.rs:56、
   permissions.rs:31），但没有任何东西生产它们：`runGated` 不向
   `requestApproval` 传预览，sidecar 从不拼 `--preview`，`default_policy()`
-  不用 `ConfirmPreview`，审批卡片渲染的是脱敏参数而非动作预览。把
+  不用 `ConfirmPreview`，审批卡片渲染的是询问的原始参数而非动作预览。把
   `--preview` 输出接到卡片上是一个更深的切片（confirm_preview 簇）；
   本切片记录映射所承载的脱敏预览形状，并把生产腿记为缺口。
 - **SP-CLI 的更宽范围。** 创始规格的 SP-CLI 行命名「补全、帮助质量、

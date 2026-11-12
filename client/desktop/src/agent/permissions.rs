@@ -203,7 +203,8 @@ impl PermissionBridge {
 /// The redacted argument preview for a permission ask, mirroring the CLI's
 /// preview vocabulary: shapes (counts, lengths) and store ids only, never
 /// addresses, subjects, or body text, so the two writers' rows in one
-/// ledger read alike. An unknown tool gets the shape alone.
+/// ledger read alike. The gating map (docs/cli.md) pins one shape per
+/// tool; an unknown tool gets the shape alone.
 fn shaped_arg_preview(tool: &str, args: &serde_json::Value) -> String {
     let fields = args.as_object();
     let id = |key: &str| {
@@ -226,6 +227,12 @@ fn shaped_arg_preview(tool: &str, args: &serde_json::Value) -> String {
             .and_then(|fields| fields.get(key))
             .and_then(serde_json::Value::as_str)
             .map_or(0, |text| text.chars().count())
+    };
+    let flag = |key: &str, default: bool| {
+        fields
+            .and_then(|fields| fields.get(key))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(default)
     };
     match tool {
         "list_folders" => format!("account={}", id("account")),
@@ -253,132 +260,45 @@ fn shaped_arg_preview(tool: &str, args: &serde_json::Value) -> String {
             chars("body"),
         ),
         "discard_draft" => format!("account={} key={}", id("account"), id("key")),
+        "search_messages" => {
+            let mut preview = format!("query_chars={}", chars("query"));
+            if let Some(account) = fields
+                .and_then(|fields| fields.get("account"))
+                .and_then(serde_json::Value::as_str)
+            {
+                let _ =
+                    std::fmt::Write::write_fmt(&mut preview, format_args!(" account={account}"));
+            }
+            if let Some(folder) = fields
+                .and_then(|fields| fields.get("folder"))
+                .and_then(serde_json::Value::as_str)
+            {
+                let _ = std::fmt::Write::write_fmt(&mut preview, format_args!(" folder={folder}"));
+            }
+            if let Some(offset) = fields.and_then(|fields| fields.get("offset")) {
+                let _ = std::fmt::Write::write_fmt(&mut preview, format_args!(" offset={offset}"));
+            }
+            preview
+        }
+        "mark_read" => format!(
+            "account={} key={} read={}",
+            id("account"),
+            id("key"),
+            flag("read", true)
+        ),
+        "set_flagged" => format!(
+            "account={} key={} flagged={}",
+            id("account"),
+            id("key"),
+            flag("flagged", true)
+        ),
+        "archive_message" | "move_to_trash" => {
+            format!("account={} key={}", id("account"), id("key"))
+        }
         _ => format!("fields={}", fields.map_or(0, serde_json::Map::len)),
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn approval(id: &str, correlation: Option<&str>) -> PendingApproval {
-        PendingApproval {
-            id: id.to_string(),
-            tool_call_id: "call-1".to_string(),
-            tool: "save_draft".to_string(),
-            level: PermissionLevel::Confirm,
-            args: serde_json::json!({ "account": "acct-1" }),
-            preview: None,
-            correlation: correlation.map(str::to_string),
-        }
-    }
-
-    fn bridge() -> PermissionBridge {
-        PermissionBridge::new(std::sync::Arc::new(
-            AiStore::open_in_memory().expect("the in-memory store opens"),
-        ))
-    }
-
-    #[test]
-    fn register_respond_round_trips_one_shot() {
-        let bridge = bridge();
-        bridge
-            .register(approval("perm-1", Some("corr-1")))
-            .expect("registers");
-        assert_eq!(bridge.pending().len(), 1);
-
-        let consumed = bridge
-            .respond("perm-1", true, false)
-            .expect("the answer consumes the ask");
-        assert_eq!(consumed.correlation.as_deref(), Some("corr-1"));
-        assert_eq!(
-            bridge.pending(),
-            [] as [crate::agent::permissions::PendingApproval; 0]
-        );
-
-        let again = bridge.respond("perm-1", true, false);
-        assert!(again.is_err(), "an answer is one-shot");
-    }
-
-    #[test]
-    fn duplicate_ids_are_refused() {
-        let bridge = bridge();
-        bridge
-            .register(approval("perm-1", None))
-            .expect("registers");
-        assert!(bridge.register(approval("perm-1", None)).is_err());
-        assert_eq!(bridge.pending().len(), 1);
-    }
-
-    /// The audit row a settled save_draft ask wrote, read straight from
-    /// the ledger file: the store only appends, so the test brings its
-    /// own connection.
-    fn recorded_preview(dir: &std::path::Path) -> String {
-        let conn = rusqlite::Connection::open(dir.join("ai.sqlite"))
-            .expect("the ledger opens for reading");
-        conn.query_row(
-            "SELECT arg_preview FROM audit_log WHERE verb = 'permission save_draft'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("the permission row reads back")
-    }
-
-    #[test]
-    fn the_audit_row_carries_shapes_not_message_text() {
-        let dir = super::super::testkit::scratch("permission-preview");
-        let bridge = PermissionBridge::new(std::sync::Arc::new(
-            AiStore::open(&dir.join("ai.sqlite")).expect("the file store opens"),
-        ));
-        bridge
-            .register(PendingApproval {
-                id: "perm-1".to_string(),
-                tool_call_id: "call-1".to_string(),
-                tool: "save_draft".to_string(),
-                level: PermissionLevel::Confirm,
-                args: serde_json::json!({
-                    "account": "acct-1",
-                    "from": "ada@example.com",
-                    "to": ["bob@example.com", "carol@example.com"],
-                    "cc": ["dan@example.com"],
-                    "subject": "Re: the meridian code is halcyon-dawn",
-                    "body": "burn after reading: zulu-seven-bravo",
-                }),
-                preview: None,
-                correlation: Some("corr-1".to_string()),
-            })
-            .expect("registers");
-        bridge
-            .respond("perm-1", true, false)
-            .expect("the answer consumes the ask");
-
-        let preview = recorded_preview(&dir);
-        assert_eq!(
-            preview, "account=acct-1 from=1 to=2 cc=1 subject_chars=37 body_chars=36",
-            "the preview mirrors the CLI's shape vocabulary"
-        );
-        for planted in ["example.com", "halcyon-dawn", "zulu-seven-bravo"] {
-            assert!(
-                !preview.contains(planted),
-                "the recorded row leaked '{planted}': {preview}"
-            );
-        }
-    }
-
-    #[test]
-    fn fail_close_drains_and_restores_survive() {
-        let bridge = bridge();
-        bridge
-            .register(approval("perm-1", Some("corr-1")))
-            .expect("registers");
-        let drained = bridge.fail_close_all("sidecar died");
-        assert_eq!(drained.len(), 1);
-        assert_eq!(
-            bridge.pending(),
-            [] as [crate::agent::permissions::PendingApproval; 0]
-        );
-
-        bridge.restore(drained[0].clone());
-        assert_eq!(bridge.pending().len(), 1);
-    }
-}
+#[path = "permissions_tests.rs"]
+mod tests;
