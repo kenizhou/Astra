@@ -34,6 +34,8 @@ import { useComposeRequestHydration } from '@/features/composer/useComposeReques
 import { SendResultToast } from '@/features/outbox/SendResultToast';
 import { PeoplePane } from '@/features/people/PeoplePane';
 import { SettingsScreen } from '@/features/settings/SettingsScreen';
+import { ShortcutsHelp } from '@/features/shortcuts-help/ShortcutsHelp';
+import { useShortcutsHelpOpener } from '@/features/shortcuts-help/useShortcutsHelpOpener';
 import { FolderPane } from '@/components/folder-pane/FolderPane';
 import { useWindowStage } from '@/hooks/useWindowSize';
 import { useAppearanceStore } from '@/services/appearance';
@@ -201,6 +203,7 @@ export function AppShell() {
   useDraftResumeAtStart();
   useComposeRequestHydration();
   useCommandPaletteOpener();
+  useShortcutsHelpOpener();
 
   const viewContent = (
     <div className="relative h-full">
@@ -271,6 +274,7 @@ export function AppShell() {
       <SettingsScreen />
       <AccountSetupFlow />
       <CommandPalette />
+      <ShortcutsHelp />
     </div>
   );
 }
