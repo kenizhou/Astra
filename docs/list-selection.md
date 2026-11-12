@@ -81,6 +81,21 @@ visible without hover. The hover slot offers no undo, matching the row
 menu and the ribbon; swipe owns undo. Touch users (no hover) keep swipe,
 the row menu, and the bulk toolbar.
 
+## Sweep
+
+The row menu's "Clean up sender" entry opens a dialog that sweeps one
+sender's mail in the current folder. It filters the loaded rows by the
+sender's address (the list filter's own predicate), previews the count "in
+this folder" with the honest note that it counts the loaded rows only, and
+shows a bounded preview of the matching subjects. The action is Archive
+(the default) or Move to Trash; Confirm loops the chosen intent over the
+matching rows, the bulk toolbar's own batch pattern, and closes. Cancel and
+Escape close without dispatching; an empty match disables Confirm with its
+reason. The act stops at the row's trash (no permanent delete), and there is
+no undo, matching the bulk toolbar and the row menu: the confirm is the
+guard. v1 sweeps the current folder's loaded window only; a cross-folder
+sweep over the search intent is a named follow-up.
+
 ## Known gaps
 
 - **A conversation cannot be moved**; the verb disables with its reason.
