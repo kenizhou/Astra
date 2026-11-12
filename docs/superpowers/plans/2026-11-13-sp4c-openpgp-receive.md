@@ -41,7 +41,7 @@ no-key negative arm, withdraw copies).
 - [ ] Tests first (the offline integration reds + the gated live proof that
       skips offline); then the adapter + composite + proof. Commit
       `feat: OpenPGP receive through the reading pipeline`.
-- [ ] Cap watch: astra-app/client NOT cap-exempt — new modules, not growth
+- [ ] Cap watch: astra-app/client NOT cap-exempt: new modules, not growth
       of reading.rs (462) or ipc.ts (at cap; no new wire type needed, the
       banner rides the existing SecurityBannerView). The live proof skips
       without ASTRA_LIVE_HARNESS (the controller arms it).
