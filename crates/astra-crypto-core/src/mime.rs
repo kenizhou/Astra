@@ -335,6 +335,257 @@ pub fn wrap_protected_headers(entity: &[u8], subject_block: Option<&str>, signed
     out
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// Receive-side MIME interpretation: the inverses of the send framing above.
+// Pure byte parsing, no mail-builder dependency, mirroring the send half.
+// ──────────────────────────────────────────────────────────────────────────
+
+/// Split a MIME entity into its header block (as text) and its body bytes. The
+/// blank line may be CRLF or LF; an entity with no blank line is all headers
+/// and an empty body. `None` when the entity is not UTF-8.
+pub(crate) fn split_headers_body(entity: &[u8]) -> Option<(String, Vec<u8>)> {
+    let s = std::str::from_utf8(entity).ok()?;
+    let bytes = s.as_bytes();
+    if let Some(pos) = s.find("\r\n\r\n") {
+        Some((s[..pos].to_string(), bytes[pos + 4..].to_vec()))
+    } else if let Some(pos) = s.find("\n\n") {
+        Some((s[..pos].to_string(), bytes[pos + 2..].to_vec()))
+    } else {
+        Some((s.to_string(), Vec::new()))
+    }
+}
+
+/// The first header named `name` (case-insensitive), its folded continuation
+/// lines unfolded into a single space-joined value. `None` when absent.
+pub(crate) fn header_value(headers: &str, name: &str) -> Option<String> {
+    let mut current_name = String::new();
+    let mut current_val = String::new();
+    let mut found: Option<String> = None;
+    let flush = |cname: &str, cval: &str, found: &mut Option<String>| {
+        if found.is_none() && cname.eq_ignore_ascii_case(name) {
+            *found = Some(cval.trim().to_string());
+        }
+    };
+    for raw in headers.split('\n') {
+        let line = raw.trim_end_matches('\r');
+        if line.starts_with(' ') || line.starts_with('\t') {
+            if !current_name.is_empty() {
+                current_val.push(' ');
+                current_val.push_str(line.trim());
+            }
+            continue;
+        }
+        flush(&current_name, &current_val, &mut found);
+        if let Some((n, v)) = line.split_once(':') {
+            current_name = n.trim().to_string();
+            current_val = v.trim().to_string();
+        } else {
+            current_name.clear();
+            current_val.clear();
+        }
+    }
+    flush(&current_name, &current_val, &mut found);
+    found
+}
+
+/// The entity's `Content-Type` value, defaulting to `text/plain` when absent.
+pub(crate) fn content_type(headers: &str) -> String {
+    header_value(headers, "content-type").unwrap_or_else(|| "text/plain".to_string())
+}
+
+/// The lowercased media type (the `Content-Type` value before its first `;`).
+pub(crate) fn media_type(ct: &str) -> String {
+    ct.split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase()
+}
+
+/// A `Content-Type` parameter value (case-insensitive name, surrounding quotes
+/// stripped), or `None` when the parameter is absent.
+pub(crate) fn ct_param(ct: &str, name: &str) -> Option<String> {
+    for part in ct.split(';').skip(1) {
+        if let Some((k, v)) = part.trim().split_once('=') {
+            if k.trim().eq_ignore_ascii_case(name) {
+                return Some(v.trim().trim_matches('"').to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Split a `multipart/*` entity into its boundary-delimited part entities (each
+/// with its own headers + body). The preamble and the closing delimiter are
+/// dropped; the CRLF preceding a boundary belongs to the delimiter, not the
+/// part. `None` when the entity is not multipart or carries no parts.
+pub(crate) fn multipart_parts(entity: &[u8]) -> Option<Vec<Vec<u8>>> {
+    let (headers, body) = split_headers_body(entity)?;
+    let ct = content_type(&headers);
+    if !media_type(&ct).starts_with("multipart/") {
+        return None;
+    }
+    let boundary = ct_param(&ct, "boundary")?;
+    let body_str = std::str::from_utf8(&body).ok()?;
+    let delim = format!("--{boundary}");
+    let close = format!("--{boundary}--");
+    let mut parts: Vec<Vec<u8>> = Vec::new();
+    let mut cur: Vec<&str> = Vec::new();
+    let mut in_part = false;
+    for raw in body_str.split('\n') {
+        let line = raw.trim_end_matches('\r');
+        let trimmed = line.trim_end();
+        if trimmed == close {
+            if in_part {
+                parts.push(cur.join("\r\n").into_bytes());
+            }
+            in_part = false;
+            break;
+        } else if trimmed == delim {
+            if in_part {
+                parts.push(cur.join("\r\n").into_bytes());
+                cur.clear();
+            }
+            in_part = true;
+        } else if in_part {
+            cur.push(line);
+        }
+    }
+    if in_part {
+        parts.push(cur.join("\r\n").into_bytes());
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts)
+    }
+}
+
+/// Decode a part body per its `Content-Transfer-Encoding`: base64,
+/// quoted-printable, or identity (7bit/8bit/binary). `None` on a base64 decode
+/// failure.
+pub(crate) fn decode_cte(body: &[u8], cte: &str) -> Option<Vec<u8>> {
+    match cte.trim().to_ascii_lowercase().as_str() {
+        "base64" => {
+            let cleaned: Vec<u8> = body
+                .iter()
+                .copied()
+                .filter(|b| !b.is_ascii_whitespace())
+                .collect();
+            base64::engine::general_purpose::STANDARD
+                .decode(&cleaned)
+                .ok()
+        }
+        "quoted-printable" => Some(decode_qp(body)),
+        _ => Some(body.to_vec()),
+    }
+}
+
+/// A minimal quoted-printable decoder: `=XX` hex escapes and `=` soft line
+/// breaks; every other byte passes through.
+fn decode_qp(input: &[u8]) -> Vec<u8> {
+    fn hex(b: u8) -> Option<u8> {
+        match b {
+            b'0'..=b'9' => Some(b - b'0'),
+            b'a'..=b'f' => Some(b - b'a' + 10),
+            b'A'..=b'F' => Some(b - b'A' + 10),
+            _ => None,
+        }
+    }
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < input.len() {
+        let b = input[i];
+        if b != b'=' {
+            out.push(b);
+            i += 1;
+            continue;
+        }
+        // Soft line break: `=\r\n` or `=\n`.
+        if i + 1 < input.len() && input[i + 1] == b'\r' {
+            i += 2;
+            if i < input.len() && input[i] == b'\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if i + 1 < input.len() && input[i + 1] == b'\n' {
+            i += 1;
+            continue;
+        }
+        if i + 2 < input.len() {
+            if let (Some(hi), Some(lo)) = (hex(input[i + 1]), hex(input[i + 2])) {
+                out.push(hi * 16 + lo);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b);
+        i += 1;
+    }
+    out
+}
+
+/// The inverse of [`wrap_protected_headers`]: when `entity` is the
+/// `multipart/mixed; protected-headers="v1"` wrapper, return the restored
+/// Subject (from the wrapper's header block) and the original body entity (its
+/// single subpart). `None` when the entity is not the protected-headers framing.
+pub fn unwrap_protected_headers(entity: &[u8]) -> Option<(Option<String>, Vec<u8>)> {
+    let (headers, _body) = split_headers_body(entity)?;
+    let ct = content_type(&headers);
+    if media_type(&ct) != "multipart/mixed" {
+        return None;
+    }
+    if !ct_param(&ct, "protected-headers")?.eq_ignore_ascii_case("v1") {
+        return None;
+    }
+    let subject = header_value(&headers, "subject");
+    let parts = multipart_parts(entity)?;
+    let inner = parts.into_iter().next()?;
+    Some((subject, inner))
+}
+
+/// Extract the decrypted body's text legs: the first `text/plain` and the first
+/// `text/html` found by walking the entity (recursing through `multipart/*`).
+/// Either is `None` when no such leg exists.
+pub fn body_legs(entity: &[u8]) -> (Option<String>, Option<String>) {
+    let mut plain = None;
+    let mut html = None;
+    collect_legs(entity, &mut plain, &mut html);
+    (plain, html)
+}
+
+/// Walk one entity, recursing through multipart children, capturing the first
+/// plain and HTML legs (decoded per their transfer encoding).
+fn collect_legs(entity: &[u8], plain: &mut Option<String>, html: &mut Option<String>) {
+    let Some((headers, body)) = split_headers_body(entity) else {
+        return;
+    };
+    let ct = content_type(&headers);
+    let mt = media_type(&ct);
+    if mt.starts_with("multipart/") {
+        if let Some(parts) = multipart_parts(entity) {
+            for part in parts {
+                collect_legs(&part, plain, html);
+            }
+        }
+        return;
+    }
+    let cte =
+        header_value(&headers, "content-transfer-encoding").unwrap_or_else(|| "7bit".to_string());
+    let Some(decoded) = decode_cte(&body, &cte) else {
+        return;
+    };
+    let Ok(text) = String::from_utf8(decoded) else {
+        return;
+    };
+    if mt == "text/plain" && plain.is_none() {
+        *plain = Some(text);
+    } else if mt == "text/html" && html.is_none() {
+        *html = Some(text);
+    }
+}
+
 #[cfg(test)]
 #[path = "mime_tests.rs"]
 mod mime_tests;

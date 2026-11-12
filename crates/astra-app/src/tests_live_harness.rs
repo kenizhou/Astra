@@ -185,6 +185,8 @@ mod calendar_invite;
 mod calendar_proof;
 #[path = "tests_live_harness/composer_proof.rs"]
 mod composer_proof;
+#[path = "tests_live_harness/crypto_receive.rs"]
+mod crypto_receive;
 #[path = "tests_live_harness/crypto_send.rs"]
 mod crypto_send;
 #[path = "tests_live_harness/delete_proof.rs"]

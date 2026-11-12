@@ -133,9 +133,18 @@ pub(crate) fn assemble_state(
     ));
     let gate_for_boot: Arc<dyn astra_app::BeforeSendGate> = gate.clone();
     let transform_for_boot: Arc<dyn astra_app::ComposeTransform> = gate;
-    let decoder_for_boot: Arc<dyn astra_app::MessageDecoder> = Arc::new(
+    // The reading decode fold: the built-in crypto decoder over the store
+    // opened above, consulted before the plugin decoder. A crypto verdict
+    // takes precedence (fail closed); everything else falls through to the
+    // plugin, whose fail-open stands.
+    let plugin_decoder: Arc<dyn astra_app::MessageDecoder> = Arc::new(
         crate::plugin::PluginDecoder::new(Arc::clone(&plugins), GATE_HANDLER_TIMEOUT),
     );
+    let decoder_for_boot: Arc<dyn astra_app::MessageDecoder> =
+        Arc::new(crate::decode::CompositeDecoder::new(
+            Arc::new(astra_app::CryptoDecoder::new(Arc::clone(&crypto_store))),
+            plugin_decoder,
+        ));
     let core = runtime.block_on(|| {
         astra_app::boot(
             &engine_path,

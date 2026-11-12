@@ -162,6 +162,58 @@ pub fn wrap_signed(
     out
 }
 
+/// Whether the entity is recognised as PGP/MIME encrypted (the Content-Type
+/// and protocol), regardless of whether the ciphertext extracts. A recognised
+/// but unextractable message fails closed rather than rendering untouched.
+pub fn is_pgp_encrypted(entity: &[u8]) -> bool {
+    use crate::mime::{content_type, ct_param, media_type, split_headers_body};
+    let Some((headers, _body)) = split_headers_body(entity) else {
+        return false;
+    };
+    let ct = content_type(&headers);
+    media_type(&ct) == "multipart/encrypted"
+        && ct_param(&ct, "protocol")
+            .map(|protocol| protocol.eq_ignore_ascii_case("application/pgp-encrypted"))
+            .unwrap_or(false)
+}
+
+/// The inverse of [`wrap_encrypted`]: extract the OpenPGP ciphertext bytes from
+/// a PGP/MIME `multipart/encrypted; protocol="application/pgp-encrypted"`
+/// entity (RFC 3156 §2). `None` when the entity is not this crypto framing.
+///
+/// Part 1 is the `application/pgp-encrypted` control part (`Version: 1`); part
+/// 2 carries the OpenPGP message as `application/octet-stream`, base64
+/// transported. The ciphertext part is selected by its media type, falling back
+/// to the second part when the type is unusual.
+pub fn unwrap_encrypted(entity: &[u8]) -> Option<Vec<u8>> {
+    use crate::mime::{
+        content_type, ct_param, decode_cte, header_value, media_type, multipart_parts,
+        split_headers_body,
+    };
+    let (headers, _body) = split_headers_body(entity)?;
+    let ct = content_type(&headers);
+    if media_type(&ct) != "multipart/encrypted" {
+        return None;
+    }
+    if !ct_param(&ct, "protocol")?.eq_ignore_ascii_case("application/pgp-encrypted") {
+        return None;
+    }
+    let parts = multipart_parts(entity)?;
+    for part in &parts {
+        let (ph, pb) = split_headers_body(part)?;
+        if media_type(&content_type(&ph)) == "application/octet-stream" {
+            let cte = header_value(&ph, "content-transfer-encoding")
+                .unwrap_or_else(|| "base64".to_string());
+            return decode_cte(&pb, &cte);
+        }
+    }
+    let part = parts.get(1)?;
+    let (ph, pb) = split_headers_body(part)?;
+    let cte =
+        header_value(&ph, "content-transfer-encoding").unwrap_or_else(|| "base64".to_string());
+    decode_cte(&pb, &cte)
+}
+
 #[cfg(test)]
 #[path = "pgp_mime_tests.rs"]
 mod pgp_mime_tests;

@@ -63,6 +63,9 @@ tokio = { workspace = true, features = ["sync", "time"] }
 # The gated live JMAP-detection test drives the detection crate's `detect` directly,
 # with the dev-harness base override the host command never sets.
 astra-autodetect = { path = "../astra-autodetect" }
+# The crypto decode tests seed real keys into an in-memory store; the fixed
+# test master key keeps the suite off the OS keyring.
+astra-crypto-store = { path = "../astra-crypto-store", features = ["testing"] }
 # The fake provider implements the engine's `Provider` contract, whose sync plumbing
 # (SyncState, SyncUpdate) the facade does not re-export.
 engine-core.workspace = true

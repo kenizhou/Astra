@@ -25,6 +25,7 @@ mod calendar;
 mod compose_open;
 mod compose_request;
 mod crypto;
+mod crypto_decode;
 mod decode;
 mod dispatch;
 mod drafts;
@@ -58,9 +59,7 @@ mod sync_account;
 mod sync_progress;
 mod window;
 
-// The gated live test against the local Stalwart harness: a sibling file (the crate's
-// convention) that skips unless ASTRA_LIVE_HARNESS=1, so an offline `cargo test`
-// never dials anything.
+// The gated live Stalwart-harness test: a sibling file that skips unless ASTRA_LIVE_HARNESS=1.
 #[cfg(test)]
 #[path = "tests_live_harness.rs"]
 mod tests_live_harness;
@@ -151,6 +150,7 @@ pub use calendar::{
 };
 pub use compose_request::OpenDraftError;
 pub use crypto::CryptoFlags;
+pub use crypto_decode::CryptoDecoder;
 pub use decode::{DecodeOutcome, MessageDecoder};
 pub use dispatch::AppError;
 pub use drafts::{DraftResume, DRAFT_AUTOSAVE_IDLE};
