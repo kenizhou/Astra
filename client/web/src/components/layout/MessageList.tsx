@@ -5,8 +5,10 @@
 // before the first measure). The rows come straight from the snapshot the
 // pulls keep fresh, grouped under a date header per sent-at day; the
 // client-side filter narrows what renders, never the window itself, so a
-// full window keeps offering to grow. A single click selects and opens
-// (selection is open, the highlight following the open message), and
+// full window keeps offering to grow. The pin overlay floats the pinned
+// rows to the top of the folder view, engine order kept within each
+// partition; the search results keep their own rank. A single click selects
+// and opens (selection is open, the highlight following the open message), and
 // ShowMore grows the window the core owes whenever the rows fill it. A
 // live search state replaces the folder rows with the result rows through
 // the same window and the same open flow, keyed by message, flat with no
@@ -37,6 +39,8 @@ import { buildDraftMenu, buildRowMenu, type RowAccountContext } from '@/componen
 import { SwipeToast } from '@/components/message-list/SwipeToast';
 import { sameRowKey } from '@/components/message-list/rowIdentity';
 import { OutboxQueue } from '@/features/outbox/OutboxQueue';
+import { partitionPinnedFirst } from '@/features/list-pin/partitionPinnedFirst';
+import { usePinnedRowsStore } from '@/features/list-pin/pinnedRowsStore';
 import { SweepDialog } from '@/features/sweep/SweepDialog';
 import { dispatch, intents } from '@/services/ipc';
 import { useFolderStore } from '@/stores/folderStore';
@@ -190,12 +194,17 @@ export function MessageList() {
   const scope = useFolderStore((s) => s.scope);
   const outboxAccount = useFolderStore((s) => s.outboxAccount);
   const filter = useListFilterStore((s) => s.filter);
+  const pinned = usePinnedRowsStore((s) => s.pinned);
   const menu = useContextMenu();
   const menuTargets = useRef<MessageRowView[]>([]);
 
   const outboxMode = outboxAccount !== null;
   const searching = search !== null;
-  const shownRows = filteredRows(rows, filter);
+  // The pin overlay rides the folder view's single render choke point: the
+  // rendered items, the Shift range, and Select All all derive from it,
+  // while the snapshot, the selection carry, and ShowMore's raw count stay
+  // untouched. The search branch keeps its own order.
+  const shownRows = partitionPinnedFirst(filteredRows(rows, filter), pinned);
   const counts = filterCounts(rows);
 
   // The folder switch resets the filter to All: a tab named over one
