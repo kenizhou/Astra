@@ -238,7 +238,15 @@ impl PreferencesState {
                 }
             }),
             default_send_account: prefs.default_send_account.clone(),
+            blocked_senders: prefs.blocked_senders.clone(),
         }
+    }
+
+    /// The blocked senders' normalised addresses, the set the new-mail
+    /// queue's gate reads at arm: the one projection the pass and the
+    /// settings block share, so the two can never disagree.
+    pub(crate) fn blocked_senders(&self) -> std::collections::BTreeSet<String> {
+        self.prefs.blocked_senders.clone()
     }
 
     /// Stamps the persisted expansion over one account's sorted rows, which
@@ -301,6 +309,9 @@ impl PreferencesState {
         on_disk.signatures.clone_from(&self.prefs.signatures);
         on_disk.sync.clone_from(&self.prefs.sync);
         on_disk.sender_names.clone_from(&self.prefs.sender_names);
+        on_disk
+            .blocked_senders
+            .clone_from(&self.prefs.blocked_senders);
         self.last_save_failed = save_preferences(path, &on_disk).is_err();
     }
 }

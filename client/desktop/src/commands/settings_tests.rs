@@ -39,6 +39,7 @@ fn the_settings_pull_round_trips_the_published_snapshot() {
             analytics_consented: false,
             language: "en-GB".to_owned(),
             zone_offered: false,
+            blocked_senders: std::collections::BTreeSet::new(),
         },
         accounts: vec![AccountSettingsRow {
             account: account(),

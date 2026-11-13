@@ -15,8 +15,10 @@
 //! read-modify-write against what is on disk right now, so a concurrent
 //! write to an unrelated preference is not clobbered.
 
+mod blocking;
 mod state;
 
+pub(crate) use blocking::normalise_sender_address;
 pub(crate) use state::PreferencesState;
 
 use std::{
@@ -156,6 +158,10 @@ pub struct Preferences {
     /// account whose name has never been asked for.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub sender_names: BTreeMap<engine_api::AccountId, String>,
+    /// The senders whose mail raises no new-mail notification, normalised
+    /// bare addresses. Suppression only: their mail still lands in the Inbox.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub blocked_senders: BTreeSet<String>,
     /// Whether the log level is debug, the Diagnostics toggle. Off by
     /// default: the log runs at info until the person raises it, and the
     /// logger reads the level at boot, so the change lands with the next
@@ -218,6 +224,7 @@ impl Default for Preferences {
             notifications_enabled: true,
             sync: BTreeMap::new(),
             sender_names: BTreeMap::new(),
+            blocked_senders: BTreeSet::new(),
             debug_enabled: false,
             analytics_consented: false,
             language: default_language(),

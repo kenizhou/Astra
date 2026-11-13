@@ -225,4 +225,17 @@ pub enum SettingsIntent {
         /// dispatch.
         name: String,
     },
+    /// Block a sender: their mail raises no new-mail notification. The
+    /// address crosses verbatim; the core normalises it on dispatch.
+    /// Suppression only: the mail still lands in the Inbox, never auto-filed.
+    BlockSender {
+        /// The sender address to block, carried verbatim.
+        address: String,
+    },
+    /// Unblock a sender: their mail raises new-mail notifications again. The
+    /// address crosses verbatim; the core normalises it on dispatch.
+    UnblockSender {
+        /// The sender address to unblock, carried verbatim.
+        address: String,
+    },
 }

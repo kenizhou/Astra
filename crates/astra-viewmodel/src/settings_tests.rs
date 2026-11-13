@@ -45,6 +45,7 @@ fn the_snapshot_crosses_its_full_shape_and_reads_back() {
             analytics_consented: false,
             language: "en-GB".to_owned(),
             zone_offered: false,
+            blocked_senders: std::collections::BTreeSet::new(),
         },
         accounts: vec![AccountSettingsRow {
             account: account("work"),
@@ -316,6 +317,7 @@ fn an_unpinned_default_calendar_and_empty_attributions_cross_no_key() {
         analytics_consented: false,
         language: "en-GB".to_owned(),
         zone_offered: false,
+        blocked_senders: std::collections::BTreeSet::new(),
     };
     let wire = serde_json::to_value(&block).expect("the block serialises");
     assert!(
@@ -448,8 +450,13 @@ fn block_fixture() -> SettingsBlock {
         analytics_consented: false,
         language: "en-GB".to_owned(),
         zone_offered: false,
+        blocked_senders: std::collections::BTreeSet::new(),
     }
 }
+
+// The blocklist's wire crossing, split for the cap; reuses the block fixture.
+#[path = "settings_blocking_tests.rs"]
+mod blocking_tests;
 
 #[test]
 fn the_sync_settings_cross_with_their_cap_words_and_absent_means_default() {

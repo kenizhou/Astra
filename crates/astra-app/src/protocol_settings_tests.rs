@@ -86,6 +86,24 @@ fn set_notifications_enabled_carries_its_flag() {
 }
 
 #[test]
+fn block_and_unblock_sender_carry_the_address_verbatim() {
+    // The address crosses as typed; the core normalises it on dispatch, the
+    // same discipline the zone id follows.
+    round_trips(
+        &Intent::Settings(SettingsIntent::BlockSender {
+            address: "Ada Lovelace <ada@example.test>".to_owned(),
+        }),
+        r#"{"settings":{"block_sender":{"address":"Ada Lovelace <ada@example.test>"}}}"#,
+    );
+    round_trips(
+        &Intent::Settings(SettingsIntent::UnblockSender {
+            address: "ada@example.test".to_owned(),
+        }),
+        r#"{"settings":{"unblock_sender":{"address":"ada@example.test"}}}"#,
+    );
+}
+
+#[test]
 fn set_zone_carries_the_zone_verbatim() {
     // The type carries the string; the core validates the id on dispatch,
     // never here, so a host's typo reaches the core as-is to be refused typed
