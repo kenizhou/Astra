@@ -15,8 +15,9 @@
 
 ## 动词
 
-今天交付三十二个：十四个邮件、草稿与规则动词，十个 `ai` 动词，七个
-`knowledge` 与 `snippets` 动词，以及 `completions` 生成器。语法是两个位置词
+今天交付三十七个：十四个邮件、草稿与规则动词，十个 `ai` 动词，七个
+`knowledge` 与 `snippets` 动词，五个 `keys` 动词，以及 `completions`
+生成器。语法是两个位置词
 （`verb subverb`）加标志，且标志顺序自由：sidecar 应拼写为
 `astra-cli [--json] [--correlation-id <id>] <verb> <subverb> [--flag <value> ...]`，
 始终传 `--json` 与轮次的 `--correlation-id`，并把两个位置词之后的一切都当作
@@ -54,6 +55,11 @@
 | `knowledge list --account <id>` | 审计账本旁的知识存储（0007） | `entries`：id、kind、text、`source_account`、`source_key`、`created_at`，最新优先；条目文本整段携带，与 `ai drafts` 的整正文纪律相同 |
 | `knowledge forget --id <id>` | 删除一条存储的知识条目，唯一出口 | `id`、`state: forgotten`；`--preview` 点名确切的遗忘；无条目携带的 id 是点名它的运行时错误 |
 | `knowledge extract` | 无：该拼写被解析后拒绝 | 以 `3` 退出并附永不拨号规则的拒绝消息（见下）；`--preview` 走非变更动词共有的用法错误 |
+| `keys list --account <id>` | `crypto.sqlite` 中账户的密钥库行，两个标准合并 | `keys`：fingerprint、email、standard、`key_type`、origin、`has_private`、`created_at`、`expires_at`；仅公开视图，绝不跨越密钥材料 |
+| `keys collected --account <id>` | `crypto.sqlite` 中账户暂存的已收集密钥，两个标准合并 | `keys`：暂存行 id、`peer_email`、standard、fingerprint、source、`seen_at`，最新优先；绝不跨越密钥材料 |
+| `keys import --account <id> (--plain <text> 或 --file <path> 或 stdin) [--standard <word>]` | 经存储的仅公钥导入写入一个公钥证书 | `key`（整形后的落地行）与 `state: imported`；默认的 unverified 信任随导入记录；`--preview` 点名动作；材料只来自一个来源，携带秘密的材料被拒绝并指向桌面 |
+| `keys promote --account <id> --standard <word> --fingerprint <fp> [--email <a>] [--verified]` | 把暂存密钥提升进密钥库并记录接受决定 | `key`（整形后的落地行）与 `state: promoted`；`--preview` 点名动作；信任写入是承重的第二半，既有密钥库行绝不被降级 |
+| `keys reject --account <id> --id <n> --standard <word> --fingerprint <fp> [--email <a>]` | 移除暂存行并记录 rejected 决定 | `id`、`state: rejected`；`--preview` 点名动作；决定绑定给定的 email，否则绑定暂存行的对等体邮箱 |
 | `snippets list` | 审计账本旁的片段库（0008） | `snippets`：id、title、body、`created_at`、`updated_at`，最近触碰优先；正文整段携带，插入放置的正是它 |
 | `snippets create --title <t> (--body <text> 或 --body-file <path>)` | 向片段存储写入一个片段 | `snippet`（id、title、body、库的 stamps）与 `state: created`；`--preview` 打印存储将接收的确切片段；正文只来自一个来源，同时给两个是用法错误 |
 | `snippets delete --id <id>` | 删除一条存储的片段 | `id`、`state: deleted`；`--preview` 点名确切的删除；无片段携带的 id 是点名它的运行时错误 |
@@ -95,6 +101,17 @@
   摘要缓存）、文档表（摘要报与分析报告）、知识表与片段表，即每次调用都已
   打开的那一个文件：不读邮件、不拨提供商，因此这些动词对冷数据目录的可用性
   与邮件动词对已同步目录的可用性相同。
+- **密钥动词不经引擎应答，走自己的存储。** `keys list`、`keys collected`、
+  `keys import`、`keys promote` 与 `keys reject` 读写引擎存储旁的
+  `crypto.sqlite`，惰性打开，带同样的五秒 busy timeout，因此宿主与 CLI
+  共享该文件。仅公开材料：导入接受公钥证书（armored 或二进制，标准可嗅探
+  或钉住），携带秘密的材料被拒绝并指向桌面的私钥路径，因为 vault 主密钥
+  存放在 CLI 永不打开的 OS 钥匙串里。提升把存储的 promote 与使密钥可用于
+  发送的信任决定配对，拒绝把暂存移除与 rejected 决定配对；两个编排都复制
+  应用的已收集密钥审阅，在两个互不依赖的 crate 里拼写两遍并由两套测试
+  钉住，即封闭动作集自身的先例。密钥库的外键需要应用注册的账户行：应用
+  从未注册过的账户，其导入或提升以点名桌面的运行时错误失败，而读取与
+  拒绝照常应答。
 - **CLI 绝不拨模型。** `ai cold` 与 `ai results` 返回扫描记录下的内容，绝不是
   实时调用：判定在此存在仅因应用的收件扫描审判过该邮件，未审判的邮件应答
   `null`，绝不猜测。`ai drafts`、`ai summary` 与 `ai style` 把同样的诚实延伸到
@@ -196,15 +213,24 @@ needs-approval。新增一个工具会迫使本映射、宿主的策略表
 | `set_flagged` | `messages set-flagged` | `confirm` | `account=<id> key=<id> flagged=<bool>` |
 | `archive_message` | `messages archive` | `confirm` | `account=<id> key=<id>` |
 | `move_to_trash` | `messages trash` | `confirm` | `account=<id> key=<id>` |
+| `list_keys` | `keys list` | `auto` | `account=<id>` |
+| `list_collected_keys` | `keys collected` | `auto` | `account=<id>` |
+| `import_key` | `keys import` | `confirm` | `account=<id> material_chars=<n> [standard=<word>]` |
+| `promote_key` | `keys promote` | `confirm` | `account=<id> standard=<word> fingerprint=<id> [email=1] verified=<bool>` |
+| `reject_key` | `keys reject` | `confirm` | `account=<id> id=<n> standard=<word> fingerprint=<id> [email=1]` |
 
-四个读取直接运行；六个写入先询问。预览形状是宿主对一次询问的
+六个读取直接运行；九个写入先询问。预览形状是宿主对一次询问的
 `shaped_arg_preview` 输出，即权限审计行携带的脱敏参数预览：只有形状与
 存储 id，绝无地址、主题或正文文本，与 CLI 自己的审计行携带同一词汇。
 可选字段只在询问的参数携带它们时出现；搜索预览不带 `limit`，因为工具
 在 argv 上拼写 `--limit`，但其审批参数只持有查询、可选的账户与文件夹、
-以及可选的 offset。三个测试钉住映射：`policy_tests.rs` 把策略表钉在
-恰好这十行，`permissions_tests.rs` 钉住每一个预览形状，sidecar 的
-`mailToolsMap.test.ts` 钉住十个名字与每一个动词和子动词。
+以及可选的 offset。密钥写入以 confirm 门控，因为提升与拒绝改变发送
+解析器未来的决定；两者都不是发送类。导入的材料是调用方提供的数据，
+以其长度代替；对等体邮箱以存在计数（`email=1`）携带，绝不出地址，
+即 drafts `from` 自身的纪律。三个测试钉住映射：`policy_tests.rs` 把
+策略表钉在恰好这十五行，`permissions_tests.rs` 钉住每一个预览形状，
+sidecar 的 `mailToolsMap.test.ts` 与 `keyToolsMap.test.ts` 钉住十五个
+名字与每一个动词和子动词。
 
 已知缺口，记录而非静默：`confirm_preview` 级别与审批 `preview` 载荷在
 协议与桥中端到端存在，但尚无物生产它们。`runGated` 不向
@@ -218,6 +244,8 @@ needs-approval。新增一个工具会迫使本映射、宿主的策略表
 `ASTRA_DATA_DIR` 指定数据目录；未设置时，CLI 使用应用标识符下平台级的用户数据
 目录，即桌面宿主经 Tauri 解析的同一目录族。其中 CLI 打开引擎存储
 （`astra.sqlite`，与应用打开的是同一个文件）与 AI 账本（`ai.sqlite`，在其旁）。
+密钥动词惰性打开加密存储（`crypto.sqlite`，与应用的密钥面打开的是同一个
+文件），仅在 `keys` 动词运行时，带同样的五秒 busy timeout。
 
 **第二写入方的接缝，如实陈述。** CLI 与运行中的应用并行，打开同一个引擎存储。
 存储是 WAL 模式的 SQLite，带五秒 busy timeout；CLI 的每次写入都经引擎自己的
@@ -234,8 +262,8 @@ needs-approval。新增一个工具会迫使本映射、宿主的策略表
 
 | 规则 | 状态 | 位置 |
 |---|---|---|
-| 三十二个动词与固定信封 | ✅ | `cli/src/verbs` |
-| 每个变更动词（messages 动作、drafts、rules、knowledge 与 snippets）上的 `--preview`，各共享一个构建器 | ✅ | `cli/src/verbs/{messages,drafts,rules,knowledge,snippets}.rs` 与 `message_writes.rs` |
+| 三十七个动词与固定信封 | ✅ | `cli/src/verbs` |
+| 每个变更动词（messages 动作、drafts、rules、knowledge、snippets 与 keys）上的 `--preview`，各共享一个构建器 | ✅ | `cli/src/verbs/{messages,drafts,rules,knowledge,snippets,keys}.rs` 与 `message_writes.rs` |
 | 每次调用带相关性 id 审计 | ✅ | `cli/src/audit.rs`、`cli/src/verbs/mod.rs` |
 | 发送类动词先解析后拒绝，退出码 3 | ✅ | `cli/src/verbs/mod.rs` |
 | 模型类动词（`ai style rebuild`、`ai digest generate`、`ai report generate`、`knowledge extract`、`snippets search`）先解析后拒绝，退出码 3 | ✅ | `cli/src/verbs/{ai,knowledge,snippets}.rs` |
@@ -247,11 +275,15 @@ needs-approval。新增一个工具会迫使本映射、宿主的策略表
 | 拒绝之外的发送类动词（不交付） | N/A | 发送类就是拒绝本身 |
 | 邮件动作动词（mark-read、set-flagged、archive、trash）与 MCP 搜索契约的作用域 | ✅ | `cli/src/verbs/{message_writes,messages}.rs` |
 | 永久删除动词（永不交付；行级废纸篓即上限） | N/A | 应用层的 delete 保持不暴露 |
-| 建立在动词之上的虚拟权限工具 | ✅ | 上文的权限门控映射：十个工具钉住动词、级别与预览形状 |
+| 走 `crypto.sqlite` 的密钥动词（仅公开材料；提升/拒绝编排与应用拼写两遍，由两套测试钉住） | ✅ | `cli/src/verbs/keys.rs`、`crates/astra-app/src/collected.rs` |
+| 建立在动词之上的虚拟权限工具 | ✅ | 上文的权限门控映射：十五个工具钉住动词、级别与预览形状 |
 | 来自动词词汇的 shell 补全（`completions <shell>`：bash、zsh、fish、pwsh） | ✅ | `cli/src/verbs/completions.rs`，信封规则的唯一生成器例外 |
 
 已知缺口，记录而非静默：
 
+- 私钥导入没有 CLI 拼写：vault 主密钥存放在 OS 钥匙串中，CLI 永不打开
+  钥匙串，也不存在安全的口令传输。`keys import` 收到携带秘密的材料时
+  拒绝并指向桌面设置 Keys 导入；私钥路径留在桌面。
 - CLI 从索引文件应答 `accounts list`，因为固定版本上的引擎存储不提供账户枚举，
   而应用在启动时从索引把账户列表保存在内存中。若引擎将来提供存储侧的账户列表，
   它将取代这一文件读取。

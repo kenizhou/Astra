@@ -322,10 +322,12 @@ pub(crate) fn build_relay(
     )
 }
 
-/// The permission policy SPA0 ships: the read verbs run (search joins them
-/// with SP2y), the draft and act verbs ask, and anything unknown fails
-/// closed inside the sidecar's bridge (an absent row means needs-approval
-/// there).
+/// The permission policy the product ships: the read verbs run (search
+/// joined them with SP2y, the key reads with SP4d-1b), the draft, act, and
+/// key write verbs ask, and anything unknown fails closed inside the
+/// sidecar's bridge (an absent row means needs-approval there). The key
+/// writes gate at confirm because promote and reject change the send
+/// resolver's future decisions; none is send-class.
 pub(crate) fn default_policy() -> std::collections::BTreeMap<String, protocol::PermissionPolicy> {
     let auto = || protocol::PermissionPolicy {
         level: protocol::PermissionLevel::Auto,
@@ -346,6 +348,11 @@ pub(crate) fn default_policy() -> std::collections::BTreeMap<String, protocol::P
         ("set_flagged".to_string(), confirm()),
         ("archive_message".to_string(), confirm()),
         ("move_to_trash".to_string(), confirm()),
+        ("list_keys".to_string(), auto()),
+        ("list_collected_keys".to_string(), auto()),
+        ("import_key".to_string(), confirm()),
+        ("promote_key".to_string(), confirm()),
+        ("reject_key".to_string(), confirm()),
     ]
     .into_iter()
     .collect()

@@ -27,6 +27,7 @@ import { MockHarness } from './harness/mock';
 import { PiAdapter } from './harness/pi-adapter';
 import type { AgentHarness, HarnessEvent, HarnessSession } from './harness/types';
 import { PermissionBridge, type PermissionPolicy } from './permissions/bridge';
+import { createKeyTools } from './tools/keyTools';
 import { createMailTools } from './tools/mailTools';
 
 let harness: AgentHarness | null = null;
@@ -84,17 +85,18 @@ const TOOL_BUDGET_GRACE_MS = resolveToolBudgetGraceMs(process.env);
  *  view. */
 const turnBudget: { current: TurnBudget | null } = { current: null };
 
-/** The five mail tools, shared by both harnesses (pi mounts them as
+/** The mail and key tools, shared by both harnesses (pi mounts them as
  *  customTools; the mock dispatches them for fixture-driven e2e). Deps are
  *  live views, so one instance serves every session, and both harnesses
  *  gate through the same budget view. */
-const mailTools = createMailTools({
+const toolDeps = {
   bridge,
   cliPath: getCliPath,
   dataDir: getDataDir,
   correlationId: () => correlation.current,
   budget: () => turnBudget.current,
-});
+};
+const tools = [...createMailTools(toolDeps), ...createKeyTools(toolDeps)];
 
 /** One prompt's ledger context while it runs. */
 interface PromptCtx {
@@ -246,9 +248,9 @@ async function handleCommand(cmd: InCommand): Promise<void> {
       for (const key of Object.keys(policyTable)) delete policyTable[key];
       Object.assign(policyTable, cmd.policy ?? {});
       if (cmd.harness === 'mock') {
-        harness = new MockHarness({ fixturePath: cmd.mock_fixture, tools: mailTools });
+        harness = new MockHarness({ fixturePath: cmd.mock_fixture, tools });
       } else if (cmd.harness === 'pi') {
-        harness = new PiAdapter({ dataDir: cmd.data_dir, modelConfigs, mailTools });
+        harness = new PiAdapter({ dataDir: cmd.data_dir, modelConfigs, mailTools: tools });
       } else {
         writeEnvelope({ type: 'error', id: null, message: `unknown harness: ${cmd.harness}` });
         return;

@@ -56,7 +56,9 @@ pub(crate) fn arg_preview(verb: &Verb) -> String {
         | Verb::AiStyle { account }
         | Verb::AiDigest { account }
         | Verb::AiReport { account }
-        | Verb::KnowledgeList { account } => format!("account={account}"),
+        | Verb::KnowledgeList { account }
+        | Verb::KeysList { account }
+        | Verb::KeysCollected { account } => format!("account={account}"),
         Verb::AccountsList
         | Verb::RulesList
         | Verb::AiStyleRebuild
@@ -150,5 +152,43 @@ pub(crate) fn arg_preview(verb: &Verb) -> String {
             condition.chars().count(),
             actions.len(),
         ),
+        // The key verbs preview shapes only: the material's byte count
+        // stands in for the cert, the fingerprint is a store id, and the
+        // peer email rides as a presence count, the drafts from's own
+        // discipline (an address never enters the ledger).
+        Verb::KeysImport { args } => match &args.standard {
+            Some(standard) => format!(
+                "account={} bytes={} source={} standard={standard}",
+                args.account,
+                args.bytes.len(),
+                args.source,
+            ),
+            None => format!(
+                "account={} bytes={} source={}",
+                args.account,
+                args.bytes.len(),
+                args.source,
+            ),
+        },
+        Verb::KeysPromote { args } => match &args.email {
+            Some(_) => format!(
+                "account={} standard={} fingerprint={} email=1 verified={}",
+                args.account, args.standard, args.fingerprint, args.verified,
+            ),
+            None => format!(
+                "account={} standard={} fingerprint={} verified={}",
+                args.account, args.standard, args.fingerprint, args.verified,
+            ),
+        },
+        Verb::KeysReject { args } => match &args.email {
+            Some(_) => format!(
+                "account={} id={} standard={} fingerprint={} email=1",
+                args.account, args.id, args.standard, args.fingerprint,
+            ),
+            None => format!(
+                "account={} id={} standard={} fingerprint={}",
+                args.account, args.id, args.standard, args.fingerprint,
+            ),
+        },
     }
 }

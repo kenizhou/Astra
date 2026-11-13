@@ -15,9 +15,10 @@
  *   dir's agent directory, never ~/.pi. Session ids are sanitised because
  *   pi writes them verbatim into the JSONL filename and ':' is illegal on
  *   Windows.
- * - The ten mail tools mount via customTools; the built-in coding tools
- *   and any auto-discovered extension tools stay disabled by the explicit
- *   tools: allowlist (CHAT_TOOL_ALLOWLIST), so only the ten names enable.
+ * - The ten mail tools and the five key tools mount via customTools; the
+ *   built-in coding tools and any auto-discovered extension tools stay
+ *   disabled by the explicit tools: allowlist (CHAT_TOOL_ALLOWLIST), so only
+ *   those fifteen names enable.
  * - The astra-cli skill index rides the system prompt through a
  *   DefaultResourceLoader appendSystemPrompt entry. When a resourceLoader
  *   is supplied, createAgentSession does NOT reload it, so the adapter owns
@@ -49,9 +50,10 @@ import type {
 /** Provider id used when registering the configured endpoint. */
 const PROVIDER_ID = 'astra-agent';
 
-/** G10: the explicit session allowlist, the ten mail tools and nothing
- *  else. With tools: provided, pi enables ONLY these names, so the built-in
- *  fs/bash tools and any future extension directory stay off. */
+/** G10: the explicit session allowlist, the ten mail tools and the five
+ *  key tools, nothing else. With tools: provided, pi enables ONLY these
+ *  names, so the built-in fs/bash tools and any future extension directory
+ *  stay off. */
 export const CHAT_TOOL_ALLOWLIST: readonly string[] = [
   'list_folders',
   'list_messages',
@@ -63,6 +65,11 @@ export const CHAT_TOOL_ALLOWLIST: readonly string[] = [
   'set_flagged',
   'archive_message',
   'move_to_trash',
+  'list_keys',
+  'list_collected_keys',
+  'import_key',
+  'promote_key',
+  'reject_key',
 ];
 
 /** Resident skill index appended to every pi system prompt. Short by

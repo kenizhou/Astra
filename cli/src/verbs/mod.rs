@@ -27,6 +27,11 @@ pub(crate) mod fakes;
 pub(crate) mod folders;
 #[cfg(test)]
 mod folders_tests;
+pub(crate) mod keys;
+#[cfg(test)]
+mod keys_review_tests;
+#[cfg(test)]
+mod keys_tests;
 pub(crate) mod knowledge;
 #[cfg(test)]
 mod knowledge_tests;
@@ -279,6 +284,22 @@ async fn execute(invocation: &Invocation, data_dir: &Path, store: &AiStore) -> A
         Verb::SnippetsCreate { args } => return snippets::create(store, args, invocation.preview),
         Verb::SnippetsDelete { id } => return snippets::delete(store, id, invocation.preview),
         Verb::SnippetsSearch => return snippets::search(),
+        Verb::KeysList { account } => return keys::list(data_dir, &account_id(data_dir, account)?),
+        Verb::KeysCollected { account } => {
+            return keys::collected(data_dir, &account_id(data_dir, account)?);
+        }
+        Verb::KeysImport { args } => {
+            let account = account_id(data_dir, &args.account)?;
+            return keys::import(data_dir, &account, args, invocation.preview);
+        }
+        Verb::KeysPromote { args } => {
+            let account = account_id(data_dir, &args.account)?;
+            return keys::promote(data_dir, &account, args, invocation.preview);
+        }
+        Verb::KeysReject { args } => {
+            let account = account_id(data_dir, &args.account)?;
+            return keys::reject(data_dir, &account, args, invocation.preview);
+        }
         Verb::AiCold { account, keys } => {
             let account = account_id(data_dir, account)?;
             return ai::cold(store, &account, keys);
@@ -330,6 +351,11 @@ async fn execute(invocation: &Invocation, data_dir: &Path, store: &AiStore) -> A
         | Verb::KnowledgeList { .. }
         | Verb::KnowledgeForget { .. }
         | Verb::KnowledgeExtract
+        | Verb::KeysList { .. }
+        | Verb::KeysCollected { .. }
+        | Verb::KeysImport { .. }
+        | Verb::KeysPromote { .. }
+        | Verb::KeysReject { .. }
         | Verb::SnippetsList
         | Verb::SnippetsCreate { .. }
         | Verb::SnippetsDelete { .. }

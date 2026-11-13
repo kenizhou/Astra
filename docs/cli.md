@@ -17,9 +17,9 @@ the ledger does not know happened.
 
 ## The verbs
 
-Thirty-two ship today: fourteen mail, drafts, and rules verbs, the ten `ai`
-verbs, the seven `knowledge` and `snippets` verbs, and the `completions`
-generator. The grammar is two positional words (`verb subverb`) plus
+Thirty-seven ship today: fourteen mail, drafts, and rules verbs, the ten
+`ai` verbs, the seven `knowledge` and `snippets` verbs, the five `keys`
+verbs, and the `completions` generator. The grammar is two positional words (`verb subverb`) plus
 flags, and flag order is free: the sidecar
 should spell `astra-cli [--json] [--correlation-id <id>] <verb> <subverb>
 [--flag <value> ...]`, always passing `--json` and the turn's
@@ -60,6 +60,11 @@ zsh, fish, or pwsh. A call is unambiguous in text and in an audit row.
 | `knowledge list --account <id>` | the knowledge store (0007) beside the audit ledger | `entries`: id, kind, text, `source_account`, `source_key`, `created_at`, newest first; the entry's text rides whole, the whole-body discipline `ai drafts` carries |
 | `knowledge forget --id <id>` | deletes one stored knowledge entry, the only exit | `id`, `state: forgotten`; `--preview` names the exact forgetting; an id no entry carries is a runtime error naming it |
 | `knowledge extract` | nothing: the spelling parses and refuses | exit `3` with the never-dials refusal (below); `--preview` is the shared non-mutating usage error |
+| `keys list --account <id>` | the account's keystore rows in `crypto.sqlite`, both standards merged | `keys`: fingerprint, email, standard, `key_type`, origin, `has_private`, `created_at`, `expires_at`; the public view only, no key material crosses |
+| `keys collected --account <id>` | the account's staged collected keys in `crypto.sqlite`, both standards merged | `keys`: the staging row id, `peer_email`, standard, fingerprint, source, `seen_at`, newest first; no key material crosses |
+| `keys import --account <id> (--plain <text> or --file <path> or stdin) [--standard <word>]` | writes one public cert through the store's public-only import | `key` (the shaped landed row) and `state: imported`; the default unverified trust rides with the import; `--preview` names the action; the material comes from one source, and secret-bearing input is refused pointing at the desktop |
+| `keys promote --account <id> --standard <word> --fingerprint <fp> [--email <a>] [--verified]` | promotes the staged key into the keystore and records the acceptance | `key` (the shaped landed row) and `state: promoted`; `--preview` names the action; the trust write is the load-bearing second half, and a standing keystore row is never downgraded |
+| `keys reject --account <id> --id <n> --standard <word> --fingerprint <fp> [--email <a>]` | removes the staging row and records a rejected decision | `id`, `state: rejected`; `--preview` names the action; the decision binds the given email, else the staged row's peer email |
 | `snippets list` | the snippet library (0008) beside the audit ledger | `snippets`: id, title, body, `created_at`, `updated_at`, the most recently touched first; the body rides whole, the insert places exactly it |
 | `snippets create --title <t> (--body <text> or --body-file <path>)` | writes one snippet to the snippet store | `snippet` (id, title, body, the store's stamps) and `state: created`; `--preview` prints the exact snippet the store would take; the body comes from one source, two at once is a usage error |
 | `snippets delete --id <id>` | deletes one stored snippet | `id`, `state: deleted`; `--preview` names the exact deletion; an id no snippet carries is a runtime error naming it |
@@ -118,6 +123,23 @@ Rules that bind every verb:
   `ai.sqlite`, the one file every invocation already opens: no mail is
   read and no provider is dialled, so the verbs work against a cold data
   dir exactly as the mail verbs work against a synced one.
+- **The key verbs answer without the engine, over their own store.**
+  `keys list`, `keys collected`, `keys import`, `keys promote`, and
+  `keys reject` read and write `crypto.sqlite` beside the engine store,
+  opened lazily with the same five-second busy timeout so the host and
+  the CLI share the file. PUBLIC material only: the import takes a
+  public cert (armored or binary, the standard sniffed or pinned), and
+  secret-bearing input is refused with a pointer to the desktop private
+  path, because the vault master key lives in the OS keyring the CLI
+  never opens. The promote pairs the store's promote with the trust
+  decision that makes the key send-usable, and the reject pairs the
+  staging removal with a rejected decision; both orchestrations
+  replicate the app's collected-key review, spelled twice in two crates
+  that do not depend on each other and pinned by both test suites, the
+  closed action set's own precedent. The keystore's foreign keys need
+  the account row the app registers: an import or promote for an
+  account the app never registered fails with a runtime error naming
+  the desktop, while the reads and the reject answer regardless.
 - **The CLI never dials a model.** `ai cold` and `ai results` return what
   a pass recorded, never a live call: a verdict exists here only because
   the app's incoming pass judged the message, and an unjudged message
@@ -256,18 +278,28 @@ states for permissions.
 | `set_flagged` | `messages set-flagged` | `confirm` | `account=<id> key=<id> flagged=<bool>` |
 | `archive_message` | `messages archive` | `confirm` | `account=<id> key=<id>` |
 | `move_to_trash` | `messages trash` | `confirm` | `account=<id> key=<id>` |
+| `list_keys` | `keys list` | `auto` | `account=<id>` |
+| `list_collected_keys` | `keys collected` | `auto` | `account=<id>` |
+| `import_key` | `keys import` | `confirm` | `account=<id> material_chars=<n> [standard=<word>]` |
+| `promote_key` | `keys promote` | `confirm` | `account=<id> standard=<word> fingerprint=<id> [email=1] verified=<bool>` |
+| `reject_key` | `keys reject` | `confirm` | `account=<id> id=<n> standard=<word> fingerprint=<id> [email=1]` |
 
-The four reads run; the six writes ask. The preview shape is the host's
+The six reads run; the nine writes ask. The preview shape is the host's
 `shaped_arg_preview` output for an ask, the redacted argument preview
 the permission audit row carries: shapes and store ids only, never
 addresses, subjects, or body text, the same vocabulary the CLI's own
 audit rows carry. Optional fields ride only when the ask's args carry
 them; the search preview carries no `limit`, because the tool spells
 `--limit` on the argv but its approval args hold only the query, the
-optional account and folder, and the optional offset. Three pins hold
-the map: `policy_tests.rs` holds the policy table to exactly these ten
-rows, `permissions_tests.rs` holds every preview shape, and the
-sidecar's `mailToolsMap.test.ts` holds the ten names and every verb and
+optional account and folder, and the optional offset. The key writes
+gate at confirm because promote and reject change the send resolver's
+future decisions; none is send-class. The import's material is
+caller-supplied data, so its length stands in; the peer email rides as
+a presence count (`email=1`), never the address, the drafts `from`'s
+own discipline. Three pins hold the map: `policy_tests.rs` holds the
+policy table to exactly these fifteen rows, `permissions_tests.rs`
+holds every preview shape, and the sidecar's `mailToolsMap.test.ts`
+and `keyToolsMap.test.ts` hold the fifteen names and every verb and
 subverb.
 
 Known gap, recorded rather than left silent: the `confirm_preview`
@@ -286,7 +318,9 @@ table documents.
 per-user data directory under the app identifier, the same directory family
 the desktop host resolves through Tauri. Inside it the CLI opens the engine
 store (`astra.sqlite`, the same file the app opens) and the AI ledger
-(`ai.sqlite`, beside it).
+(`ai.sqlite`, beside it). The key verbs open the crypto store
+(`crypto.sqlite`, the same file the app's key surfaces open) lazily, only
+when a `keys` verb runs, under the same five-second busy timeout.
 
 **The second-writer seam, stated honestly.** The CLI runs beside a live
 app against the same engine store. The store is WAL-mode SQLite with a
@@ -309,8 +343,8 @@ known interaction, not a gap to close.
 
 | Rule | Status | Where |
 |---|---|---|
-| Thirty-two verbs with the pinned envelope | ✅ | `cli/src/verbs` |
-| `--preview` on every mutating verb (messages act, drafts, rules, knowledge, and snippets), one shared builder each | ✅ | `cli/src/verbs/{messages,drafts,rules,knowledge,snippets}.rs` and `message_writes.rs` |
+| Thirty-seven verbs with the pinned envelope | ✅ | `cli/src/verbs` |
+| `--preview` on every mutating verb (messages act, drafts, rules, knowledge, snippets, and keys), one shared builder each | ✅ | `cli/src/verbs/{messages,drafts,rules,knowledge,snippets,keys}.rs` and `message_writes.rs` |
 | Every invocation audited with a correlation id | ✅ | `cli/src/audit.rs`, `cli/src/verbs/mod.rs` |
 | Send-class verbs parsed and refused, exit 3 | ✅ | `cli/src/verbs/mod.rs` |
 | Model-class verbs (`ai style rebuild`, `ai digest generate`, `ai report generate`, `knowledge extract`, `snippets search`) parsed and refused, exit 3 | ✅ | `cli/src/verbs/{ai,knowledge,snippets}.rs` |
@@ -322,11 +356,17 @@ known interaction, not a gap to close.
 | Send-class verbs beyond refusal (none ship) | N/A | the send class is the refusal |
 | The mail action verbs (mark-read, set-flagged, archive, trash) with the MCP search contract's scoping | ✅ | `cli/src/verbs/{message_writes,messages}.rs` |
 | A permanent-delete verb (never ships; the row's trash is the ceiling) | N/A | the app layer's delete stays unexposed |
-| Virtual permission tools over the verbs | ✅ | the permission gating map above: ten tools pinned to verb, level, and preview shape |
+| The key verbs over `crypto.sqlite` (public material only; the promote/reject orchestration spelled twice with the app, pinned by both suites) | ✅ | `cli/src/verbs/keys.rs`, `crates/astra-app/src/collected.rs` |
+| Virtual permission tools over the verbs | ✅ | the permission gating map above: fifteen tools pinned to verb, level, and preview shape |
 | Shell completions from the verb vocabulary (`completions <shell>`: bash, zsh, fish, pwsh) | ✅ | `cli/src/verbs/completions.rs`, the one generator exception to the envelope rule |
 
 Known gaps, recorded rather than left silent:
 
+- Private-key import has no CLI spelling: the vault master key is
+  OS-keyring-resident and the CLI never opens the keyring, and no safe
+  passphrase transport exists. `keys import` fed secret-bearing material
+  refuses with a pointer to the desktop Settings Keys import; the private
+  path stays desktop.
 - The CLI answers `accounts list` from the index file, because the engine
   store exposes no account enumeration at the pinned rev and the app keeps
   its account list in memory from the index at boot. A store-side account

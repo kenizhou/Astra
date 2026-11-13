@@ -131,7 +131,7 @@ fn fail_close_drains_and_restores_survive() {
 /// ride only when the args carry them, and a genuinely unknown tool falls
 /// to the generic shape (fail closed).
 #[test]
-fn the_ten_preview_shapes_mirror_the_cli_vocabulary() {
+fn the_fifteen_preview_shapes_mirror_the_cli_vocabulary() {
     let cases: Vec<(&str, serde_json::Value, &str)> = vec![
         (
             "list_folders",
@@ -216,6 +216,71 @@ fn the_ten_preview_shapes_mirror_the_cli_vocabulary() {
             "account=acct-1 key=msg-1",
         ),
         (
+            "list_keys",
+            serde_json::json!({ "account": "acct-1" }),
+            "account=acct-1",
+        ),
+        (
+            "list_collected_keys",
+            serde_json::json!({ "account": "acct-1" }),
+            "account=acct-1",
+        ),
+        (
+            "import_key",
+            serde_json::json!({ "account": "acct-1", "material": "armored cert" }),
+            "account=acct-1 material_chars=12",
+        ),
+        (
+            "import_key",
+            serde_json::json!({
+                "account": "acct-1",
+                "material": "armored cert",
+                "standard": "openpgp",
+            }),
+            "account=acct-1 material_chars=12 standard=openpgp",
+        ),
+        (
+            "promote_key",
+            serde_json::json!({
+                "account": "acct-1",
+                "standard": "openpgp",
+                "fingerprint": "ABCD",
+            }),
+            "account=acct-1 standard=openpgp fingerprint=ABCD verified=false",
+        ),
+        (
+            "promote_key",
+            serde_json::json!({
+                "account": "acct-1",
+                "standard": "openpgp",
+                "fingerprint": "ABCD",
+                "email": "peer@example.com",
+                "verified": true,
+            }),
+            "account=acct-1 standard=openpgp fingerprint=ABCD email=1 verified=true",
+        ),
+        (
+            "reject_key",
+            serde_json::json!({
+                "account": "acct-1",
+                "id": 7,
+                "standard": "openpgp",
+                "fingerprint": "ABCD",
+            }),
+            "account=acct-1 id=7 standard=openpgp fingerprint=ABCD",
+        ),
+        (
+            "reject_key",
+            serde_json::json!({
+                "account": "acct-1",
+                "id": 7,
+                "standard": "openpgp",
+                "fingerprint": "ABCD",
+                "email": "peer@example.com",
+            }),
+            "account=acct-1 id=7 standard=openpgp fingerprint=ABCD email=1",
+        ),
+        (
             "send_message",
             serde_json::json!({ "account": "acct-1", "key": "msg-1" }),
             "fields=2",
@@ -243,4 +308,40 @@ fn the_search_preview_never_carries_the_query_text() {
             "the preview leaked '{planted}': {preview}"
         );
     }
+}
+
+/// The import preview carries the material's length, never its text: the
+/// cert material is caller-supplied data, and the peer email rides as a
+/// presence count, the drafts from's own discipline.
+#[test]
+fn the_key_previews_never_carry_the_material_or_the_peer_address() {
+    let args = serde_json::json!({
+        "account": "acct-1",
+        "material": "-----BEGIN PGP PUBLIC KEY BLOCK----- halcyon-dawn",
+    });
+    let preview = shaped_arg_preview("import_key", &args);
+    assert_eq!(preview, "account=acct-1 material_chars=49");
+    for planted in ["BEGIN PGP", "halcyon-dawn"] {
+        assert!(
+            !preview.contains(planted),
+            "the preview leaked '{planted}': {preview}"
+        );
+    }
+
+    let args = serde_json::json!({
+        "account": "acct-1",
+        "standard": "openpgp",
+        "fingerprint": "ABCD",
+        "email": "peer@elsewhere.local",
+        "verified": true,
+    });
+    let preview = shaped_arg_preview("promote_key", &args);
+    assert_eq!(
+        preview,
+        "account=acct-1 standard=openpgp fingerprint=ABCD email=1 verified=true"
+    );
+    assert!(
+        !preview.contains("elsewhere.local"),
+        "the preview leaked the peer address: {preview}"
+    );
 }

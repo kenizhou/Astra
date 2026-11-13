@@ -20,6 +20,9 @@ engine-core.workspace = true
 engine-provider.workspace = true
 # The audit ledger (`AiStore`, `AuditRow`, `CorrelationId`).
 astra-ai = { path = "../crates/astra-ai" }
+# The key verbs' store: the public key rows, the collected staging area,
+# and the trust decisions in crypto.sqlite beside the engine store.
+astra-crypto-store = { path = "../crates/astra-crypto-store" }
 # The envelope's serialisation.
 serde.workspace = true
 serde_json.workspace = true
@@ -36,3 +39,13 @@ dirs.workspace = true
 # The audit-row assertions open the ledger's sqlite file directly: the store
 # itself only appends.
 rusqlite.workspace = true
+# The key verb tests seed real keys into a file store; the fixed test master
+# key keeps the suite off the OS keyring (the astra-app pattern).
+astra-crypto-store = { path = "../crates/astra-crypto-store", features = ["testing"] }
+# The key verb tests build real OpenPGP cert fixtures (public certs and a
+# secret-bearing TSK) through Sequoia's CertBuilder and read fingerprints
+# and public blobs through the openpgp crate's keymap.
+astra-crypto-openpgp = { path = "../crates/astra-crypto-openpgp" }
+sequoia-openpgp = { version = "2", default-features = false, features = ["crypto-rust", "allow-experimental-crypto", "allow-variable-time-crypto"] }
+# The key verb tests hex-encode a seeded S/MIME row's fixture bytes.
+hex = "0.4"

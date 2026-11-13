@@ -362,13 +362,17 @@ name = "astra-cli"
 version = "0.2.0"
 dependencies = [
  "astra-ai",
+ "astra-crypto-openpgp",
+ "astra-crypto-store",
  "async-trait",
  "dirs 6.0.0",
  "engine-api",
  "engine-core",
  "engine-provider",
  "futures",
+ "hex",
  "rusqlite",
+ "sequoia-openpgp",
  "serde",
  "serde_json",
  "tokio",

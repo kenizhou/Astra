@@ -234,8 +234,22 @@ fn shaped_arg_preview(tool: &str, args: &serde_json::Value) -> String {
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(default)
     };
+    let number = |key: &str| {
+        fields
+            .and_then(|fields| fields.get(key))
+            .and_then(serde_json::Value::as_i64)
+            .map_or_else(|| "?".to_owned(), |n| n.to_string())
+    };
+    let has = |key: &str| {
+        fields
+            .and_then(|fields| fields.get(key))
+            .and_then(serde_json::Value::as_str)
+            .is_some()
+    };
     match tool {
-        "list_folders" => format!("account={}", id("account")),
+        "list_folders" | "list_keys" | "list_collected_keys" => {
+            format!("account={}", id("account"))
+        }
         "list_messages" => {
             let mut preview = format!("account={}", id("account"));
             if let Some(folder) = fields
@@ -294,6 +308,54 @@ fn shaped_arg_preview(tool: &str, args: &serde_json::Value) -> String {
         ),
         "archive_message" | "move_to_trash" => {
             format!("account={} key={}", id("account"), id("key"))
+        }
+        // The import's material is caller-supplied data: its length stands
+        // in, the drafts body's own discipline.
+        "import_key" => {
+            let mut preview = format!(
+                "account={} material_chars={}",
+                id("account"),
+                chars("material")
+            );
+            if let Some(standard) = fields
+                .and_then(|fields| fields.get("standard"))
+                .and_then(serde_json::Value::as_str)
+            {
+                let _ =
+                    std::fmt::Write::write_fmt(&mut preview, format_args!(" standard={standard}"));
+            }
+            preview
+        }
+        // The peer email rides as a presence count, never the address (the
+        // drafts from's discipline); the fingerprint is a store id.
+        "promote_key" => {
+            let mut preview = format!(
+                "account={} standard={} fingerprint={}",
+                id("account"),
+                id("standard"),
+                id("fingerprint"),
+            );
+            if has("email") {
+                let _ = std::fmt::Write::write_fmt(&mut preview, format_args!(" email=1"));
+            }
+            let _ = std::fmt::Write::write_fmt(
+                &mut preview,
+                format_args!(" verified={}", flag("verified", false)),
+            );
+            preview
+        }
+        "reject_key" => {
+            let mut preview = format!(
+                "account={} id={} standard={} fingerprint={}",
+                id("account"),
+                number("id"),
+                id("standard"),
+                id("fingerprint"),
+            );
+            if has("email") {
+                let _ = std::fmt::Write::write_fmt(&mut preview, format_args!(" email=1"));
+            }
+            preview
         }
         _ => format!("fields={}", fields.map_or(0, serde_json::Map::len)),
     }

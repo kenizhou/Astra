@@ -70,6 +70,29 @@ const DRIFT_SPELLINGS: &[&[&str]] = &[
         "mark_read",
     ],
     &["snippets", "create", "--title", "t", "--body", "b"],
+    &["keys", "import", "--account", "alpha", "--plain", "cert"],
+    &[
+        "keys",
+        "promote",
+        "--account",
+        "alpha",
+        "--standard",
+        "openpgp",
+        "--fingerprint",
+        "AA",
+    ],
+    &[
+        "keys",
+        "reject",
+        "--account",
+        "alpha",
+        "--id",
+        "1",
+        "--standard",
+        "openpgp",
+        "--fingerprint",
+        "AA",
+    ],
 ];
 
 /// The closed flag vocabulary the reverse drift probe walks: every flag
@@ -85,7 +108,9 @@ const FLAG_VOCABULARY: &[&str] = &[
     "--cc",
     "--clear",
     "--condition",
+    "--email",
     "--file",
+    "--fingerprint",
     "--folder",
     "--from",
     "--id",
@@ -95,10 +120,12 @@ const FLAG_VOCABULARY: &[&str] = &[
     "--offset",
     "--plain",
     "--query",
+    "--standard",
     "--subject",
     "--title",
     "--to",
     "--unread",
+    "--verified",
 ];
 
 #[test]
