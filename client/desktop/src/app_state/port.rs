@@ -162,6 +162,18 @@ impl AppPort for App<HostProvider> {
         App::refresh_calendars_if_changed(self).await;
     }
 
+    async fn snooze_message(&self, row: astra_app::RowRef, wake_at: i64) -> Result<(), String> {
+        App::snooze_message(self, row, wake_at)
+            .await
+            .map_err(|err| err.to_string())
+    }
+
+    async fn wake_due_snoozes(&self, now: i64) -> Result<usize, String> {
+        App::wake_due_snoozes(self, now)
+            .await
+            .map_err(|err| err.to_string())
+    }
+
     async fn draft_chips(&self, account: &AccountId, key: &ProviderKey) -> Vec<Chip> {
         App::draft_chips(self, account, key).await
     }

@@ -200,6 +200,19 @@ pub(crate) fn assemble_state(
     // in, installed before the state hands anything to a command so
     // the first event the boot records finds it standing.
     core.install_analytics_store(Arc::clone(&ai_store));
+    // The device-local snooze store beside the analytics ledger: the core
+    // records and wakes over it, and the host wake timer reads its due
+    // entries. The timer holds the two Arcs (the core and the store), so no
+    // AppState field carries the store and the drop order stays as it stands.
+    let snooze_store = Arc::new(astra_snooze::SnoozeStore::open(
+        &data_dir.join(SNOOZE_STORE_FILE),
+    )?);
+    core.install_snooze_store(Arc::clone(&snooze_store));
+    crate::snooze_timer::spawn(
+        Arc::clone(&core) as Arc<dyn AppPort>,
+        snooze_store,
+        &runtime,
+    );
     // The crypto store opened before the dial (above) rides the state: the
     // account-add flow and the headless dial build wrappers from it too.
     // Prime the settings snapshot: nothing republishes it until a settings
@@ -274,6 +287,10 @@ pub(crate) fn assemble_state(
 /// The AI ledgers' file name, under the data directory: the same store the
 /// CLI opens, so both writers land in one ledger.
 pub(crate) const AI_STORE_FILE: &str = "ai.sqlite";
+
+/// The snooze store's file name, under the data directory: device-local, the
+/// host wake timer's alone (the CLI does not share it).
+const SNOOZE_STORE_FILE: &str = "snooze.sqlite";
 
 /// The crypto store's file name, under the data directory: key material and
 /// trust decisions. Opened before the account dial so every IMAP dial can

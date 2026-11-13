@@ -43,6 +43,7 @@ import { partitionPinnedFirst } from '@/features/list-pin/partitionPinnedFirst';
 import { usePinnedRowsStore } from '@/features/list-pin/pinnedRowsStore';
 import { useVipSendersStore } from '@/features/vip/vipSendersStore';
 import { SweepDialog } from '@/features/sweep/SweepDialog';
+import { SnoozeDialog } from '@/features/snooze/SnoozeDialog';
 import { dispatch, intents } from '@/services/ipc';
 import { useFolderStore } from '@/stores/folderStore';
 import { useListFilterStore } from '@/stores/listFilterStore';
@@ -394,6 +395,7 @@ export function MessageList() {
       )}
       <SwipeToast />
       <SweepDialog />
+      <SnoozeDialog />
     </section>
   );
 }

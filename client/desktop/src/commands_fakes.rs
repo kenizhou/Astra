@@ -9,22 +9,18 @@
 // module so this file stays under the 500-line limit; the re-export keeps
 // every test module's `commands_fakes::…` paths unchanged.
 mod snapshots;
-
 // The fake's whole AppPort impl, its own child for the same limit (one
 // trait impl for the one fake, so the block cannot split); the re-export
 // keeps the seeds' type nameable through the paths the tests already use.
 mod port;
-
 // The assist pulls' seed records, their own child beside the port module
 // so that file stays under the same limit beside the trait impl that serves
 // them.
 mod seeds;
-
 // The MCP host fixture (an empty backend over the in-memory ledger in a
 // per-test scratch directory), its own child for the same limit, for
 // the state builder below and any test that builds a state of its own.
 mod mcp_host;
-
 pub(crate) use mcp_host::host;
 
 use std::{
@@ -200,6 +196,8 @@ pub(crate) struct FakeApp {
     pub(crate) outcomes: Mutex<Vec<(String, PassOutcome)>>,
     /// The accounts whose first pass the delivery loop waited on.
     pub(crate) first_waits: Mutex<Vec<String>>,
+    pub(crate) snoozed: Mutex<Vec<(astra_app::RowRef, i64)>>,
+    pub(crate) woken: Mutex<Vec<i64>>,
 }
 
 impl FakeApp {
@@ -264,6 +262,8 @@ impl FakeApp {
             drained: Mutex::new(Vec::new()),
             outcomes: Mutex::new(Vec::new()),
             first_waits: Mutex::new(Vec::new()),
+            snoozed: Mutex::new(Vec::new()),
+            woken: Mutex::new(Vec::new()),
         })
     }
 

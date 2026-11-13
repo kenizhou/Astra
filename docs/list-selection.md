@@ -147,6 +147,18 @@ loads. The set is per browser profile, with no cross-device sync;
 notification or priority routing for VIP mail is a named follow-up. This
 slice is the marker, the badge, and the filter.
 
+## Snooze
+
+The row menu's "Snooze…" entry sets one message aside until a wake instant:
+it opens a picker offering later today, tomorrow, and next week as computed
+instants, and choosing one moves the message into the account's Snooze
+folder and records the schedule device-local. At the wake the host timer
+returns the message to its origin folder. A conversation or a batch stands
+disabled with its reason (a move names messages only). The stable identity
+is the message's `Message-ID`, never the provider key the move synthesizes
+anew; the full contract, the store, and the closed-app wake precision live
+in [snooze.md](snooze.md).
+
 ## Known gaps
 
 - **A conversation cannot be moved**; the verb disables with its reason.

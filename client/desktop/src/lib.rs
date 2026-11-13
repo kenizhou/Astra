@@ -41,6 +41,7 @@ mod plugin;
 mod share;
 #[cfg(debug_assertions)]
 mod showcase;
+mod snooze_timer;
 mod window_state;
 
 // The command-surface test fixtures: one compiled copy of the fake app, the
@@ -155,6 +156,7 @@ pub fn run() {
             commands::calendar::calendar,
             commands::calendar::calendar_brief_generate,
             commands::calendar::calendar_event_detail,
+            commands::snooze::snooze_message,
             commands::people::people,
             commands::people::people_card,
             commands::people::people_suggestions,

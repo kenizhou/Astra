@@ -239,6 +239,14 @@ impl AppPort for ShowcaseApp {
 
     async fn refresh_calendars_if_changed(&self) {}
 
+    async fn snooze_message(&self, _row: astra_app::RowRef, _wake_at: i64) -> Result<(), String> {
+        Ok(())
+    }
+
+    async fn wake_due_snoozes(&self, _now: i64) -> Result<usize, String> {
+        Ok(0)
+    }
+
     async fn draft_chips(&self, _account: &AccountId, _key: &ProviderKey) -> Vec<Chip> {
         Vec::new()
     }

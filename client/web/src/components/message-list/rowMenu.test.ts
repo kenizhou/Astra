@@ -14,6 +14,7 @@ const draftOpen = vi.hoisted(() => ({
   openDraftRowWindow: vi.fn(),
 }));
 const sweep = vi.hoisted(() => ({ open: vi.fn() }));
+const snooze = vi.hoisted(() => ({ open: vi.fn() }));
 
 vi.mock('@/services/ipc', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -31,6 +32,10 @@ vi.mock('@/features/composer/draftOpen', () => ({
 
 vi.mock('@/features/sweep/sweepStore', () => ({
   useSweepStore: { getState: () => ({ open: sweep.open }) },
+}));
+
+vi.mock('@/features/snooze/snoozeStore', () => ({
+  useSnoozeStore: { getState: () => ({ open: snooze.open }) },
 }));
 
 import { buildDraftMenu, buildRowMenu, type RowAccountContext } from './rowMenu';
@@ -80,6 +85,7 @@ beforeEach(() => {
   draftOpen.openDraftRow.mockReset();
   draftOpen.openDraftRowWindow.mockReset();
   sweep.open.mockReset();
+  snooze.open.mockReset();
 });
 
 // The confirm spy restores after each test, so a refused click in one
@@ -108,6 +114,7 @@ describe('buildRowMenu', () => {
       'Delete Permanently',
       'Archive',
       'Clean up sender…',
+      'Snooze…',
       '|',
       'Copy Subject',
       'Copy Sender',
@@ -134,6 +141,36 @@ describe('buildRowMenu', () => {
     expect(entry.description).toContain('Pick one row');
     entry.onSelect?.();
     expect(sweep.open).not.toHaveBeenCalled();
+  });
+
+  it('opens the snooze picker over the single message', () => {
+    const items = buildRowMenu([m1], 'flat', accountCtx);
+    const entry = items.find((item) => item.label === 'Snooze…')!;
+
+    expect(entry.disabled).toBeUndefined();
+    entry.onSelect!();
+
+    expect(snooze.open).toHaveBeenCalledTimes(1);
+    expect(snooze.open).toHaveBeenCalledWith({ account: 'work', key: 'k1' });
+    expect(ipc.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('disables the snooze entry on a batch and on a conversation, with the reason', () => {
+    const batch = buildRowMenu([m1, m2], 'flat', accountCtx).find(
+      (item) => item.label === 'Snooze…',
+    )!;
+    expect(batch.disabled).toBe(true);
+    expect(batch.description).toContain('Pick one message');
+    batch.onSelect?.();
+    expect(snooze.open).not.toHaveBeenCalled();
+
+    const thread = buildRowMenu([th], 'flat', accountCtx).find(
+      (item) => item.label === 'Snooze…',
+    )!;
+    expect(thread.disabled).toBe(true);
+    expect(thread.description).toContain('conversation');
+    thread.onSelect?.();
+    expect(snooze.open).not.toHaveBeenCalled();
   });
 
   it('opens the message in its own window from the single-message item', () => {

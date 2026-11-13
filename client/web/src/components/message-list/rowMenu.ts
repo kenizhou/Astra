@@ -18,6 +18,7 @@ import {
   ForwardIcon,
   JunkIcon,
   MarkReadIcon,
+  MoonIcon,
   PinIcon,
   PopOutIcon,
   ReplyAllIcon,
@@ -32,6 +33,7 @@ import { openDraftRow, openDraftRowWindow } from '@/features/composer/draftOpen'
 import { usePinnedRowsStore } from '@/features/list-pin/pinnedRowsStore';
 import { useVipSendersStore } from '@/features/vip/vipSendersStore';
 import { useSweepStore } from '@/features/sweep/sweepStore';
+import { useSnoozeStore } from '@/features/snooze/snoozeStore';
 import { rowKeyId } from '@/components/message-list/rowIdentity';
 import type { FolderRow, MessageRowView, ViewMode } from '@/services/surfaces';
 
@@ -277,6 +279,32 @@ function sweepItem(targets: MessageRowView[]): ContextMenuItem {
   };
 }
 
+/** The snooze entry: opens the wake-time picker over the one message, the
+ *  dialog setting it aside until the chosen instant. A conversation or a
+ *  batch cannot name one message, so the entry stands disabled with the
+ *  reason (a move names messages only). */
+function snoozeItem(targets: MessageRowView[]): ContextMenuItem {
+  const oneMessage = singleMessage(targets);
+  const reason =
+    oneMessage !== null
+      ? undefined
+      : targets.length === 1
+        ? 'A whole conversation cannot be snoozed for this yet'
+        : 'Pick one message for this';
+  return {
+    label: 'Snooze…',
+    icon: MoonIcon,
+    disabled: reason !== undefined ? true : undefined,
+    title: reason,
+    description: reason,
+    onSelect: () => {
+      if (oneMessage !== null) {
+        useSnoozeStore.getState().open(oneMessage);
+      }
+    },
+  };
+}
+
 /** The menu one message row (or a batch of them) opens. */
 export function buildRowMenu(
   targets: MessageRowView[],
@@ -355,6 +383,7 @@ export function buildRowMenu(
       onSelect: () => forEach(targets, (row) => void dispatch(intents.archiveMessage(row.key))),
     },
     sweepItem(targets),
+    snoozeItem(targets),
     { separator: true },
     {
       label: 'Copy Subject',
