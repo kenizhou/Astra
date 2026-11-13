@@ -152,8 +152,10 @@ pub(crate) fn promote_collected_of(
     })
 }
 
-/// Rejects a staged key by its staging id, recording a rejected decision so a
-/// re-staged copy is refused rather than silently re-offered.
+/// Rejects a staged key by its staging id, recording a rejected decision.
+/// Staging is decision-blind, so a re-opened source re-stages and the list
+/// re-offers it; the rejection stands (an unverified promote never downgrades
+/// it; the resolver answers Rejected once a keystore row exists).
 pub(crate) fn reject_collected_of(
     state: &AppState,
     account: &AccountId,

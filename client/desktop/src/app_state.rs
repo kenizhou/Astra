@@ -142,7 +142,10 @@ pub(crate) trait AppPort: Send + Sync {
     ) -> Result<astra_crypto_store::CryptoKeyRow, String>;
 
     /// Rejects a staged key: removes the staging row by id and records a
-    /// rejected decision, so a re-staged copy is refused rather than re-offered.
+    /// rejected decision. Staging is decision-blind, so a re-opened source
+    /// re-stages and the list re-offers it; the rejection stands (an unverified
+    /// promote never downgrades it; the resolver answers Rejected once a
+    /// keystore row exists).
     ///
     /// # Errors
     ///

@@ -118,8 +118,10 @@ impl<P: Provider> App<P> {
     }
 
     /// Rejects a staged key: removes the staging row by id and records a
-    /// `rejected` decision, so a re-staged copy of the same key is refused by
-    /// the resolver rather than silently re-offered. The decision binds
+    /// `rejected` decision. Staging is decision-blind, so a re-opened source
+    /// re-stages the key and the review list offers it again; the rejection
+    /// stands (an unverified promote never downgrades it, and the resolver
+    /// answers Rejected once a keystore row exists). The decision binds
     /// `email`, or the staged row's peer email when none is named (an empty
     /// address when neither stands, the unknown-key audit precedent).
     ///

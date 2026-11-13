@@ -354,10 +354,13 @@ The app methods (`astra-app/src/collected.rs`, the `keys.rs` shape) expose:
   row's peer email when none is named; a key with no peer email carries no
   address to decide against and the promote still lands the key.
 - `reject_collected(account, id, standard, fingerprint, email)`: removes the
-  staging row by id and records a `rejected` decision, so a re-staged copy of
-  the same key is refused by the resolver rather than silently re-offered (an
-  unverified promote of a re-staged copy never downgrades the standing
-  rejection).
+  staging row by id and records a `rejected` decision. Staging is silent and
+  decision-blind, so a re-opened source message re-stages the key and the review
+  list offers it again; the rejection stands: an unverified promote of the
+  re-staged copy never downgrades it, and the resolver answers `Rejected` once a
+  keystore row exists (a staged-only key answers `NoKey`, decisions are read only
+  against a keystore row). Decision-aware staging/listing (never re-offer a
+  rejected key) is a recorded follow-up, not this slice.
 
 A shared store helper (`record_promote_trust` in `import.rs`) records the
 promote acceptance with the no-downgrade guard, reusing `record_import_trust`
@@ -427,6 +430,12 @@ skips unless `ASTRA_LIVE_HARNESS=1`.
   affordance (`set_pinned_key`, marking a promoted key preferred) is a
   follow-up; the promote lands the key send-usable without it. The composer
   recipient-trust UI (showing the trust state at send time) is a follow-up.
+  Staging and the review list are decision-blind: a rejected key re-stages when
+  its source message is re-opened and the list offers it again. The rejection
+  still stands (an unverified promote never downgrades it; the resolver answers
+  Rejected once a keystore row exists), so this is a re-offer, never a silent
+  re-acceptance. Decision-aware staging/listing (never re-offer a rejected key)
+  is a follow-up behaviour change.
 - A legacy signature carrying only an Issuer KeyID (no IssuerFingerprint
   subpacket) can verify yet report no signer fingerprint, so it labels
   NotSigned rather than ValidVerified. A degradation, never a false

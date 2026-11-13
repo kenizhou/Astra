@@ -269,8 +269,11 @@ app 方法（`astra-app/src/collected.rs`，`keys.rs` 形态）暴露：
   （绝不降级既有的 verified/personal 决定）。接受绑定 `email`，未命名时绑定暂存
   行的对等体邮箱；无对等体邮箱的密钥无地址可决定，提升仍落地密钥。
 - `reject_collected(account, id, standard, fingerprint, email)`：按 id 移除暂存
-  行并记录一个 `rejected` 决定，故同一密钥的重新暂存副本被解析器拒绝而非静默
-  重新提供（重新暂存副本的 unverified 提升绝不降级既有的拒绝）。
+  行并记录一个 `rejected` 决定。暂存是静默且决策盲的，故重新打开源邮件会重新暂
+  存该密钥，审阅列表会再次提供它；拒绝仍然成立：重新暂存副本的 unverified 提升
+  绝不降级它，且一旦 keystore 行存在解析器即答 `Rejected`（仅暂存密钥答 `NoKey`，
+  决定只针对 keystore 行读取）。决策感知的暂存/列表（绝不重新提供被拒密钥）是记
+  录在案的后续，而非本切片。
 
 一个共享存储助手（`import.rs` 中的 `record_promote_trust`）以无降级守卫记录
 提升接受，复用 `put_trust_decision` 之上的 `record_import_trust`。
@@ -317,7 +320,11 @@ Reject。指纹被显示，故人在选择 Accept as verified 前可带外核验
   播种。CLI 密钥动词（`keys collected`/`promote`）与 sidecar 虚拟工具是
   SP4d-1b（动词随其虚拟权限工具落地，needs-approval 默认）。pin 入口
   （`set_pinned_key`，标记提升后的密钥为首选）是后续；提升无需它即落地可用
-  于发送的密钥。编写器收件人信任 UI（发送时显示信任状态）是后续。
+  于发送的密钥。编写器收件人信任 UI（发送时显示信任状态）是后续。暂存与审阅
+  列表是决策盲的：被拒密钥在其源邮件重新打开时重新暂存，列表再次提供它。拒绝
+  仍然成立（unverified 提升绝不降级它；一旦 keystore 行存在解析器即答
+  Rejected），故这是重新提供，绝非静默重新接受。决策感知的暂存/列表（绝不重新
+  提供被拒密钥）是后续行为变更。
 - 仅携带 Issuer KeyID（无 IssuerFingerprint 子包）的遗留签名可验证却报告
   无签名者指纹，故标为 NotSigned 而非 ValidVerified。一个退化，绝非假的
   「已验证」；现代客户端发出 IssuerFingerprint。

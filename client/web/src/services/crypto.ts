@@ -143,8 +143,10 @@ export function promoteCollected(
 
 /**
  * Rejects a staged collected key by its staging id: removes the staging row
- * and records a rejected decision, so a re-staged copy is refused rather than
- * silently re-offered. The email binds the decision, or null when absent.
+ * and records a rejected decision. Staging is decision-blind, so a re-opened
+ * source re-stages and the list re-offers it; the rejection stands (an
+ * unverified promote never downgrades it; the resolver answers Rejected once a
+ * keystore row exists). The email binds the decision, or null when absent.
  */
 export function rejectCollected(
   account: string,
