@@ -28,7 +28,11 @@
 //! through the engine's real send path, reads the delivery back, and withdraws both
 //! copies so the harness keeps its seeded shape; the attachment proof in the same
 //! file carries the wire one file further, staging one attachment behind a minted
-//! handle whose bytes the app-level read returns exactly. The gated reply and
+//! handle whose bytes the app-level read returns exactly. The gated attachment
+//! browser proof (`attachment_browser_proof`) carries the same delivered note
+//! through the core's cross-message aggregation: the browse lists the part beside
+//! its source reference and the byte read returns the same bytes, both copies
+//! withdrawn. The gated reply and
 //! forward tests (`reply`, `forward`) walk the answer chain over the same wire:
 //! each first submits a fresh note from astra1 to astra2 (the seed leaves astra2
 //! nothing to answer), then composes the answer through the product's own compose
@@ -171,6 +175,8 @@ use crate::{reference::MessageRef, App, AppObserver, FolderRef, Intent, RowRef, 
 // 500-line cap the gate enforces; the explicit `#[path]`s because this file
 // owns no directory a bare `mod` would resolve into. `proof` holds the
 // fixtures the delivery proofs share; `folder_proof` the folder proofs'.
+#[path = "tests_live_harness/attachment_browser_proof.rs"]
+mod attachment_browser_proof;
 #[path = "tests_live_harness/calendar.rs"]
 mod calendar;
 #[path = "tests_live_harness/calendar_boot_proof.rs"]

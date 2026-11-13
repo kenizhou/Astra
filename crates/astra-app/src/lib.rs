@@ -7,8 +7,7 @@
 //! other. The [`App`] owns one [`engine_api::Engine`] shared across every configured
 //! [`Account`], and [`boot`] assembles the whole sequence over a host-provided runtime.
 //! The crate root holds the runtime's state; the command surface, the projection,
-//! the sync paths, the preferences, the sender-name service, the AI rules model,
-//! the AI replies model, the AI assist services, and the AI documents services
+//! the sync paths, the preferences, the sender-name service, and the AI services
 //! each live in their own module.
 
 mod accounts;
@@ -18,6 +17,7 @@ mod ai_replies;
 mod ai_results;
 mod ai_rules;
 mod analytics;
+mod attachment_browser;
 mod attachments;
 mod body_warm;
 mod boot;

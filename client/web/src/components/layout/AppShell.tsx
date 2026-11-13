@@ -23,6 +23,7 @@
 import { Group, Panel } from 'react-resizable-panels';
 
 import { AccountSetupFlow } from '@/features/account-setup/AccountSetupFlow';
+import { AttachmentBrowser } from '@/features/attachment-browser/AttachmentBrowser';
 import { AiPanel } from '@/features/ai-panel/AiPanel';
 import { AgentPanel } from '@/features/agent/AgentPanel';
 import { CalendarPane } from '@/features/calendar/CalendarPane';
@@ -275,6 +276,7 @@ export function AppShell() {
       <AccountSetupFlow />
       <CommandPalette />
       <ShortcutsHelp />
+      <AttachmentBrowser />
     </div>
   );
 }

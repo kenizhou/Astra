@@ -3,9 +3,8 @@
 //! it drives on, the per-account dial table, and the credential store. One value,
 //! registered once at boot, read back by every command through Tauri's `State`.
 
-// The core's whole `AppPort` impl, its own child so this file stays under
-// the line cap (one trait impl for the one concrete type, so the block
-// cannot split further).
+// The core's whole `AppPort` impl, its own child for the line cap (one trait
+// impl for the one concrete type cannot split further).
 mod port;
 
 use std::sync::Arc;
@@ -32,12 +31,10 @@ use crate::{AccountCredentialStore, AccountDials, AppRuntime, LlmClient, Sidecar
 /// The concrete provider parameter the desktop host runs the app over:
 /// `App<HostProvider>`.
 ///
-/// Every element is a `ReconnectingImapProvider` over the TLS IMAP transport (an
-/// IMAP account's connections bound folder by folder, retried once after a dropped
-/// socket), boxed at `astra-account`'s public seam: `connect_mail_providers` and
+/// Every element is a `ReconnectingImapProvider` over the TLS IMAP transport,
+/// boxed at `astra-account`'s public seam: `connect_mail_providers` and
 /// `connect_imap_mailbox` hand back `Box<dyn Provider>`, and the engine implements
 /// its `Provider` trait for `Box<P>`, so the box **is** the host's provider type.
-/// Nothing else dials: this host's every account is IMAP in SP1.
 pub(crate) type HostProvider = Box<dyn Provider>;
 
 /// One configured account as the host installs it: [`astra_app::Account`] over the
@@ -187,6 +184,13 @@ pub(crate) trait AppPort: Send + Sync {
         account: &AccountId,
         key: &ProviderKey,
     ) -> Result<EmlContent, EmlReadError>;
+
+    /// The attachment browser's pull: the flattened attachment rows across
+    /// every account beside the coverage report, narrowed by the filter.
+    async fn attachment_browser(
+        &self,
+        filter: astra_viewmodel::AttachmentBrowserFilter,
+    ) -> astra_viewmodel::AttachmentBrowserView;
 
     /// The published draft-status snapshot: the composition whose save moved, or `None`.
     fn draft_status(&self) -> Option<DraftStatusSnapshot>;
@@ -421,10 +425,9 @@ pub(crate) trait AppPort: Send + Sync {
 
 /// The state the shell manages: everything a command needs, in one registered value.
 ///
-/// The field order is the drop order, and it is load bearing: the agent
-/// relay must drop before the runtime, because the runtime's shutdown
-/// waits for the relay's read pump and the pump waits on the sidecar
-/// child, which waits on the relay's stdin closing.
+/// The field order is the drop order, and it is load bearing: the agent relay
+/// must drop before the runtime, whose shutdown waits on the relay's read pump,
+/// which waits on the sidecar child, which waits on the relay's stdin closing.
 pub(crate) struct AppState {
     /// The app core behind the command surface.
     pub(crate) app: Arc<dyn AppPort>,

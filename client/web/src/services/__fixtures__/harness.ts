@@ -55,6 +55,13 @@ const SNAPSHOTS: Record<string, unknown> = {
   snippet_search: [],
   people_suggestions: [],
   style_profile: null,
+  /* The attachment browser pull: an empty browse with honest zero coverage,
+     so the modal renders its empty state in fixture mode instead of loading
+     forever on an unrecorded null. */
+  attachment_browser: {
+    entries: [],
+    coverage: { scanned: 0, indexed: 0, skipped: 0, failed_accounts: [], scan_limit: 200 },
+  },
 };
 
 const announced = new Set<string>();

@@ -131,6 +131,7 @@ pub fn run() {
             commands::crypto::promote_collected,
             commands::crypto::reject_collected,
             commands::attachments::save_attachment,
+            commands::attachment_browser::attachment_browser,
             commands::eml::eml_save,
             commands::drafts::draft_status,
             commands::drafts::draft_resume,

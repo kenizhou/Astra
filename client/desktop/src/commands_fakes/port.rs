@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! The fake app's [`AppPort`] impl, split out of the fixture root so that
-//! root stays under the 500-line limit: one trait impl for the one fake,
-//! the inherited contract beside the assist answers, everything the
-//! command tests seed or assert in one place behind the fake's own locks.
-//! The seed records the assist answers read sit in the sibling `seeds`.
+//! The fake app's [`AppPort`] impl, its own child of the fixture root for the
+//! 500-line cap (one trait impl cannot split): everything the command tests
+//! seed or assert behind the fake's own locks; the assist seeds in `seeds`.
 
 use astra_ai::{AiDocumentKind, KnowledgeId};
 use astra_app::{
@@ -14,9 +12,9 @@ use astra_app::{
     TranslateLanguage,
 };
 use astra_viewmodel::{
-    CalendarSnapshot, ComposeKind, ComposeRequestSnapshot, DraftStatusSnapshot, EventDetail,
-    MailboxListSnapshot, MailtoOpen, PeopleSnapshot, ReadingSnapshot, SendingSnapshot,
-    SettingsSnapshot, SyncProgressSnapshot,
+    AttachmentBrowserFilter, AttachmentBrowserView, CalendarSnapshot, ComposeKind,
+    ComposeRequestSnapshot, DraftStatusSnapshot, EventDetail, MailboxListSnapshot, MailtoOpen,
+    PeopleSnapshot, ReadingSnapshot, SendingSnapshot, SettingsSnapshot, SyncProgressSnapshot,
 };
 use engine_api::{AccountId, CalendarDate, ProviderKey, RecipientSuggestion};
 
@@ -24,8 +22,7 @@ use crate::app_state::{AppPort, HostAccount};
 
 use super::{compose_prefill, open_snapshot, FakeApp};
 
-// The key import and collected-review fake's state, its own child for the
-// line cap; the re-export keeps the `port::KeysFake` path the root names.
+// The key fake's state, its own child for the cap; the re-export keeps the path.
 mod keys_fake;
 pub(crate) use keys_fake::KeysFake;
 
@@ -68,8 +65,7 @@ impl AppPort for FakeApp {
         message: &astra_app::MessageRef,
         _passphrase: astra_crypto_core::SecretBox<String>,
     ) -> Option<astra_viewmodel::PasswordPromptState> {
-        // The passphrase is never recorded: it stays in-process. Only the
-        // message identity the command handed through is asserted by tests.
+        // The passphrase stays in-process; only the message identity is recorded.
         self.password_into.lock().unwrap().push((
             message.account.as_str().to_owned(),
             message.key.as_str().to_owned(),
@@ -83,8 +79,7 @@ impl AppPort for FakeApp {
         bytes: Vec<u8>,
         _passphrase: Option<astra_crypto_core::SecretBox<String>>,
     ) -> Result<astra_crypto_store::CryptoKeyRow, String> {
-        // The passphrase is never recorded: it stays in-process. Only the
-        // account and the byte count the command handed through are asserted.
+        // The passphrase stays in-process; only the account and byte count land.
         let mut keys = self.keys.lock().unwrap();
         keys.import_into
             .push((account.as_str().to_owned(), bytes.len()));
@@ -177,6 +172,12 @@ impl AppPort for FakeApp {
         self.eml.lock().unwrap().clone()
     }
 
+    async fn attachment_browser(&self, filter: AttachmentBrowserFilter) -> AttachmentBrowserView {
+        let mut browser = self.browser.lock().unwrap();
+        browser.asked.push(filter);
+        browser.view.clone()
+    }
+
     fn draft_status(&self) -> Option<DraftStatusSnapshot> {
         self.draft_status.lock().unwrap().clone()
     }
@@ -235,8 +236,7 @@ impl AppPort for FakeApp {
     }
 
     async fn refresh_calendars_if_changed(&self) {
-        // The command surface never drives the periodic refresh; the timer
-        // host owns it, so the fake answers the empty visit.
+        // The timer host owns the periodic refresh; the fake answers nothing.
     }
 
     async fn snooze_message(&self, row: astra_app::RowRef, wake_at: i64) -> Result<(), String> {
@@ -335,9 +335,8 @@ impl AppPort for FakeApp {
             key.as_str().to_owned(),
             draft.to_owned(),
         ));
-        // The publish the core's own accept makes: the reply's prefill into
-        // the single slot, the draft's paragraphs riding the real snapshot the
-        // app core's own tests pin.
+        // The publish the core's accept makes: the reply's prefill into the
+        // single slot, the draft's paragraphs riding the real snapshot.
         *self.compose_request.lock().unwrap() =
             Some(compose_prefill(ComposeKind::Reply, account.as_str()));
     }
@@ -429,8 +428,7 @@ impl AppPort for FakeApp {
         let mut docs = self.docs.lock().unwrap();
         docs.latest_into
             .push((account.as_str().to_owned(), kind.as_str().to_owned()));
-        // The seeded row answers only its own kind, the way the store's
-        // newest-row-per-kind read does.
+        // The seeded row answers only its own kind, as the store's read does.
         docs.latest.clone().filter(|view| view.kind == kind)
     }
 

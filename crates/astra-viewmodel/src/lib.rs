@@ -6,6 +6,7 @@
 //! engine, grouping and ordering live here, so every surface shares one definition of
 //! what is on screen.
 
+mod attachment_browser;
 mod calendar;
 mod compose_open;
 mod compose_request;
@@ -20,6 +21,10 @@ mod settings;
 mod sync_progress;
 pub mod view;
 
+pub use attachment_browser::{
+    AttachmentBrowserCoverage, AttachmentBrowserEntry, AttachmentBrowserFilter,
+    AttachmentBrowserView,
+};
 pub use calendar::{
     CalendarRow, CalendarShape, CalendarSnapshot, CalendarViewWire, CalendarWriteRow,
     CalendarWriteState, EventDetail, NowLineData, OccurrenceAccuracy, OccurrenceRow,

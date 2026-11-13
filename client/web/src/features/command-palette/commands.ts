@@ -23,6 +23,7 @@ import {
   MarkReadIcon,
   MoonIcon,
   OrderedListIcon,
+  PaperclipIcon,
   PeopleIcon,
   PinIcon,
   PlusIcon,
@@ -38,6 +39,7 @@ import {
 } from '@/components/icons';
 import { openSearchIsland } from '@/components/layout/searchIsland';
 import { sameRowKey } from '@/components/message-list/rowIdentity';
+import { openAttachmentBrowser } from '@/features/attachment-browser/attachmentBrowserStore';
 import { openNewMessageComposer } from '@/features/composer/composeWindow';
 import { usePinnedSearchesStore } from '@/features/pinned-searches/pinnedSearchesStore';
 import { useAppearanceStore } from '@/services/appearance';
@@ -265,6 +267,13 @@ export function buildCommands(): PaletteCommand[] {
       category: 'Search',
       icon: PinIcon,
       run: () => usePinnedSearchesStore.getState().openPanel(),
+    },
+    {
+      id: 'attachment-browser',
+      label: 'Browse attachments',
+      category: 'Search',
+      icon: PaperclipIcon,
+      run: () => openAttachmentBrowser(),
     },
     {
       id: 'settings',

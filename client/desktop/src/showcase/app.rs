@@ -197,6 +197,14 @@ impl AppPort for ShowcaseApp {
         Err(EmlReadError::Unresolved)
     }
 
+    async fn attachment_browser(
+        &self,
+        _filter: astra_viewmodel::AttachmentBrowserFilter,
+    ) -> astra_viewmodel::AttachmentBrowserView {
+        // The showcase holds no mail engine: the browse answers the empty view.
+        astra_viewmodel::AttachmentBrowserView::default()
+    }
+
     fn draft_status(&self) -> Option<DraftStatusSnapshot> {
         None
     }
