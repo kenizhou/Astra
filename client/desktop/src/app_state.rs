@@ -111,6 +111,52 @@ pub(crate) trait AppPort: Send + Sync {
         account: &AccountId,
     ) -> Result<Vec<astra_crypto_store::CryptoKeyRow>, String>;
 
+    /// The account's staged collected keys across both standards, newest
+    /// first: the review surface's list. Public material only.
+    ///
+    /// # Errors
+    ///
+    /// Returns the core's refusal words when no store is installed or a read
+    /// fails.
+    async fn list_collected(
+        &self,
+        account: &AccountId,
+    ) -> Result<Vec<astra_crypto_store::CollectedKeyRow>, String>;
+
+    /// Promotes a staged key into the keystore paired with the trust decision
+    /// that makes it send-usable: the review surface's accept (`verified`
+    /// false) or accept-as-verified (`verified` true). Answers the landed row
+    /// (public view).
+    ///
+    /// # Errors
+    ///
+    /// Returns the core's refusal words: no store, no staged or keystore row
+    /// for the fingerprint, or a failed write.
+    async fn promote_collected(
+        &self,
+        account: &AccountId,
+        standard: astra_crypto_core::Standard,
+        fingerprint: &str,
+        email: Option<&str>,
+        verified: bool,
+    ) -> Result<astra_crypto_store::CryptoKeyRow, String>;
+
+    /// Rejects a staged key: removes the staging row by id and records a
+    /// rejected decision, so a re-staged copy is refused rather than re-offered.
+    ///
+    /// # Errors
+    ///
+    /// Returns the core's refusal words when no store is installed or a read
+    /// or write fails.
+    async fn reject_collected(
+        &self,
+        account: &AccountId,
+        id: i64,
+        standard: astra_crypto_core::Standard,
+        fingerprint: &str,
+        email: Option<&str>,
+    ) -> Result<(), String>;
+
     /// Reads one attachment's decoded bytes for the host's Save As: the
     /// row's suggested file name beside the bytes. `Ok(None)` when the
     /// message's source reads but no downloadable part matches the id.

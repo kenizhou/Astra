@@ -23,47 +23,11 @@ use crate::app_state::{AppPort, HostAccount};
 
 use super::{compose_prefill, open_snapshot, FakeApp};
 
-/// The key import fake's state: the preset answers and the recorded asks.
-/// The passphrase is never recorded: it stays in-process, so only the
-/// account and the byte count of an import cross into the fake.
-#[derive(Default)]
-pub(crate) struct KeysFake {
-    /// The import's preset answer; `None` refuses as unseeded.
-    pub(crate) import: Option<Result<astra_crypto_store::CryptoKeyRow, String>>,
-    /// The (account, byte count) pairs the import was asked for.
-    pub(crate) import_into: Vec<(String, usize)>,
-    /// The list's preset answer; `None` answers an empty list.
-    pub(crate) list: Option<Result<Vec<astra_crypto_store::CryptoKeyRow>, String>>,
-    /// The accounts the list was asked for.
-    pub(crate) list_into: Vec<String>,
-}
-
-impl FakeApp {
-    /// Seeds the fake's knowledge listing with one entry, minted around
-    /// `id`, so the listing and the forget have a row to round trip.
-    pub(crate) fn holding_knowledge(&self, id: &str, kind: &str, text: &str) {
-        self.assist.lock().unwrap().knowledge.push(KnowledgeView {
-            id: KnowledgeId::new(id.to_owned()),
-            kind: kind.to_owned(),
-            text: text.to_owned(),
-            source_account: "work".to_owned(),
-            source_key: "imap:v1:u42".to_owned(),
-            created_at: 1,
-        });
-    }
-
-    /// Seeds the fake's snippet answer with one snippet, minted around
-    /// `id`, so the listing and the search have rows to answer.
-    pub(crate) fn holding_snippet(&self, id: &str, title: &str, body: &str) {
-        self.assist.lock().unwrap().snippets.push(Snippet {
-            id: astra_ai::SnippetId::new(id.to_owned()),
-            title: title.to_owned(),
-            body: body.to_owned(),
-            created_at: 1,
-            updated_at: 1,
-        });
-    }
-}
+// The key import and collected-review fake's state, its own child so this
+// file stays under the line cap beside the trait impl that serves them; the
+// re-export keeps the `port::KeysFake` path the fixture root names unchanged.
+mod keys_fake;
+pub(crate) use keys_fake::KeysFake;
 
 #[async_trait::async_trait]
 impl AppPort for FakeApp {
@@ -136,6 +100,55 @@ impl AppPort for FakeApp {
         let mut keys = self.keys.lock().unwrap();
         keys.list_into.push(account.as_str().to_owned());
         keys.list.clone().unwrap_or_else(|| Ok(Vec::new()))
+    }
+
+    async fn list_collected(
+        &self,
+        account: &AccountId,
+    ) -> Result<Vec<astra_crypto_store::CollectedKeyRow>, String> {
+        let mut keys = self.keys.lock().unwrap();
+        keys.collected_into.push(account.as_str().to_owned());
+        keys.collected.clone().unwrap_or_else(|| Ok(Vec::new()))
+    }
+
+    async fn promote_collected(
+        &self,
+        account: &AccountId,
+        standard: astra_crypto_core::Standard,
+        fingerprint: &str,
+        email: Option<&str>,
+        verified: bool,
+    ) -> Result<astra_crypto_store::CryptoKeyRow, String> {
+        let mut keys = self.keys.lock().unwrap();
+        keys.promote_into.push((
+            account.as_str().to_owned(),
+            standard.as_str().to_owned(),
+            fingerprint.to_owned(),
+            email.map(str::to_owned),
+            verified,
+        ));
+        keys.promote
+            .clone()
+            .unwrap_or_else(|| Err("the fake holds no promote answer".to_owned()))
+    }
+
+    async fn reject_collected(
+        &self,
+        account: &AccountId,
+        id: i64,
+        standard: astra_crypto_core::Standard,
+        fingerprint: &str,
+        email: Option<&str>,
+    ) -> Result<(), String> {
+        let mut keys = self.keys.lock().unwrap();
+        keys.reject_into.push((
+            account.as_str().to_owned(),
+            id,
+            standard.as_str().to_owned(),
+            fingerprint.to_owned(),
+            email.map(str::to_owned),
+        ));
+        keys.reject.clone().unwrap_or(Ok(()))
     }
 
     async fn attachment_content(

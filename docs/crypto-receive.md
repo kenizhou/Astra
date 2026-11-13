@@ -120,8 +120,9 @@ the fail-closed arms return before it, so a failed receive stages nothing.
 
 The payoff is immediate: `receive_openpgp` already offers the collected certs
 to `decrypt_with_signers` and `resolve_signer`, so a staged key improves the
-next message's embedded-signature verification. The review/promote surface
-for collected keys is SP4d; staging here is silent.
+next message's embedded-signature verification. The review/promote surface for
+collected keys landed in SP4d-2 (the review surface below); staging here is
+silent.
 
 ## The CRL fetching path (SP4c-3b)
 
@@ -262,7 +263,7 @@ bring a key in. SP4d-1 lands the desktop key import surface: import your own
 private/identity key (so received encrypted mail decrypts) and import a peer's
 public certificate (so signatures verify and encrypted sends resolve). The CLI
 key verbs and the sidecar virtual tools are SP4d-1b; the review/promote surface
-for collected keys is SP4d-2.
+for collected keys landed in SP4d-2 (the review surface below).
 
 Two paths, deliberately separate to avoid the has_private pollution:
 
@@ -325,6 +326,61 @@ keys through the product surface (no programmatic seeding), sends an
 encrypted+signed mail, and asserts it decrypts and verifies, pinning the
 has_private guard on the public imports. It skips unless `ASTRA_LIVE_HARNESS=1`.
 
+## The collected-key review surface (SP4d-2)
+
+The receive and send arcs stage peer keys silently into `collected_keys` (the
+Autocrypt consume above; gossip, WKD, and the S/MIME harvest likewise), but a
+person needs a way to review, accept, or reject a staged key. SP4d-2 lands the
+desktop review/promote surface over the complete store layer: list the staged
+keys, accept (promote into `crypto_keys` plus a trust decision), accept as
+verified, or reject (remove the staging row plus a rejected decision). The CLI
+key verbs and the sidecar virtual tools are SP4d-1b (the desktop-first
+precedent).
+
+The app methods (`astra-app/src/collected.rs`, the `keys.rs` shape) expose:
+
+- `list_collected(account)`: the account's staged rows across both standards,
+  newest first (the store's `seen_at DESC, id DESC` ordering merged across the
+  standards, a same-second tie breaking on the row id). Public material only.
+- `promote_collected(account, standard, fingerprint, email, verified)`: the
+  store `promote_collected_key` (which drains the staging rows and never
+  downgrades a standing keystore row) THEN the trust write. This pairing is
+  load-bearing: promote alone is only half an acceptance, the explicit decision
+  is what makes the promoted key send-usable (the resolver answers Undecided
+  without one) and lifts the S/MIME harvested-anchor exclusion. A `verified`
+  choice always records verified (an upgrade); an `unverified` choice records
+  unverified only when no decision stands (never downgrades a standing
+  verified/personal decision). The acceptance binds `email`, or the staged
+  row's peer email when none is named; a key with no peer email carries no
+  address to decide against and the promote still lands the key.
+- `reject_collected(account, id, standard, fingerprint, email)`: removes the
+  staging row by id and records a `rejected` decision, so a re-staged copy of
+  the same key is refused by the resolver rather than silently re-offered (an
+  unverified promote of a re-staged copy never downgrades the standing
+  rejection).
+
+A shared store helper (`record_promote_trust` in `import.rs`) records the
+promote acceptance with the no-downgrade guard, reusing `record_import_trust`
+over `put_trust_decision`.
+
+The desktop commands (`commands/crypto.rs`: `list_collected`,
+`promote_collected`, `reject_collected`) carry the account, standard,
+fingerprint, staging id, email, and verified flag, registered in the host. No
+secret crosses this surface (collected keys are public material). The web
+affordance lives in the settings Keys category
+(`features/keys/CollectedKeysReview.tsx`, joined to the Keys detail): each
+staged row shows the fingerprint, peer email, source, and standard, and offers
+Accept (unverified), Accept as verified, and Reject. The fingerprint is shown
+so a person can verify it out of band before choosing Accept as verified. The
+wire types ride `services/crypto.ts`, never `ipc.ts`.
+
+The gated live proof (`tests_live_harness/crypto_collected_review.rs`) receives
+an Autocrypt message that stages a peer key, lists it through the product
+surface, promotes it (the trust decision lands), and sends that peer encrypted
+mail admitted by the promote alone (no programmatic trust seeding); it rejects
+a second staged key and asserts it is removed, then withdraws every copy. It
+skips unless `ASTRA_LIVE_HARNESS=1`.
+
 ## Known gaps, recorded rather than left silent
 
 - Encrypted receive only, per standard: OpenPGP PGP/MIME (SP4c-1) and S/MIME
@@ -340,13 +396,13 @@ has_private guard on the public imports. It skips unless `ASTRA_LIVE_HARNESS=1`.
   follow-up. The passphrase is never persisted, so a re-open re-prompts; a
   session passphrase cache is a follow-up. The password dialog is shell-only
   (the reading pane), like the other receive surfaces.
-- Autocrypt staging is silent: the review/promote UI for collected keys is
-  SP4d. The send gate emits `Autocrypt-Gossip` inside the ciphertext but no
-  cleartext own `Autocrypt` header yet; the consume reads a cleartext header
-  when an incoming message carries one (a peer client's), and the own-header
-  emission is a follow-up. Gossip consume reads the protected-headers wrapper
-  the send gate emits; third-party gossip placements beyond that wrapper are
-  a follow-up.
+- Autocrypt staging is silent: the review/promote UI for collected keys landed
+  in SP4d-2 (the review surface above). The send gate emits `Autocrypt-Gossip`
+  inside the ciphertext but no cleartext own `Autocrypt` header yet; the consume
+  reads a cleartext header when an incoming message carries one (a peer
+  client's), and the own-header emission is a follow-up. Gossip consume reads
+  the protected-headers wrapper the send gate emits; third-party gossip
+  placements beyond that wrapper are a follow-up.
 - S/MIME revocation fetching landed in SP4c-3b (the CRL fetching path above):
   the receive hook fetches-or-caches the signer chain's distribution-point CRLs
   through the fail-soft `CrlFetcher` port, so a revoked signer hard-fails the
@@ -358,9 +414,19 @@ has_private guard on the public imports. It skips unless `ASTRA_LIVE_HARNESS=1`.
 - The key import surface landed in SP4d-1 (the key import surface above): own
   private key and peer public cert import through the product surface, and the
   live proof now imports rather than seeds. The CLI key verbs and the sidecar
-  virtual tools are SP4d-1b; the review/promote surface for collected keys is
-  SP4d-2. Key generation, export, default-key selection beyond the first
-  import, and the composer recipient-trust UI are follow-ups.
+  virtual tools are SP4d-1b; the review/promote surface for collected keys
+  landed in SP4d-2 (the review surface above). Key generation, export,
+  default-key selection beyond the first import, and the composer
+  recipient-trust UI are follow-ups.
+- The collected-key review surface landed in SP4d-2 (the review surface above):
+  list, accept, accept-as-verified, and reject through the product surface, the
+  promote paired with the trust decision that makes the key send-usable, and
+  the live proof now promotes rather than seeds. The CLI key verbs (`keys
+  collected`/`promote`) and the sidecar virtual tools are SP4d-1b (the verb
+  lands with its virtual permission tool, needs-approval default). A pin
+  affordance (`set_pinned_key`, marking a promoted key preferred) is a
+  follow-up; the promote lands the key send-usable without it. The composer
+  recipient-trust UI (showing the trust state at send time) is a follow-up.
 - A legacy signature carrying only an Issuer KeyID (no IssuerFingerprint
   subpacket) can verify yet report no signer fingerprint, so it labels
   NotSigned rather than ValidVerified. A degradation, never a false
@@ -388,6 +454,7 @@ has_private guard on the public imports. It skips unless `ASTRA_LIVE_HARNESS=1`.
 | The W9 password flow: SKESK detection, needs-password verdict, in-memory passphrase, re-prompt | ✅ | `astra-crypto-store/src/receive.rs`, `astra-app/src/reading_password.rs`, `crypto_decode.rs`, `client/desktop/src/commands/crypto.rs`, `client/web/src/components/reading-pane/PasswordDialog.tsx` |
 | Drafts at rest: the encrypted mirror, the save/discard hooks, the resume read seam, fail-closed refusal | ✅ | `astra-crypto-store/src/drafts.rs`, `migrations/0005_encrypted_drafts.sql`, `astra-app/src/drafts/encrypt.rs`, `drafts.rs`, `drafts/resume.rs` |
 | Key import: the public-only store path, the private backend path, the has_private guard, the in-memory passphrase, the trust write | ✅ | `astra-crypto-store/src/import.rs`, `astra-app/src/keys.rs`, `client/desktop/src/commands/crypto.rs`, `client/web/src/features/keys/KeysDetail.tsx` |
-| The live proofs (send encrypted, open, decrypt, the negative arms, drafts at rest, key import) | ✅ | `tests_live_harness/crypto_receive.rs`, `crypto_receive_smime.rs`, `crypto_receive_autocrypt.rs`, `crypto_receive_crl.rs`, `crypto_receive_password.rs`, `crypto_drafts_at_rest.rs`, `crypto_key_import.rs` |
+| Collected-key review: list, the promote-plus-trust pairing, the no-downgrade guard, the rejected decision | ✅ | `astra-crypto-store/src/import.rs` (`record_promote_trust`), `astra-app/src/collected.rs`, `client/desktop/src/commands/crypto.rs`, `client/web/src/features/keys/CollectedKeysReview.tsx` |
+| The live proofs (send encrypted, open, decrypt, the negative arms, drafts at rest, key import, collected review) | ✅ | `tests_live_harness/crypto_receive.rs`, `crypto_receive_smime.rs`, `crypto_receive_autocrypt.rs`, `crypto_receive_crl.rs`, `crypto_receive_password.rs`, `crypto_drafts_at_rest.rs`, `crypto_key_import.rs`, `crypto_collected_review.rs` |
 | Inline armor, detached signatures | N/A | SP4c-3, the gaps above |
 | Key generation and export, the token registry, the native security UI | N/A | SP4d follow-ups |

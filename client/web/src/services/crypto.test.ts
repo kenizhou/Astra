@@ -11,8 +11,15 @@ const invoke = vi.hoisted(() => vi.fn());
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke }));
 
-import { importKey, listKeys, submitReadingPassword } from './crypto';
-import type { CryptoKeyRow, PasswordPromptState } from './crypto';
+import {
+  importKey,
+  listCollected,
+  listKeys,
+  promoteCollected,
+  rejectCollected,
+  submitReadingPassword,
+} from './crypto';
+import type { CollectedKeyRow, CryptoKeyRow, PasswordPromptState } from './crypto';
 
 beforeEach(() => {
   invoke.mockReset();
@@ -98,5 +105,72 @@ describe('the key list call', () => {
     invoke.mockResolvedValue(rows);
     const outcome = await listKeys('work');
     expect(outcome.map((row) => row.fingerprint)).toEqual(['fpA', 'fpB']);
+  });
+});
+
+describe('the collected list call', () => {
+  it('invokes the command with the account', async () => {
+    invoke.mockResolvedValue([]);
+    await listCollected('work');
+    expect(invoke).toHaveBeenCalledWith('list_collected', { account: 'work' });
+  });
+
+  it('answers the staged rows the host returns', async () => {
+    const rows = [{ id: 1, fingerprint: 'fpA' }, { id: 2, fingerprint: 'fpB' }] as CollectedKeyRow[];
+    invoke.mockResolvedValue(rows);
+    const outcome = await listCollected('work');
+    expect(outcome.map((row) => row.fingerprint)).toEqual(['fpA', 'fpB']);
+  });
+});
+
+describe('the collected promote call', () => {
+  it('invokes the command with the fields and the verified flag', async () => {
+    invoke.mockResolvedValue({ fingerprint: 'fp' });
+    await promoteCollected('work', 'openpgp', 'fp', 'peer@elsewhere.local', true);
+    expect(invoke).toHaveBeenCalledWith('promote_collected', {
+      account: 'work',
+      standard: 'openpgp',
+      fingerprint: 'fp',
+      email: 'peer@elsewhere.local',
+      verified: true,
+    });
+  });
+
+  it('carries an absent email as null and the unverified choice', async () => {
+    invoke.mockResolvedValue({ fingerprint: 'fp' });
+    await promoteCollected('work', 'openpgp', 'fp', null, false);
+    expect(invoke).toHaveBeenCalledWith('promote_collected', {
+      account: 'work',
+      standard: 'openpgp',
+      fingerprint: 'fp',
+      email: null,
+      verified: false,
+    });
+  });
+});
+
+describe('the collected reject call', () => {
+  it('invokes the command with the staging id and the fields', async () => {
+    invoke.mockResolvedValue(undefined);
+    await rejectCollected('work', 7, 'openpgp', 'fp', 'peer@elsewhere.local');
+    expect(invoke).toHaveBeenCalledWith('reject_collected', {
+      account: 'work',
+      id: 7,
+      standard: 'openpgp',
+      fingerprint: 'fp',
+      email: 'peer@elsewhere.local',
+    });
+  });
+
+  it('carries an absent email as null', async () => {
+    invoke.mockResolvedValue(undefined);
+    await rejectCollected('work', 7, 'openpgp', 'fp', null);
+    expect(invoke).toHaveBeenCalledWith('reject_collected', {
+      account: 'work',
+      id: 7,
+      standard: 'openpgp',
+      fingerprint: 'fp',
+      email: null,
+    });
   });
 });

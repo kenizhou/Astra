@@ -10,6 +10,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const crypto = vi.hoisted(() => ({
   importKey: vi.fn(),
   listKeys: vi.fn(),
+  listCollected: vi.fn(),
+  promoteCollected: vi.fn(),
+  rejectCollected: vi.fn(),
 }));
 
 vi.mock('@/services/crypto', () => crypto);
@@ -64,7 +67,11 @@ function snapshot(): SettingsSnapshot {
 beforeEach(() => {
   crypto.importKey.mockReset();
   crypto.listKeys.mockReset();
+  crypto.listCollected.mockReset();
+  crypto.promoteCollected.mockReset();
+  crypto.rejectCollected.mockReset();
   crypto.listKeys.mockResolvedValue([row()]);
+  crypto.listCollected.mockResolvedValue([]);
   useSettingsStore.getState().applySnapshot(snapshot());
 });
 
@@ -143,5 +150,21 @@ describe('the key import detail', () => {
 
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('the key import failed: wrong passphrase');
+  });
+
+  it('joins the collected-key review for the chosen account', async () => {
+    crypto.listCollected.mockResolvedValue([
+      {
+        id: 9,
+        peerEmail: 'peer@elsewhere.local',
+        standard: 'openpgp',
+        fingerprint: 'fpCollected',
+        source: 'autocrypt',
+        seenAt: '1700000000',
+      },
+    ]);
+    render(<KeysDetail />);
+    expect(await screen.findByText('fpCollected')).toBeTruthy();
+    expect(crypto.listCollected).toHaveBeenCalledWith('work');
   });
 });

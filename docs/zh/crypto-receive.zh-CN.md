@@ -94,7 +94,7 @@ keystore 的证书路径（那会把它们泄入锚集）。
 
 收益是即时的：`receive_openpgp` 已将已收集证书提供给 `decrypt_with_signers`
 与 `resolve_signer`，故入暂存的密钥改善下一封邮件的内嵌签名验证。已收集
-密钥的审阅/提升面是 SP4d；此处暂存静默。
+密钥的审阅/提升面在 SP4d-2 落地（下述审阅面）；此处暂存静默。
 
 ## CRL 抓取路径（SP4c-3b）
 
@@ -200,7 +200,7 @@ CLI 对等：CLI 直接读引擎正文；镜像是 desktop 阅读路径保护，
 接收与发送弧暂存并消费密钥，但人需要一个把密钥带进来的途径。SP4d-1 落地
 desktop 密钥导入面：导入你自己的私钥/身份密钥（使收到的加密邮件可解密），
 以及导入对等体的公钥证书（使签名可验证、加密发送可解析）。CLI 密钥动词与
-sidecar 虚拟工具是 SP4d-1b；已收集密钥的审阅/提升面是 SP4d-2。
+sidecar 虚拟工具是 SP4d-1b；已收集密钥的审阅/提升面在 SP4d-2 落地（下述审阅面）。
 
 两条路径，刻意分离以避免 has_private 污染：
 
@@ -248,6 +248,46 @@ desktop 命令（`commands/crypto.rs`）在进程内携带字节与可选口令
 （无编程播种），发送一封加密+签名邮件，并断言其解密且验证，在公钥导入上钉住
 has_private 守卫。除非 `ASTRA_LIVE_HARNESS=1` 否则跳过。
 
+## 已收集密钥审阅面（SP4d-2）
+
+接收与发送弧把对等体密钥静默暂存进 `collected_keys`（上述 Autocrypt 消费；
+gossip、WKD 与 S/MIME 收割同样如此），但人需要一个审阅、接受或拒绝暂存密钥的
+途径。SP4d-2 在完整的存储层之上落地 desktop 审阅/提升面：列出暂存密钥、接受
+（提升进 `crypto_keys` 并附带一个信任决定）、接受为已验证、或拒绝（移除暂存行
+并附带一个 rejected 决定）。CLI 密钥动词与 sidecar 虚拟工具是 SP4d-1b（desktop
+优先的先例）。
+
+app 方法（`astra-app/src/collected.rs`，`keys.rs` 形态）暴露：
+
+- `list_collected(account)`：账户跨两个标准的暂存行，最新优先（存储的
+  `seen_at DESC, id DESC` 排序跨标准合并，同秒平局按行 id 打破）。仅公钥材料。
+- `promote_collected(account, standard, fingerprint, email, verified)`：存储
+  `promote_collected_key`（排空暂存行且绝不降级既有 keystore 行）然后信任写入。
+  这一配对是承重的：仅提升只是接受的一半，显式决定才使提升后的密钥可用于发送
+  （无决定时解析器答 Undecided）并解除 S/MIME 收割锚排除。`verified` 选择总是
+  记录 verified（一次升级）；`unverified` 选择仅在无决定成立时记录 unverified
+  （绝不降级既有的 verified/personal 决定）。接受绑定 `email`，未命名时绑定暂存
+  行的对等体邮箱；无对等体邮箱的密钥无地址可决定，提升仍落地密钥。
+- `reject_collected(account, id, standard, fingerprint, email)`：按 id 移除暂存
+  行并记录一个 `rejected` 决定，故同一密钥的重新暂存副本被解析器拒绝而非静默
+  重新提供（重新暂存副本的 unverified 提升绝不降级既有的拒绝）。
+
+一个共享存储助手（`import.rs` 中的 `record_promote_trust`）以无降级守卫记录
+提升接受，复用 `put_trust_decision` 之上的 `record_import_trust`。
+
+desktop 命令（`commands/crypto.rs`：`list_collected`、`promote_collected`、
+`reject_collected`）携带账户、标准、指纹、暂存 id、邮箱与 verified 标志，在宿主
+注册。无秘密跨越此面（已收集密钥是公钥材料）。web 入口位于设置 Keys 类别
+（`features/keys/CollectedKeysReview.tsx`，接入 Keys 详情）：每个暂存行显示指纹、
+对等体邮箱、来源与标准，并提供 Accept（unverified）、Accept as verified 与
+Reject。指纹被显示，故人在选择 Accept as verified 前可带外核验它。wire 类型
+骑乘 `services/crypto.ts`，绝非 `ipc.ts`。
+
+门控活实证（`tests_live_harness/crypto_collected_review.rs`）接收一封暂存对等体
+密钥的 Autocrypt 邮件，经产品面列出它，提升它（信任决定落地），并发送由提升
+单独准入的给该对等体的加密邮件（无编程信任播种）；它拒绝第二个暂存密钥并断言
+其被移除，然后撤回每个副本。除非 `ASTRA_LIVE_HARNESS=1` 否则跳过。
+
 ## 已知缺口，记录而非静默
 
 - 按标准仅加密接收：OpenPGP PGP/MIME（SP4c-1）与 S/MIME enveloped-data
@@ -259,10 +299,10 @@ has_private 守卫。除非 `ASTRA_LIVE_HARNESS=1` 否则跳过。
   `password_protected` 字段）：活实证经 `encrypt_symmetric` 手工构造 SKESK
   邮件。接线 W9 发送是一个协调后续。口令绝不持久化，故重新打开会重提示；
   会话口令缓存是后续。密码对话框仅 shell（阅读 pane），恰如其他接收面。
-- Autocrypt 暂存静默：已收集密钥的审阅/提升 UI 是 SP4d。发送门在密文内发出
-  `Autocrypt-Gossip`，但尚无明文自身 `Autocrypt` 头；当传入邮件携带明文头
-  （对等客户端的）时消费读取它，自身头的发出是后续。gossip 消费读取发送门
-  发出的受保护头包装器；超出该包装器的第三方 gossip 放置是后续。
+- Autocrypt 暂存静默：已收集密钥的审阅/提升 UI 在 SP4d-2 落地（上述审阅面）。
+  发送门在密文内发出 `Autocrypt-Gossip`，但尚无明文自身 `Autocrypt` 头；当传入
+  邮件携带明文头（对等客户端的）时消费读取它，自身头的发出是后续。gossip 消费
+  读取发送门发出的受保护头包装器；超出该包装器的第三方 gossip 放置是后续。
 - S/MIME 吊销抓取在 SP4c-3b 落地（上述 CRL 抓取路径）：接收钩子经失败即软的
   `CrlFetcher` 端口抓取或缓存签名者链的分发点 CRL，故实践中吊销签名者使链
   硬失败。抓取失败或空缓存仍读作 unchecked（失败即软，绝不阻塞打开）。链的
@@ -270,8 +310,14 @@ has_private 守卫。除非 `ASTRA_LIVE_HARNESS=1` 否则跳过。
   硬化（私有/环回地址过滤）与保护隐私的 OCSP/stapling 替代仍是后续。
 - 密钥导入面在 SP4d-1 落地（上述密钥导入面）：自身私钥与对等体公钥证书经
   产品面导入，活实证如今导入而非播种。CLI 密钥动词与 sidecar 虚拟工具是
-  SP4d-1b；已收集密钥的审阅/提升面是 SP4d-2。密钥生成、导出、超出首个导入的
-  默认密钥选择，以及编写器收件人信任 UI 是后续。
+  SP4d-1b；已收集密钥的审阅/提升面在 SP4d-2 落地（上述审阅面）。密钥生成、
+  导出、超出首个导入的默认密钥选择，以及编写器收件人信任 UI 是后续。
+- 已收集密钥审阅面在 SP4d-2 落地（上述审阅面）：经产品面列出、接受、接受为
+  已验证与拒绝，提升与使密钥可用于发送的信任决定配对，活实证如今提升而非
+  播种。CLI 密钥动词（`keys collected`/`promote`）与 sidecar 虚拟工具是
+  SP4d-1b（动词随其虚拟权限工具落地，needs-approval 默认）。pin 入口
+  （`set_pinned_key`，标记提升后的密钥为首选）是后续；提升无需它即落地可用
+  于发送的密钥。编写器收件人信任 UI（发送时显示信任状态）是后续。
 - 仅携带 Issuer KeyID（无 IssuerFingerprint 子包）的遗留签名可验证却报告
   无签名者指纹，故标为 NotSigned 而非 ValidVerified。一个退化，绝非假的
   「已验证」；现代客户端发出 IssuerFingerprint。
@@ -296,6 +342,7 @@ has_private 守卫。除非 `ASTRA_LIVE_HARNESS=1` 否则跳过。
 | W9 密码流：SKESK 检测、needs-password 裁决、内存口令、重提示 | ✅ | `astra-crypto-store/src/receive.rs`、`astra-app/src/reading_password.rs`、`crypto_decode.rs`、`client/desktop/src/commands/crypto.rs`、`client/web/src/components/reading-pane/PasswordDialog.tsx` |
 | 静态草稿：加密镜像、保存/丢弃钩子、恢复读取接缝、失败即关闭拒绝 | ✅ | `astra-crypto-store/src/drafts.rs`、`migrations/0005_encrypted_drafts.sql`、`astra-app/src/drafts/encrypt.rs`、`drafts.rs`、`drafts/resume.rs` |
 | 密钥导入：仅公钥存储路径、私有后端路径、has_private 守卫、内存口令、信任写入 | ✅ | `astra-crypto-store/src/import.rs`、`astra-app/src/keys.rs`、`client/desktop/src/commands/crypto.rs`、`client/web/src/features/keys/KeysDetail.tsx` |
-| 活实证（发送加密、打开、解密、否定臂、静态草稿、密钥导入） | ✅ | `tests_live_harness/crypto_receive.rs`、`crypto_receive_smime.rs`、`crypto_receive_autocrypt.rs`、`crypto_receive_crl.rs`、`crypto_receive_password.rs`、`crypto_drafts_at_rest.rs`、`crypto_key_import.rs` |
+| 已收集密钥审阅：列出、提升加信任配对、无降级守卫、rejected 决定 | ✅ | `astra-crypto-store/src/import.rs`（`record_promote_trust`）、`astra-app/src/collected.rs`、`client/desktop/src/commands/crypto.rs`、`client/web/src/features/keys/CollectedKeysReview.tsx` |
+| 活实证（发送加密、打开、解密、否定臂、静态草稿、密钥导入、已收集审阅） | ✅ | `tests_live_harness/crypto_receive.rs`、`crypto_receive_smime.rs`、`crypto_receive_autocrypt.rs`、`crypto_receive_crl.rs`、`crypto_receive_password.rs`、`crypto_drafts_at_rest.rs`、`crypto_key_import.rs`、`crypto_collected_review.rs` |
 | 内联 armor、分离签名 | N/A | SP4c-3，上述缺口 |
 | 密钥生成与导出、token 注册表、原生安全 UI | N/A | SP4d 后续 |
