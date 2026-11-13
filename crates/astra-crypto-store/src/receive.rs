@@ -543,9 +543,32 @@ pub async fn receive(
     message_id: &str,
     source: &[u8],
 ) -> ReceiveOutcome {
+    receive_with_fetcher(
+        store,
+        account_id,
+        message_id,
+        source,
+        &crate::NoopCrlFetcher,
+    )
+    .await
+}
+
+/// [`receive`] with a CRL fetch port (SP4c-3b D2). The S/MIME arm fetches-or-
+/// caches the signer chain's distribution-point CRLs through `fetcher` before
+/// the chain verify (fail-soft); the OpenPGP arm is unchanged (no X.509 chain).
+pub async fn receive_with_fetcher(
+    store: &Arc<CryptoStore>,
+    account_id: &str,
+    message_id: &str,
+    source: &[u8],
+    fetcher: &dyn crate::CrlFetcher,
+) -> ReceiveOutcome {
     if let Ok((_outer, entity)) = mime::split_message(source) {
         if smime_mime::is_smime_enveloped(&entity.0) {
-            return crate::receive_smime(store, account_id, message_id, source).await;
+            return crate::receive_smime_with_fetcher(
+                store, account_id, message_id, source, fetcher,
+            )
+            .await;
         }
     }
     receive_openpgp(store, account_id, message_id, source).await

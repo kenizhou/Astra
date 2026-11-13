@@ -53,7 +53,13 @@ pub use collected::{
     list_collected_keys_for_peer, promote_collected_key, remove_collected_key, stage_collected_key,
     stage_collected_key_if_absent, CollectedKeyRow,
 };
-pub use crl::{get_crl, list_crls, prune_stale_crls, upsert_crl, CrlCacheRow};
+pub use crl::{
+    fetch_or_cache_crl, get_crl, list_crls, prune_stale_crls, upsert_crl, CrlCacheRow, CrlFetcher,
+    FetchedCrl, NoopCrlFetcher,
+};
+// The smime CRL parser the host fetcher uses to fill `FetchedCrl` metadata;
+// re-exported so the host reaches it through the store (its existing dep).
+pub use astra_crypto_smime::{crl_metadata_of_der, CrlMetadata};
 pub use default::{
     backfill_cert_summaries, delete_crypto_key, get_default_signing_key, set_default_signing_key,
     DefaultKeyRow,
@@ -67,8 +73,8 @@ pub use keystore::SqliteKeyStore;
 pub use password::apply_password_crypto;
 pub use pinned::{list_pinned_keys, remove_pinned_key, set_pinned_key, PinnedKey};
 pub use policy::StoreCryptoPolicy;
-pub use receive::{receive, receive_openpgp, ReceiveOutcome, ReceiveState};
-pub use receive_smime::receive_smime;
+pub use receive::{receive, receive_openpgp, receive_with_fetcher, ReceiveOutcome, ReceiveState};
+pub use receive_smime::{receive_smime, receive_smime_with_fetcher};
 pub use resolve::{
     key_material_expired, pin_preferred_handle, recipient_trust_failures, resolve_recipient_status,
     resolve_recipient_status_at, RecipientTrustFailure, RecipientTrustState, RecipientTrustStatus,

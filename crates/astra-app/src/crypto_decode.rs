@@ -20,7 +20,9 @@
 use std::sync::Arc;
 
 use astra_crypto_core::{SignatureState, Standard};
-use astra_crypto_store::{receive, CryptoStore, ReceiveOutcome, ReceiveState};
+use astra_crypto_store::{
+    receive_with_fetcher, CrlFetcher, CryptoStore, NoopCrlFetcher, ReceiveOutcome, ReceiveState,
+};
 use astra_viewmodel::{AttachmentRow, SecurityBannerView, SecurityLevelView};
 
 use crate::{DecodeOutcome, MessageDecoder, MessageRef};
@@ -28,28 +30,40 @@ use crate::{DecodeOutcome, MessageDecoder, MessageRef};
 /// The built-in OpenPGP receive decoder over the shared crypto store: the
 /// account's private keys and collected certs resolve through it, and every
 /// verdict lands its `message_crypto_results` row keyed by the message's
-/// account and provider key.
+/// account and provider key. The S/MIME arm fetches-or-caches the signer
+/// chain's CRLs through the attached [`CrlFetcher`] before the chain verify
+/// (fail-soft); the default no-op fetcher keeps the offline path cache-only.
 #[derive(Debug)]
 pub struct CryptoDecoder {
     store: Arc<CryptoStore>,
+    fetcher: Arc<dyn CrlFetcher>,
 }
 
 impl CryptoDecoder {
-    /// A decoder reading its keys from `store`.
+    /// A decoder reading its keys from `store`, with the offline no-op CRL
+    /// fetcher (revocation uses only the already-cached CRLs).
     #[must_use]
     pub fn new(store: Arc<CryptoStore>) -> Self {
-        Self { store }
+        Self::with_crl_fetcher(store, Arc::new(NoopCrlFetcher))
+    }
+
+    /// A decoder reading its keys from `store` and fetching CRLs through
+    /// `fetcher` (the host's bounded HTTP implementation).
+    #[must_use]
+    pub fn with_crl_fetcher(store: Arc<CryptoStore>, fetcher: Arc<dyn CrlFetcher>) -> Self {
+        Self { store, fetcher }
     }
 }
 
 #[async_trait::async_trait]
 impl MessageDecoder for CryptoDecoder {
     async fn decode(&self, message: &MessageRef, raw: &[u8]) -> Option<DecodeOutcome> {
-        let outcome = receive(
+        let outcome = receive_with_fetcher(
             &self.store,
             message.account.as_str(),
             message.key.as_str(),
             raw,
+            self.fetcher.as_ref(),
         )
         .await;
         match outcome.state {

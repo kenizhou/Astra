@@ -93,20 +93,49 @@ keystore 的证书路径（那会把它们泄入锚集）。
 与 `resolve_signer`，故入暂存的密钥改善下一封邮件的内嵌签名验证。已收集
 密钥的审阅/提升面是 SP4d；此处暂存静默。
 
+## CRL 抓取路径（SP4c-3b）
+
+S/MIME 链检查消费 CRL 缓存；SP4c-3b 填充它。在 `verify_with_context` 之前，
+接收钩子从签名者叶与每个中间证书提取 CRL 分发点 URL（smime crate 的
+`crl_distribution_point_urls`，SP4c-2 解析规则），去重，并经 `CrlFetcher`
+端口逐个抓取或缓存。仅 `http` 与 `https` URL 可接受：分发点 URL 受攻击者
+影响（它来自证书），故任何其他 scheme 被丢弃。
+
+端口遵循 `SendCryptoPolicy` 先例：store 定义 `CrlFetcher`，宿主实现它，故
+store 绝不依赖 astra-app。desktop 实现（`HttpCrlFetcher`）做一次有界 HTTP
+GET：短超时、响应大小上限、仅 http(s)、无重定向。新鲜缓存的 CRL 直接沿用
+而不抓取；过期或缺失的触发一次抓取与 upsert。抓取失败即软：任何传输、
+scheme、大小或解析失败都把证书降级为 unchecked 吊销，绝不阻塞邮件打开
+（链本就软失败）。链按签名时刻验证，故新抓取的 CRL 仍对签名瞬间检查。来自
+恶意 URL 的伪造 CRL 失败于链的 CRL 签名检查（检查器对签发 CA 验证）。
+
+吊销状态如今在实践中可达。吊销签名者序列号的 CRL 使链硬失败：
+`chain_valid=false`、`revocation_state=revoked`、Invalid 签名状态，以及被
+区分的吊销 banner。无可用 CRL（空缓存、抓取失败、或链读作 unchecked 的过期
+CRL）时打开以 `revocation_state=unchecked` 继续。离线 no-op 抓取器在未附
+宿主抓取器时使阅读路径仅缓存。
+
+两个考量被记录而非隐藏。隐私：抓取 CRL 向 CA 暴露正在验证哪些证书（一个
+追踪向量）；OCSP/stapling 替代是后续。残余盲 SSRF：scheme 过滤接受 http(s)
+但不阻止私有或环回地址，故恶意分发点仍能把有界 GET 瞄准内部主机；地址段
+过滤是硬化后续。抓取保持有界且内联；后台预取是后续。
+
 ## 已知缺口，记录而非静默
 
 - 按标准仅加密接收：OpenPGP PGP/MIME（SP4c-1）与 S/MIME enveloped-data
   （SP4c-2）。内联 PGP armor 与分离签名形态（PGP multipart/signed、S/MIME
   multipart/signed 与不透明 signed-data）是后续；Autocrypt 消费在 SP4c-3a
-  落地（上述接收半）；CRL 抓取（SP4c-3b）与 W9 密码流程（SP4c-3c）仍在；
-  静态加密草稿是 SP4c-4。
+  落地（上述接收半）；CRL 抓取在 SP4c-3b 落地（上述抓取路径）；W9 密码流程
+  （SP4c-3c）仍在；静态加密草稿是 SP4c-4。
 - Autocrypt 暂存静默：已收集密钥的审阅/提升 UI 是 SP4d。发送门在密文内发出
   `Autocrypt-Gossip`，但尚无明文自身 `Autocrypt` 头；当传入邮件携带明文头
   （对等客户端的）时消费读取它，自身头的发出是后续。gossip 消费读取发送门
   发出的受保护头包装器；超出该包装器的第三方 gossip 放置是后续。
-- S/MIME 吊销仅缓存：CRL 缓存在 SP4c-3 抓取器落地前为空，故实践中吊销读作
-  unchecked（有 CRL 时吊销证书仍使链硬失败）。链的 Stale 吊销状态在抓取器
-  落地前持久化为 unchecked。
+- S/MIME 吊销抓取在 SP4c-3b 落地（上述 CRL 抓取路径）：接收钩子经失败即软的
+  `CrlFetcher` 端口抓取或缓存签名者链的分发点 CRL，故实践中吊销签名者使链
+  硬失败。抓取失败或空缓存仍读作 unchecked（失败即软，绝不阻塞打开）。链的
+  Stale 吊销状态持久化为 unchecked（Good/Stale 粒度是后续）。残余盲 SSRF
+  硬化（私有/环回地址过滤）与保护隐私的 OCSP/stapling 替代仍是后续。
 - 尚无密钥管理面（SP4d）：实证以编程方式播下接收者密钥。一个最小导入
   路径是使接收在测试之外可用的承重后续。
 - 仅携带 Issuer KeyID（无 IssuerFingerprint 子包）的遗留签名可验证却报告
@@ -129,6 +158,7 @@ keystore 的证书路径（那会把它们泄入锚集）。
 | 复合解码器（加密裁决优先、插件落穿） | ✅ | `client/desktop/src/decode.rs` |
 | 失败即关闭：无密钥/失败/篡改绝不渲染密文 | ✅ | closed 臂 + 结构性接缝清除 |
 | Autocrypt 消费：传入解析、addr 绑定、静默暂存 | ✅ | `astra-crypto-store/src/autocrypt.rs`、`receive.rs` |
-| 活实证（发送加密、打开、解密、否定臂） | ✅ | `tests_live_harness/crypto_receive.rs`、`crypto_receive_smime.rs`、`crypto_receive_autocrypt.rs` |
-| 内联 armor、分离签名、CRL 抓取、静态草稿 | N/A | SP4c-3/4，上述缺口 |
+| CRL 抓取：DP 提取、失败即软抓取器端口、接收钩子 | ✅ | `astra-crypto-smime/src/cert.rs`、`astra-crypto-store/src/crl.rs`、`receive_smime.rs`、`client/desktop/src/crl_fetch.rs` |
+| 活实证（发送加密、打开、解密、否定臂） | ✅ | `tests_live_harness/crypto_receive.rs`、`crypto_receive_smime.rs`、`crypto_receive_autocrypt.rs`、`crypto_receive_crl.rs` |
+| 内联 armor、分离签名、静态草稿 | N/A | SP4c-3/4，上述缺口 |
 | 密钥管理、token 注册表、原生安全 UI | N/A | SP4d |

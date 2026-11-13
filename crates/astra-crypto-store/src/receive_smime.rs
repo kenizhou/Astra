@@ -23,15 +23,16 @@ use astra_crypto_core::{
     TrustState,
 };
 use astra_crypto_smime::{
-    cert_summary_of_der, extract_intermediates, extract_signed_content, extract_signer_cert,
-    fingerprint_of_cert_der, is_signed_data, SmimeBackend,
+    cert_summary_of_der, crl_distribution_point_urls, extract_intermediates,
+    extract_signed_content, extract_signer_cert, fingerprint_of_cert_der, is_signed_data,
+    SmimeBackend,
 };
 
 use crate::receive::{write_result, ResultVerdict};
 use crate::{
-    get_latest_trust_decision, insert_harvested_cert, list_crls, list_crypto_keys_for_account,
-    list_intermediate_certs, list_trust_anchor_certs, CryptoKeyRow, CryptoStore, ReceiveOutcome,
-    ReceiveState, SqliteKeyStore,
+    fetch_or_cache_crl, get_latest_trust_decision, insert_harvested_cert, list_crls,
+    list_crypto_keys_for_account, list_intermediate_certs, list_trust_anchor_certs, CrlFetcher,
+    CryptoKeyRow, CryptoStore, NoopCrlFetcher, ReceiveOutcome, ReceiveState, SqliteKeyStore,
 };
 
 /// Opens one incoming S/MIME enveloped message for `account_id`, persisting the
@@ -45,11 +46,30 @@ use crate::{
 /// harvest the signer leaf; persist the result row; restore the protected
 /// subject. A source that is not the crypto framing answers
 /// [`ReceiveState::NotEncrypted`] and writes no row.
+///
+/// The offline entry: no CRL fetcher is attached, so revocation uses only the
+/// already-cached CRLs (the [`NoopCrlFetcher`] default). The host reading path
+/// calls [`receive_smime_with_fetcher`] to populate the cache first.
 pub async fn receive_smime(
     store: &Arc<CryptoStore>,
     account_id: &str,
     message_id: &str,
     source: &[u8],
+) -> ReceiveOutcome {
+    receive_smime_with_fetcher(store, account_id, message_id, source, &NoopCrlFetcher).await
+}
+
+/// [`receive_smime`] with a CRL fetch port (SP4c-3b D2). Before the chain
+/// verify, the signer leaf's and intermediates' distribution-point URLs are
+/// extracted and each CRL is fetched-or-cached through `fetcher` (fail-soft:
+/// a fetch failure degrades to unchecked and never blocks the open). The
+/// refreshed cache then feeds the chain validation.
+pub async fn receive_smime_with_fetcher(
+    store: &Arc<CryptoStore>,
+    account_id: &str,
+    message_id: &str,
+    source: &[u8],
+    fetcher: &dyn CrlFetcher,
 ) -> ReceiveOutcome {
     // 1. Detect + unwrap the S/MIME enveloped framing. Anything else is left
     //    untouched.
@@ -190,6 +210,7 @@ pub async fn receive_smime(
             &econtent,
             from_email.as_deref(),
             &rows,
+            fetcher,
         )
         .await;
         (econtent, Some(outcome))
@@ -291,6 +312,7 @@ struct Verified {
 /// with the store-resolved inputs, harvest the signer leaf, and map the state
 /// ladder. The chain fields derive from the verdict: `Invalid` → chain invalid,
 /// the valid states → chain valid, `UnknownKey` → no chain assessment.
+#[allow(clippy::too_many_arguments)]
 async fn verify_signed(
     backend: &SmimeBackend,
     store: &Arc<CryptoStore>,
@@ -299,6 +321,7 @@ async fn verify_signed(
     econtent: &[u8],
     from_email: Option<&str>,
     own_rows: &[CryptoKeyRow],
+    fetcher: &dyn CrlFetcher,
 ) -> Verified {
     // The signer leaf: its fingerprint resolves the trust decision, and its DER
     // is harvested (never auto-trusted). A leaf that will not extract degrades
@@ -318,6 +341,13 @@ async fn verify_signed(
     // Resolve the verify inputs from the store.
     let anchors = list_trust_anchor_certs(store, account_id).unwrap_or_default();
     let intermediates = merge_intermediates(store, account_id, signed_data_der);
+
+    // SP4c-3b CRL hook: extract the distribution-point URLs from the signer
+    // leaf + intermediates, fetch-or-cache each (fail-soft), then the refreshed
+    // cache feeds the chain. Every step is best-effort: a parse or fetch failure
+    // degrades to unchecked and never blocks the open.
+    refresh_crl_cache(store, fetcher, leaf_der.as_deref(), &intermediates).await;
+
     let crls = list_crls(store).unwrap_or_default();
     let signer_trust = resolve_signer_trust(
         store,
@@ -384,8 +414,8 @@ async fn verify_signed(
         | SignatureState::ValidUnverified => Some(true),
         _ => None,
     };
-    // The CRL cache is empty in practice (no fetcher until SP4c-3), so
-    // revocation is unchecked unless the chain hard-failed on a revocation.
+    // The persisted state marks a chain revocation hard-fail as revoked;
+    // otherwise it reads unchecked (the Good/Stale granularity is a follow-up).
     let revocation_state = if result.revocation_reason.is_some() {
         "revoked"
     } else {
@@ -400,6 +430,39 @@ async fn verify_signed(
         revocation_state: revocation_state.to_string(),
         failure_reason: result.failure_reason,
         revocation_reason: result.revocation_reason,
+    }
+}
+
+/// Populate the CRL cache for the signer chain (SP4c-3b D2). Extracts the
+/// distribution-point URLs from the signer leaf and every intermediate,
+/// deduplicates them, and fetches-or-caches each through the port at the
+/// current wall-clock instant. Fail-soft throughout: a cert that will not
+/// parse contributes no URLs, and a fetch failure leaves the cache as-is, so
+/// the message open is never blocked. The chain validates as-of signing time,
+/// so a freshly fetched CRL is still checked against the signing instant.
+async fn refresh_crl_cache(
+    store: &Arc<CryptoStore>,
+    fetcher: &dyn CrlFetcher,
+    leaf_der: Option<&[u8]>,
+    intermediates: &[Vec<u8>],
+) {
+    let now_epoch = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or_else(|_| "0".to_string(), |d| d.as_secs().to_string());
+
+    let mut seen = std::collections::HashSet::new();
+    let certs = leaf_der
+        .into_iter()
+        .chain(intermediates.iter().map(Vec::as_slice));
+    for der in certs {
+        let Ok(urls) = crl_distribution_point_urls(der) else {
+            continue;
+        };
+        for url in urls {
+            if seen.insert(url.clone()) {
+                fetch_or_cache_crl(store, fetcher, &url, &now_epoch).await;
+            }
+        }
     }
 }
 

@@ -312,6 +312,79 @@ fn spki_display(cert: &x509_parser::certificate::X509Certificate<'_>) -> String 
     }
 }
 
+/// Extract the CRL distribution-point URLs from a DER-encoded X.509 certificate
+/// (SP4c-3b D1). Reads the `cRLDistributionPoints` extension via x509-parser and
+/// collects every `fullName` `uniformResourceIdentifier` general name. Only
+/// `http` and `https` URLs are admissible: a distribution-point URL is
+/// attacker-influenced (it comes from the cert), so any other scheme is dropped.
+/// URLs are deduplicated, preserving first-seen order. A cert with no
+/// distribution-point extension yields an empty list. Returns `Err(Malformed)`
+/// for anything that is not a parseable X.509 cert.
+pub fn crl_distribution_point_urls(cert_der: &[u8]) -> CcResult<Vec<String>> {
+    let (_rem, cert) = x509_parser::parse_x509_certificate(cert_der)
+        .map_err(|e| CryptoError::Malformed(format!("parse cert DER: {e}")))?;
+    let ext = match cert
+        .get_extension_unique(&x509_parser::oid_registry::OID_X509_EXT_CRL_DISTRIBUTION_POINTS)
+    {
+        Ok(Some(ext)) => ext,
+        _ => return Ok(Vec::new()),
+    };
+    let points = match ext.parsed_extension() {
+        x509_parser::extensions::ParsedExtension::CRLDistributionPoints(points) => points,
+        _ => return Ok(Vec::new()),
+    };
+    let mut urls: Vec<String> = Vec::new();
+    for point in points.iter() {
+        let Some(x509_parser::extensions::DistributionPointName::FullName(names)) =
+            &point.distribution_point
+        else {
+            continue;
+        };
+        for name in names {
+            if let x509_parser::extensions::GeneralName::URI(uri) = name {
+                if is_http_url(uri) && !urls.iter().any(|u| u == uri) {
+                    urls.push((*uri).to_string());
+                }
+            }
+        }
+    }
+    Ok(urls)
+}
+
+/// Whether a distribution-point URL uses an admissible `http` or `https` scheme
+/// (case-insensitive, per RFC 3986). Anything else (ldap, ftp, file, a bare
+/// string) is rejected.
+fn is_http_url(url: &str) -> bool {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return false;
+    };
+    !rest.is_empty() && matches!(scheme.to_ascii_lowercase().as_str(), "http" | "https")
+}
+
+/// The cache-relevant metadata parsed from a CRL's DER (SP4c-3b): the issuing
+/// CA's distinguished name (for display) and the `nextUpdate` instant as an
+/// epoch-seconds string (the cache's freshness key). Parsing lives here in the
+/// smime crate, never the store; the receive fetch-or-cache layer calls it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CrlMetadata {
+    /// The CRL issuer's distinguished name (RFC 4514 string), when present.
+    pub issuer_dn: Option<String>,
+    /// The `nextUpdate` time as epoch seconds, when the CRL carries one.
+    pub next_update: Option<String>,
+}
+
+/// Parse the issuer DN and `nextUpdate` from a DER-encoded CRL via x509-parser.
+/// Returns `Err(Malformed)` for anything that is not a parseable CRL; the caller
+/// treats that as "no usable CRL" and degrades to unchecked (fail-soft).
+pub fn crl_metadata_of_der(crl_der: &[u8]) -> CcResult<CrlMetadata> {
+    let (_rem, crl) = x509_parser::parse_x509_crl(crl_der)
+        .map_err(|e| CryptoError::Malformed(format!("parse CRL DER: {e}")))?;
+    Ok(CrlMetadata {
+        issuer_dn: Some(crl.issuer().to_string()),
+        next_update: crl.next_update().map(|t| t.timestamp().to_string()),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -373,5 +446,116 @@ mod tests {
     fn summary_rejects_non_x509_blob() {
         assert!(cert_summary_of_der(b"-----BEGIN PGP PUBLIC KEY BLOCK-----").is_err());
         assert!(cert_summary_of_der(b"").is_err());
+    }
+
+    // --- SP4c-3b: CRL distribution-point extraction ---
+
+    use x509_cert::ext::pkix::crl::dp::DistributionPoint;
+    use x509_cert::ext::pkix::name::DistributionPointName;
+    use x509_cert::ext::pkix::CrlDistributionPoints;
+
+    /// Build a self-signed cert carrying a `cRLDistributionPoints` extension
+    /// with one `fullName` URI per entry of `urls`. An empty slice builds a
+    /// cert with no distribution-point extension at all.
+    fn cert_with_dp_urls(urls: &[&str]) -> Vec<u8> {
+        let mut rng = rand::rng();
+        let signing_key = SigningKey::generate_from_rng(&mut rng);
+        let pub_spki = SubjectPublicKeyInfo::from_key(signing_key.verifying_key()).expect("spki");
+        let subject = Name::from_str("CN=dp-test").expect("subject");
+        let profile = SmimeLeafProfile { subject };
+        let serial = SerialNumber::from(7u32);
+        let validity = Validity::from_now(Duration::from_secs(3600)).expect("validity");
+        let mut builder =
+            CertificateBuilder::new(profile, serial, validity, pub_spki).expect("builder");
+        if !urls.is_empty() {
+            let names: Vec<GeneralName> = urls
+                .iter()
+                .map(|u| {
+                    GeneralName::UniformResourceIdentifier(
+                        Ia5String::new(u.as_bytes()).expect("uri ia5"),
+                    )
+                })
+                .collect();
+            let dp = DistributionPoint {
+                distribution_point: Some(DistributionPointName::FullName(names)),
+                reasons: None,
+                crl_issuer: None,
+            };
+            builder
+                .add_extension(&CrlDistributionPoints(vec![dp]))
+                .expect("dp ext");
+        }
+        let cert = builder
+            .build::<_, DerSignature>(&signing_key)
+            .expect("build");
+        cert.to_der().expect("to_der")
+    }
+
+    #[test]
+    fn dp_extraction_yields_the_http_url() {
+        let der = cert_with_dp_urls(&["http://ca.example.com/crl.der"]);
+        let urls = crl_distribution_point_urls(&der).expect("extract");
+        assert_eq!(urls, vec!["http://ca.example.com/crl.der".to_string()]);
+    }
+
+    #[test]
+    fn dp_extraction_yields_https_and_dedups_preserving_order() {
+        let der = cert_with_dp_urls(&[
+            "https://ca.example.com/a.crl",
+            "http://ca.example.com/b.crl",
+            "https://ca.example.com/a.crl",
+        ]);
+        let urls = crl_distribution_point_urls(&der).expect("extract");
+        assert_eq!(
+            urls,
+            vec![
+                "https://ca.example.com/a.crl".to_string(),
+                "http://ca.example.com/b.crl".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn dp_extraction_without_the_extension_yields_nothing() {
+        let der = cert_with_dp_urls(&[]);
+        assert!(crl_distribution_point_urls(&der)
+            .expect("extract")
+            .is_empty());
+        // A production self-signed leaf carries no DP extension either.
+        let built = build_self_signed_smime_cert("alice@kylins.com").expect("build");
+        assert!(crl_distribution_point_urls(&built.cert_der)
+            .expect("extract")
+            .is_empty());
+    }
+
+    #[test]
+    fn dp_extraction_rejects_non_http_schemes() {
+        let der = cert_with_dp_urls(&[
+            "ldap://ca.example.com/crl",
+            "ftp://ca.example.com/crl",
+            "file:///etc/crl",
+            "http://ok.example.com/crl.der",
+        ]);
+        let urls = crl_distribution_point_urls(&der).expect("extract");
+        assert_eq!(urls, vec!["http://ok.example.com/crl.der".to_string()]);
+    }
+
+    #[test]
+    fn dp_extraction_accepts_an_uppercase_scheme() {
+        let der = cert_with_dp_urls(&["HTTPS://ca.example.com/crl.der"]);
+        let urls = crl_distribution_point_urls(&der).expect("extract");
+        assert_eq!(urls, vec!["HTTPS://ca.example.com/crl.der".to_string()]);
+    }
+
+    #[test]
+    fn dp_extraction_rejects_a_non_cert_blob() {
+        assert!(crl_distribution_point_urls(b"not a cert").is_err());
+        assert!(crl_distribution_point_urls(b"").is_err());
+    }
+
+    #[test]
+    fn crl_metadata_rejects_a_non_crl_blob() {
+        assert!(crl_metadata_of_der(b"not a crl").is_err());
+        assert!(crl_metadata_of_der(b"").is_err());
     }
 }

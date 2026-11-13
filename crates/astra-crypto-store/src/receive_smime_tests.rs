@@ -12,16 +12,16 @@ use std::sync::Arc;
 
 use astra_crypto_core::{mime, CryptoBackend, CryptoPolicy, SignatureState, Standard};
 use astra_crypto_smime::testing::{
-    build_intermediate_signed_by, build_leaf_signed_by, build_self_signed_ca,
-    build_signed_data_with_certs, BuiltCert,
+    build_crl, build_intermediate_signed_by, build_leaf_signed_by, build_leaf_signed_by_with_dp,
+    build_self_signed_ca, build_signed_data_with_certs, BuiltCert,
 };
 use astra_crypto_smime::{fingerprint_of_cert_der, SmimeBackend};
 use base64::Engine;
 
 use super::receive_smime;
 use crate::{
-    upsert_crypto_key, upsert_intermediate_cert, CryptoKeyRecord, CryptoKeyRow, CryptoStore,
-    ReceiveState, SqliteKeyStore,
+    get_crl, receive_smime_with_fetcher, upsert_crypto_key, upsert_intermediate_cert, CrlFetcher,
+    CryptoKeyRecord, CryptoKeyRow, CryptoStore, FetchedCrl, ReceiveState, SqliteKeyStore,
 };
 
 const PLAIN_ENTITY: &[u8] = b"Content-Type: text/plain; charset=utf-8\r\n\r\nthe secret words";
@@ -499,4 +499,209 @@ fn a_token_row_builds_a_token_handle_not_software() {
         matches!(token.handle, astra_crypto_core::KeyHandle::Token { .. }),
         "a token row builds a Token handle, mirroring the OpenPGP path"
     );
+}
+
+// --- SP4c-3b: the CRL receive hook (fetch-or-cache feeds the chain) ---
+
+/// The distribution-point URL the fixture leaf advertises.
+const DP_URL: &str = "http://crl.test/inter.crl";
+
+/// A fetcher that serves one fixed CRL (or fails). No socket: the hook is
+/// proved offline against a hand-built CRL.
+#[derive(Debug)]
+struct ServingFetcher {
+    crl_der: Vec<u8>,
+    fail: bool,
+}
+
+#[async_trait::async_trait]
+impl CrlFetcher for ServingFetcher {
+    async fn fetch(&self, _crl_url: &str) -> Result<FetchedCrl, String> {
+        if self.fail {
+            return Err("the CRL endpoint is unreachable".to_string());
+        }
+        let next_update = (std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            + 86_400)
+            .to_string();
+        Ok(FetchedCrl {
+            crl_der: self.crl_der.clone(),
+            issuer_dn: None,
+            next_update: Some(next_update),
+        })
+    }
+}
+
+/// The trusted-chain fixture whose sender leaf advertises [`DP_URL`]. Returns
+/// the store, the RFC5322 source, and the chain (so a test can build a CRL
+/// signed by the intermediate that revokes the leaf serial).
+async fn crl_fixture() -> (Arc<CryptoStore>, Vec<u8>, Chain) {
+    let store = test_store();
+    let root = build_self_signed_ca("CN=Root");
+    let inter = build_intermediate_signed_by("CN=Inter", &root);
+    let leaf = build_leaf_signed_by_with_dp("a1@x.com", &inter, &[DP_URL]);
+    let recipient = build_leaf_signed_by("a2@x.com", &root);
+    let chain = Chain {
+        root,
+        inter,
+        leaf,
+        recipient,
+    };
+    let leaf_fp = fingerprint_of_cert_der(&chain.leaf.cert_der).unwrap();
+
+    import_identity(&store, "a2", &chain.recipient).await;
+    import_identity(&store, "a1", &chain.leaf).await;
+    insert_public(
+        &store,
+        "a1",
+        Some("a2@x.com"),
+        &chain.recipient.cert_der,
+        "contact",
+    );
+    insert_public(&store, "a2", None, &chain.root.cert_der, "imported");
+    upsert_intermediate_cert(&store, "a2", &chain.inter.cert_der).unwrap();
+    crate::put_trust_decision(
+        &store, "a2", "a1@x.com", "smime", &leaf_fp, "verified", None,
+    )
+    .unwrap();
+
+    let inner_entity =
+        mime::wrap_protected_headers(PLAIN_ENTITY, Some("Subject: the real subject"), true);
+    let plaintext = build_signed_data_with_certs(
+        &inner_entity,
+        &chain.leaf.cert_der,
+        &chain.leaf.priv_pkcs8_der,
+        std::slice::from_ref(&chain.inter.cert_der),
+    );
+    let recip_fp = fingerprint_of_cert_der(&chain.recipient.cert_der).unwrap();
+    let recip_handle = astra_crypto_core::KeyHandleRef {
+        handle: astra_crypto_core::KeyHandle::Software(astra_crypto_core::KeyId(format!(
+            "smime|{recip_fp}"
+        ))),
+        standard: Standard::Smime,
+        fingerprint: astra_crypto_core::Fingerprint::new(recip_fp),
+        usage: astra_crypto_core::KeyUsage::SignAndEncrypt,
+        algorithm: "ECDSA-P256".into(),
+    };
+    let env = backend(&store, "a1")
+        .encrypt(astra_crypto_core::EncryptOp {
+            parts: &[astra_crypto_core::Part {
+                id: astra_crypto_core::PartId("body".into()),
+                kind: astra_crypto_core::PartKind::Body,
+                data: plaintext,
+            }],
+            serialization: astra_crypto_core::SerializationStrategy::SingleMimeBlob,
+            recipients: std::slice::from_ref(&recip_handle),
+            sign_with: None,
+        })
+        .await
+        .expect("encrypt fixture");
+    let entity = mime::wrap_enveloped(&env.parts[0].ciphertext, "enveloped-data");
+    let mut source = b"From: a1@x.com\r\nTo: a2@x.com\r\nSubject: ...\r\n".to_vec();
+    source.extend_from_slice(&entity);
+    (store, source, chain)
+}
+
+#[tokio::test]
+async fn a_revoked_cert_with_a_served_crl_hard_fails_the_chain() {
+    let (store, source, chain) = crl_fixture().await;
+    // The intermediate signs a CRL revoking the sender leaf's serial.
+    let crl_der = build_crl(&chain.inter, &[&chain.leaf]);
+    let fetcher = ServingFetcher {
+        crl_der,
+        fail: false,
+    };
+
+    let out = receive_smime_with_fetcher(&store, "a2", "crl1", &source, &fetcher).await;
+
+    assert_eq!(
+        out.state,
+        ReceiveState::Decrypted,
+        "the open is never blocked"
+    );
+    assert_eq!(out.chain_valid, Some(false), "a revoked cert hard-fails");
+    assert_eq!(out.revocation_state.as_deref(), Some("revoked"));
+    assert_eq!(out.signature_state, SignatureState::Invalid);
+    assert!(out.revocation_reason.is_some(), "the CRLReason is surfaced");
+    // The fetched CRL landed in the cache, keyed by the DP URL.
+    assert!(
+        get_crl(&store, DP_URL).unwrap().is_some(),
+        "the CRL is cached"
+    );
+    let row = read_result(&store, "a2", "crl1").expect("a row lands");
+    assert_eq!(row.revocation, "revoked");
+    assert_eq!(row.chain_valid, Some(0));
+}
+
+#[tokio::test]
+async fn a_fetch_failure_degrades_to_unchecked_and_still_opens() {
+    let (store, source, _chain) = crl_fixture().await;
+    let fetcher = ServingFetcher {
+        crl_der: Vec::new(),
+        fail: true,
+    };
+
+    let out = receive_smime_with_fetcher(&store, "a2", "crl2", &source, &fetcher).await;
+
+    assert_eq!(
+        out.state,
+        ReceiveState::Decrypted,
+        "a fetch failure never blocks"
+    );
+    assert_eq!(out.plain.as_deref(), Some("the secret words"));
+    assert_eq!(out.chain_valid, Some(true), "the chain still validates");
+    assert_eq!(
+        out.revocation_state.as_deref(),
+        Some("unchecked"),
+        "no revocation data → unchecked"
+    );
+    assert_eq!(out.signature_state, SignatureState::ValidVerified);
+    assert!(get_crl(&store, DP_URL).unwrap().is_none(), "nothing cached");
+}
+
+#[tokio::test]
+async fn a_served_non_revoking_crl_still_validates_the_chain() {
+    let (store, source, chain) = crl_fixture().await;
+    // A covering CRL with no revoked entries: the leaf serial is not in it.
+    let crl_der = build_crl(&chain.inter, &[]);
+    let fetcher = ServingFetcher {
+        crl_der,
+        fail: false,
+    };
+
+    let out = receive_smime_with_fetcher(&store, "a2", "crl3", &source, &fetcher).await;
+
+    assert_eq!(out.state, ReceiveState::Decrypted);
+    assert_eq!(out.chain_valid, Some(true));
+    assert_eq!(out.signature_state, SignatureState::ValidVerified);
+    assert!(
+        get_crl(&store, DP_URL).unwrap().is_some(),
+        "the CRL is cached"
+    );
+}
+
+#[tokio::test]
+async fn the_offline_entry_uses_only_the_cache_and_never_fetches() {
+    let (store, source, chain) = crl_fixture().await;
+    // Seed a revoking CRL directly into the cache; the offline entry (no
+    // fetcher) must still honour it via list_crls.
+    let crl_der = build_crl(&chain.inter, &[&chain.leaf]);
+    crate::upsert_crl(
+        &store,
+        &crate::CrlCacheRow {
+            crl_url: DP_URL.to_string(),
+            crl_der,
+            issuer_dn: None,
+            next_update: Some("9999999999".to_string()),
+            fetched_at: "1".to_string(),
+        },
+    )
+    .unwrap();
+
+    let out = receive_smime(&store, "a2", "crl4", &source).await;
+
+    assert_eq!(out.chain_valid, Some(false));
+    assert_eq!(out.revocation_state.as_deref(), Some("revoked"));
 }
