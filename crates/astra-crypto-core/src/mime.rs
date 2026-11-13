@@ -355,15 +355,17 @@ pub(crate) fn split_headers_body(entity: &[u8]) -> Option<(String, Vec<u8>)> {
     }
 }
 
-/// The first header named `name` (case-insensitive), its folded continuation
-/// lines unfolded into a single space-joined value. `None` when absent.
-pub(crate) fn header_value(headers: &str, name: &str) -> Option<String> {
+/// Every header value named `name` (case-insensitive) in a header block, each
+/// with its folded continuation lines unfolded into a single space-joined
+/// value, in the order the headers appear. The shared unfolding core behind
+/// the single-value reader and the pub multi-value reader below.
+fn unfolded_header_values(headers: &str, name: &str) -> Vec<String> {
     let mut current_name = String::new();
     let mut current_val = String::new();
-    let mut found: Option<String> = None;
-    let flush = |cname: &str, cval: &str, found: &mut Option<String>| {
-        if found.is_none() && cname.eq_ignore_ascii_case(name) {
-            *found = Some(cval.trim().to_string());
+    let mut found: Vec<String> = Vec::new();
+    let flush = |cname: &str, cval: &str, found: &mut Vec<String>| {
+        if cname.eq_ignore_ascii_case(name) {
+            found.push(cval.trim().to_string());
         }
     };
     for raw in headers.split('\n') {
@@ -386,6 +388,28 @@ pub(crate) fn header_value(headers: &str, name: &str) -> Option<String> {
     }
     flush(&current_name, &current_val, &mut found);
     found
+}
+
+/// The first header named `name` (case-insensitive), its folded continuation
+/// lines unfolded into a single space-joined value. `None` when absent.
+pub(crate) fn header_value(headers: &str, name: &str) -> Option<String> {
+    unfolded_header_values(headers, name).into_iter().next()
+}
+
+/// Every value of the header named `name` (case-insensitive) in a MIME
+/// entity's header block, each with its folded continuation lines unfolded
+/// into a single space-joined value, in the order the headers appear. Empty
+/// when the header is absent or the entity is not UTF-8. A bare header block
+/// (no blank line) reads as all headers. The multi-value, bytes-level
+/// companion to the private single-value reader, exposed so the store's
+/// Autocrypt consume can read the repeated `Autocrypt-Gossip` headers (the
+/// `from_email` precedent of a thin pub reader over the private header
+/// parser).
+pub fn header_values(entity: &[u8], name: &str) -> Vec<String> {
+    let Some((headers, _body)) = split_headers_body(entity) else {
+        return Vec::new();
+    };
+    unfolded_header_values(&headers, name)
 }
 
 /// The entity's `Content-Type` value, defaulting to `text/plain` when absent.

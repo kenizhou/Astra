@@ -7,8 +7,10 @@
 //! `Autocrypt:` header for the outer block. [`minimal_export`] produces the
 //! small key blob those headers carry: primary + encryption-capable subkeys,
 //! self-signatures only (third-party certifications stripped), secret
-//! material removed. The inbound parse/stage/consume half is the receive
-//! slice (SP4c).
+//! material removed. The inbound consume half ([`consume_autocrypt_header`],
+//! [`consume_gossip_headers`]) parses those headers off a received message and
+//! stages the keys into the collected area (silent, never touching the decrypt
+//! verdict).
 
 use base64::Engine as _;
 use sequoia_openpgp as openpgp;
@@ -246,6 +248,144 @@ pub fn inject_headers(mime: &[u8], headers: &[String]) -> Vec<u8> {
     out
 }
 
+// The consume half (SP4c-3a): parse the inbound Autocrypt / Autocrypt-Gossip
+// headers and stage the keys into the collected area. Staging is silent and
+// never touches the decrypt verdict (the receive orchestrator stages after the
+// verdict is computed); a malformed header stages nothing and never panics.
+
+/// One parsed inbound Autocrypt header: the bound address, the optional
+/// `prefer-encrypt` attribute (the `Autocrypt` header carries it; gossip does
+/// not), and the decoded key blob (the binary minimal export the header
+/// base64s).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedAutocrypt {
+    /// The address the header advertises (`addr` attribute).
+    pub addr: String,
+    /// The `prefer-encrypt` attribute when present (`mutual` / `nopreference`).
+    pub prefer_encrypt: Option<String>,
+    /// The decoded keydata blob (binary OpenPGP, the minimal export).
+    pub keydata: Vec<u8>,
+}
+
+/// Parse one unfolded Autocrypt attribute string into its addr, prefer-encrypt
+/// and decoded keydata. Attributes split on `;`; the keydata is base64-STANDARD
+/// with the fold whitespace stripped (unfolding joins continuation lines with a
+/// space, which base64-STANDARD does not tolerate). `None` when addr or keydata
+/// is missing, the addr is empty, or the keydata is not valid base64. Never
+/// panics.
+pub fn parse_autocrypt_value(value: &str) -> Option<ParsedAutocrypt> {
+    let mut addr = None;
+    let mut prefer_encrypt = None;
+    let mut keydata_b64 = None;
+    for attr in value.split(';') {
+        let Some((k, v)) = attr.trim().split_once('=') else {
+            continue;
+        };
+        let k = k.trim();
+        let v = v.trim();
+        if k.eq_ignore_ascii_case("addr") {
+            addr = Some(v.to_string());
+        } else if k.eq_ignore_ascii_case("prefer-encrypt") {
+            prefer_encrypt = Some(v.to_string());
+        } else if k.eq_ignore_ascii_case("keydata") {
+            keydata_b64 = Some(v.to_string());
+        }
+    }
+    let addr = addr?;
+    let keydata_b64 = keydata_b64?;
+    if addr.is_empty() {
+        return None;
+    }
+    let cleaned: String = keydata_b64
+        .chars()
+        .filter(|c| !c.is_ascii_whitespace())
+        .collect();
+    let keydata = base64::engine::general_purpose::STANDARD
+        .decode(cleaned.as_bytes())
+        .ok()?;
+    if keydata.is_empty() {
+        return None;
+    }
+    Some(ParsedAutocrypt {
+        addr,
+        prefer_encrypt,
+        keydata,
+    })
+}
+
+/// Stage one observed key blob under `peer_email` with source `autocrypt`,
+/// deduped on (account, standard, fingerprint, source). Returns 1 when newly
+/// staged, 0 when the blob holds no cert, the key is already staged, or the
+/// store write fails (silent: a staging hiccup never blocks receive).
+fn stage_autocrypt_key(
+    store: &CryptoStore,
+    account_id: &str,
+    peer_email: &str,
+    keydata: &[u8],
+) -> usize {
+    let Some((fingerprint, _cert)) = parse_first_cert(keydata) else {
+        return 0;
+    };
+    match crate::stage_collected_key_if_absent(
+        store,
+        Some(account_id),
+        Some(peer_email),
+        Some(STANDARD_OPENPGP),
+        Some(&fingerprint),
+        keydata,
+        Some("autocrypt"),
+    ) {
+        Ok(Some(_)) => 1,
+        Ok(None) | Err(_) => 0,
+    }
+}
+
+/// Consume the cleartext `Autocrypt:` header(s) from a message's outer header
+/// block, staging the sender's key when the header's `addr` matches the From
+/// address (the Autocrypt Level 1 binding; a mismatch discards). Silent: a
+/// missing From, a mismatched addr, or malformed keydata stages nothing and
+/// never panics. Returns the number of keys newly staged.
+pub fn consume_autocrypt_header(
+    store: &CryptoStore,
+    account_id: &str,
+    outer_headers: &[u8],
+    from_addr: Option<&str>,
+) -> usize {
+    let Some(from) = from_addr else {
+        return 0;
+    };
+    let mut staged = 0;
+    for value in astra_crypto_core::mime::header_values(outer_headers, "autocrypt") {
+        let Some(parsed) = parse_autocrypt_value(&value) else {
+            continue;
+        };
+        if !parsed.addr.eq_ignore_ascii_case(from) {
+            continue;
+        }
+        staged += stage_autocrypt_key(store, account_id, &parsed.addr, &parsed.keydata);
+    }
+    staged
+}
+
+/// Consume the `Autocrypt-Gossip:` header(s) from the decrypted inner entity's
+/// header block, staging each recipient peer's key. A gossip addr is the
+/// recipient peer (no From binding). Silent: malformed entries stage nothing
+/// and never panic. Returns the number of keys newly staged.
+pub fn consume_gossip_headers(store: &CryptoStore, account_id: &str, inner: &[u8]) -> usize {
+    let mut staged = 0;
+    for value in astra_crypto_core::mime::header_values(inner, "autocrypt-gossip") {
+        let Some(parsed) = parse_autocrypt_value(&value) else {
+            continue;
+        };
+        staged += stage_autocrypt_key(store, account_id, &parsed.addr, &parsed.keydata);
+    }
+    staged
+}
+
 #[cfg(test)]
 #[path = "autocrypt_tests.rs"]
 mod autocrypt_tests;
+
+#[cfg(test)]
+#[path = "autocrypt_consume_tests.rs"]
+mod autocrypt_consume_tests;
