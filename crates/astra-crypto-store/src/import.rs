@@ -17,7 +17,7 @@ use base64::Engine as _;
 
 use crate::keys::{get_crypto_key_public, upsert_crypto_key, CryptoKeyRecord, CryptoKeyRow};
 use crate::store::CryptoStore;
-use crate::trust::put_trust_decision;
+use crate::trust::{get_latest_trust_decision, put_trust_decision};
 use astra_crypto_openpgp::keymap::{cert_to_public_blob, fingerprint_of, parse_certs};
 
 /// Import a peer's public cert into `account_id`, sniffing the standard:
@@ -101,6 +101,48 @@ pub fn record_import_trust(
     )
 }
 
+/// Record the import's default acceptance: an imported peer key is `unverified`
+/// (the send resolver treats `unverified` as encryption-qualified, so the
+/// import is send-usable straight away; a later out-of-band verification
+/// promotes it). A standing decision is never downgraded, so a re-import of a
+/// verified key keeps `verified`. A cert with no email user id carries no peer
+/// address to decide against; the review surface (SP4d-2) owns it.
+fn record_default_trust(
+    store: &CryptoStore,
+    account_id: &str,
+    email: Option<&str>,
+    standard: &str,
+    fingerprint: &str,
+) -> Result<(), String> {
+    let Some(email) = email else {
+        return Ok(());
+    };
+    let standing = get_latest_trust_decision(store, account_id, email, standard, fingerprint)?;
+    if standing.is_none() {
+        record_import_trust(store, account_id, email, standard, fingerprint, false)?;
+    }
+    Ok(())
+}
+
+/// Carry the standing row's load-bearing fields into a public re-import so a
+/// public cert never wipes a private key's default flags or token binding. A
+/// standing private/token key keeps its `key_type` (a public re-import never
+/// demotes it to `public`); a public-only row takes the public type. The
+/// upsert's conflict clause overwrites these fields unconditionally, so the
+/// caller must supply the standing values.
+fn preserve_standing(row: &mut CryptoKeyRow, existing: Option<&CryptoKeyRow>) {
+    let Some(old) = existing else {
+        return;
+    };
+    row.is_default_sign = old.is_default_sign;
+    row.is_default_encrypt = old.is_default_encrypt;
+    row.token_serial.clone_from(&old.token_serial);
+    row.token_key_id.clone_from(&old.token_key_id);
+    if old.has_private {
+        row.key_type.clone_from(&old.key_type);
+    }
+}
+
 /// Store every parsed OpenPGP cert as a public-only row and answer the
 /// first one. Secret material anywhere in the input refuses the whole
 /// import: the public path never wraps a private blob.
@@ -118,21 +160,26 @@ fn import_openpgp_public(
     for cert in certs {
         let fingerprint = fingerprint_of(cert).as_str().to_owned();
         let blob = cert_to_public_blob(cert).map_err(|e| e.to_string())?;
+        let email = email_of_cert(cert);
+        let existing = get_crypto_key_public(store, account_id, "openpgp", &fingerprint)?;
+        let mut row = CryptoKeyRow {
+            account_id: account_id.to_owned(),
+            standard: "openpgp".to_owned(),
+            key_type: "public".to_owned(),
+            email: email.clone(),
+            fingerprint: fingerprint.clone(),
+            origin: "imported".to_owned(),
+            ..Default::default()
+        };
+        preserve_standing(&mut row, existing.as_ref());
         let record = CryptoKeyRecord {
-            row: CryptoKeyRow {
-                account_id: account_id.to_owned(),
-                standard: "openpgp".to_owned(),
-                key_type: "public".to_owned(),
-                email: email_of_cert(cert),
-                fingerprint: fingerprint.clone(),
-                origin: "imported".to_owned(),
-                ..Default::default()
-            },
+            row,
             public_data: hex::encode(blob),
             private_data: None,
             policy_json: None,
         };
         upsert_crypto_key(store, &record)?;
+        record_default_trust(store, account_id, email.as_deref(), "openpgp", &fingerprint)?;
         if first_fingerprint.is_empty() {
             first_fingerprint = fingerprint;
         }
@@ -151,24 +198,29 @@ fn import_smime_public(
     let fingerprint =
         astra_crypto_smime::fingerprint_of_cert_der(der).map_err(|e| e.to_string())?;
     let summary = astra_crypto_smime::cert_summary_of_der(der).ok();
+    let email = summary.as_ref().and_then(|s| s.email.clone());
+    let existing = get_crypto_key_public(store, account_id, "smime", &fingerprint)?;
+    let mut row = CryptoKeyRow {
+        account_id: account_id.to_owned(),
+        standard: "smime".to_owned(),
+        key_type: "cert".to_owned(),
+        email: email.clone(),
+        fingerprint: fingerprint.clone(),
+        origin: "imported".to_owned(),
+        expires_at: summary.as_ref().map(|s| s.not_after_unix.to_string()),
+        subject_cn: summary.as_ref().and_then(|s| s.subject_cn.clone()),
+        not_before: summary.as_ref().map(|s| s.not_before_unix.to_string()),
+        ..Default::default()
+    };
+    preserve_standing(&mut row, existing.as_ref());
     let record = CryptoKeyRecord {
-        row: CryptoKeyRow {
-            account_id: account_id.to_owned(),
-            standard: "smime".to_owned(),
-            key_type: "cert".to_owned(),
-            email: summary.as_ref().and_then(|s| s.email.clone()),
-            fingerprint: fingerprint.clone(),
-            origin: "imported".to_owned(),
-            expires_at: summary.as_ref().map(|s| s.not_after_unix.to_string()),
-            subject_cn: summary.as_ref().and_then(|s| s.subject_cn.clone()),
-            not_before: summary.as_ref().map(|s| s.not_before_unix.to_string()),
-            ..Default::default()
-        },
+        row,
         public_data: hex::encode(der),
         private_data: None,
         policy_json: None,
     };
     upsert_crypto_key(store, &record)?;
+    record_default_trust(store, account_id, email.as_deref(), "smime", &fingerprint)?;
     get_crypto_key_public(store, account_id, "smime", &fingerprint)?
         .ok_or_else(|| "the imported row did not land".to_owned())
 }

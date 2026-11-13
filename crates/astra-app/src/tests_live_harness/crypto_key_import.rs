@@ -2,8 +2,8 @@
 //! The gated key import proof (SP4d-1): both keys arrive through the
 //! product's own import surface (`App::import_key`), never through
 //! programmatic upsert seeding. astra1 imports its own private key and the
-//! recipient's public cert (with a verified trust decision); astra2 imports
-//! its own private key and the sender's public cert. astra1 then sends an
+//! recipient's public cert (the import records the unverified acceptance);
+//! astra2 imports its own private key and the sender's public cert. astra1 then sends an
 //! encrypted+signed mail through the engine's own outbox, and the built-in
 //! crypto decoder opens the delivered row at astra2 to the composer's words,
 //! the verified banner, and the restored protected subject. The proof pins
@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use astra_crypto_core::CryptoMethod;
 use astra_crypto_openpgp::keymap::{cert_to_armored_public, cert_to_secret_blob, fingerprint_of};
-use astra_crypto_store::{record_import_trust, CryptoStore};
+use astra_crypto_store::{get_latest_trust_decision, CryptoStore};
 use engine_api::{EmailAddress, Engine};
 use sequoia_openpgp::cert::prelude::*;
 
@@ -139,8 +139,8 @@ async fn the_imported_keys_decrypt_and_verify_the_delivered_mail() {
 
     // The import, through the product surface only. Each account's own
     // private key (the private path), then the peer's public cert (the
-    // public path), then the sender's verified decision on the recipient so
-    // the send gate admits the encryption.
+    // public path), which itself records the unverified acceptance the send
+    // gate admits the encryption by.
     let sender_own = app
         .import_key(&sender, &sender_tsk, None)
         .await
@@ -167,15 +167,19 @@ async fn the_imported_keys_decrypt_and_verify_the_delivered_mail() {
     );
     assert_eq!(sender_peer.key_type, "public");
     assert_eq!(sender_peer.origin, "imported");
-    record_import_trust(
+    // The import surface itself records the acceptance: no programmatic trust
+    // seeding. The default is unverified, which the send resolver treats as
+    // encryption-qualified, so the send below is admitted by the import alone.
+    let decision = get_latest_trust_decision(
         &store,
         sender.as_str(),
         proof::RECIPIENT,
         "openpgp",
         &recipient_fp,
-        true,
     )
-    .expect("the verified decision lands");
+    .expect("the trust read runs")
+    .expect("the public import recorded a decision");
+    assert_eq!(decision.decision, "unverified");
 
     let recipient_peer = app
         .import_key(&recipient, &sender_public, None)

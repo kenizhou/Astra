@@ -298,10 +298,23 @@ settings Keys category (`features/keys`): a file picker and a paste field, an
 optional passphrase held only in local state and cleared the moment it is
 spent. The wire types ride `services/crypto.ts`, never `ipc.ts`.
 
-A shared trust-write helper (`record_import_trust`) records the import
-surface's `verified` / `unverified` decision over `put_trust_decision`; the
-collected-key promote surface (SP4d-2) reuses it. The explicit decision is what
-makes a peer key send-usable.
+A shared trust-write helper (`record_import_trust`) records a `verified` /
+`unverified` decision over `put_trust_decision`; the collected-key promote
+surface (SP4d-2) reuses it. The explicit decision is what makes a peer key
+send-usable. The public import itself records the default acceptance: an
+imported peer key lands `unverified` (the send resolver treats `unverified` as
+encryption-qualified, so the import is send-usable straight away; a later
+out-of-band verification promotes it to `verified`). A standing decision is
+never downgraded, so a re-import of a verified key keeps `verified`; a cert
+with no email user id carries no peer address to decide against and the review
+surface (SP4d-2) owns it.
+
+A public re-import of a fingerprint already held privately preserves the
+standing row: the default-sign / default-encrypt flags, the token binding, and
+the `key_type` (a private key is never demoted to `public`). The upsert's
+conflict clause overwrites those fields unconditionally, so the import carries
+the standing values forward; a later import never steals the standing default
+on either path.
 
 The passphrase is held only in memory: it moves through as a `SecretBox`
 (zeroized on drop) and is never logged or persisted; only the vault-wrapped

@@ -5,6 +5,7 @@
 //! refused, and the shared trust-write helper records a decision.
 
 use super::*;
+use crate::default::{get_default_signing_key, set_default_signing_key};
 use crate::keys::{
     get_crypto_key_full, get_crypto_key_public, get_crypto_key_public_with_blob,
     list_crypto_keys_for_account,
@@ -269,4 +270,116 @@ fn the_trust_write_helper_records_a_decision() {
     // The audit history keeps both rows.
     let history = list_decisions_for_email(&store, "a1", "openpgp", "peer@x.com").unwrap();
     assert_eq!(history.len(), 2);
+}
+
+#[test]
+fn a_public_import_records_an_unverified_decision() {
+    let store = test_store();
+    let cert = gen("Peer <peer@x.com>");
+    let row = import_public_cert(&store, "a1", &armored_public(&cert)).expect("import ok");
+
+    // The import itself lands the acceptance: an imported peer key is
+    // unverified by default, which the send resolver treats as
+    // encryption-qualified, so the import is send-usable straight away.
+    let latest = get_latest_trust_decision(&store, "a1", "peer@x.com", "openpgp", &row.fingerprint)
+        .unwrap()
+        .expect("the import recorded a decision");
+    assert_eq!(latest.decision, "unverified");
+}
+
+#[test]
+fn a_reimport_never_downgrades_a_standing_decision() {
+    let store = test_store();
+    let cert = gen("Peer <peer@x.com>");
+    let row = import_public_cert(&store, "a1", &armored_public(&cert)).expect("first import");
+
+    // The person verifies the fingerprint out of band.
+    record_import_trust(
+        &store,
+        "a1",
+        "peer@x.com",
+        "openpgp",
+        &row.fingerprint,
+        true,
+    )
+    .unwrap();
+
+    // A re-import of the same cert (an updated copy) must not reset the
+    // standing verified decision back to unverified.
+    import_public_cert(&store, "a1", &armored_public(&cert)).expect("re-import");
+    let latest = get_latest_trust_decision(&store, "a1", "peer@x.com", "openpgp", &row.fingerprint)
+        .unwrap()
+        .expect("the decision stands");
+    assert_eq!(latest.decision, "verified", "a re-import never downgrades");
+}
+
+#[test]
+fn a_public_reimport_preserves_the_standing_default_signer() {
+    let store = test_store();
+    let cert = gen("Own <own@x.com>");
+    let fp = fingerprint_of(&cert).as_str().to_owned();
+
+    // A privately-held key stands as the default signer (the private import
+    // path arms it). The private blob is dummy material: the test never
+    // decrypts it, only asserts it survives.
+    let record = CryptoKeyRecord {
+        row: CryptoKeyRow {
+            account_id: "a1".to_owned(),
+            standard: "openpgp".to_owned(),
+            key_type: "cert".to_owned(),
+            email: Some("own@x.com".to_owned()),
+            fingerprint: fp.clone(),
+            origin: "generated".to_owned(),
+            ..Default::default()
+        },
+        public_data: hex::encode(cert_to_public_blob(&cert).unwrap()),
+        private_data: Some("dummy-secret-material".to_owned()),
+        policy_json: None,
+    };
+    upsert_crypto_key(&store, &record).unwrap();
+    set_default_signing_key(&store, "a1", "openpgp", &fp).unwrap();
+
+    // Importing the same key's public cert (key files ship in pairs) must not
+    // wipe the default flag, demote the key type, or drop the private blob.
+    let row = import_public_cert(&store, "a1", &armored_public(&cert)).expect("public re-import");
+    assert!(row.is_default_sign, "the standing default survives");
+    assert!(row.has_private, "the private blob survives");
+    assert_eq!(
+        row.key_type, "cert",
+        "a private key is not demoted to public"
+    );
+    let standing = get_default_signing_key(&store, "a1", astra_crypto_core::Standard::OpenPgp)
+        .unwrap()
+        .expect("the default signer still stands");
+    assert_eq!(standing.fingerprint, fp);
+}
+
+#[test]
+fn a_smime_public_reimport_preserves_the_standing_default_signer() {
+    let store = test_store();
+    let ca = astra_crypto_smime::testing::build_self_signed_ca("CN=Import Test CA");
+    let leaf = astra_crypto_smime::testing::build_leaf_signed_by("leaf@x.com", &ca);
+    let fp = astra_crypto_smime::fingerprint_of_cert_der(&leaf.cert_der).unwrap();
+
+    let record = CryptoKeyRecord {
+        row: CryptoKeyRow {
+            account_id: "a1".to_owned(),
+            standard: "smime".to_owned(),
+            key_type: "cert".to_owned(),
+            email: Some("leaf@x.com".to_owned()),
+            fingerprint: fp.clone(),
+            origin: "generated".to_owned(),
+            ..Default::default()
+        },
+        public_data: hex::encode(&leaf.cert_der),
+        private_data: Some("dummy-secret-material".to_owned()),
+        policy_json: None,
+    };
+    upsert_crypto_key(&store, &record).unwrap();
+    set_default_signing_key(&store, "a1", "smime", &fp).unwrap();
+
+    let row = import_public_cert(&store, "a1", &leaf.cert_der).expect("public re-import");
+    assert!(row.is_default_sign, "the standing default survives");
+    assert!(row.has_private, "the private blob survives");
+    assert_eq!(row.key_type, "cert", "a private key is not demoted");
 }

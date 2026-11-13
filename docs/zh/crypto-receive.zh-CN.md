@@ -230,8 +230,16 @@ desktop 命令（`commands/crypto.rs`）在进程内携带字节与可选口令
 走 `ipc.ts`。
 
 一个共享的信任写入助手（`record_import_trust`）在 `put_trust_decision` 之上
-记录导入面的 `verified` / `unverified` 决定；已收集密钥的提升面（SP4d-2）
-复用它。显式决定正是使对等密钥可用于发送的东西。
+记录 `verified` / `unverified` 决定；已收集密钥的提升面（SP4d-2）复用它。显
+式决定正是使对等密钥可用于发送的东西。公钥导入本身记录默认接受：导入的对等
+密钥落地为 `unverified`（发送解析器把 `unverified` 视为可加密，故导入后即可
+用于发送；日后带外验证把它提升为 `verified`）。既有决定绝不降级，故重导入一
+个已验证密钥保持 `verified`；无 email user id 的证书没有可决定的对等地址，由
+审阅面（SP4d-2）接管。
+
+对已私持指纹的公钥重导入保留既有行：默认签名/默认加密标志、token 绑定、以及
+`key_type`（私钥绝不降级为 `public`）。upsert 的冲突子句无条件覆盖这些字段，
+故导入把既有值带上前；两条路径上后来的导入都绝不窃取既有默认。
 
 口令仅保存在内存：它以 `SecretBox`（drop 时清零）流转，绝不记录或持久化；
 只有 vault 包裹的密钥 blob 静态落地。
