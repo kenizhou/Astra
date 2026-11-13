@@ -5,22 +5,15 @@
 //! tests, the reading tests they split off, and the drafts, sending, compose,
 //! and ai tests) includes the same module rather than its own.
 
-// The fake's preset snapshots (the reading and compose answers), a child
-// module so this file stays under the 500-line limit; the re-export keeps
-// every test module's `commands_fakes::…` paths unchanged.
-mod snapshots;
-// The fake's whole AppPort impl, its own child for the same limit (one
-// trait impl for the one fake, so the block cannot split); the re-export
-// keeps the seeds' type nameable through the paths the tests already use.
-mod port;
-// The assist pulls' seed records, their own child beside the port module
-// so that file stays under the same limit beside the trait impl that serves
-// them.
-mod seeds;
-// The MCP host fixture (an empty backend over the in-memory ledger in a
-// per-test scratch directory), its own child for the same limit, for
-// the state builder below and any test that builds a state of its own.
+// The fake's preset snapshots, AppPort impl, assist seeds, browser pull, and
+// MCP host fixture: each its own child for the 500-line cap (one trait impl
+// for the one fake cannot split); the re-exports keep the `commands_fakes::…`
+// paths every test module already uses.
+mod browser;
 mod mcp_host;
+mod port;
+mod seeds;
+mod snapshots;
 pub(crate) use mcp_host::host;
 
 use std::{
@@ -50,6 +43,8 @@ use crate::{
 pub(crate) use snapshots::{compose_prefill, open_snapshot};
 
 pub(crate) use seeds::{AssistSeeds, BriefSeeds, DocsSeeds};
+
+pub(crate) use browser::BrowserFake;
 
 /// A scratch directory for one test's account index.
 pub(crate) fn scratch(name: &str) -> PathBuf {
@@ -104,6 +99,8 @@ pub(crate) struct FakeApp {
     /// The (account, key) pairs the `.eml` read was asked for, so a test
     /// can assert the command hands the webview's ids through to the core.
     pub(crate) eml_into: Mutex<Vec<(String, String)>>,
+    /// The browser pull's answer and the filters it was asked with.
+    pub(crate) browser: Mutex<BrowserFake>,
     /// The draft-status snapshot the pull answers with: what the fake's drafts
     /// dispatches last published.
     pub(crate) draft_status: Mutex<Option<DraftStatusSnapshot>>,
@@ -226,6 +223,7 @@ impl FakeApp {
             attachment_into: Mutex::new(Vec::new()),
             eml: Mutex::new(Err(EmlReadError::Unresolved)),
             eml_into: Mutex::new(Vec::new()),
+            browser: Mutex::new(BrowserFake::default()),
             draft_status: Mutex::new(None),
             compose_request: Mutex::new(None),
             mailto_open: Mutex::new(None),

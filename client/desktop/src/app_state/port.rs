@@ -114,6 +114,13 @@ impl AppPort for App<HostProvider> {
         App::eml_content(self, account, key).await
     }
 
+    async fn attachment_browser(
+        &self,
+        filter: astra_viewmodel::AttachmentBrowserFilter,
+    ) -> astra_viewmodel::AttachmentBrowserView {
+        App::attachment_browser(self, filter).await
+    }
+
     fn draft_status(&self) -> Option<DraftStatusSnapshot> {
         App::draft_status(self)
     }

@@ -23,8 +23,7 @@ use crate::{AppState, HostAccount, HostProvider};
 // The compose command surface (the request pull), split into its own child for the line cap.
 pub(crate) mod compose;
 
-// The drafts command surface (the status pull and the resume read), under the
-// same split.
+// The drafts command surface (the status pull and the resume read), same split.
 pub(crate) mod drafts;
 
 // The sending command surface (the queue pull), under the same split.
@@ -57,7 +56,8 @@ pub(crate) mod platform;
 pub(crate) mod mcp;
 pub(crate) mod plugin;
 
-// The jmap add, attachments Save As, eml save, crypto receive, snooze, and reminder surfaces.
+// The jmap add, attachments Save As, attachment browser, eml save, crypto receive, snooze, and reminder surfaces.
+pub(crate) mod attachment_browser;
 pub(crate) mod attachments;
 pub(crate) mod crypto;
 pub(crate) mod eml;
