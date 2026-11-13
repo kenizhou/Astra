@@ -96,6 +96,7 @@ pub(crate) struct FakeApp {
     /// can assert the command hands the webview's ids through to the core. The
     /// passphrase itself is never recorded: it stays in-process.
     pub(crate) password_into: Mutex<Vec<(String, String)>>,
+    pub(crate) keys: Mutex<port::KeysFake>,
     /// The attachment read's answer; `Err` stands in for the typed refusal.
     pub(crate) attachment: Mutex<Result<Option<AttachmentContent>, AttachmentReadError>>,
     /// The (account, key, id) triples the attachment read was asked for, so
@@ -223,6 +224,7 @@ impl FakeApp {
             reading: Mutex::new(None),
             password_prompt: Mutex::new(None),
             password_into: Mutex::new(Vec::new()),
+            keys: Mutex::new(port::KeysFake::default()),
             attachment: Mutex::new(Ok(None)),
             attachment_into: Mutex::new(Vec::new()),
             eml: Mutex::new(Err(EmlReadError::Unresolved)),

@@ -23,6 +23,21 @@ use crate::app_state::{AppPort, HostAccount};
 
 use super::{compose_prefill, open_snapshot, FakeApp};
 
+/// The key import fake's state: the preset answers and the recorded asks.
+/// The passphrase is never recorded: it stays in-process, so only the
+/// account and the byte count of an import cross into the fake.
+#[derive(Default)]
+pub(crate) struct KeysFake {
+    /// The import's preset answer; `None` refuses as unseeded.
+    pub(crate) import: Option<Result<astra_crypto_store::CryptoKeyRow, String>>,
+    /// The (account, byte count) pairs the import was asked for.
+    pub(crate) import_into: Vec<(String, usize)>,
+    /// The list's preset answer; `None` answers an empty list.
+    pub(crate) list: Option<Result<Vec<astra_crypto_store::CryptoKeyRow>, String>>,
+    /// The accounts the list was asked for.
+    pub(crate) list_into: Vec<String>,
+}
+
 impl FakeApp {
     /// Seeds the fake's knowledge listing with one entry, minted around
     /// `id`, so the listing and the forget have a row to round trip.
@@ -96,6 +111,31 @@ impl AppPort for FakeApp {
             message.key.as_str().to_owned(),
         ));
         *self.password_prompt.lock().unwrap()
+    }
+
+    async fn import_key(
+        &self,
+        account: &AccountId,
+        bytes: Vec<u8>,
+        _passphrase: Option<astra_crypto_core::SecretBox<String>>,
+    ) -> Result<astra_crypto_store::CryptoKeyRow, String> {
+        // The passphrase is never recorded: it stays in-process. Only the
+        // account and the byte count the command handed through are asserted.
+        let mut keys = self.keys.lock().unwrap();
+        keys.import_into
+            .push((account.as_str().to_owned(), bytes.len()));
+        keys.import
+            .clone()
+            .unwrap_or_else(|| Err("the fake holds no import answer".to_owned()))
+    }
+
+    async fn list_keys(
+        &self,
+        account: &AccountId,
+    ) -> Result<Vec<astra_crypto_store::CryptoKeyRow>, String> {
+        let mut keys = self.keys.lock().unwrap();
+        keys.list_into.push(account.as_str().to_owned());
+        keys.list.clone().unwrap_or_else(|| Ok(Vec::new()))
     }
 
     async fn attachment_content(

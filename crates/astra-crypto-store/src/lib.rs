@@ -31,6 +31,7 @@ mod crl;
 pub mod crypto_policy;
 mod default;
 mod drafts;
+mod import;
 mod keys;
 mod keystore;
 mod password;
@@ -70,6 +71,7 @@ pub use drafts::encrypted_draft_blob;
 pub use drafts::{
     delete_encrypted_draft, get_encrypted_draft, put_encrypted_draft, DraftMirrorError,
 };
+pub use import::{import_public_cert, import_public_cert_as, record_import_trust};
 pub use keys::{
     get_crypto_key_full, get_crypto_key_public, get_crypto_key_public_with_blob,
     list_crypto_keys_for_account, list_crypto_keys_for_email, upsert_crypto_key, CryptoKeyRecord,

@@ -11,8 +11,8 @@ const invoke = vi.hoisted(() => vi.fn());
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke }));
 
-import { submitReadingPassword } from './crypto';
-import type { PasswordPromptState } from './crypto';
+import { importKey, listKeys, submitReadingPassword } from './crypto';
+import type { CryptoKeyRow, PasswordPromptState } from './crypto';
 
 beforeEach(() => {
   invoke.mockReset();
@@ -54,5 +54,49 @@ describe('the prompt affordance wire', () => {
   it('crosses the wrong-password re-prompt as the snake_case word', () => {
     const wire = JSON.parse('"wrong_password"') as PasswordPromptState;
     expect(wire).toBe('wrong_password');
+  });
+});
+
+describe('the key import call', () => {
+  it('invokes the command with the account, the bytes, and no passphrase', async () => {
+    invoke.mockResolvedValue({ fingerprint: 'fp' });
+    await importKey('work', new Uint8Array([1, 2, 3]));
+    expect(invoke).toHaveBeenCalledWith('import_key', {
+      account: 'work',
+      bytes: [1, 2, 3],
+      passphrase: null,
+    });
+  });
+
+  it('carries the passphrase in-process when one is supplied', async () => {
+    invoke.mockResolvedValue({ fingerprint: 'fp' });
+    await importKey('work', new Uint8Array([9]), 'hunter2');
+    expect(invoke).toHaveBeenCalledWith('import_key', {
+      account: 'work',
+      bytes: [9],
+      passphrase: 'hunter2',
+    });
+  });
+
+  it('answers the landed row', async () => {
+    const row = { fingerprint: 'fpImport', hasPrivate: false } as CryptoKeyRow;
+    invoke.mockResolvedValue(row);
+    const outcome = await importKey('work', new Uint8Array([1]));
+    expect(outcome.fingerprint).toBe('fpImport');
+  });
+});
+
+describe('the key list call', () => {
+  it('invokes the command with the account', async () => {
+    invoke.mockResolvedValue([]);
+    await listKeys('work');
+    expect(invoke).toHaveBeenCalledWith('list_keys', { account: 'work' });
+  });
+
+  it('answers the rows the host returns', async () => {
+    const rows = [{ fingerprint: 'fpA' }, { fingerprint: 'fpB' }] as CryptoKeyRow[];
+    invoke.mockResolvedValue(rows);
+    const outcome = await listKeys('work');
+    expect(outcome.map((row) => row.fingerprint)).toEqual(['fpA', 'fpB']);
   });
 });

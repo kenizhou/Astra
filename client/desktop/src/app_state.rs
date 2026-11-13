@@ -82,6 +82,35 @@ pub(crate) trait AppPort: Send + Sync {
         passphrase: astra_crypto_core::SecretBox<String>,
     ) -> Option<astra_viewmodel::PasswordPromptState>;
 
+    /// Imports key material into the account: public material lands through
+    /// the store's public-only path, secret material through the backend's
+    /// passphrase-gated private path. Answers the landed row (public view,
+    /// no private material). The passphrase stays in-process: it moves into
+    /// the core as a secret and is never logged or persisted.
+    ///
+    /// # Errors
+    ///
+    /// Returns the core's refusal words: no store, unrecognised material,
+    /// a passphrase that does not unlock the secret, or a failed write.
+    async fn import_key(
+        &self,
+        account: &AccountId,
+        bytes: Vec<u8>,
+        passphrase: Option<astra_crypto_core::SecretBox<String>>,
+    ) -> Result<astra_crypto_store::CryptoKeyRow, String>;
+
+    /// The account's keys across both standards, public view only (no
+    /// private material crosses this answer).
+    ///
+    /// # Errors
+    ///
+    /// Returns the core's refusal words when no store is installed or a
+    /// read fails.
+    async fn list_keys(
+        &self,
+        account: &AccountId,
+    ) -> Result<Vec<astra_crypto_store::CryptoKeyRow>, String>;
+
     /// Reads one attachment's decoded bytes for the host's Save As: the
     /// row's suggested file name beside the bytes. `Ok(None)` when the
     /// message's source reads but no downloadable part matches the id.

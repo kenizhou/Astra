@@ -48,6 +48,24 @@ impl AppPort for App<HostProvider> {
         App::submit_reading_password(self, message.clone(), passphrase).await
     }
 
+    async fn import_key(
+        &self,
+        account: &AccountId,
+        bytes: Vec<u8>,
+        passphrase: Option<astra_crypto_core::SecretBox<String>>,
+    ) -> Result<astra_crypto_store::CryptoKeyRow, String> {
+        App::import_key(self, account, &bytes, passphrase)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    async fn list_keys(
+        &self,
+        account: &AccountId,
+    ) -> Result<Vec<astra_crypto_store::CryptoKeyRow>, String> {
+        App::list_keys(self, account).map_err(|e| e.to_string())
+    }
+
     async fn attachment_content(
         &self,
         account: &AccountId,

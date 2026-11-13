@@ -195,6 +195,59 @@ vault 错误拒绝保存（失败即关闭，不持久化明文；撰写器在�
 draft_pool.reply 明文是相邻的静态暴露，超出范围（同一 vault，一个后续）。
 CLI 对等：CLI 直接读引擎正文；镜像是 desktop 阅读路径保护，恰如其他接收面。
 
+## 密钥导入面（SP4d-1）
+
+接收与发送弧暂存并消费密钥，但人需要一个把密钥带进来的途径。SP4d-1 落地
+desktop 密钥导入面：导入你自己的私钥/身份密钥（使收到的加密邮件可解密），
+以及导入对等体的公钥证书（使签名可验证、加密发送可解析）。CLI 密钥动词与
+sidecar 虚拟工具是 SP4d-1b；已收集密钥的审阅/提升面是 SP4d-2。
+
+两条路径，刻意分离以避免 has_private 污染：
+
+- 公钥证书路径（`astra-crypto-store::import_public_cert`）解析材料（OpenPGP
+  armor 或二进制经 `parse_certs`，或 S/MIME PEM/DER 证书经
+  `fingerprint_of_cert_der` / `cert_summary_of_der`），并经
+  `upsert_crypto_key` 以 `private_data: None`、`key_type: 'public'`（OpenPGP）
+  或 `'cert'`（S/MIME）、`origin: 'imported'` 存储仅公钥 blob。它绝不经过
+  后端 `import_key` / keystore `put`，那会记录私钥 blob 并把 `has_private`
+  置真，污染接收解密候选过滤器与解析器的 Personal/Ready 分支。携带秘密的
+  OpenPGP 输入在此被拒绝：私钥属于私有路径。跨标准导入被拒绝
+  （`import_public_cert_as` 钉住标准）。
+- 私钥/身份路径复用既有的后端 `import_key`（口令门控的秘密解密、经 keystore
+  持久化），它正确记录在账户绑定 AAD 下静态包裹的私钥 blob。S/MIME 臂使用
+  `import_key_with_chain`，把包中的中间证书落为 `intermediate` 行（绝不作为
+  信任锚）。
+
+app 方法（`astra-app/src/keys.rs`，`reading_password.rs` 形态）嗅探材料并
+分发：OpenPGP TSK 或 S/MIME 密钥包走私有路径，其余走公钥路径。某标准的第一个
+私钥在尚无默认时成为账户的默认签名密钥，故导入后账户即可签名；后续导入绝不
+夺取既有默认。`list_keys` 跨两个标准应答账户的行，仅公开视图。
+
+desktop 命令（`commands/crypto.rs`）在进程内携带字节与可选口令
+（`submit_reading_password` 先例：秘密留在宿主内存，绝不记录或持久化）。web
+入口位于设置 Keys 类别（`features/keys`）：一个文件选择器与一个粘贴字段，
+可选口令仅保存在局部状态、用完即清。wire 类型走 `services/crypto.ts`，绝不
+走 `ipc.ts`。
+
+一个共享的信任写入助手（`record_import_trust`）在 `put_trust_decision` 之上
+记录 `verified` / `unverified` 决定；已收集密钥的提升面（SP4d-2）复用它。显
+式决定正是使对等密钥可用于发送的东西。公钥导入本身记录默认接受：导入的对等
+密钥落地为 `unverified`（发送解析器把 `unverified` 视为可加密，故导入后即可
+用于发送；日后带外验证把它提升为 `verified`）。既有决定绝不降级，故重导入一
+个已验证密钥保持 `verified`；无 email user id 的证书没有可决定的对等地址，由
+审阅面（SP4d-2）接管。
+
+对已私持指纹的公钥重导入保留既有行：默认签名/默认加密标志、token 绑定、以及
+`key_type`（私钥绝不降级为 `public`）。upsert 的冲突子句无条件覆盖这些字段，
+故导入把既有值带上前；两条路径上后来的导入都绝不窃取既有默认。
+
+口令仅保存在内存：它以 `SecretBox`（drop 时清零）流转，绝不记录或持久化；
+只有 vault 包裹的密钥 blob 静态落地。
+
+门控活实证（`tests_live_harness/crypto_key_import.rs`）经产品面导入两个密钥
+（无编程播种），发送一封加密+签名邮件，并断言其解密且验证，在公钥导入上钉住
+has_private 守卫。除非 `ASTRA_LIVE_HARNESS=1` 否则跳过。
+
 ## 已知缺口，记录而非静默
 
 - 按标准仅加密接收：OpenPGP PGP/MIME（SP4c-1）与 S/MIME enveloped-data
@@ -215,8 +268,10 @@ CLI 对等：CLI 直接读引擎正文；镜像是 desktop 阅读路径保护，
   硬失败。抓取失败或空缓存仍读作 unchecked（失败即软，绝不阻塞打开）。链的
   Stale 吊销状态持久化为 unchecked（Good/Stale 粒度是后续）。残余盲 SSRF
   硬化（私有/环回地址过滤）与保护隐私的 OCSP/stapling 替代仍是后续。
-- 尚无密钥管理面（SP4d）：实证以编程方式播下接收者密钥。一个最小导入
-  路径是使接收在测试之外可用的承重后续。
+- 密钥导入面在 SP4d-1 落地（上述密钥导入面）：自身私钥与对等体公钥证书经
+  产品面导入，活实证如今导入而非播种。CLI 密钥动词与 sidecar 虚拟工具是
+  SP4d-1b；已收集密钥的审阅/提升面是 SP4d-2。密钥生成、导出、超出首个导入的
+  默认密钥选择，以及编写器收件人信任 UI 是后续。
 - 仅携带 Issuer KeyID（无 IssuerFingerprint 子包）的遗留签名可验证却报告
   无签名者指纹，故标为 NotSigned 而非 ValidVerified。一个退化，绝非假的
   「已验证」；现代客户端发出 IssuerFingerprint。
@@ -240,6 +295,7 @@ CLI 对等：CLI 直接读引擎正文；镜像是 desktop 阅读路径保护，
 | CRL 抓取：DP 提取、失败即软抓取器端口、接收钩子 | ✅ | `astra-crypto-smime/src/cert.rs`、`astra-crypto-store/src/crl.rs`、`receive_smime.rs`、`client/desktop/src/crl_fetch.rs` |
 | W9 密码流：SKESK 检测、needs-password 裁决、内存口令、重提示 | ✅ | `astra-crypto-store/src/receive.rs`、`astra-app/src/reading_password.rs`、`crypto_decode.rs`、`client/desktop/src/commands/crypto.rs`、`client/web/src/components/reading-pane/PasswordDialog.tsx` |
 | 静态草稿：加密镜像、保存/丢弃钩子、恢复读取接缝、失败即关闭拒绝 | ✅ | `astra-crypto-store/src/drafts.rs`、`migrations/0005_encrypted_drafts.sql`、`astra-app/src/drafts/encrypt.rs`、`drafts.rs`、`drafts/resume.rs` |
-| 活实证（发送加密、打开、解密、否定臂、静态草稿） | ✅ | `tests_live_harness/crypto_receive.rs`、`crypto_receive_smime.rs`、`crypto_receive_autocrypt.rs`、`crypto_receive_crl.rs`、`crypto_receive_password.rs`、`crypto_drafts_at_rest.rs` |
+| 密钥导入：仅公钥存储路径、私有后端路径、has_private 守卫、内存口令、信任写入 | ✅ | `astra-crypto-store/src/import.rs`、`astra-app/src/keys.rs`、`client/desktop/src/commands/crypto.rs`、`client/web/src/features/keys/KeysDetail.tsx` |
+| 活实证（发送加密、打开、解密、否定臂、静态草稿、密钥导入） | ✅ | `tests_live_harness/crypto_receive.rs`、`crypto_receive_smime.rs`、`crypto_receive_autocrypt.rs`、`crypto_receive_crl.rs`、`crypto_receive_password.rs`、`crypto_drafts_at_rest.rs`、`crypto_key_import.rs` |
 | 内联 armor、分离签名 | N/A | SP4c-3，上述缺口 |
-| 密钥管理、token 注册表、原生安全 UI | N/A | SP4d |
+| 密钥生成与导出、token 注册表、原生安全 UI | N/A | SP4d 后续 |

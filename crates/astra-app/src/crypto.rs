@@ -6,6 +6,11 @@
 //!: inside the engine's own outbox. There is deliberately no Astra-side
 //! send machinery here anymore.
 
+// The key import surface (SP4d-1): a sibling file declared here so the crate
+// root stays at the line cap (the tests_live_harness declaration idiom).
+#[path = "keys.rs"]
+pub(crate) mod keys;
+
 use serde::{Deserialize, Serialize};
 
 /// The composer's per-draft crypto toggles on a submit intent. `None`
