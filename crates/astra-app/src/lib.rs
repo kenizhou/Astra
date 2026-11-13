@@ -53,6 +53,7 @@ mod settings;
 mod signatures;
 mod snapshot;
 mod snapshot_rows;
+mod snooze;
 mod submit;
 mod surfaced;
 mod sync;
@@ -223,12 +224,8 @@ pub struct App<P> {
     /// replaces the one before it, because a composer opened on an older
     /// request would answer a message the user has moved past.
     compose_request: Surfaced<Option<astra_viewmodel::ComposeRequestSnapshot>>,
-    /// The message the pending compose request was computed from, held beside
-    /// the snapshot rather than read back out of it (the snapshot's contract
-    /// carries no reference, and no bare key crosses modules): the submit
-    /// arms re-resolve it through the reading resolve path to thread the
-    /// outgoing reply or forward under the original's `References` chain.
-    /// Replaced by each request that publishes, like the snapshot beside it.
+    /// The message the pending compose request was computed from: the submit
+    /// arms re-resolve it to thread the reply or forward under its chain.
     compose_source: Mutex<Option<crate::reference::MessageRef>>,
     /// The original's part ids the pending compose request's forward is
     /// holding onto, set beside `compose_source` by the request that
@@ -359,6 +356,8 @@ pub struct App<P> {
     /// the host beside the account store. `None` (the default) and the
     /// recorder records nothing. See `analytics`.
     analytics: Mutex<Option<Arc<astra_ai::AiStore>>>,
+    /// The device-local snooze store the host installs; `None` records nothing.
+    snooze: Mutex<Option<Arc<astra_snooze::SnoozeStore>>>,
 }
 
 impl<P> core::fmt::Debug for App<P> {
@@ -436,6 +435,7 @@ impl<P: Provider> App<P> {
             decoder: None,
             crypto_store: Mutex::new(None),
             analytics: Mutex::new(None),
+            snooze: Mutex::new(None),
         }
     }
 

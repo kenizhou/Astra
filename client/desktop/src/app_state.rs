@@ -248,6 +248,14 @@ pub(crate) trait AppPort: Send + Sync {
     /// nothing must signal nothing.
     async fn refresh_calendars_if_changed(&self);
 
+    /// Snoozes one message until `wake_at` (unix seconds): the core records
+    /// the stable identity and moves it into the account's Snooze folder.
+    async fn snooze_message(&self, row: astra_app::RowRef, wake_at: i64) -> Result<(), String>;
+
+    /// Wakes every snooze due at `now`, returning the messages to their
+    /// origin folders: the host timer's tick body, answering the count woken.
+    async fn wake_due_snoozes(&self, now: i64) -> Result<usize, String>;
+
     /// Takes the new-mail batch the passes have collected and leaves the
     /// queue empty: the delivery loop's drain after each pass it lands, so
     /// the OS notification policy stays in the host where the window state

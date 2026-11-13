@@ -239,6 +239,16 @@ impl AppPort for FakeApp {
         // host owns it, so the fake answers the empty visit.
     }
 
+    async fn snooze_message(&self, row: astra_app::RowRef, wake_at: i64) -> Result<(), String> {
+        self.snoozed.lock().unwrap().push((row, wake_at));
+        Ok(())
+    }
+
+    async fn wake_due_snoozes(&self, now: i64) -> Result<usize, String> {
+        self.woken.lock().unwrap().push(now);
+        Ok(0)
+    }
+
     fn drain_new_mail(&self) -> NewMailBatch {
         let batch = self.batches.lock().unwrap().pop_front().unwrap_or_default();
         self.drained

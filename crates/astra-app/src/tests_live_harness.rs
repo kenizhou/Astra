@@ -253,6 +253,8 @@ mod sender_identity;
 mod settings;
 #[path = "tests_live_harness/settings_proof.rs"]
 mod settings_proof;
+#[path = "tests_live_harness/snooze_proof.rs"]
+mod snooze_proof;
 #[path = "tests_live_harness/unified.rs"]
 mod unified;
 #[path = "tests_live_harness/warm_proof.rs"]
