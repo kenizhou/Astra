@@ -23,7 +23,7 @@ use astra_crypto_core::{SignatureState, Standard};
 use astra_crypto_store::{
     receive_with_fetcher, CrlFetcher, CryptoStore, NoopCrlFetcher, ReceiveOutcome, ReceiveState,
 };
-use astra_viewmodel::{AttachmentRow, SecurityBannerView, SecurityLevelView};
+use astra_viewmodel::{AttachmentRow, PasswordPromptState, SecurityBannerView, SecurityLevelView};
 
 use crate::{DecodeOutcome, MessageDecoder, MessageRef};
 
@@ -66,23 +66,38 @@ impl MessageDecoder for CryptoDecoder {
             self.fetcher.as_ref(),
         )
         .await;
-        match outcome.state {
-            // Not the crypto framing: the store's rendering and the plugin
-            // fold stand untouched.
-            ReceiveState::NotEncrypted => None,
-            // Fail closed: the banner alone, never the ciphertext, never a
-            // fall-through to the plugin.
-            ReceiveState::NoKey => Some(closed("Encrypted message; cannot decrypt (no key).")),
-            ReceiveState::Failed => Some(closed("Encrypted message; cannot decrypt.")),
-            ReceiveState::Decrypted => Some(decrypted(&outcome)),
-            // A passphrase-protected message stays fail closed: the banner
-            // alone, never the ciphertext. The password prompt and re-entry
-            // (SP4c-3c) replace this interim arm with the needs-password banner
-            // and the passphrase affordance.
-            ReceiveState::NeedsPassword | ReceiveState::WrongPassword => {
-                Some(closed("Encrypted message; a passphrase is required."))
-            }
-        }
+        decode_outcome(&outcome)
+    }
+}
+
+/// Maps a neutral receive outcome onto the decode port: the decrypted legs,
+/// the security banner, the restored subject, and (on a passphrase prompt)
+/// the password affordance. Shared by the reading open's [`CryptoDecoder`]
+/// and the password re-entry, so both land the identical verdict shape.
+/// `None` only for the not-encrypted answer, which leaves the store's own
+/// rendering and the plugin fold untouched.
+pub(crate) fn decode_outcome(outcome: &ReceiveOutcome) -> Option<DecodeOutcome> {
+    match outcome.state {
+        // Not the crypto framing: the store's rendering and the plugin
+        // fold stand untouched.
+        ReceiveState::NotEncrypted => None,
+        // Fail closed: the banner alone, never the ciphertext, never a
+        // fall-through to the plugin.
+        ReceiveState::NoKey => Some(closed("Encrypted message; cannot decrypt (no key).")),
+        ReceiveState::Failed => Some(closed("Encrypted message; cannot decrypt.")),
+        ReceiveState::Decrypted => Some(decrypted(outcome)),
+        // A passphrase-protected message stays fail closed (no legs, no
+        // ciphertext) but carries the prompt affordance: the reading pane
+        // mounts its password dialog on it. The wrong-passphrase arm is the
+        // re-prompt signal, distinguished so the dialog names the refusal.
+        ReceiveState::NeedsPassword => Some(password_closed(
+            "Encrypted message; a passphrase is required.",
+            PasswordPromptState::NeedsPassword,
+        )),
+        ReceiveState::WrongPassword => Some(password_closed(
+            "Encrypted message; the passphrase was not correct.",
+            PasswordPromptState::WrongPassword,
+        )),
     }
 }
 
@@ -96,6 +111,24 @@ fn closed(text: &str) -> DecodeOutcome {
             text: text.to_owned(),
         }),
         crypto_verdict: true,
+        ..Default::default()
+    }
+}
+
+/// A fail-closed passphrase prompt: the banner and the prompt affordance,
+/// nothing else. No legs, no subject, no ciphertext; the verdict flag tells
+/// the seam the store's own outer-framing read must not render and the
+/// ciphertext chips must hide. The affordance is the signal the reading
+/// pane mounts its password dialog on. A warning, not an error: the message
+/// is openable with the passphrase, not broken.
+fn password_closed(text: &str, prompt: PasswordPromptState) -> DecodeOutcome {
+    DecodeOutcome {
+        banner: Some(SecurityBannerView {
+            level: SecurityLevelView::Warning,
+            text: text.to_owned(),
+        }),
+        crypto_verdict: true,
+        password_prompt: Some(prompt),
         ..Default::default()
     }
 }
@@ -115,6 +148,7 @@ fn decrypted(outcome: &ReceiveOutcome) -> DecodeOutcome {
         }),
         subject: outcome.subject.clone(),
         crypto_verdict: true,
+        password_prompt: None,
     }
 }
 

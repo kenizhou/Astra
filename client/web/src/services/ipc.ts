@@ -83,6 +83,10 @@ export * from './settings';
 // commands), under the same re-export and split.
 export * from './mcp';
 
+// The crypto receive half (the password prompt affordance and the passphrase
+// submission), under the same re-export and split for the cap.
+export * from './crypto';
+
 /** A folder bound to its owning account; unique only within the account. */
 export interface FolderRef {
   account: string;
@@ -324,6 +328,9 @@ export interface ReadingSnapshot {
   invitation?: InvitationBlock;
   /** The plugin decode's security banner, when a serving plugin had something to say. */
   security_banner?: import('./plugins').SecurityBannerView;
+  /** The password prompt affordance, when the open message is passphrase-protected
+   *  and no key fits: the signal the reading pane mounts its password dialog on. */
+  password_prompt?: import('./crypto').PasswordPromptState;
 }
 
 /** The state of a composition's most recent draft save. */

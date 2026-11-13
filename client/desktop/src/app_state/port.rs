@@ -40,6 +40,14 @@ impl AppPort for App<HostProvider> {
         App::reading(self)
     }
 
+    async fn submit_reading_password(
+        &self,
+        message: &astra_app::MessageRef,
+        passphrase: astra_crypto_core::SecretBox<String>,
+    ) -> Option<astra_viewmodel::PasswordPromptState> {
+        App::submit_reading_password(self, message.clone(), passphrase).await
+    }
+
     async fn attachment_content(
         &self,
         account: &AccountId,

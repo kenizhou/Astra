@@ -14,6 +14,7 @@ import { ContextMenu, type ContextMenuItem } from '@/components/ui/ContextMenu';
 import { AttachmentList } from '@/components/reading-pane/AttachmentList';
 import { InvitationCard } from '@/components/reading-pane/InvitationCard';
 import { MessageHtml, READING_ZOOM_BASE_PX } from '@/components/reading-pane/MessageHtml';
+import { PasswordDialog } from '@/components/reading-pane/PasswordDialog';
 import { QuickReplyStrip } from '@/components/reading-pane/QuickReplyStrip';
 import { ReadingHeader } from '@/components/reading-pane/ReadingHeader';
 import { SmartReplies } from '@/components/reading-pane/SmartReplies';
@@ -101,6 +102,7 @@ export function ReadingView({ onAddContact, openedFromFolder = null }: ReadingVi
       {snapshot.security_banner !== undefined && (
         <PluginBanner banner={snapshot.security_banner} />
       )}
+      <PasswordDialog />
       <SmartReplies />
       <SummaryBlock />
       <TranslateBlock />

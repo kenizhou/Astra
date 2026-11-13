@@ -84,6 +84,20 @@ impl AppPort for FakeApp {
         self.reading.lock().unwrap().clone()
     }
 
+    async fn submit_reading_password(
+        &self,
+        message: &astra_app::MessageRef,
+        _passphrase: astra_crypto_core::SecretBox<String>,
+    ) -> Option<astra_viewmodel::PasswordPromptState> {
+        // The passphrase is never recorded: it stays in-process. Only the
+        // message identity the command handed through is asserted by tests.
+        self.password_into.lock().unwrap().push((
+            message.account.as_str().to_owned(),
+            message.key.as_str().to_owned(),
+        ));
+        *self.password_prompt.lock().unwrap()
+    }
+
     async fn attachment_content(
         &self,
         account: &AccountId,

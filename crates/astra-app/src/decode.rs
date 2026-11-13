@@ -17,7 +17,7 @@
 //! port's answer carries the body's legs, which only ever flow to the reading
 //! snapshot.
 
-use astra_viewmodel::SecurityBannerView;
+use astra_viewmodel::{PasswordPromptState, SecurityBannerView};
 
 /// One decode's answer: the replacement legs and the banner, each optional.
 /// Both legs absent and no banner is the decoder saying nothing, which the
@@ -40,6 +40,11 @@ pub struct DecodeOutcome {
     /// (the store's own outer-framing read never renders beside them, fail
     /// closed), and the ciphertext pseudo-attachment chips hide.
     pub crypto_verdict: bool,
+    /// The password prompt affordance, when the verdict is a passphrase
+    /// prompt (a SKESK message no key fits, or a wrong passphrase re-prompt).
+    /// The seam rides it onto the reading snapshot so a surface mounts its
+    /// password dialog; `None` on every other verdict.
+    pub password_prompt: Option<PasswordPromptState>,
 }
 
 /// The message decoder: one call per open, the host's plugin decode or the

@@ -191,6 +191,8 @@ mod crypto_receive;
 mod crypto_receive_autocrypt;
 #[path = "tests_live_harness/crypto_receive_crl.rs"]
 mod crypto_receive_crl;
+#[path = "tests_live_harness/crypto_receive_password.rs"]
+mod crypto_receive_password;
 #[path = "tests_live_harness/crypto_receive_smime.rs"]
 mod crypto_receive_smime;
 #[path = "tests_live_harness/crypto_send.rs"]

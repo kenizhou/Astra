@@ -21,8 +21,7 @@ use engine_api::AccountId;
 use crate::{AppState, HostAccount, HostProvider};
 
 // The compose command surface (the request pull), split into its own child
-// module to keep this file under the size limit, the same split the app core's
-// protocol made for its compose intents.
+// module for the line cap, the same split the app core's compose intents made.
 pub(crate) mod compose;
 
 // The drafts command surface (the status pull and the resume read), under the
@@ -59,8 +58,9 @@ pub(crate) mod platform;
 pub(crate) mod mcp;
 pub(crate) mod plugin;
 
-// The jmap add, attachments Save As, and eml save command surfaces.
+// The jmap add, attachments Save As, eml save, and crypto receive surfaces.
 pub(crate) mod attachments;
+pub(crate) mod crypto;
 pub(crate) mod eml;
 pub(crate) mod jmap;
 

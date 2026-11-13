@@ -45,6 +45,7 @@ fn a_full_reading_snapshot_crosses_with_every_optional_key() {
         remote_image_count: 2,
         invitation: None,
         security_banner: None,
+        password_prompt: None,
     };
 
     let json = serde_json::to_string(&snapshot).unwrap();
@@ -89,6 +90,7 @@ fn a_security_banner_crosses_with_level_and_text() {
             level: SecurityLevelView::Warning,
             text: "Signature invalid".to_owned(),
         }),
+        password_prompt: None,
     };
     let json = serde_json::to_string(&snapshot).unwrap();
     assert!(
@@ -116,6 +118,7 @@ fn a_plain_only_reading_snapshot_crosses_with_no_optional_keys() {
         remote_image_count: 0,
         invitation: None,
         security_banner: None,
+        password_prompt: None,
     };
 
     let json = serde_json::to_string(&snapshot).unwrap();
@@ -236,6 +239,7 @@ fn an_invitation_block_crosses_after_the_body_with_snake_case_words() {
             organizer: "boss@test.local".to_owned(),
         }),
         security_banner: None,
+        password_prompt: None,
     };
 
     let json = serde_json::to_string(&snapshot).unwrap();

@@ -34,6 +34,9 @@ framing（发送先例的镜像）。
   一个 `no-key` 结果行。
 - **失败**（被篡改的密文、坏签名、错误密钥，或被识别但密文无法提取的
   framing）：一个「无法解密」banner，无明文，一个 `failed` 结果行。
+- **需要密码**（一个 SKESK 槽且无 PKESK 密钥适配）：一个「需要口令」banner
+  连同密码提示 affordance，无明文，无结果行（一个瞬态交互，而非持久化
+  状态）。下述 W9 密码流用用户提供的口令解密它。
 - **已解密**：腿与签名裁决（已验证，或未知签名者为未验证）、恢复的主题、
   一个 `ok` 行。
 
@@ -120,13 +123,46 @@ CRL）时打开以 `revocation_state=unchecked` 继续。离线 no-op 抓取器�
 但不阻止私有或环回地址，故恶意分发点仍能把有界 GET 瞄准内部主机；地址段
 过滤是硬化后续。抓取保持有界且内联；后台预取是后续。
 
+## W9 密码流（SP4c-3c）
+
+受口令保护的 OpenPGP 邮件携带一个 SKESK 槽（对称加密），而非或同时携带
+PKESK 密钥包装。解包后，`has_skesk` 检测它。当无 PKESK 密钥适配时，
+`receive_openpgp` 答瞬态 `NeedsPassword` 裁决，而非 no-key/failed：一封邮件
+可同时携带两种槽，密钥适配时密钥路径仍胜出，故 SKESK 标志仅重定向无适配
+密钥的臂。硬错误（篡改、坏签名）即使存在 SKESK 槽也失败即关闭，绝不降级
+为提示。
+
+解码器把 `NeedsPassword` 映射为失败即关闭的「需要口令」banner 连同密码提示
+affordance（`ReadingSnapshot.password_prompt`）：无腿、无密文、无结果行。
+阅读 pane 在该 affordance 上挂载其密码对话框。对话框收集口令并经一个 desktop
+命令提交，该命令在进程内携带它（`crypto_wrapper` 先例：秘密留在宿主内存，
+绝不记录或持久化）。命令在一个新鲜 `engine.message_source` 上重跑
+`receive_openpgp_password`，并经同一渲染接缝刷新阅读快照（阅读重入模块，
+从接近上限的 `reading.rs` 拆出）。
+
+`receive_openpgp_password` 经 `decrypt_symmetric` 解密，采用与密钥路径相同的
+`known_signers` / `extra_signer_blobs` 解析，故内嵌签名仍对已知对等体验证，
+未知签名者退化而非中止。成功时落地与密钥路径相同的裁决、恢复主题与 `ok`
+行，affordance 落下（对话框在正文上关闭）。错误口令答瞬态 `WrongPassword`
+重提示信号：对话框重提示，命名拒绝，无明文，无行。结构性失败恰如密钥路径
+失败即关闭。取消绝不到达编排器：裁决保持 needs-password（失败即关闭）。
+
+口令仅保存在内存：它作为一个 `SecretBox`（drop 时清零）移入后端，绝不记录
+或持久化。needs-password 与 wrong-password 状态是瞬态交互，而非持久化行
+（`decrypt_state` CHECK 保持 ok/no-key/failed/n/a）；成功写 ok。重新打开会
+重提示（无缓存口令）。
+
 ## 已知缺口，记录而非静默
 
 - 按标准仅加密接收：OpenPGP PGP/MIME（SP4c-1）与 S/MIME enveloped-data
   （SP4c-2）。内联 PGP armor 与分离签名形态（PGP multipart/signed、S/MIME
   multipart/signed 与不透明 signed-data）是后续；Autocrypt 消费在 SP4c-3a
-  落地（上述接收半）；CRL 抓取在 SP4c-3b 落地（上述抓取路径）；W9 密码流程
-  （SP4c-3c）仍在；静态加密草稿是 SP4c-4。
+  落地（上述接收半）；CRL 抓取在 SP4c-3b 落地（上述抓取路径）；W9 密码流在
+  SP4c-3c 落地（上述密码流）；静态加密草稿是 SP4c-4。
+- W9 发送半本身未接线（`apply_password_crypto` 无调用者，`SendDraft` 无
+  `password_protected` 字段）：活实证经 `encrypt_symmetric` 手工构造 SKESK
+  邮件。接线 W9 发送是一个协调后续。口令绝不持久化，故重新打开会重提示；
+  会话口令缓存是后续。密码对话框仅 shell（阅读 pane），恰如其他接收面。
 - Autocrypt 暂存静默：已收集密钥的审阅/提升 UI 是 SP4d。发送门在密文内发出
   `Autocrypt-Gossip`，但尚无明文自身 `Autocrypt` 头；当传入邮件携带明文头
   （对等客户端的）时消费读取它，自身头的发出是后续。gossip 消费读取发送门
@@ -159,6 +195,7 @@ CRL）时打开以 `revocation_state=unchecked` 继续。离线 no-op 抓取器�
 | 失败即关闭：无密钥/失败/篡改绝不渲染密文 | ✅ | closed 臂 + 结构性接缝清除 |
 | Autocrypt 消费：传入解析、addr 绑定、静默暂存 | ✅ | `astra-crypto-store/src/autocrypt.rs`、`receive.rs` |
 | CRL 抓取：DP 提取、失败即软抓取器端口、接收钩子 | ✅ | `astra-crypto-smime/src/cert.rs`、`astra-crypto-store/src/crl.rs`、`receive_smime.rs`、`client/desktop/src/crl_fetch.rs` |
-| 活实证（发送加密、打开、解密、否定臂） | ✅ | `tests_live_harness/crypto_receive.rs`、`crypto_receive_smime.rs`、`crypto_receive_autocrypt.rs`、`crypto_receive_crl.rs` |
+| W9 密码流：SKESK 检测、needs-password 裁决、内存口令、重提示 | ✅ | `astra-crypto-store/src/receive.rs`、`astra-app/src/reading_password.rs`、`crypto_decode.rs`、`client/desktop/src/commands/crypto.rs`、`client/web/src/components/reading-pane/PasswordDialog.tsx` |
+| 活实证（发送加密、打开、解密、否定臂） | ✅ | `tests_live_harness/crypto_receive.rs`、`crypto_receive_smime.rs`、`crypto_receive_autocrypt.rs`、`crypto_receive_crl.rs`、`crypto_receive_password.rs` |
 | 内联 armor、分离签名、静态草稿 | N/A | SP4c-3/4，上述缺口 |
 | 密钥管理、token 注册表、原生安全 UI | N/A | SP4d |

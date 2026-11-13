@@ -55,6 +55,7 @@ fn decrypted_verdict() -> DecodeOutcome {
         }),
         subject: Some("the real subject".to_owned()),
         crypto_verdict: true,
+        password_prompt: None,
     }
 }
 

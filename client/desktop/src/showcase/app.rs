@@ -121,6 +121,16 @@ impl AppPort for ShowcaseApp {
         self.reading.clone()
     }
 
+    async fn submit_reading_password(
+        &self,
+        _message: &astra_app::MessageRef,
+        _passphrase: astra_crypto_core::SecretBox<String>,
+    ) -> Option<astra_viewmodel::PasswordPromptState> {
+        // The showcase carries no crypto store: a passphrase submission has
+        // nothing to decrypt against, so the verdict stays needs-password.
+        Some(astra_viewmodel::PasswordPromptState::NeedsPassword)
+    }
+
     async fn attachment_content(
         &self,
         _account: &AccountId,
