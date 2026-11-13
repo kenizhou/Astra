@@ -8,7 +8,7 @@ use std::path::Path;
 
 use astra_ai::CorrelationId;
 
-use super::ai;
+use super::{ai, keys};
 use super::{DraftArgs, Invocation, ParseFailure, SnippetArgs, Verb, DEFAULT_LIMIT, SEND_CLASS};
 use crate::envelope::Code;
 
@@ -131,6 +131,21 @@ pub(super) fn parse(args: &[String], stdin: &mut dyn Read) -> Result<Invocation,
         // the line carried, so the refusal (not a usage error) answers a
         // caller that reached for the model-backed run.
         (Some("knowledge"), Some("extract")) => Verb::KnowledgeExtract,
+        (Some("keys"), Some("list")) => Verb::KeysList {
+            account: required(args, "--account")?,
+        },
+        (Some("keys"), Some("collected")) => Verb::KeysCollected {
+            account: required(args, "--account")?,
+        },
+        (Some("keys"), Some("import")) => Verb::KeysImport {
+            args: keys::import_args(args, stdin)?,
+        },
+        (Some("keys"), Some("promote")) => Verb::KeysPromote {
+            args: keys::promote_args(args)?,
+        },
+        (Some("keys"), Some("reject")) => Verb::KeysReject {
+            args: keys::reject_args(args)?,
+        },
         (Some("snippets"), Some("list")) => Verb::SnippetsList,
         (Some("snippets"), Some("create")) => Verb::SnippetsCreate {
             args: snippet_args(args)?,
@@ -273,7 +288,7 @@ fn snippet_args(args: &[String]) -> Result<SnippetArgs, ParseFailure> {
 }
 
 /// A flag that must carry a value, read as an owned `String`.
-fn required(args: &[String], flag: &str) -> Result<String, ParseFailure> {
+pub(super) fn required(args: &[String], flag: &str) -> Result<String, ParseFailure> {
     owned_value(args, flag)?.ok_or_else(|| usage(&missing(flag)))
 }
 
@@ -298,7 +313,7 @@ pub(super) fn usage(message: &str) -> ParseFailure {
 /// A flag's value that must carry content, not just characters: a rule's
 /// name and condition are data the pass judges by, so a blank one never
 /// reaches the store.
-fn non_empty(value: String, flag: &str) -> Result<String, ParseFailure> {
+pub(super) fn non_empty(value: String, flag: &str) -> Result<String, ParseFailure> {
     if value.trim().is_empty() {
         return Err(usage(&format!(
             "the {flag} flag wants content, not just whitespace"
@@ -359,7 +374,10 @@ pub(super) fn flag_present(args: &[String], flag: &str) -> bool {
 
 /// A flag that takes a value, singular: the last occurrence wins and a value
 /// must follow.
-fn one_value<'a>(args: &'a [String], flag: &str) -> Result<Option<&'a str>, ParseFailure> {
+pub(super) fn one_value<'a>(
+    args: &'a [String],
+    flag: &str,
+) -> Result<Option<&'a str>, ParseFailure> {
     let mut seen: Option<&str> = None;
     let mut index = 0;
     while index < args.len() {
@@ -376,8 +394,26 @@ fn one_value<'a>(args: &'a [String], flag: &str) -> Result<Option<&'a str>, Pars
 }
 
 /// [`one_value`](fn@one_value) as an owned `String`.
-fn owned_value(args: &[String], flag: &str) -> Result<Option<String>, ParseFailure> {
+pub(super) fn owned_value(args: &[String], flag: &str) -> Result<Option<String>, ParseFailure> {
     Ok(one_value(args, flag)?.map(str::to_owned))
+}
+
+/// A flag whose value is data rather than a vocabulary word: the next
+/// word rides whole even when it opens with a dash (an armored cert's
+/// PEM frame does). The last occurrence wins, as [`one_value`].
+pub(super) fn data_value<'a>(
+    args: &'a [String],
+    flag: &str,
+) -> Result<Option<&'a str>, ParseFailure> {
+    let mut seen: Option<&str> = None;
+    let mut index = 0;
+    while index < args.len() {
+        if args[index] == flag {
+            seen = Some(args.get(index + 1).ok_or_else(|| usage(&missing(flag)))?);
+        }
+        index += 1;
+    }
+    Ok(seen)
 }
 
 /// A flag that takes a value and may repeat, collecting every occurrence.
@@ -427,6 +463,10 @@ const SUBVERBS: &[&str] = &[
     "forget",
     "extract",
     "search",
+    "collected",
+    "import",
+    "promote",
+    "reject",
     "mark-read",
     "set-flagged",
     "archive",

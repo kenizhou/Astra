@@ -7,6 +7,54 @@
 use super::completions::Shell;
 use super::{DraftArgs, SnippetArgs};
 
+/// `keys import`'s arguments, with the material resolved at parse time so
+/// the audit preview can count it and execution cannot fail reading it,
+/// the drafts precedent. Public material only: the store refuses a
+/// secret-bearing input.
+#[derive(PartialEq)]
+pub(crate) struct KeyImportArgs {
+    /// The account id from the index.
+    pub(crate) account: String,
+    /// The cert material, armored or binary.
+    pub(crate) bytes: Vec<u8>,
+    /// Which source the material came from, for the audit preview.
+    pub(crate) source: &'static str,
+    /// The pinned standard, when the caller named one.
+    pub(crate) standard: Option<String>,
+}
+
+/// `keys promote`'s arguments: the staged key to accept and the trust
+/// decision the acceptance records beside it.
+#[derive(PartialEq)]
+pub(crate) struct KeyPromoteArgs {
+    /// The account id from the index.
+    pub(crate) account: String,
+    /// The key's standard, `openpgp` or `smime`.
+    pub(crate) standard: String,
+    /// The staged key's fingerprint.
+    pub(crate) fingerprint: String,
+    /// The address the acceptance binds, when the caller names one.
+    pub(crate) email: Option<String>,
+    /// Whether the fingerprint was confirmed out of band.
+    pub(crate) verified: bool,
+}
+
+/// `keys reject`'s arguments: the staging row to remove and the key the
+/// rejected decision names.
+#[derive(PartialEq)]
+pub(crate) struct KeyRejectArgs {
+    /// The account id from the index.
+    pub(crate) account: String,
+    /// The staging row's id.
+    pub(crate) id: i64,
+    /// The key's standard, `openpgp` or `smime`.
+    pub(crate) standard: String,
+    /// The staged key's fingerprint.
+    pub(crate) fingerprint: String,
+    /// The address the rejection binds, when the caller names one.
+    pub(crate) email: Option<String>,
+}
+
 /// The verbs, with their arguments: the mail reads and writes, the rules
 /// verbs over the rules store, the AI reads over the results,
 /// draft-pool, cache, profile, and document tables, and the shell
@@ -121,6 +169,32 @@ pub(crate) enum Verb {
     },
     /// The refused extraction: the model seam lives in the app.
     KnowledgeExtract,
+    /// List one account's keys across both standards, public view only.
+    KeysList {
+        /// The account id from the index.
+        account: String,
+    },
+    /// List one account's staged collected keys, newest first.
+    KeysCollected {
+        /// The account id from the index.
+        account: String,
+    },
+    /// Import a peer's public cert into one account's key store.
+    KeysImport {
+        /// The assembled arguments, cert material included.
+        args: KeyImportArgs,
+    },
+    /// Promote a staged key and record the acceptance that makes it
+    /// send-usable.
+    KeysPromote {
+        /// The assembled arguments.
+        args: KeyPromoteArgs,
+    },
+    /// Reject a staged key and record the refusal.
+    KeysReject {
+        /// The assembled arguments.
+        args: KeyRejectArgs,
+    },
     /// List the snippet library, the most recently touched first.
     SnippetsList,
     /// Store one snippet, title and body text included.
@@ -212,6 +286,11 @@ impl Verb {
             Self::KnowledgeList { .. } => "knowledge list",
             Self::KnowledgeForget { .. } => "knowledge forget",
             Self::KnowledgeExtract => "knowledge extract",
+            Self::KeysList { .. } => "keys list",
+            Self::KeysCollected { .. } => "keys collected",
+            Self::KeysImport { .. } => "keys import",
+            Self::KeysPromote { .. } => "keys promote",
+            Self::KeysReject { .. } => "keys reject",
             Self::SnippetsList => "snippets list",
             Self::SnippetsCreate { .. } => "snippets create",
             Self::SnippetsDelete { .. } => "snippets delete",
@@ -245,6 +324,9 @@ impl Verb {
                 | Self::KnowledgeForget { .. }
                 | Self::SnippetsCreate { .. }
                 | Self::SnippetsDelete { .. }
+                | Self::KeysImport { .. }
+                | Self::KeysPromote { .. }
+                | Self::KeysReject { .. }
         )
     }
 }

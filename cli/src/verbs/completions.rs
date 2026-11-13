@@ -159,7 +159,30 @@ pub(crate) fn descriptor(verb: &Verb) -> Entry {
             Flag::Value("--body"),
             Flag::Value("--body-file"),
         ],
-        Verb::FoldersList { .. } | Verb::KnowledgeList { .. } => &[Flag::Value("--account")],
+        Verb::FoldersList { .. }
+        | Verb::KnowledgeList { .. }
+        | Verb::KeysList { .. }
+        | Verb::KeysCollected { .. } => &[Flag::Value("--account")],
+        Verb::KeysImport { .. } => &[
+            Flag::Value("--account"),
+            Flag::Value("--plain"),
+            Flag::Value("--file"),
+            Flag::Value("--standard"),
+        ],
+        Verb::KeysPromote { .. } => &[
+            Flag::Value("--account"),
+            Flag::Value("--standard"),
+            Flag::Value("--fingerprint"),
+            Flag::Value("--email"),
+            Flag::Switch("--verified"),
+        ],
+        Verb::KeysReject { .. } => &[
+            Flag::Value("--account"),
+            Flag::Value("--id"),
+            Flag::Value("--standard"),
+            Flag::Value("--fingerprint"),
+            Flag::Value("--email"),
+        ],
         Verb::RulesDelete { .. } | Verb::KnowledgeForget { .. } | Verb::SnippetsDelete { .. } => {
             &[Flag::Value("--id")]
         }
@@ -252,6 +275,38 @@ const PROBES: &[Verb] = &[
     },
     Verb::KnowledgeForget { id: String::new() },
     Verb::KnowledgeExtract,
+    Verb::KeysList {
+        account: String::new(),
+    },
+    Verb::KeysCollected {
+        account: String::new(),
+    },
+    Verb::KeysImport {
+        args: super::verb::KeyImportArgs {
+            account: String::new(),
+            bytes: Vec::new(),
+            source: "arg",
+            standard: None,
+        },
+    },
+    Verb::KeysPromote {
+        args: super::verb::KeyPromoteArgs {
+            account: String::new(),
+            standard: String::new(),
+            fingerprint: String::new(),
+            email: None,
+            verified: false,
+        },
+    },
+    Verb::KeysReject {
+        args: super::verb::KeyRejectArgs {
+            account: String::new(),
+            id: 0,
+            standard: String::new(),
+            fingerprint: String::new(),
+            email: None,
+        },
+    },
     Verb::SnippetsList,
     Verb::SnippetsCreate {
         args: super::SnippetArgs {
