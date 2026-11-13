@@ -7,8 +7,8 @@
 // pop-out reading window for a single message; the spam report rides the
 // report family's mark_junk and stands only where the account's provider
 // can report; items the host cannot serve yet stand as named placeholders.
-// The pin entry is the exception: pure view state over the local pin set,
-// no intent, the batch landing one pin state.
+// The pin and VIP entries are the exceptions: pure view state over the
+// local sets, no intent, the batch landing one state.
 
 import {
   ArchiveIcon,
@@ -22,6 +22,7 @@ import {
   PopOutIcon,
   ReplyAllIcon,
   ReplyIcon,
+  StarIcon,
   TrashIcon,
 } from '@/components/icons';
 import { type ContextMenuItem } from '@/components/ui/ContextMenu';
@@ -29,6 +30,7 @@ import { dispatch, intents, type MessageRef } from '@/services/ipc';
 import { openMessageWindow } from '@/features/reader/readerWindows';
 import { openDraftRow, openDraftRowWindow } from '@/features/composer/draftOpen';
 import { usePinnedRowsStore } from '@/features/list-pin/pinnedRowsStore';
+import { useVipSendersStore } from '@/features/vip/vipSendersStore';
 import { useSweepStore } from '@/features/sweep/sweepStore';
 import { rowKeyId } from '@/components/message-list/rowIdentity';
 import type { FolderRow, MessageRowView, ViewMode } from '@/services/surfaces';
@@ -121,6 +123,29 @@ function pinItem(targets: MessageRowView[]): ContextMenuItem {
         const id = rowKeyId(row.key);
         if (store.isPinned(id) !== pin) {
           store.toggle(id);
+        }
+      }),
+  };
+}
+
+/** The VIP verb: pure view state over the local sender set, no intent.
+ *  The label flips on the targets' senders' state (Remove VIP only when
+ *  every target's sender stands VIP), and the batch lands one state:
+ *  Remove VIP clears every target's sender, Add VIP marks the unmarked
+ *  ones and leaves the already marked alone. The set keys by address, so
+ *  one mark stands across accounts; a blank sender is refused by the
+ *  store and stays unmarked. */
+function vipItem(targets: MessageRowView[]): ContextMenuItem {
+  const allVip = targets.every((row) => useVipSendersStore.getState().has(row.sender_address));
+  const vip = !allVip;
+  return {
+    label: allVip ? 'Remove VIP' : 'Add VIP',
+    icon: StarIcon,
+    onSelect: () =>
+      forEach(targets, (row) => {
+        const store = useVipSendersStore.getState();
+        if (store.has(row.sender_address) !== vip) {
+          store.toggle(row.sender_address);
         }
       }),
   };
@@ -277,6 +302,7 @@ export function buildRowMenu(
   return [
     openWindowItem(one, oneMessage, context),
     pinItem(targets),
+    vipItem(targets),
     { separator: true },
     {
       label: 'Reply',

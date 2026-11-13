@@ -8,7 +8,8 @@
 // trailing edge and show while the row is hovered, selected, or holds the
 // focus, with a flagged row keeping its flag visible so the state never
 // hides and a draft row suppressing the mail four. A pinned row keeps its
-// pin glyph beside the paperclip, persistent the same way. The whole row drags:
+// pin glyph beside the paperclip, persistent the same way, and a row from
+// a VIP sender keeps its star beside the pin. The whole row drags:
 // the drag carries the selection it rides in (itself alone otherwise), keys
 // only, never content. The touch pointer owns the horizontal swipe: the
 // gesture translates the content over the revealed action and fires it past
@@ -23,11 +24,13 @@ import {
   MarkReadIcon,
   PaperclipIcon,
   PinIcon,
+  StarIcon,
   TrashIcon,
 } from '@/components/icons';
 import { dispatch, intents } from '@/services/ipc';
 import { Avatar } from '@/features/people/Avatar';
 import { usePinnedRowsStore } from '@/features/list-pin/pinnedRowsStore';
+import { useVipSendersStore } from '@/features/vip/vipSendersStore';
 import { useListStore } from '@/stores/listStore';
 import type { RowKey, MessageRowView } from '@/services/surfaces';
 import { resolveTargets } from './listSelection';
@@ -76,6 +79,7 @@ export function MessageRow({ row, selected, multiSelected = false, draft = false
   const [focusWithin, setFocusWithin] = useState(false);
   const density = useListStore((s) => s.density);
   const pinned = usePinnedRowsStore((s) => s.isPinned(rowKeyId(row.key)));
+  const vip = useVipSendersStore((s) => s.has(row.sender_address));
   const swipe = useRowSwipe(row);
   const actionsVisible = hovered || selected || focusWithin;
   const sender = row.sender_name || row.sender_address;
@@ -230,6 +234,11 @@ export function MessageRow({ row, selected, multiSelected = false, draft = false
               {pinned && (
                 <span title="Pinned" aria-label="Pinned" className="inline-flex text-primary">
                   <PinIcon size={14} />
+                </span>
+              )}
+              {vip && (
+                <span title="VIP sender" aria-label="VIP sender" className="inline-flex text-warning">
+                  <StarIcon size={14} />
                 </span>
               )}
               {!draft && actionsVisible && (

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The list toolbar's filter control: four segmented buttons carrying the
+// The list toolbar's filter control: five segmented buttons carrying the
 // counts of the snapshot's rows per tab, the pressed state following the
 // chosen filter, and every click crossing back with the tab it names.
 // The search header beside them: the depth note stated at a nonzero
@@ -25,7 +25,7 @@ afterEach(() => {
   ipc.dispatch.mockReset();
 });
 
-const COUNTS = { all: 12, unread: 5, flagged: 3, attachments: 2 };
+const COUNTS = { all: 12, unread: 5, flagged: 3, attachments: 2, vip: 4 };
 
 function renderToolbar(overrides: Partial<Parameters<typeof ListToolbar>[0]> = {}) {
   return render(
@@ -57,7 +57,7 @@ function row(key: string, unread = false, flagged = false): MessageRowView {
 }
 
 describe('the filter control', () => {
-  it('renders the four tabs with their count badges', () => {
+  it('renders the five tabs with their count badges', () => {
     renderToolbar();
 
     expect(screen.getByRole('group', { name: 'Filter' })).toBeTruthy();
@@ -65,6 +65,7 @@ describe('the filter control', () => {
     expect(screen.getByRole('button', { name: 'Unread 5' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Flagged 3' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Attachments 2' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'VIP 4' })).toBeTruthy();
   });
 
   it('presses the chosen tab alone', () => {
@@ -74,6 +75,7 @@ describe('the filter control', () => {
     expect(screen.getByRole('button', { name: 'Unread 5' }).getAttribute('aria-pressed')).toBe('false');
     expect(screen.getByRole('button', { name: 'Flagged 3' }).getAttribute('aria-pressed')).toBe('true');
     expect(screen.getByRole('button', { name: 'Attachments 2' }).getAttribute('aria-pressed')).toBe('false');
+    expect(screen.getByRole('button', { name: 'VIP 4' }).getAttribute('aria-pressed')).toBe('false');
   });
 
   it('crosses the clicked tab back', () => {
@@ -88,6 +90,9 @@ describe('the filter control', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Attachments 2' }));
     expect(onFilter).toHaveBeenCalledWith('attachments');
+
+    fireEvent.click(screen.getByRole('button', { name: 'VIP 4' }));
+    expect(onFilter).toHaveBeenCalledWith('vip');
 
     fireEvent.click(screen.getByRole('button', { name: 'All 12' }));
     expect(onFilter).toHaveBeenCalledWith('all');

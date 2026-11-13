@@ -77,7 +77,10 @@ describe('the row menu pin entry', () => {
     const items = buildRowMenu([m1], 'flat');
     const positions = labels(items);
     expect(positions.indexOf('Pin')).toBe(positions.indexOf('Open in New Window') + 1);
-    expect(positions[positions.indexOf('Pin') + 1]).toBe('|');
+    // The VIP entry stands beside Pin in the view-state group; the
+    // separator closes the pair.
+    expect(positions[positions.indexOf('Pin') + 1]).toBe('Add VIP');
+    expect(positions[positions.indexOf('Pin') + 2]).toBe('|');
 
     const entry = items.find((item) => item.label === 'Pin')!;
     expect(entry.disabled).toBeUndefined();
