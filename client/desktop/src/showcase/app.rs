@@ -19,8 +19,8 @@ use astra_app::{
     AnalyticsEvent, AppError, AttachmentContent, AttachmentReadError, AvatarView,
     BriefDocumentError, CardRef, Chip, CompositionId, ContactDraftInput, DigestView, DocumentError,
     DocumentView, DraftResume, EmlContent, EmlReadError, ExtractionSummary, Intent, KnowledgeView,
-    MeetingBriefView, NewMailBatch, PassOutcome, Snippet, SplitEntry, SummariseMessageError,
-    TranslateLanguage,
+    MeetingBriefView, NewMailBatch, NewMailNotice, PassOutcome, Snippet, SplitEntry,
+    SummariseMessageError, TranslateLanguage,
 };
 use astra_viewmodel::{
     CalendarSnapshot, ComposeRequestSnapshot, DraftStatusSnapshot, EventDetail,
@@ -245,6 +245,14 @@ impl AppPort for ShowcaseApp {
 
     async fn wake_due_snoozes(&self, _now: i64) -> Result<usize, String> {
         Ok(0)
+    }
+
+    async fn remind_message(&self, _row: astra_app::RowRef, _wake_at: i64) -> Result<(), String> {
+        Ok(())
+    }
+
+    async fn wake_due_reminders(&self, _now: i64) -> Result<Vec<NewMailNotice>, String> {
+        Ok(Vec::new())
     }
 
     async fn draft_chips(&self, _account: &AccountId, _key: &ProviderKey) -> Vec<Chip> {

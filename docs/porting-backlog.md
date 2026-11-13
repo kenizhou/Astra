@@ -75,7 +75,8 @@ tool budget.
   their own slice beside this ladder. The owner delegated the picking to
   the loop (2026-11-12); the command palette, shortcuts help, hover
   actions, quote collapse, notification history, sweep, quick steps, pin,
-  pinned searches, and VIP have shipped, and the rest follow in turn.
+  pinned searches, VIP, and flag reminders have shipped, and the rest
+  follow in turn.
 - **The AI remainder**: the assistant chat with tool budget was the one
   unstarted inbox-zero row; SP2y shipped it (2026-11-08, PR #60), live-proven
   armed over the harness and the model endpoint.

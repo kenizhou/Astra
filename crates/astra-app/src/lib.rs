@@ -44,6 +44,7 @@ mod query;
 mod reading;
 mod reading_password;
 mod reference;
+mod reminders;
 mod report_writes;
 mod row_cache;
 mod sanitise;
@@ -346,18 +347,16 @@ pub struct App<P> {
     /// before the gate. `None` (the default) sends what the composer
     /// rendered.
     pub(crate) compose_transform: Option<Arc<dyn crate::gate::ComposeTransform>>,
-    /// The plugin message decoder: every reading open's raw source passes it
-    /// before the render. `None` (the default) renders the store's own read.
+    /// The plugin message decoder every reading open passes before the render; `None` renders the store's read.
     pub(crate) decoder: Option<Arc<dyn crate::decode::MessageDecoder>>,
-    /// The shared crypto store the password re-entry decrypts through (the
-    /// decoder's own instance); `None` and a submission stays needs-password.
+    /// The shared crypto store the password re-entry decrypts through; `None` stays needs-password.
     crypto_store: Mutex<Option<Arc<astra_crypto_store::CryptoStore>>>,
-    /// The ledger the consented analytics events append to, installed by
-    /// the host beside the account store. `None` (the default) and the
-    /// recorder records nothing. See `analytics`.
+    /// The consented analytics ledger the host installs; `None` records nothing. See `analytics`.
     analytics: Mutex<Option<Arc<astra_ai::AiStore>>>,
     /// The device-local snooze store the host installs; `None` records nothing.
     snooze: Mutex<Option<Arc<astra_snooze::SnoozeStore>>>,
+    /// The device-local reminder store the host installs; `None` records nothing.
+    reminders: Mutex<Option<Arc<astra_reminders::ReminderStore>>>,
 }
 
 impl<P> core::fmt::Debug for App<P> {
@@ -436,6 +435,7 @@ impl<P: Provider> App<P> {
             crypto_store: Mutex::new(None),
             analytics: Mutex::new(None),
             snooze: Mutex::new(None),
+            reminders: Mutex::new(None),
         }
     }
 

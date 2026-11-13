@@ -15,8 +15,8 @@ use astra_app::{
     Account, AnalyticsEvent, AttachmentContent, AttachmentReadError, AvatarView,
     BriefDocumentError, CardRef, Chip, CompositionId, ContactDraftInput, DigestView, DocumentError,
     DocumentView, DraftResume, EmlContent, EmlReadError, ExtractionSummary, Intent, KnowledgeView,
-    MeetingBriefView, NewMailBatch, PassOutcome, Snippet, SplitEntry, SummariseMessageError,
-    TranslateLanguage,
+    MeetingBriefView, NewMailBatch, NewMailNotice, PassOutcome, Snippet, SplitEntry,
+    SummariseMessageError, TranslateLanguage,
 };
 use astra_viewmodel::{
     CalendarSnapshot, ComposeRequestSnapshot, DraftStatusSnapshot, EventDetail,
@@ -65,8 +65,7 @@ pub(crate) trait AppPort: Send + Sync {
     /// The published sync-progress snapshot, for the host's pull.
     fn sync_progress(&self) -> SyncProgressSnapshot;
 
-    /// The published reading snapshot, for the host's pull: the one open
-    /// message's body, or `None` when nothing is open.
+    /// The published reading snapshot: the one open message's body, or `None`.
     fn reading(&self) -> Option<ReadingSnapshot>;
 
     /// Re-opens the passphrase-protected message with the reader's passphrase:
@@ -189,28 +188,19 @@ pub(crate) trait AppPort: Send + Sync {
         key: &ProviderKey,
     ) -> Result<EmlContent, EmlReadError>;
 
-    /// The published draft-status snapshot, for the host's pull: the composition
-    /// whose save moved and how it ended, or `None` when no composition has a
-    /// save to report.
+    /// The published draft-status snapshot: the composition whose save moved, or `None`.
     fn draft_status(&self) -> Option<DraftStatusSnapshot>;
 
-    /// The published compose-request snapshot, for the host's pull: the
-    /// composition the last reply or forward opened, or `None` when no
-    /// request is pending.
+    /// The published compose-request snapshot: the last reply or forward's composition, or `None`.
     fn compose_request(&self) -> Option<ComposeRequestSnapshot>;
 
-    /// Takes the pending compose request, consuming the slot: the pop-out
-    /// composer window's pull, so a later window never re-reads a spent
-    /// request.
+    /// Takes the pending compose request, consuming the slot so a later window never re-reads it.
     fn take_compose_request(&self) -> Option<ComposeRequestSnapshot>;
 
-    /// The composition a `mailto:` link opens: the parser's five fields
-    /// under the default send account, or `None` when no account stands
-    /// or the link is not a mailto link at all.
+    /// The composition a `mailto:` link opens under the default send account, or `None`.
     async fn open_mailto(&self, uri: &str) -> Option<MailtoOpen>;
 
-    /// The published sending snapshot, for the host's pull: every account's
-    /// sends that have not gone out, or nothing outstanding.
+    /// The published sending snapshot: every account's outstanding sends.
     fn sending(&self) -> SendingSnapshot;
 
     /// Opens the account's latest stored draft into `composition`, so the
@@ -255,6 +245,14 @@ pub(crate) trait AppPort: Send + Sync {
     /// Wakes every snooze due at `now`, returning the messages to their
     /// origin folders: the host timer's tick body, answering the count woken.
     async fn wake_due_snoozes(&self, now: i64) -> Result<usize, String>;
+
+    /// Reminds one message at `wake_at` (unix seconds): the core records the
+    /// provider key, subject, and sender; the message never moves or flags.
+    async fn remind_message(&self, row: astra_app::RowRef, wake_at: i64) -> Result<(), String>;
+
+    /// Wakes every reminder due at `now`, answering the notices the host
+    /// timer delivers; the message stays put.
+    async fn wake_due_reminders(&self, now: i64) -> Result<Vec<NewMailNotice>, String>;
 
     /// Takes the new-mail batch the passes have collected and leaves the
     /// queue empty: the delivery loop's drain after each pass it lands, so

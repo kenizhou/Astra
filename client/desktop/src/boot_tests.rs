@@ -178,6 +178,7 @@ fn the_assembly_hands_back_an_mcp_host_off_and_exposing_nothing() {
         agent_sink,
         std::sync::Arc::new(QuietDraftSink),
         crate::oauth::wiring::offline_surface(),
+        std::sync::Arc::new(crate::notify::NotifyBridge::logged()),
     )
     .expect("the assembly boots over an empty store");
 
@@ -226,6 +227,7 @@ fn the_assembly_installs_the_host_account_store_before_the_state_hands_back() {
         agent_sink,
         std::sync::Arc::new(QuietDraftSink),
         crate::oauth::wiring::offline_surface(),
+        std::sync::Arc::new(crate::notify::NotifyBridge::logged()),
     )
     .expect("the assembly boots over an empty store");
 

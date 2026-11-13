@@ -135,6 +135,7 @@ fn the_assembly_primes_the_settings_snapshot_for_the_first_pull() {
         agent_sink,
         std::sync::Arc::new(QuietDraftSink),
         crate::oauth::wiring::offline_surface(),
+        std::sync::Arc::new(crate::notify::NotifyBridge::logged()),
     )
     .expect("the assembly boots over an empty store");
 

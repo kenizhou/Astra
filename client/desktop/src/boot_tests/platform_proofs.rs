@@ -81,6 +81,7 @@ fn launch(data_dir: &Path, flip_debug: bool) {
         agent_sink,
         Arc::new(QuietDraftSink),
         crate::oauth::wiring::offline_surface(),
+        Arc::new(crate::notify::NotifyBridge::logged()),
     )
     .expect("the real assembly boots over the scratch store");
     let accounts = state.connections.ids().len();

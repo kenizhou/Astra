@@ -44,6 +44,7 @@ import { usePinnedRowsStore } from '@/features/list-pin/pinnedRowsStore';
 import { useVipSendersStore } from '@/features/vip/vipSendersStore';
 import { SweepDialog } from '@/features/sweep/SweepDialog';
 import { SnoozeDialog } from '@/features/snooze/SnoozeDialog';
+import { ReminderDialog } from '@/features/reminders/ReminderDialog';
 import { dispatch, intents } from '@/services/ipc';
 import { useFolderStore } from '@/stores/folderStore';
 import { useListFilterStore } from '@/stores/listFilterStore';
@@ -396,6 +397,7 @@ export function MessageList() {
       <SwipeToast />
       <SweepDialog />
       <SnoozeDialog />
+      <ReminderDialog />
     </section>
   );
 }

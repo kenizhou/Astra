@@ -45,6 +45,7 @@ pub(crate) fn assemble_state(
     agent_sink: Arc<dyn AgentEventSink>,
     draft_sink: Arc<dyn astra_app::DraftPoolSink>,
     oauth: Arc<crate::oauth::commands::SignInSurface>,
+    notify: Arc<crate::notify::NotifyBridge>,
 ) -> Result<AppState, Box<dyn std::error::Error>> {
     // The showcase flag chooses the fixture app at assembly, debug builds
     // alone: the shell stands over recorded answers with no dial and no
@@ -213,6 +214,21 @@ pub(crate) fn assemble_state(
         snooze_store,
         &runtime,
     );
+    // The device-local reminder store beside the snooze store: the core
+    // records and wakes over it, and the host wake timer reads its due
+    // entries and delivers the notices through the shared bridge. The timer
+    // holds the three Arcs (the core, the store, the bridge), so no AppState
+    // field carries the store and the drop order stays as it stands.
+    let reminder_store = Arc::new(astra_reminders::ReminderStore::open(
+        &data_dir.join(REMINDER_STORE_FILE),
+    )?);
+    core.install_reminder_store(Arc::clone(&reminder_store));
+    crate::reminder_timer::spawn(
+        Arc::clone(&core) as Arc<dyn AppPort>,
+        reminder_store,
+        notify,
+        &runtime,
+    );
     // The crypto store opened before the dial (above) rides the state: the
     // account-add flow and the headless dial build wrappers from it too.
     // Prime the settings snapshot: nothing republishes it until a settings
@@ -291,6 +307,10 @@ pub(crate) const AI_STORE_FILE: &str = "ai.sqlite";
 /// The snooze store's file name, under the data directory: device-local, the
 /// host wake timer's alone (the CLI does not share it).
 const SNOOZE_STORE_FILE: &str = "snooze.sqlite";
+
+/// The reminder store's file name, under the data directory: device-local,
+/// the host wake timer's alone (the CLI does not share it).
+const REMINDER_STORE_FILE: &str = "reminders.sqlite";
 
 /// The crypto store's file name, under the data directory: key material and
 /// trust decisions. Opened before the account dial so every IMAP dial can
@@ -385,7 +405,18 @@ pub(crate) fn setup_host(app: &mut tauri::App) -> Result<(), Box<dyn std::error:
         oauth_rx,
         oauth_tx,
     ));
-    let mut state = assemble_state(&data_dir, observer, agent_sink, draft_sink, oauth)?;
+    // The notification bridge built once and shared: the delivery loop drains
+    // new mail through it and the reminder timer delivers woken notices
+    // through the same instance (the windowed handle the headless shape lacks).
+    let notify = Arc::new(crate::notify::NotifyBridge::windowed(app.handle().clone()));
+    let mut state = assemble_state(
+        &data_dir,
+        observer,
+        agent_sink,
+        draft_sink,
+        oauth,
+        Arc::clone(&notify),
+    )?;
     // The mailto entry's host leg: the launch link, when the process was
     // started by one, is held for the page-load drain, and the deep-link
     // and reading-pane roads are wired once the state they read stands.
@@ -399,7 +430,7 @@ pub(crate) fn setup_host(app: &mut tauri::App) -> Result<(), Box<dyn std::error:
     crate::delivery::spawn(
         Arc::clone(&state.app),
         Arc::clone(&state.connections),
-        Arc::new(crate::notify::NotifyBridge::windowed(app.handle().clone())),
+        notify,
         &state.runtime,
     );
     // The periodic calendar refresh rides the same lifetime: one timer over

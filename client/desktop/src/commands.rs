@@ -20,8 +20,7 @@ use engine_api::AccountId;
 
 use crate::{AppState, HostAccount, HostProvider};
 
-// The compose command surface (the request pull), split into its own child
-// module for the line cap, the same split the app core's compose intents made.
+// The compose command surface (the request pull), split into its own child for the line cap.
 pub(crate) mod compose;
 
 // The drafts command surface (the status pull and the resume read), under the
@@ -58,11 +57,12 @@ pub(crate) mod platform;
 pub(crate) mod mcp;
 pub(crate) mod plugin;
 
-// The jmap add, attachments Save As, eml save, crypto receive, and snooze surfaces.
+// The jmap add, attachments Save As, eml save, crypto receive, snooze, and reminder surfaces.
 pub(crate) mod attachments;
 pub(crate) mod crypto;
 pub(crate) mod eml;
 pub(crate) mod jmap;
+pub(crate) mod reminders;
 pub(crate) mod snooze;
 /// A command failure, serialised to the webview as its display string: a sentence a
 /// surface can show, with the reason the host saw.

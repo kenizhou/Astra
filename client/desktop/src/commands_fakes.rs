@@ -183,9 +183,7 @@ pub(crate) struct FakeApp {
     pub(crate) avatar_into: Mutex<Vec<String>>,
     /// The settings snapshot the pull answers with.
     pub(crate) settings: Mutex<SettingsSnapshot>,
-    /// The product events the recorder was asked to record, in order:
-    /// the consent gate is the real core's, so the fake answers the
-    /// asks, not the gate.
+    /// The product events the recorder was asked to record; the fake answers the asks, not the gate.
     pub(crate) analytics: Mutex<Vec<astra_app::AnalyticsEvent>>,
     /// The batches the delivery drain answers with, in order; an empty
     /// queue answers the empty batch.
@@ -198,6 +196,7 @@ pub(crate) struct FakeApp {
     pub(crate) first_waits: Mutex<Vec<String>>,
     pub(crate) snoozed: Mutex<Vec<(astra_app::RowRef, i64)>>,
     pub(crate) woken: Mutex<Vec<i64>>,
+    pub(crate) reminded: Mutex<Vec<(astra_app::RowRef, i64)>>,
 }
 
 impl FakeApp {
@@ -264,6 +263,7 @@ impl FakeApp {
             first_waits: Mutex::new(Vec::new()),
             snoozed: Mutex::new(Vec::new()),
             woken: Mutex::new(Vec::new()),
+            reminded: Mutex::new(Vec::new()),
         })
     }
 

@@ -38,6 +38,7 @@ mod oauth;
 mod observer;
 mod platform;
 mod plugin;
+mod reminder_timer;
 mod share;
 #[cfg(debug_assertions)]
 mod showcase;
@@ -157,6 +158,7 @@ pub fn run() {
             commands::calendar::calendar_brief_generate,
             commands::calendar::calendar_event_detail,
             commands::snooze::snooze_message,
+            commands::reminders::remind_message,
             commands::people::people,
             commands::people::people_card,
             commands::people::people_suggestions,
