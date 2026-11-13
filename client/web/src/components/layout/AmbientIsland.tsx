@@ -106,6 +106,10 @@ export function AmbientIsland() {
   const wrapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    // The echo mirrors a search that landed elsewhere (a pinned search run
+    // from the panel): sync the captured query too, or Save / Enter / the
+    // debounce would ride the stale mount-time value.
+    query.current = echo ?? '';
     setText(echo ?? '');
   }, [echo]);
 

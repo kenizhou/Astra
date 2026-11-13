@@ -4,7 +4,7 @@
 // prefills the name with the query, refuses a blank name, cancels without
 // saving, folds away when the field blanks, and disables at the cap. The
 // field's own typing behaviour stays pinned in TitleBar.test.tsx.
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const ipc = vi.hoisted(() => ({ dispatch: vi.fn() }));
@@ -171,6 +171,29 @@ describe('the Save search affordance', () => {
       'name',
       'query',
     ]);
+  });
+
+  it('captures a query that lands through the echo after mount', () => {
+    render(<AmbientIsland />);
+    expand();
+
+    // A pinned search run from the panel lands the snapshot post-mount: the
+    // echo must sync the captured query, not leave the mount-time ref stale.
+    act(() => {
+      useListStore.setState({
+        search: { query: 'invoice', scope: 'all_except_trash', rows: [], depth_months: 3 },
+      });
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save search' }));
+    const name = screen.getByRole('textbox', { name: 'Saved search name' }) as HTMLInputElement;
+    expect(name.value).toBe('invoice');
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(usePinnedSearchesStore.getState().searches[0]).toMatchObject({
+      name: 'invoice',
+      query: 'invoice',
+    });
   });
 
   it('disables at the cap with its reason', () => {
