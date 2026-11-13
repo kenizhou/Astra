@@ -34,6 +34,11 @@ export function snoozeMessage(message: MessageRef, wakeAt: number): Promise<void
 export function snoozeChoices(now: Date): SnoozeChoice[] {
   const laterToday = new Date(now);
   laterToday.setHours(18, 0, 0, 0);
+  if (laterToday.getTime() <= now.getTime()) {
+    // Past the evening hour there is no "later today" left; wake a few hours
+    // out so the choice always lies in the future, never the past.
+    laterToday.setTime(now.getTime() + 3 * 60 * 60 * 1000);
+  }
   const tomorrow = new Date(now);
   tomorrow.setDate(tomorrow.getDate() + 1);
   tomorrow.setHours(8, 0, 0, 0);

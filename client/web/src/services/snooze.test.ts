@@ -44,4 +44,15 @@ describe('the wake choices', () => {
     expected.setHours(8, 0, 0, 0);
     expect(tomorrow!.wakeAt).toBe(Math.floor(expected.getTime() / 1000));
   });
+
+  it('keeps every choice in the future even in the evening', () => {
+    // Past the 18:00 "later today" hour: a naive this-evening instant would
+    // lie in the past and the message would return on the next tick.
+    const now = new Date('2026-11-12T12:00:00Z');
+    now.setHours(20, 0, 0, 0);
+    const nowUnix = Math.floor(now.getTime() / 1000);
+    for (const choice of snoozeChoices(now)) {
+      expect(choice.wakeAt).toBeGreaterThan(nowUnix);
+    }
+  });
 });
