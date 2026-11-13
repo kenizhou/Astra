@@ -37,6 +37,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "smime_receive",
         sql: include_str!("migrations/0004_smime_receive.sql"),
     },
+    Migration {
+        version: 5,
+        name: "encrypted_drafts",
+        sql: include_str!("migrations/0005_encrypted_drafts.sql"),
+    },
 ];
 
 /// The sqlite-backed crypto store. All query layers in this crate take a
