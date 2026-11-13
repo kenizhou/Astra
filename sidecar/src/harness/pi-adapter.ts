@@ -49,9 +49,10 @@ import type {
 /** Provider id used when registering the configured endpoint. */
 const PROVIDER_ID = 'astra-agent';
 
-/** G10: the explicit session allowlist, the ten mail tools and nothing
- *  else. With tools: provided, pi enables ONLY these names, so the built-in
- *  fs/bash tools and any future extension directory stay off. */
+/** G10: the explicit session allowlist, the ten mail tools and the five
+ *  key tools, nothing else. With tools: provided, pi enables ONLY these
+ *  names, so the built-in fs/bash tools and any future extension directory
+ *  stay off. */
 export const CHAT_TOOL_ALLOWLIST: readonly string[] = [
   'list_folders',
   'list_messages',
@@ -63,6 +64,11 @@ export const CHAT_TOOL_ALLOWLIST: readonly string[] = [
   'set_flagged',
   'archive_message',
   'move_to_trash',
+  'list_keys',
+  'list_collected_keys',
+  'import_key',
+  'promote_key',
+  'reject_key',
 ];
 
 /** Resident skill index appended to every pi system prompt. Short by

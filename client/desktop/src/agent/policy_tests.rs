@@ -6,8 +6,9 @@
 
 use super::protocol::{PermissionLevel, PermissionPolicy};
 
-/// The policy's rows exactly as SPA0 ships them: the read verbs (search
-/// joined them with SP2y) run, the draft and act verbs ask.
+/// The policy's rows exactly as the product ships them: the read verbs
+/// (search joined them with SP2y, the key reads with SP4d-1b) run, the
+/// draft, act, and key write verbs ask.
 #[test]
 fn the_default_policy_rows_are_exactly_the_shipped_set() {
     let policy = super::default_policy();
@@ -26,6 +27,11 @@ fn the_default_policy_rows_are_exactly_the_shipped_set() {
         ("set_flagged", row(PermissionLevel::Confirm)),
         ("archive_message", row(PermissionLevel::Confirm)),
         ("move_to_trash", row(PermissionLevel::Confirm)),
+        ("list_keys", row(PermissionLevel::Auto)),
+        ("list_collected_keys", row(PermissionLevel::Auto)),
+        ("import_key", row(PermissionLevel::Confirm)),
+        ("promote_key", row(PermissionLevel::Confirm)),
+        ("reject_key", row(PermissionLevel::Confirm)),
     ];
     assert_eq!(
         policy.len(),
