@@ -73,7 +73,10 @@ pub use cms_parse::{
 // SAME `(account_id, standard, fingerprint)` UNIQUE key `persist_imported`
 // derives for the leaf. A mismatch would break re-import idempotency and
 // cross-set dedup.
-pub use cert::{cert_summary_of_der, fingerprint_of_cert_der, CertSummary};
+pub use cert::{
+    cert_summary_of_der, crl_distribution_point_urls, crl_metadata_of_der, fingerprint_of_cert_der,
+    CertSummary, CrlMetadata,
+};
 
 /// S/MIME `CryptoBackend`. Owns the framework policy plus the `KeyStore` where
 /// generated cert/key material is persisted (public DER cert + encrypted PKCS#8

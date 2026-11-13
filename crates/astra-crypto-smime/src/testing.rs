@@ -191,6 +191,23 @@ mod inner {
     /// but signed by the parent CA (so the issuer chain is real).
     #[doc(hidden)]
     pub fn build_leaf_signed_by(email: &str, parent: &BuiltCert) -> BuiltCert {
+        build_leaf_inner(email, parent, &[])
+    }
+
+    /// Build an S/MIME leaf cert signed by `parent` that ALSO carries a
+    /// `cRLDistributionPoints` extension with one `fullName` URI per entry of
+    /// `dp_urls` (SP4c-3b). The receive hook extracts these URLs and fetches
+    /// the CRLs they point at. Same leaf shape as [`build_leaf_signed_by`].
+    #[doc(hidden)]
+    pub fn build_leaf_signed_by_with_dp(
+        email: &str,
+        parent: &BuiltCert,
+        dp_urls: &[&str],
+    ) -> BuiltCert {
+        build_leaf_inner(email, parent, dp_urls)
+    }
+
+    fn build_leaf_inner(email: &str, parent: &BuiltCert, dp_urls: &[&str]) -> BuiltCert {
         let mut rng = rand::rng();
         let signing_key = SigningKey::generate_from_rng(&mut rng);
         let verifying_key = signing_key.verifying_key();
@@ -228,6 +245,28 @@ mod inner {
             .add_extension(&SubjectAltName(vec![GeneralName::Rfc822Name(email_ia5)]))
             .expect("leaf san");
         builder.add_extension(&ski).expect("leaf ski");
+
+        // The CRL distribution-point extension (SP4c-3b), when URLs are given.
+        if !dp_urls.is_empty() {
+            let names: Vec<GeneralName> = dp_urls
+                .iter()
+                .map(|u| {
+                    GeneralName::UniformResourceIdentifier(
+                        der::asn1::Ia5String::new(u.as_bytes()).expect("dp uri ia5"),
+                    )
+                })
+                .collect();
+            let dp = x509_cert::ext::pkix::crl::dp::DistributionPoint {
+                distribution_point: Some(
+                    x509_cert::ext::pkix::name::DistributionPointName::FullName(names),
+                ),
+                reasons: None,
+                crl_issuer: None,
+            };
+            builder
+                .add_extension(&x509_cert::ext::pkix::CrlDistributionPoints(vec![dp]))
+                .expect("leaf dp");
+        }
 
         let parent_sk = SigningKey::from_pkcs8_der(&parent.priv_pkcs8_der).expect("parent key");
         let cert = builder
@@ -321,6 +360,54 @@ mod inner {
         content_info.to_der().expect("ContentInfo to_der")
     }
 
+    /// Build a CRL signed by `issuer` (SP4c-3b). The CRL revokes the serial of
+    /// every cert in `revoked`; an empty slice yields a CRL with no revoked
+    /// entries (a covering cert reads "good"). The validity window is now to
+    /// now+7 days with a `nextUpdate`, so the chain's as-of-signing-time check
+    /// reads it fresh. Mirrors the chain.rs spike CRL fixture; the issuer must
+    /// carry `cRLSign` (the CA builders here do).
+    #[doc(hidden)]
+    pub fn build_crl(issuer: &BuiltCert, revoked: &[&BuiltCert]) -> Vec<u8> {
+        use x509_cert::builder::CrlBuilder;
+        use x509_cert::crl::RevokedCert as CrlRevokedCert;
+        use x509_cert::ext::pkix::crl::CrlNumber;
+
+        let issuer_cert = <x509_cert::Certificate as der::Decode>::from_der(&issuer.cert_der)
+            .expect("parse issuer for CRL");
+        let issuer_sk =
+            SigningKey::from_pkcs8_der(&issuer.priv_pkcs8_der).expect("issuer key for CRL");
+
+        let crl_number = CrlNumber(der::asn1::Uint::new(&[1u8]).expect("crl number uint"));
+        let validity: Validity =
+            Validity::from_now(Duration::from_secs(7 * 24 * 60 * 60)).expect("crl validity");
+
+        let mut builder =
+            CrlBuilder::new_with_this_update(&issuer_cert, crl_number, validity.not_before)
+                .expect("crl builder")
+                .with_next_update(Some(validity.not_after));
+
+        if !revoked.is_empty() {
+            let entries: Vec<CrlRevokedCert> = revoked
+                .iter()
+                .map(|leaf| {
+                    let cert = <x509_cert::Certificate as der::Decode>::from_der(&leaf.cert_der)
+                        .expect("parse revoked cert");
+                    CrlRevokedCert {
+                        serial_number: cert.tbs_certificate().serial_number().clone(),
+                        revocation_date: validity.not_before,
+                        crl_entry_extensions: None,
+                    }
+                })
+                .collect();
+            builder = builder.with_certificates(entries.into_iter());
+        }
+
+        let crl = builder
+            .build::<_, DerSignature>(&issuer_sk)
+            .expect("crl build/sign");
+        crl.to_der().expect("crl to_der")
+    }
+
     fn now_secs() -> u64 {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -332,6 +419,6 @@ mod inner {
 #[cfg(feature = "testing")]
 #[doc(hidden)]
 pub use inner::{
-    build_intermediate_signed_by, build_leaf_signed_by, build_self_signed_ca,
-    build_signed_data_with_certs, BuiltCert,
+    build_crl, build_intermediate_signed_by, build_leaf_signed_by, build_leaf_signed_by_with_dp,
+    build_self_signed_ca, build_signed_data_with_certs, BuiltCert,
 };

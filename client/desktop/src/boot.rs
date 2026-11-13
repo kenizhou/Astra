@@ -140,9 +140,25 @@ pub(crate) fn assemble_state(
     let plugin_decoder: Arc<dyn astra_app::MessageDecoder> = Arc::new(
         crate::plugin::PluginDecoder::new(Arc::clone(&plugins), GATE_HANDLER_TIMEOUT),
     );
+    // The S/MIME receive arm fetches the signer chain's CRLs through a bounded
+    // HTTP fetcher (SP4c-3b). When the client cannot be realised the offline
+    // no-op fetcher stands: revocation stays cache-only, the open never blocks.
+    let crl_fetcher: Arc<dyn astra_crypto_store::CrlFetcher> =
+        match crate::crl_fetch::HttpCrlFetcher::new() {
+            Ok(fetcher) => Arc::new(fetcher),
+            Err(e) => {
+                log::warn!(
+                    "boot: the CRL fetcher is unavailable; revocation stays cache-only: {e}"
+                );
+                Arc::new(astra_crypto_store::NoopCrlFetcher)
+            }
+        };
     let decoder_for_boot: Arc<dyn astra_app::MessageDecoder> =
         Arc::new(crate::decode::CompositeDecoder::new(
-            Arc::new(astra_app::CryptoDecoder::new(Arc::clone(&crypto_store))),
+            Arc::new(astra_app::CryptoDecoder::with_crl_fetcher(
+                Arc::clone(&crypto_store),
+                crl_fetcher,
+            )),
             plugin_decoder,
         ));
     let core = runtime.block_on(|| {

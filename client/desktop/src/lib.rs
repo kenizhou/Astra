@@ -22,6 +22,7 @@ mod boot;
 mod calendar_timer;
 mod commands;
 mod credential_store;
+mod crl_fetch;
 mod crypto_wrapper;
 mod decode;
 mod delivery;
