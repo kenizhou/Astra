@@ -241,6 +241,8 @@ mod proof;
 mod reading;
 #[path = "tests_live_harness/reading_proof.rs"]
 mod reading_proof;
+#[path = "tests_live_harness/reminder_proof.rs"]
+mod reminder_proof;
 #[path = "tests_live_harness/reply.rs"]
 mod reply;
 #[path = "tests_live_harness/search.rs"]

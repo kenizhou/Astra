@@ -242,15 +242,25 @@ fn assemble_for(env: &SliceEnv) -> Result<AppState, String> {
     // OAuth surface stands over the offline stand-ins: no sign-in can
     // begin there, which nothing in the slice tries.
     let oauth = crate::oauth::wiring::offline_surface();
-    let state = assemble_state(&env.data_dir, observer, agent_sink, draft_sink, oauth)
-        .map_err(|err| format!("the headless host could not boot: {err}"))?;
+    // The headless bridge logs what would have crossed; the delivery loop and
+    // the reminder timer share the one instance, the windowed shape's sibling.
+    let notify = std::sync::Arc::new(crate::notify::NotifyBridge::logged());
+    let state = assemble_state(
+        &env.data_dir,
+        observer,
+        agent_sink,
+        draft_sink,
+        oauth,
+        std::sync::Arc::clone(&notify),
+    )
+    .map_err(|err| format!("the headless host could not boot: {err}"))?;
     // The background delivery rides the headless host too: its
     // notifications land in the log, so the slice harness observes what
     // would have crossed.
     crate::delivery::spawn(
         std::sync::Arc::clone(&state.app),
         std::sync::Arc::clone(&state.connections),
-        std::sync::Arc::new(crate::notify::NotifyBridge::logged()),
+        notify,
         &state.runtime,
     );
     // The periodic calendar refresh rides the headless host too, over the

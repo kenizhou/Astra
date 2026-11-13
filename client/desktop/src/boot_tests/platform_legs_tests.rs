@@ -28,6 +28,7 @@ fn assembled(name: &str) -> (crate::app_state::AppState, std::path::PathBuf) {
         agent_sink,
         Arc::new(QuietDraftSink),
         crate::oauth::wiring::offline_surface(),
+        Arc::new(crate::notify::NotifyBridge::logged()),
     )
     .expect("the assembly boots over an empty store");
     (state, data_dir)

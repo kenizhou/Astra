@@ -10,7 +10,8 @@ use astra_app::{
     AppError, AttachmentContent, AttachmentReadError, AvatarView, BriefDocumentError, CardRef,
     Chip, CompositionId, ContactDraftInput, DigestView, DocumentError, DocumentView, DraftResume,
     EmlContent, EmlReadError, ExtractionSummary, Intent, KnowledgeView, MeetingBriefView,
-    NewMailBatch, PassOutcome, Snippet, SplitEntry, SummariseMessageError, TranslateLanguage,
+    NewMailBatch, NewMailNotice, PassOutcome, Snippet, SplitEntry, SummariseMessageError,
+    TranslateLanguage,
 };
 use astra_viewmodel::{
     CalendarSnapshot, ComposeKind, ComposeRequestSnapshot, DraftStatusSnapshot, EventDetail,
@@ -23,9 +24,8 @@ use crate::app_state::{AppPort, HostAccount};
 
 use super::{compose_prefill, open_snapshot, FakeApp};
 
-// The key import and collected-review fake's state, its own child so this
-// file stays under the line cap beside the trait impl that serves them; the
-// re-export keeps the `port::KeysFake` path the fixture root names unchanged.
+// The key import and collected-review fake's state, its own child for the
+// line cap; the re-export keeps the `port::KeysFake` path the root names.
 mod keys_fake;
 pub(crate) use keys_fake::KeysFake;
 
@@ -247,6 +247,15 @@ impl AppPort for FakeApp {
     async fn wake_due_snoozes(&self, now: i64) -> Result<usize, String> {
         self.woken.lock().unwrap().push(now);
         Ok(0)
+    }
+
+    async fn remind_message(&self, row: astra_app::RowRef, wake_at: i64) -> Result<(), String> {
+        self.reminded.lock().unwrap().push((row, wake_at));
+        Ok(())
+    }
+
+    async fn wake_due_reminders(&self, _now: i64) -> Result<Vec<NewMailNotice>, String> {
+        Ok(Vec::new())
     }
 
     fn drain_new_mail(&self) -> NewMailBatch {

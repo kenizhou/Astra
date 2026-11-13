@@ -12,6 +12,7 @@
 
 import {
   ArchiveIcon,
+  BellIcon,
   CleanIcon,
   ComposeIcon,
   FlagIcon,
@@ -34,6 +35,7 @@ import { usePinnedRowsStore } from '@/features/list-pin/pinnedRowsStore';
 import { useVipSendersStore } from '@/features/vip/vipSendersStore';
 import { useSweepStore } from '@/features/sweep/sweepStore';
 import { useSnoozeStore } from '@/features/snooze/snoozeStore';
+import { useReminderStore } from '@/features/reminders/reminderStore';
 import { rowKeyId } from '@/components/message-list/rowIdentity';
 import type { FolderRow, MessageRowView, ViewMode } from '@/services/surfaces';
 
@@ -305,6 +307,32 @@ function snoozeItem(targets: MessageRowView[]): ContextMenuItem {
   };
 }
 
+/** The remind entry: opens the wake-time picker over the one message, the
+ *  dialog asking to be notified about it at the chosen instant (the message
+ *  never moves or flags). A conversation or a batch cannot name one message,
+ *  so the entry stands disabled with the reason. */
+function remindItem(targets: MessageRowView[]): ContextMenuItem {
+  const oneMessage = singleMessage(targets);
+  const reason =
+    oneMessage !== null
+      ? undefined
+      : targets.length === 1
+        ? 'A whole conversation cannot be reminded for this yet'
+        : 'Pick one message for this';
+  return {
+    label: 'Remind me…',
+    icon: BellIcon,
+    disabled: reason !== undefined ? true : undefined,
+    title: reason,
+    description: reason,
+    onSelect: () => {
+      if (oneMessage !== null) {
+        useReminderStore.getState().open(oneMessage);
+      }
+    },
+  };
+}
+
 /** The menu one message row (or a batch of them) opens. */
 export function buildRowMenu(
   targets: MessageRowView[],
@@ -384,6 +412,7 @@ export function buildRowMenu(
     },
     sweepItem(targets),
     snoozeItem(targets),
+    remindItem(targets),
     { separator: true },
     {
       label: 'Copy Subject',

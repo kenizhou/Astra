@@ -115,6 +115,7 @@ describe('buildRowMenu', () => {
       'Archive',
       'Clean up sender…',
       'Snooze…',
+      'Remind me…',
       '|',
       'Copy Subject',
       'Copy Sender',

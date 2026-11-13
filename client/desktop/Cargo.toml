@@ -48,6 +48,8 @@ astra-viewmodel = { path = "../../crates/astra-viewmodel" }
 astra-ai = { path = "../../crates/astra-ai" }
 # The device-local snooze store the wake timer reads and the core installs.
 astra-snooze = { path = "../../crates/astra-snooze" }
+# The device-local reminder store the wake timer reads and the core installs.
+astra-reminders = { path = "../../crates/astra-reminders" }
 # The plugin platform's contracts and worker host: the registry's manifests,
 # permission table, and out-of-process workers.
 astra-plugin = { path = "../../crates/astra-plugin" }

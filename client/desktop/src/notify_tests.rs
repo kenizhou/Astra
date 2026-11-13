@@ -11,7 +11,7 @@ use std::sync::{
 use astra_app::{NewMailBatch, NewMailNotice};
 use engine_api::{AccountId, EmailAddress, ProviderKey};
 
-use super::{HistoryEmitter, NotifyBridge, OsNotifier, NEW_MAIL_EVENT};
+use super::{HistoryEmitter, NotifyBridge, OsNotifier, NEW_MAIL_EVENT, REMINDER_EVENT};
 
 /// Every notification the sink was asked to show.
 #[derive(Default)]
@@ -355,4 +355,134 @@ fn a_bare_notice_serialises_its_absent_fields_as_null() {
     assert_eq!(json["preview"], serde_json::Value::Null);
     assert_eq!(json["account"], "work");
     assert_eq!(json["key"], "k");
+}
+
+#[test]
+fn a_reminder_delivers_one_notification_per_message_while_unfocused() {
+    let (bridge, _focus, record) = bridge(false);
+    bridge.deliver_reminders(&batch(2), true);
+    let shown = shown(&record);
+    assert_eq!(shown.len(), 2, "one per reminder: {shown:?}");
+    assert_eq!(
+        shown[0],
+        ("Reminder".to_owned(), "Subject 0".to_owned()),
+        "the title is the fixed word, the body the captured subject"
+    );
+}
+
+#[test]
+fn a_reminder_fires_even_while_the_window_is_focused() {
+    // The no-focus-suppression policy: an explicit user request fires while
+    // the window is focused; the enabled switch is the only gate.
+    let (bridge, _focus, record) = bridge(true);
+    bridge.deliver_reminders(&batch(2), true);
+    assert_eq!(
+        shown(&record).len(),
+        2,
+        "a focused window does not suppress a reminder"
+    );
+}
+
+#[test]
+fn nothing_reminds_while_the_switch_is_off() {
+    let (bridge, _focus, record) = bridge(false);
+    bridge.deliver_reminders(&batch(2), false);
+    assert!(
+        shown(&record).is_empty(),
+        "the kill switch is the reminder's only gate"
+    );
+}
+
+#[test]
+fn nothing_reminds_for_an_empty_batch() {
+    let (bridge, _focus, record) = bridge(false);
+    bridge.deliver_reminders(&NewMailBatch::default(), true);
+    assert_eq!(
+        shown(&record),
+        [] as [(std::string::String, std::string::String); 0]
+    );
+}
+
+#[test]
+fn a_reminder_without_a_subject_still_announces_itself() {
+    let (bridge, _focus, record) = bridge(false);
+    let bare = NewMailNotice {
+        account: AccountId::try_from("work").unwrap(),
+        key: ProviderKey::new("k").unwrap(),
+        from: None,
+        subject: None,
+        preview: None,
+    };
+    bridge.deliver_reminders(
+        &NewMailBatch {
+            messages: vec![bare],
+            overflow: 0,
+        },
+        true,
+    );
+    let shown = shown(&record);
+    assert_eq!(shown.len(), 1);
+    assert_eq!(
+        shown[0],
+        ("Reminder".to_owned(), "You have a reminder".to_owned())
+    );
+}
+
+#[test]
+fn the_reminder_batch_crosses_on_the_reminder_event() {
+    assert_eq!(REMINDER_EVENT, "reminder", "the web listens on this name");
+    let (bridge, _focus, record) = bridge(false);
+    let (sink, channel) = emitter();
+    let bridge = bridge.with_reminder_history(Box::new(sink));
+    let landed = batch(2);
+    bridge.deliver_reminders(&landed, true);
+    assert_eq!(
+        emitted(&channel),
+        vec![landed],
+        "the whole woken batch crosses, overflow zero"
+    );
+    assert_eq!(shown(&record).len(), 2, "the OS notifications still cross");
+}
+
+#[test]
+fn nothing_reminds_across_while_the_switch_is_off() {
+    let (bridge, _focus, _record) = bridge(false);
+    let (sink, channel) = emitter();
+    let bridge = bridge.with_reminder_history(Box::new(sink));
+    bridge.deliver_reminders(&batch(2), false);
+    assert!(
+        emitted(&channel).is_empty(),
+        "the kill switch beats the reminder history"
+    );
+}
+
+#[test]
+fn a_reminder_history_failure_never_suppresses_the_os_notification() {
+    let (bridge, _focus, record) = bridge(false);
+    let (sink, channel) = emitter();
+    channel.refused.store(true, Ordering::SeqCst);
+    let bridge = bridge.with_reminder_history(Box::new(sink));
+    bridge.deliver_reminders(&batch(2), true);
+    assert_eq!(
+        shown(&record).len(),
+        2,
+        "the OS notification crosses whatever the history channel answers"
+    );
+    assert_eq!(emitted(&channel), [] as [NewMailBatch; 0]);
+}
+
+#[test]
+fn the_reminder_channel_is_distinct_from_the_new_mail_channel() {
+    // A reminder crosses on the reminder channel only, never the new-mail
+    // one: the two histories record their own landings.
+    let (bridge, _focus, _record) = bridge(false);
+    let (new_sink, new_channel) = emitter();
+    let (rem_sink, rem_channel) = emitter();
+    let bridge = bridge
+        .with_history(Box::new(new_sink))
+        .with_reminder_history(Box::new(rem_sink));
+    let landed = batch(1);
+    bridge.deliver_reminders(&landed, true);
+    assert_eq!(emitted(&new_channel), [] as [NewMailBatch; 0]);
+    assert_eq!(emitted(&rem_channel), vec![landed]);
 }

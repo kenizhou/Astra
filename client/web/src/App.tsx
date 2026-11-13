@@ -19,6 +19,7 @@ import { mountDraftPoolEvents } from '@/events/draftPoolEvents';
 import { mountAgentEvents } from '@/events/agentEvents';
 import { mountMailtoEvents } from '@/events/mailtoEvents';
 import { mountNewMailEvents } from '@/events/newMailEvents';
+import { mountReminderEvents } from '@/events/reminderEvents';
 import { mountShareEvents } from '@/events/shareEvents';
 import { hydrate, mountSurfaceEvents } from '@/events/surfaceEvents';
 import { reportDeviceZone } from '@/features/settings/deviceZone';
@@ -49,6 +50,8 @@ export default function App() {
   useEffect(() => mountMailtoEvents(), []);
 
   useEffect(() => mountNewMailEvents(), []);
+
+  useEffect(() => mountReminderEvents(), []);
 
   useEffect(() => mountShareEvents(), []);
 
