@@ -1,0 +1,22 @@
+[package]
+name = "astra-reminders"
+description = "The device-local reminder store: one row per flagged reminder, keyed by the provider key that stays valid because the message never moves, with the wake instant and the captured subject and sender."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# The identity newtypes the store carries across the boundary: the owning
+# account and the provider key the wake opens the row by.
+engine-api.workspace = true
+# The row types cross the host boundary as serde types.
+serde.workspace = true
+# The ReminderError enum.
+thiserror.workspace = true
+# The reminder store's sqlite: the engine's own stack, so one linked sqlite3
+# serves the engine store and the reminder store (see the workspace table).
+rusqlite = { workspace = true, features = ["fallible_uint"] }

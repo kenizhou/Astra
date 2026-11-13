@@ -314,6 +314,7 @@ dependencies = [
  "astra-crypto-openpgp",
  "astra-crypto-smime",
  "astra-crypto-store",
+ "astra-reminders",
  "astra-snooze",
  "astra-viewmodel",
  "async-trait",
@@ -602,6 +603,16 @@ dependencies = [
  "astra-plugin",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "astra-reminders"
+version = "0.2.0"
+dependencies = [
+ "engine-api",
+ "rusqlite",
+ "serde",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
