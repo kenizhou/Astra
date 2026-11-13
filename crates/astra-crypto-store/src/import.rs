@@ -101,6 +101,39 @@ pub fn record_import_trust(
     )
 }
 
+/// Record the collected-key promote surface's acceptance (SP4d-2): `verified`
+/// when the person confirmed the fingerprint out of band (always an upgrade),
+/// `unverified` when they accepted it without verification (only when no
+/// decision stands, so a standing `verified`/`personal` decision is never
+/// downgraded). The promote lands the key through [`crate::promote_collected_key`],
+/// which writes no decision of its own; this explicit decision is what makes
+/// the promoted key send-usable (the resolver answers Undecided without one).
+/// A key with no peer email carries no address to decide against; the promote
+/// still lands the key. Reuses [`record_import_trust`] over `put_trust_decision`.
+///
+/// # Errors
+/// Fails when a decision read or insert cannot run.
+pub fn record_promote_trust(
+    store: &CryptoStore,
+    account_id: &str,
+    email: Option<&str>,
+    standard: &str,
+    fingerprint: &str,
+    verified: bool,
+) -> Result<(), String> {
+    let Some(email) = email else {
+        return Ok(());
+    };
+    if verified {
+        return record_import_trust(store, account_id, email, standard, fingerprint, true);
+    }
+    let standing = get_latest_trust_decision(store, account_id, email, standard, fingerprint)?;
+    if standing.is_none() {
+        record_import_trust(store, account_id, email, standard, fingerprint, false)?;
+    }
+    Ok(())
+}
+
 /// Record the import's default acceptance: an imported peer key is `unverified`
 /// (the send resolver treats `unverified` as encryption-qualified, so the
 /// import is send-usable straight away; a later out-of-band verification
