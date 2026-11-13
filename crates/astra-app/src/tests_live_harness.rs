@@ -227,6 +227,8 @@ mod forward;
 mod gate;
 #[path = "tests_live_harness/jmap.rs"]
 mod jmap;
+#[path = "tests_live_harness/junk_blocking_proof.rs"]
+mod junk_blocking_proof;
 #[path = "tests_live_harness/list.rs"]
 mod list;
 #[path = "tests_live_harness/mail_oauth_proof.rs"]

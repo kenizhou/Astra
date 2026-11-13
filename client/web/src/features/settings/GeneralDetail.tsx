@@ -21,6 +21,7 @@ import { registerDefaultMail, type RegisterDefaultMailOutcome } from '@/services
 import { useAccountStore } from '@/stores/accountStore';
 import { SKINS, useAppearanceStore, type ContrastMode, type DensityMode, type FontSizeStep, type ReadingPosition, type TextureMode } from '@/services/appearance';
 
+import { BlockedSenders } from './BlockedSenders';
 import { DEFAULT_LANGUAGE, LANGUAGES } from './language';
 import { useSettingsStore } from './settingsStore';
 
@@ -270,6 +271,7 @@ export function GeneralDetail() {
         />
         New mail notifications
       </label>
+      <BlockedSenders />
       <div className="flex flex-col gap-1">
         <Picker
           label="Language"

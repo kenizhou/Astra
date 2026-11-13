@@ -100,6 +100,7 @@ describe('buildRowMenu', () => {
       'Open in New Window',
       'Pin',
       'Add VIP',
+      'Block sender…',
       '|',
       'Reply',
       'Reply All',
