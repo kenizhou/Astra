@@ -1,0 +1,22 @@
+[package]
+name = "astra-snooze"
+description = "The device-local snooze store: one row per snoozed message, keyed by its stable Message-ID, with the wake instant and the origin folder to return to."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# The identity newtypes the store carries across the boundary: the owning
+# account, the stable RFC 5322 Message-ID, and the diagnostic provider key.
+engine-api.workspace = true
+# The row types cross the host boundary as serde types.
+serde.workspace = true
+# The SnoozeError enum.
+thiserror.workspace = true
+# The snooze store's sqlite: the engine's own stack, so one linked sqlite3
+# serves the engine store and the snooze store (see the workspace table).
+rusqlite = { workspace = true, features = ["fallible_uint"] }

@@ -19,6 +19,8 @@ astra-account = { path = "../astra-account" }
 astra-ai = { path = "../astra-ai" }
 # The shared composer document a drafts save renders and stores.
 astra-composer = { path = "../astra-composer" }
+# The device-local snooze store the core records and wakes over.
+astra-snooze = { path = "../astra-snooze" }
 # The immutable snapshots the surfaces render, and the folder-row projection.
 astra-viewmodel = { path = "../astra-viewmodel" }
 # The built-in crypto: the send gate, the store and its outbox/transport, and
