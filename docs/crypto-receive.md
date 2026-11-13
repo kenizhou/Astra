@@ -255,6 +255,63 @@ draft_pool.reply plaintext is adjacent at-rest exposure, out of scope (same
 vault, a follow-up). CLI parity: the CLI reads engine bodies directly; the
 mirror is a desktop reading-path protection, like the other receive surfaces.
 
+## The key import surface (SP4d-1)
+
+The receive and send arcs stage and consume keys, but a person needs a way to
+bring a key in. SP4d-1 lands the desktop key import surface: import your own
+private/identity key (so received encrypted mail decrypts) and import a peer's
+public certificate (so signatures verify and encrypted sends resolve). The CLI
+key verbs and the sidecar virtual tools are SP4d-1b; the review/promote surface
+for collected keys is SP4d-2.
+
+Two paths, deliberately separate to avoid the has_private pollution:
+
+- The public-cert path (`astra-crypto-store::import_public_cert`) parses the
+  material (OpenPGP armor-or-binary via `parse_certs`, or an S/MIME PEM/DER
+  cert via `fingerprint_of_cert_der` / `cert_summary_of_der`) and stores the
+  public-only blob through `upsert_crypto_key` with `private_data: None`,
+  `key_type: 'public'` (OpenPGP) or `'cert'` (S/MIME), `origin: 'imported'`. It
+  never routes through the backend `import_key` / keystore `put`, which record
+  a private blob and would set `has_private` true, polluting the receive
+  decryption-candidate filter and the resolver's Personal/Ready branch.
+  Secret-bearing OpenPGP input is refused here: a private key belongs to the
+  private path. A cross-standard import is refused (`import_public_cert_as`
+  pins the standard).
+- The private/identity path reuses the existing backend `import_key`
+  (passphrase-gated secret decrypt, persist through the keystore), which
+  correctly records the private blob wrapped at rest under the account-bound
+  AAD. The S/MIME arm uses `import_key_with_chain`, landing the bag's
+  intermediates as `intermediate` rows (never trust anchors).
+
+The app method (`astra-app/src/keys.rs`, the `reading_password.rs` shape)
+sniffs the material and dispatches: an OpenPGP TSK or an S/MIME key bundle
+takes the private path, everything else the public path. The first private key
+of a standard becomes the account's default signing key when none stands, so
+the account can sign straight after the import; a later import never steals
+the standing default. `list_keys` answers the account's rows across both
+standards, public view only.
+
+The desktop command (`commands/crypto.rs`) carries the bytes and the optional
+passphrase in-process (the `submit_reading_password` precedent: secrets stay
+in host memory, never logged or persisted). The web affordance lives in the
+settings Keys category (`features/keys`): a file picker and a paste field, an
+optional passphrase held only in local state and cleared the moment it is
+spent. The wire types ride `services/crypto.ts`, never `ipc.ts`.
+
+A shared trust-write helper (`record_import_trust`) records the import
+surface's `verified` / `unverified` decision over `put_trust_decision`; the
+collected-key promote surface (SP4d-2) reuses it. The explicit decision is what
+makes a peer key send-usable.
+
+The passphrase is held only in memory: it moves through as a `SecretBox`
+(zeroized on drop) and is never logged or persisted; only the vault-wrapped
+key blob lands at rest.
+
+The gated live proof (`tests_live_harness/crypto_key_import.rs`) imports both
+keys through the product surface (no programmatic seeding), sends an
+encrypted+signed mail, and asserts it decrypts and verifies, pinning the
+has_private guard on the public imports. It skips unless `ASTRA_LIVE_HARNESS=1`.
+
 ## Known gaps, recorded rather than left silent
 
 - Encrypted receive only, per standard: OpenPGP PGP/MIME (SP4c-1) and S/MIME
@@ -285,9 +342,12 @@ mirror is a desktop reading-path protection, like the other receive surfaces.
   persists as unchecked (the Good/Stale granularity is a follow-up). The
   residual blind-SSRF hardening (private/loopback address filtering) and the
   privacy-preserving OCSP/stapling alternative remain follow-ups.
-- No key-management surface yet (SP4d): the live proof seeds the recipient
-  key programmatically. A minimal import path is the load-bearing follow-up
-  that makes receive usable beyond tests.
+- The key import surface landed in SP4d-1 (the key import surface above): own
+  private key and peer public cert import through the product surface, and the
+  live proof now imports rather than seeds. The CLI key verbs and the sidecar
+  virtual tools are SP4d-1b; the review/promote surface for collected keys is
+  SP4d-2. Key generation, export, default-key selection beyond the first
+  import, and the composer recipient-trust UI are follow-ups.
 - A legacy signature carrying only an Issuer KeyID (no IssuerFingerprint
   subpacket) can verify yet report no signer fingerprint, so it labels
   NotSigned rather than ValidVerified. A degradation, never a false
@@ -314,6 +374,7 @@ mirror is a desktop reading-path protection, like the other receive surfaces.
 | CRL fetching: DP extraction, the fail-soft fetcher port, the receive hook | ✅ | `astra-crypto-smime/src/cert.rs`, `astra-crypto-store/src/crl.rs`, `receive_smime.rs`, `client/desktop/src/crl_fetch.rs` |
 | The W9 password flow: SKESK detection, needs-password verdict, in-memory passphrase, re-prompt | ✅ | `astra-crypto-store/src/receive.rs`, `astra-app/src/reading_password.rs`, `crypto_decode.rs`, `client/desktop/src/commands/crypto.rs`, `client/web/src/components/reading-pane/PasswordDialog.tsx` |
 | Drafts at rest: the encrypted mirror, the save/discard hooks, the resume read seam, fail-closed refusal | ✅ | `astra-crypto-store/src/drafts.rs`, `migrations/0005_encrypted_drafts.sql`, `astra-app/src/drafts/encrypt.rs`, `drafts.rs`, `drafts/resume.rs` |
-| The live proofs (send encrypted, open, decrypt, the negative arms, drafts at rest) | ✅ | `tests_live_harness/crypto_receive.rs`, `crypto_receive_smime.rs`, `crypto_receive_autocrypt.rs`, `crypto_receive_crl.rs`, `crypto_receive_password.rs`, `crypto_drafts_at_rest.rs` |
+| Key import: the public-only store path, the private backend path, the has_private guard, the in-memory passphrase, the trust write | ✅ | `astra-crypto-store/src/import.rs`, `astra-app/src/keys.rs`, `client/desktop/src/commands/crypto.rs`, `client/web/src/features/keys/KeysDetail.tsx` |
+| The live proofs (send encrypted, open, decrypt, the negative arms, drafts at rest, key import) | ✅ | `tests_live_harness/crypto_receive.rs`, `crypto_receive_smime.rs`, `crypto_receive_autocrypt.rs`, `crypto_receive_crl.rs`, `crypto_receive_password.rs`, `crypto_drafts_at_rest.rs`, `crypto_key_import.rs` |
 | Inline armor, detached signatures | N/A | SP4c-3, the gaps above |
-| Key management, the token registry, the native security UI | N/A | SP4d |
+| Key generation and export, the token registry, the native security UI | N/A | SP4d follow-ups |

@@ -28,6 +28,7 @@ export type SettingsCategory =
   | 'composing'
   | 'shortcuts'
   | 'accounts'
+  | 'keys'
   | 'plugins'
   | 'advanced'
   | 'diagnostics'

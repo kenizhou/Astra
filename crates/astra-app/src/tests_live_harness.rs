@@ -187,6 +187,8 @@ mod calendar_proof;
 mod composer_proof;
 #[path = "tests_live_harness/crypto_drafts_at_rest.rs"]
 mod crypto_drafts_at_rest;
+#[path = "tests_live_harness/crypto_key_import.rs"]
+mod crypto_key_import;
 #[path = "tests_live_harness/crypto_receive.rs"]
 mod crypto_receive;
 #[path = "tests_live_harness/crypto_receive_autocrypt.rs"]

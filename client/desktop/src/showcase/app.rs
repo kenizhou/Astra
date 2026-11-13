@@ -131,6 +131,24 @@ impl AppPort for ShowcaseApp {
         Some(astra_viewmodel::PasswordPromptState::NeedsPassword)
     }
 
+    async fn import_key(
+        &self,
+        _account: &AccountId,
+        _bytes: Vec<u8>,
+        _passphrase: Option<astra_crypto_core::SecretBox<String>>,
+    ) -> Result<astra_crypto_store::CryptoKeyRow, String> {
+        // The showcase carries no crypto store: an import has nothing to
+        // land against, so it refuses.
+        Err("no crypto store is installed".to_owned())
+    }
+
+    async fn list_keys(
+        &self,
+        _account: &AccountId,
+    ) -> Result<Vec<astra_crypto_store::CryptoKeyRow>, String> {
+        Ok(Vec::new())
+    }
+
     async fn attachment_content(
         &self,
         _account: &AccountId,

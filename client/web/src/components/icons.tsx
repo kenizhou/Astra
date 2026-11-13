@@ -25,6 +25,7 @@ import {
   Folder01Icon,
   InformationCircleIcon as AboutIconData,
   InboxIcon as InboxIconData,
+  Key01Icon,
   KeyboardIcon as ShortcutsIconData,
   LeftToRightListBulletIcon,
   LeftToRightListNumberIcon,
@@ -120,4 +121,5 @@ export const PopOutIcon = makeIcon(PopOutIconData);
 export const PluginIcon = makeIcon(PluginIconData);
 export const DiagnosticsIcon = makeIcon(Activity01Icon);
 export const PrivacyIcon = makeIcon(Shield01Icon);
+export const KeysIcon = makeIcon(Key01Icon);
 export const BellIcon = makeIcon(BellIconData);
