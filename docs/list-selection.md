@@ -128,6 +128,25 @@ visible limit appears once ShowMore loads it. A cross-mode map between flat
 message pins and threaded conversation pins needs thread ids on flat rows
 (engine work), a named follow-up; there is no Pinned filter tab yet.
 
+## VIP senders
+
+A VIP sender is a sender the user marks important: their rows wear a small
+star badge, and the filter gains a VIP tab answering their mail. The VIP
+set is device-local (localStorage), keyed by the sender's bare address
+(lowercased and trimmed, a display form lifted to the addr-spec), so the
+mark is the sender's and stands across accounts, unlike the pin set's
+per-account row keys. The row menu carries an Add VIP / Remove VIP toggle
+(batch-capable, idempotent), the pin toggle's own shape: the label flips
+on the targets' senders' state, and the batch lands one state. A blank
+sender address is refused. The filter stays client-side over the loaded
+rows, never an intent: the VIP tab answers the rows whose sender stands
+in the set, and the tab's count reads the same set at the list's render
+choke point, the pin pattern. The badge and the filter read the loaded
+rows only: a VIP sender with no loaded row shows nothing until their mail
+loads. The set is per browser profile, with no cross-device sync;
+notification or priority routing for VIP mail is a named follow-up. This
+slice is the marker, the badge, and the filter.
+
 ## Known gaps
 
 - **A conversation cannot be moved**; the verb disables with its reason.

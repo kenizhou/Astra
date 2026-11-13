@@ -91,6 +91,7 @@ const FILTERS: ReadonlyArray<{ id: ListFilter; label: string }> = [
   { id: 'unread', label: 'Unread' },
   { id: 'flagged', label: 'Flagged' },
   { id: 'attachments', label: 'Attachments' },
+  { id: 'vip', label: 'VIP' },
 ];
 
 interface ListToolbarProps {

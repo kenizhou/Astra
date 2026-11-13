@@ -93,6 +93,7 @@ describe('buildRowMenu', () => {
     expect(labels(buildRowMenu([m1], 'flat', accountCtx))).toEqual([
       'Open in New Window',
       'Pin',
+      'Add VIP',
       '|',
       'Reply',
       'Reply All',
