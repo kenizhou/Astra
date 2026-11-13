@@ -130,7 +130,6 @@ mod transport_store;
 mod unseen;
 mod utf7;
 mod watch;
-mod wrap;
 
 #[cfg(test)]
 mod integration;

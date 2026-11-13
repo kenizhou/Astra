@@ -51,9 +51,6 @@ pub struct ImapProvider<S> {
     /// The resolved SMTP transport, or `None` when submission is unconfigured.
     /// `pub(crate)` so [`crate::filing`] (which owns the submission dispatch) reads it.
     pub(crate) smtp: Option<Arc<SmtpSender>>,
-    /// The host-installed MIME wrapper submissions consult when a draft asks for
-    /// crypto; `pub(crate)` for the same reason as `smtp`.
-    pub(crate) mime_wrapper: Option<Arc<dyn engine_provider::MimeWrapper>>,
     /// The sync-depth window floor: when set, a snapshot fetches only mail delivered
     /// on or after this date (`ImapConfig::with_since`). `None` syncs the whole mailbox.
     since: Option<time::Date>,
@@ -85,12 +82,10 @@ impl<S> core::fmt::Debug for ImapProvider<S> {
 impl<S> ImapProvider<S> {
     /// A provider bound to `mailbox`, borrowing from `pool`. The account computes the rest once
     /// for all of its providers (`crate::account`).
-    #[allow(clippy::too_many_arguments)] // the account facts a provider borrows are all distinct
     pub(crate) fn new(
         pool: Arc<ImapPool<S>>,
         mailbox: MailboxId,
         smtp: Option<Arc<SmtpSender>>,
-        mime_wrapper: Option<Arc<dyn engine_provider::MimeWrapper>>,
         since: Option<time::Date>,
         connection_info: ConnectionInfo,
         shared_account: Option<SharedAccountId>,
@@ -100,7 +95,6 @@ impl<S> ImapProvider<S> {
             pool,
             mailbox,
             smtp,
-            mime_wrapper,
             since,
             connection_info,
             shared_account,
