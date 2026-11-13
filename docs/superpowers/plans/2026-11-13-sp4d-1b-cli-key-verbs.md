@@ -30,7 +30,7 @@ PROBES).
       error; --preview on a read verb is a usage error); then the verbs +
       scaffolding. Commit `feat: the CLI key verbs`.
 - [ ] cli is NOT cap-exempt: mod.rs (468) and parse.rs (457) have ~30-40 lines of
-      headroom for five verbs — keep the execute arms one-liners and the crypto
+      headroom for five verbs; keep the execute arms one-liners and the crypto
       open in keys.rs; if a file breaches, split a child module (the E0119 trap:
       a trait impl cannot split). The promote/reject orchestration is spelled
       twice (CLI + app) by design, pinned by tests on both sides (docs/cli.md).
@@ -54,7 +54,7 @@ minor).
       envelope level/args + approve/reject/abort + the map pin; the host policy
       pins the five rows + the preview shapes); then the extraction + tools +
       gating + docs. Commit `feat: the key virtual tools and contract`.
-- [ ] sidecar is NOT cap-exempt: mailTools.ts (487) cannot host the tools — the
+- [ ] sidecar is NOT cap-exempt: mailTools.ts (487) cannot host the tools, so the
       gated.ts extraction is required; mailTools.test.ts (497) and index.test.ts
       (487) are near the cap, keep new tests in sibling files. The three pins
       (policy_tests, permissions_tests, the sidecar map test) move together.

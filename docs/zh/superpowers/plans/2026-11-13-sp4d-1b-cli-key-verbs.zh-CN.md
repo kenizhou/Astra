@@ -25,7 +25,7 @@ mod.rs（两个 execute 臂 + 模块注册）、audit.rs（arg_preview 臂）、
       rejected；preview 不写任何内容；每次调用的审计行；携带秘密输入被拒指向桌
       面；FK 未注册错误；读动词带 --preview 是 usage 错误）；随后动词 + 脚手架。
       提交 `feat: the CLI key verbs`。
-- [ ] cli 不豁免上限：mod.rs（468）与 parse.rs（457）为五动词留 ~30-40 行余量——
+- [ ] cli 不豁免上限：mod.rs（468）与 parse.rs（457）为五动词留 ~30-40 行余量，
       execute 臂保持单行、crypto 打开放 keys.rs；若文件破上限，拆子模块（E0119 陷
       阱：trait impl 不可拆）。promote/reject 编排按设计写两份（CLI + app），双侧
       测试钉住（docs/cli.md）。arg_preview 仅形状，绝不携带调用方文本。既有 CLI 测
@@ -48,7 +48,7 @@ minor）。
 - [ ] 测试先行（sidecar 工具钉住精确 argv 语法 + 批准信封 level/args +
       approve/reject/abort + map pin；宿主 policy 钉住五行 + 预览形状）；随后抽取
       + 工具 + gating + 文档。提交 `feat: the key virtual tools and contract`。
-- [ ] sidecar 不豁免上限：mailTools.ts（487）不能容纳工具——gated.ts 抽取必需；
+- [ ] sidecar 不豁免上限：mailTools.ts（487）不能容纳工具，gated.ts 抽取必需；
       mailTools.test.ts（497）与 index.test.ts（487）接近上限，新测试放兄弟文件。
       三个 pin（policy_tests、permissions_tests、sidecar map 测试）同动。
       confirm_preview 留记录缺口（交付 confirm）。无秘密跨越此面；口令绝不为 CLI
