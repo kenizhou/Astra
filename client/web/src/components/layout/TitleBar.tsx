@@ -14,9 +14,11 @@ import { useState } from 'react';
 
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
-import { BellIcon, MoonIcon, PlusIcon, SettingsIcon, SunIcon } from '@/components/icons';
+import { BellIcon, MoonIcon, PinIcon, PlusIcon, SettingsIcon, SunIcon } from '@/components/icons';
 import { WindowTitleControls } from '@/components/ui/WindowTitleControls';
 import { NotificationHistoryPanel } from '@/features/notification-history/NotificationHistoryPanel';
+import { PinnedSearchesPanel } from '@/features/pinned-searches/PinnedSearchesPanel';
+import { usePinnedSearchesStore } from '@/features/pinned-searches/pinnedSearchesStore';
 import { dispatch, intents } from '@/services/ipc';
 import { nextThemeMode, useUiStore } from '@/stores/uiStore';
 
@@ -32,6 +34,15 @@ const TITLE_ICON_CLASS =
 export function TitleBar() {
   const themeMode = useUiStore((s) => s.themeMode);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const savedOpen = usePinnedSearchesStore((s) => s.panelOpen);
+  const toggleSaved = () => {
+    const store = usePinnedSearchesStore.getState();
+    if (store.panelOpen) {
+      store.closePanel();
+    } else {
+      store.openPanel();
+    }
+  };
   const openSetup = () => useUiStore.getState().setAccountSetupOpen(true);
   const openSettings = () => useUiStore.getState().setSettingsOpen(true);
   const cycleTheme = () => {
@@ -76,6 +87,24 @@ export function TitleBar() {
         className="h-full min-w-[40px] flex-1"
       />
 
+      <div className="relative">
+        <button
+          type="button"
+          onClick={toggleSaved}
+          aria-label="Saved searches"
+          aria-expanded={savedOpen}
+          title="Saved searches"
+          data-pinned-searches-bell
+          className={TITLE_ICON_CLASS}
+        >
+          <PinIcon size={16} />
+        </button>
+        {savedOpen && (
+          <div className="absolute right-0 top-full z-[var(--z-popover)] mt-1">
+            <PinnedSearchesPanel />
+          </div>
+        )}
+      </div>
       <div className="relative">
         <button
           type="button"

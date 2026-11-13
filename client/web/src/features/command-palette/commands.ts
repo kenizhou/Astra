@@ -24,6 +24,7 @@ import {
   MoonIcon,
   OrderedListIcon,
   PeopleIcon,
+  PinIcon,
   PlusIcon,
   ReadingIcon,
   RefreshIcon,
@@ -38,6 +39,7 @@ import {
 import { openSearchIsland } from '@/components/layout/searchIsland';
 import { sameRowKey } from '@/components/message-list/rowIdentity';
 import { openNewMessageComposer } from '@/features/composer/composeWindow';
+import { usePinnedSearchesStore } from '@/features/pinned-searches/pinnedSearchesStore';
 import { useAppearanceStore } from '@/services/appearance';
 import { dispatch, intents, type FolderRef, type MessageRef } from '@/services/ipc';
 import type { AccountFolderRow, FolderRole, MessageRowView } from '@/services/surfaces';
@@ -256,6 +258,13 @@ export function buildCommands(): PaletteCommand[] {
       run: () => {
         openSearchIsland();
       },
+    },
+    {
+      id: 'saved-searches',
+      label: 'Saved searches',
+      category: 'Search',
+      icon: PinIcon,
+      run: () => usePinnedSearchesStore.getState().openPanel(),
     },
     {
       id: 'settings',

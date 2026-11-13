@@ -16,8 +16,12 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-import { SearchIcon } from '@/components/icons';
+import { PinIcon, SearchIcon } from '@/components/icons';
 import { useAgentStore } from '@/features/agent/agentStore';
+import {
+  MAX_PINNED_SEARCHES,
+  usePinnedSearchesStore,
+} from '@/features/pinned-searches/pinnedSearchesStore';
 import { dispatch, intents } from '@/services/ipc';
 import type { SearchScope } from '@/services/surfaces';
 import { useListStore } from '@/stores/listStore';
@@ -91,8 +95,11 @@ export function AmbientIsland() {
   const echo = useListStore((s) => s.search?.query ?? null);
   const scope = useListStore((s) => s.search?.scope ?? 'all_except_trash');
   const history = useSearchHistoryStore((s) => s.queries);
+  const savedCount = usePinnedSearchesStore((s) => s.searches.length);
   const [expanded, setExpanded] = useState(echo !== null);
   const [text, setText] = useState(echo ?? '');
+  const [saveDraft, setSaveDraft] = useState<{ query: string; name: string } | null>(null);
+  const atSaveCap = savedCount >= MAX_PINNED_SEARCHES;
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const query = useRef(text);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -170,12 +177,16 @@ export function AmbientIsland() {
     const standing = useListStore.getState().search?.query ?? '';
     query.current = standing;
     setText(standing);
+    setSaveDraft(null);
     setExpanded(false);
   };
 
   const onQueryChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     query.current = event.target.value;
     setText(event.target.value);
+    if (event.target.value === '') {
+      setSaveDraft(null);
+    }
     disarm();
     timer.current = setTimeout(() => {
       timer.current = null;
@@ -209,10 +220,21 @@ export function AmbientIsland() {
       disarm();
       query.current = '';
       setText('');
+      setSaveDraft(null);
       void dispatch(intents.search(null));
       return;
     }
     collapse();
+  };
+
+  /** Saves the captured query under the drafted name and folds the form. */
+  const submitSave = (): void => {
+    if (saveDraft === null || saveDraft.name.trim() === '') {
+      return;
+    }
+    usePinnedSearchesStore.getState().save(saveDraft.name, saveDraft.query);
+    setSaveDraft(null);
+    inputRef.current?.focus();
   };
 
   const onScopeChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
@@ -260,6 +282,20 @@ export function AmbientIsland() {
             onKeyDown={onKeyDown}
             className="h-full min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground"
           />
+          {text.trim() !== '' && (
+            <button
+              type="button"
+              aria-label="Save search"
+              title={
+                atSaveCap ? 'You can save up to ' + MAX_PINNED_SEARCHES + ' searches' : 'Save search'
+              }
+              disabled={atSaveCap}
+              onClick={() => setSaveDraft({ query: query.current, name: query.current.trim() })}
+              className="grid h-5 w-5 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <PinIcon size={13} />
+            </button>
+          )}
         </>
       ) : (
         <button
@@ -274,6 +310,49 @@ export function AmbientIsland() {
         </button>
       )}
       <AgentPresenceDot />
+      {saveDraft !== null && text.trim() !== '' && (
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            submitSave();
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.stopPropagation();
+              setSaveDraft(null);
+              inputRef.current?.focus();
+            }
+          }}
+          className="absolute left-0 top-full z-[var(--z-dropdown)] mt-1 flex w-full items-center gap-1 rounded-[var(--radius-sm)] border border-border-subtle bg-surface-floating p-1.5 shadow-[var(--shadow-lg)]"
+        >
+          <input
+            type="text"
+            aria-label="Saved search name"
+            value={saveDraft.name}
+            onChange={(event) => setSaveDraft({ ...saveDraft, name: event.target.value })}
+            placeholder="Name this search"
+            autoFocus
+            className="h-7 min-w-0 flex-1 rounded-[var(--radius-xs)] border border-border bg-background px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+          <button
+            type="submit"
+            disabled={saveDraft.name.trim() === ''}
+            className="shrink-0 rounded-[var(--radius-xs)] bg-primary px-2 py-1 text-xs font-medium text-primary-foreground shadow-[var(--shadow-sm)] hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Save
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setSaveDraft(null);
+              inputRef.current?.focus();
+            }}
+            className="shrink-0 rounded-[var(--radius-xs)] border border-border-subtle px-2 py-1 text-xs text-muted-foreground hover:bg-hover hover:text-foreground"
+          >
+            Cancel
+          </button>
+        </form>
+      )}
       {showHistory && (
         <div
           role="listbox"

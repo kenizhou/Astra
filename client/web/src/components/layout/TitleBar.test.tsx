@@ -10,7 +10,7 @@
 // opens the agent panel. The settings entry opens the modal, and the theme
 // button cycles the override through the intent, so the persisted block
 // stays the one truth.
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const windowApi = vi.hoisted(() => ({
@@ -38,6 +38,7 @@ vi.mock('@/services/ipc', async (importOriginal) => ({
 
 import { TitleBar } from './TitleBar';
 import { useAgentStore } from '@/features/agent/agentStore';
+import { usePinnedSearchesStore } from '@/features/pinned-searches/pinnedSearchesStore';
 import { useListStore } from '@/stores/listStore';
 import { useSearchHistoryStore } from '@/stores/searchHistoryStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -343,5 +344,55 @@ describe('the island search box', () => {
     });
 
     expect((screen.getByLabelText('Search mail') as HTMLInputElement).value).toBe('');
+  });
+});
+
+describe('the saved searches entry', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    usePinnedSearchesStore.setState({ searches: [], panelOpen: false });
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+    usePinnedSearchesStore.setState({ searches: [], panelOpen: false });
+  });
+
+  it('opens the panel beside the bell and lists the saved searches', () => {
+    usePinnedSearchesStore.setState({
+      searches: [{ id: 'a', name: 'Ada monitors', query: 'from:ada monitor' }],
+    });
+    render(<TitleBar />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Saved searches' }));
+
+    const dialog = screen.getByRole('dialog', { name: 'Saved searches' });
+    expect(within(dialog).getByText('Ada monitors')).toBeTruthy();
+    expect(within(dialog).getByText('from:ada monitor')).toBeTruthy();
+  });
+
+  it('runs a saved search through the search intent and opens the island', () => {
+    usePinnedSearchesStore.setState({
+      searches: [{ id: 'a', name: 'Ada monitors', query: 'from:ada monitor' }],
+    });
+    render(<TitleBar />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Saved searches' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Run Ada monitors' }));
+
+    expect(ipc.dispatch).toHaveBeenCalledWith({ search: { query: 'from:ada monitor' } });
+    expect(screen.getByLabelText('Search scope')).toBeTruthy();
+    expect(screen.queryByRole('dialog', { name: 'Saved searches' })).toBeNull();
+  });
+
+  it('closes the panel from the bell again without a doubled toggle', () => {
+    render(<TitleBar />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Saved searches' }));
+    expect(screen.getByRole('dialog', { name: 'Saved searches' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Saved searches' }));
+    expect(screen.queryByRole('dialog', { name: 'Saved searches' })).toBeNull();
+    expect(usePinnedSearchesStore.getState().panelOpen).toBe(false);
   });
 });
