@@ -19,6 +19,7 @@ vi.mock('@/features/composer/composeWindow', () => ({
 }));
 
 import { registerSearchIslandOpener } from '@/components/layout/searchIsland';
+import { useAttachmentBrowserStore } from '@/features/attachment-browser/attachmentBrowserStore';
 import { usePinnedSearchesStore } from '@/features/pinned-searches/pinnedSearchesStore';
 import { useAppearanceStore } from '@/services/appearance';
 import type { AccountFolderRow, FolderRow, MessageRowView } from '@/services/surfaces';
@@ -98,6 +99,7 @@ beforeEach(() => {
   useReadingStore.setState({ snapshot: null, showRemoteImages: false });
   useAppearanceStore.setState({ readingPosition: 'right' });
   usePinnedSearchesStore.setState({ searches: [], panelOpen: false });
+  useAttachmentBrowserStore.setState({ isOpen: false, sender: null });
   registerSearchIslandOpener(null);
 });
 
@@ -273,6 +275,12 @@ describe('the Search, App, and View commands', () => {
   it('Saved searches opens the panel through the store gate', () => {
     command('saved-searches').run();
     expect(usePinnedSearchesStore.getState().panelOpen).toBe(true);
+    expect(ipc.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('Browse attachments opens the browser through the store gate', () => {
+    command('attachment-browser').run();
+    expect(useAttachmentBrowserStore.getState().isOpen).toBe(true);
     expect(ipc.dispatch).not.toHaveBeenCalled();
   });
 
