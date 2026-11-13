@@ -406,3 +406,131 @@ async fn the_unified_dispatcher_routes_pgp_and_leaves_plain_untouched() {
     let out = crate::receive(&store, "a2", "d2", plain).await;
     assert_eq!(out.state, ReceiveState::NotEncrypted);
 }
+
+// --- The Autocrypt consume hooks (SP4c-3a): silent staging on receive ---
+
+/// The sender's minimal-export blob (the bytes an Autocrypt header carries).
+fn sender_minimal_blob(store: &Arc<CryptoStore>, account: &str, fingerprint: &str) -> Vec<u8> {
+    let blob = public_blob(store, account, fingerprint);
+    let cert = keymap::parse_certs(&blob)
+        .expect("parse the sender cert")
+        .remove(0);
+    crate::autocrypt::minimal_export(&cert).expect("minimal export")
+}
+
+#[tokio::test]
+async fn a_cleartext_autocrypt_header_stages_the_sender_key_without_changing_the_verdict() {
+    // a2 holds no signer cert for a1, so the embedded signature is unknown at
+    // decrypt time. The consume stages a1's key AFTER the verdict is computed.
+    let (store, a1, a2) = two_accounts(false).await;
+    let minimal = sender_minimal_blob(&store, "a1", a1.fingerprint.as_str());
+    let header = crate::autocrypt::emit_autocrypt_header("a1@x.com", &minimal);
+    let source = encrypt_source(&store, "a1", &a2, Some(&a1), PLAIN_ENTITY, "...").await;
+    let source = crate::autocrypt::inject_headers(&source, &[header]);
+
+    let out = receive_openpgp(&store, "a2", "ac1", &source).await;
+    assert_eq!(out.state, ReceiveState::Decrypted);
+    assert_eq!(
+        out.signature_state,
+        SignatureState::UnknownKey,
+        "staging is silent: this message's verdict is unchanged by the staged key"
+    );
+
+    let rows = crate::list_collected_keys_for_account(&store, "a2", "openpgp").unwrap();
+    assert_eq!(rows.len(), 1, "the sender key stages once");
+    assert_eq!(rows[0].source.as_deref(), Some("autocrypt"));
+    assert_eq!(rows[0].peer_email.as_deref(), Some("a1@x.com"));
+    assert_eq!(
+        rows[0].fingerprint.as_deref(),
+        Some(a1.fingerprint.as_str())
+    );
+}
+
+#[tokio::test]
+async fn a_cleartext_autocrypt_header_whose_addr_is_not_from_stages_nothing() {
+    let (store, a1, a2) = two_accounts(false).await;
+    let minimal = sender_minimal_blob(&store, "a1", a1.fingerprint.as_str());
+    // The header advertises a different addr than the From (a1@x.com).
+    let header = crate::autocrypt::emit_autocrypt_header("intruder@x.com", &minimal);
+    let source = encrypt_source(&store, "a1", &a2, Some(&a1), PLAIN_ENTITY, "...").await;
+    let source = crate::autocrypt::inject_headers(&source, &[header]);
+
+    let out = receive_openpgp(&store, "a2", "ac2", &source).await;
+    assert_eq!(out.state, ReceiveState::Decrypted);
+    assert!(
+        crate::list_collected_keys_for_account(&store, "a2", "openpgp")
+            .unwrap()
+            .is_empty(),
+        "the addr-to-From binding discards the mismatched header"
+    );
+}
+
+#[tokio::test]
+async fn gossip_headers_inside_the_ciphertext_stage_the_peer_keys() {
+    let (store, a1, a2) = two_accounts(false).await;
+    let c3 = engine::generate("A Three <a3@x.com>").unwrap();
+    let c4 = engine::generate("A Four <a4@x.com>").unwrap();
+    let b3 = crate::autocrypt::minimal_export(&c3).unwrap();
+    let b4 = crate::autocrypt::minimal_export(&c4).unwrap();
+    let fp3 = keymap::fingerprint_of(&c3).as_str().to_string();
+    let fp4 = keymap::fingerprint_of(&c4).as_str().to_string();
+
+    // The send gate's layout: the protected-headers wrapper, then the gossip
+    // headers injected into its root header block, all inside the ciphertext.
+    let wrapped =
+        mime::wrap_protected_headers(PLAIN_ENTITY, Some("Subject: the real subject"), true);
+    let inner = crate::autocrypt::inject_headers(
+        &wrapped,
+        &[
+            crate::autocrypt::emit_gossip_header("a3@x.com", &b3),
+            crate::autocrypt::emit_gossip_header("a4@x.com", &b4),
+        ],
+    );
+    let source = encrypt_source(&store, "a1", &a2, Some(&a1), &inner, "...").await;
+
+    let out = receive_openpgp(&store, "a2", "g1", &source).await;
+    assert_eq!(out.state, ReceiveState::Decrypted);
+    assert_eq!(
+        out.subject.as_deref(),
+        Some("the real subject"),
+        "the protected subject still restores beside the gossip consume"
+    );
+
+    let rows = crate::list_collected_keys_for_account(&store, "a2", "openpgp").unwrap();
+    assert_eq!(rows.len(), 2, "both gossip peer keys stage");
+    let mut peers: Vec<String> = rows.iter().map(|r| r.peer_email.clone().unwrap()).collect();
+    peers.sort();
+    assert_eq!(peers, vec!["a3@x.com".to_string(), "a4@x.com".to_string()]);
+    for row in &rows {
+        assert_eq!(row.source.as_deref(), Some("autocrypt"));
+    }
+    let fps: Vec<String> = rows
+        .iter()
+        .map(|r| r.fingerprint.clone().unwrap())
+        .collect();
+    assert!(fps.contains(&fp3) && fps.contains(&fp4));
+}
+
+#[tokio::test]
+async fn a_failed_decrypt_stages_nothing_and_stays_failed() {
+    let (store, a1, a2) = two_accounts(false).await;
+    let minimal = sender_minimal_blob(&store, "a1", a1.fingerprint.as_str());
+    let header = crate::autocrypt::emit_autocrypt_header("a1@x.com", &minimal);
+    let source = encrypt_source(&store, "a1", &a2, Some(&a1), PLAIN_ENTITY, "...").await;
+    let mut source = crate::autocrypt::inject_headers(&source, &[header]);
+    tamper_ciphertext(&mut source);
+
+    let out = receive_openpgp(&store, "a2", "ac3", &source).await;
+    assert_eq!(
+        out.state,
+        ReceiveState::Failed,
+        "the fail-closed arm is preserved"
+    );
+    assert!(out.plain.is_none());
+    assert!(
+        crate::list_collected_keys_for_account(&store, "a2", "openpgp")
+            .unwrap()
+            .is_empty(),
+        "a failed receive stages nothing"
+    );
+}

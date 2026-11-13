@@ -132,8 +132,10 @@ impl ReceiveOutcome {
 /// account's private OpenPGP key; decrypt + verify through
 /// [`OpenpgpBackend::decrypt_with_signers`] directly (offering the keystore
 /// signers + the collected certs); map the outcome to the signature state;
-/// persist the result row; restore the protected subject. A source that is not
-/// the crypto framing answers [`ReceiveState::NotEncrypted`] and writes no row.
+/// persist the result row; restore the protected subject; consume the inbound
+/// Autocrypt keys into the collected staging (silent, after the verdict, so it
+/// never changes this message's outcome). A source that is not the crypto
+/// framing answers [`ReceiveState::NotEncrypted`] and writes no row.
 pub async fn receive_openpgp(
     store: &Arc<CryptoStore>,
     account_id: &str,
@@ -141,7 +143,9 @@ pub async fn receive_openpgp(
     source: &[u8],
 ) -> ReceiveOutcome {
     // 1. Detect + unwrap the PGP/MIME framing. Anything else is left untouched.
-    let Ok((_outer, entity)) = mime::split_message(source) else {
+    //    The outer headers are kept: the cleartext Autocrypt consume reads them
+    //    after the verdict (step 7).
+    let Ok((outer, entity)) = mime::split_message(source) else {
         return ReceiveOutcome::closed(ReceiveState::NotEncrypted, SignatureState::NotSigned);
     };
     let Some(ciphertext) = pgp_mime::unwrap_encrypted(&entity.0) else {
@@ -251,11 +255,14 @@ pub async fn receive_openpgp(
         .iter()
         .find_map(|part| matches!(part.kind, PartKind::Body).then(|| part.data.clone()))
         .unwrap_or_default();
-    let (subject, legs_entity) = match mime::unwrap_protected_headers(&inner) {
-        Some((subject, body)) => (subject, body),
-        None => (None, inner),
+    // The legs borrow the inner entity (rather than moving it) so the gossip
+    // consume below can still read its header block.
+    let protected = mime::unwrap_protected_headers(&inner);
+    let (subject, legs_entity) = match &protected {
+        Some((subject, body)) => (subject.clone(), body.as_slice()),
+        None => (None, inner.as_slice()),
     };
-    let (plain, html) = mime::body_legs(&legs_entity);
+    let (plain, html) = mime::body_legs(legs_entity);
 
     // 6. Persist the result row (the first writer of message_crypto_results).
     let crypto_kind = if signed {
@@ -275,6 +282,23 @@ pub async fn receive_openpgp(
             signer_email.as_deref(),
         ),
     );
+
+    // 7. Consume the inbound Autocrypt keys into the collected staging (silent).
+    //    This runs AFTER the verdict is computed and persisted, so it never
+    //    changes this message's outcome; the staged keys improve the NEXT
+    //    message's embedded-signature verification. The cleartext Autocrypt
+    //    header binds the sender's key to From; the gossip headers ride the
+    //    decrypted inner entity's protected-headers wrapper and carry the
+    //    recipient peers. The fail-closed arms above return before this point,
+    //    so a failed receive stages nothing.
+    crate::autocrypt::consume_autocrypt_header(
+        store,
+        account_id,
+        outer.headers.as_bytes(),
+        mime::from_email(source).as_deref(),
+    );
+    crate::autocrypt::consume_gossip_headers(store, account_id, &inner);
+
     ReceiveOutcome {
         state: ReceiveState::Decrypted,
         signature_state,
