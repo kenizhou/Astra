@@ -152,13 +152,56 @@ affordance（`ReadingSnapshot.password_prompt`）：无腿、无密文、无结�
 （`decrypt_state` CHECK 保持 ok/no-key/failed/n/a）；成功写 ok。重新打开会
 重提示（无缓存口令）。
 
+## 静态草稿镜像（SP4c-4）
+
+引擎以明文持久化撰写草稿（排队时的 outbox 载荷、warm 后的同步 blob 缓存与
+message_body/FTS），且不可更改。Astra 在 `engine.put_draft` 之前自行构造
+Draft，故正文可拦截。SP4c-4 增加一个由 Astra 持有的加密草稿镜像，外加一个
+恢复读取接缝：持久的 Astra 持有副本经 vault 加密，恢复优先读它，仅对从未
+镜像的草稿回退到引擎正文。
+
+镜像是 `encrypted_drafts` 表（迁移 0005），以 (account_id, draft_key) 为键，
+其中 draft_key 是草稿稳定的 Message-ID（`Draft.message_id`，预生成、无尖
+括号），即恢复从存储邮件推导的同一身份。正文是 vault blob
+（`hex(0x01 || nonce || ct+tag)`，OS 钥匙串主密钥下的 AES-256-GCM），以
+AAD `astra:{account}:draft:{message_id}:1` 包装，镜像私钥 AAD，故从某一
+账户或草稿移用的 blob 在别处无法通过 AEAD 验证。存储把载荷当作不透明
+字节；Draft 到 JSON 的 serde 位于 astra-app（`drafts/encrypt.rs`）。
+
+保存钩子在 `engine.put_draft` 之前运行：它序列化渲染后的 Draft 并写入镜像。
+vault 错误拒绝保存（失败即关闭，不持久化明文；撰写器在内存中保留草稿，
+拒绝被记录）。账户行先被幂等注册（FK 目标，MIME 包装器惯例），故无加密
+包装器的普通账户仍能保存。镜像在引擎保留草稿的保存中存活：停泊保存
+（outbox 在 provider 调用之前记录 op）与已应用但未记录的写入都保留草稿，
+故镜像站立。仅当引擎未保留任何内容时才回滚（op 入队之前的载荷编码失败）；
+歧义的存储错误保守地保留镜像，因为孤儿镜像是无害密文，而回滚一个被保留
+草稿的镜像会剥去其静态保护。重保存 upsert 同一键；摘要/取代逻辑不受影响。
+删除钩子在两条丢弃路径与发送后清理（经撰写丢弃路由）上触发。
+
+恢复读取接缝先调用 `get_encrypted_draft`。三种结果彼此区分：存在的镜像
+反序列化 Draft 并映射为 DraftResume（文字来自 vault，而非引擎缓存）；缺席
+的镜像（`Ok(None)`，草稿从未镜像）照旧回退到 `engine.message_body`；存在
+但无法解密的镜像失败即关闭（阅读快照上的「无法解密」banner，不恢复，
+绝不回退明文）。DraftResume 与阅读快照形状不变。
+
+明文仅存在于内存与 vault blob 内：主密钥留在 OS 钥匙串（清零、绝不记录），
+此处不记录草稿内容。
+
+记录的缺口：引擎自身的静态副本仍是明文（排队时的 outbox 载荷、同步 blob
+缓存、warm 后的 message_body/FTS）。本切片保护持久的 Astra 持有副本并把
+恢复路由经 vault；它不清除引擎残留。若要求是「磁盘上绝不明文」，则
+引擎前加密（交给 put_draft 一个携带密文的 Draft）是后续；它使服务端草稿
+对其他客户端不可读并退化搜索/摘要，故是一个产品决策，而非本切片。AI
+draft_pool.reply 明文是相邻的静态暴露，超出范围（同一 vault，一个后续）。
+CLI 对等：CLI 直接读引擎正文；镜像是 desktop 阅读路径保护，恰如其他接收面。
+
 ## 已知缺口，记录而非静默
 
 - 按标准仅加密接收：OpenPGP PGP/MIME（SP4c-1）与 S/MIME enveloped-data
   （SP4c-2）。内联 PGP armor 与分离签名形态（PGP multipart/signed、S/MIME
   multipart/signed 与不透明 signed-data）是后续；Autocrypt 消费在 SP4c-3a
   落地（上述接收半）；CRL 抓取在 SP4c-3b 落地（上述抓取路径）；W9 密码流在
-  SP4c-3c 落地（上述密码流）；静态加密草稿是 SP4c-4。
+  SP4c-3c 落地（上述密码流）；静态加密草稿在 SP4c-4 落地（上述镜像）。
 - W9 发送半本身未接线（`apply_password_crypto` 无调用者，`SendDraft` 无
   `password_protected` 字段）：活实证经 `encrypt_symmetric` 手工构造 SKESK
   邮件。接线 W9 发送是一个协调后续。口令绝不持久化，故重新打开会重提示；
@@ -196,6 +239,7 @@ affordance（`ReadingSnapshot.password_prompt`）：无腿、无密文、无结�
 | Autocrypt 消费：传入解析、addr 绑定、静默暂存 | ✅ | `astra-crypto-store/src/autocrypt.rs`、`receive.rs` |
 | CRL 抓取：DP 提取、失败即软抓取器端口、接收钩子 | ✅ | `astra-crypto-smime/src/cert.rs`、`astra-crypto-store/src/crl.rs`、`receive_smime.rs`、`client/desktop/src/crl_fetch.rs` |
 | W9 密码流：SKESK 检测、needs-password 裁决、内存口令、重提示 | ✅ | `astra-crypto-store/src/receive.rs`、`astra-app/src/reading_password.rs`、`crypto_decode.rs`、`client/desktop/src/commands/crypto.rs`、`client/web/src/components/reading-pane/PasswordDialog.tsx` |
-| 活实证（发送加密、打开、解密、否定臂） | ✅ | `tests_live_harness/crypto_receive.rs`、`crypto_receive_smime.rs`、`crypto_receive_autocrypt.rs`、`crypto_receive_crl.rs`、`crypto_receive_password.rs` |
-| 内联 armor、分离签名、静态草稿 | N/A | SP4c-3/4，上述缺口 |
+| 静态草稿：加密镜像、保存/丢弃钩子、恢复读取接缝、失败即关闭拒绝 | ✅ | `astra-crypto-store/src/drafts.rs`、`migrations/0005_encrypted_drafts.sql`、`astra-app/src/drafts/encrypt.rs`、`drafts.rs`、`drafts/resume.rs` |
+| 活实证（发送加密、打开、解密、否定臂、静态草稿） | ✅ | `tests_live_harness/crypto_receive.rs`、`crypto_receive_smime.rs`、`crypto_receive_autocrypt.rs`、`crypto_receive_crl.rs`、`crypto_receive_password.rs`、`crypto_drafts_at_rest.rs` |
+| 内联 armor、分离签名 | N/A | SP4c-3，上述缺口 |
 | 密钥管理、token 注册表、原生安全 UI | N/A | SP4d |

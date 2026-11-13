@@ -45,7 +45,7 @@ impl<P: Provider> App<P> {
     }
 
     /// The installed crypto store, cloned out from behind its mutex.
-    fn crypto_store(&self) -> Option<Arc<CryptoStore>> {
+    pub(crate) fn crypto_store(&self) -> Option<Arc<CryptoStore>> {
         self.crypto_store
             .lock()
             .expect("crypto-store mutex poisoned")

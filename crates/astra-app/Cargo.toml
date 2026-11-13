@@ -85,6 +85,9 @@ provider-imap.workspace = true
 engine-tls.workspace = true
 # The crypto tests hex-encode fixture key material.
 hex = "0.4"
+# The drafts-at-rest tests read and break the mirror row through the store's
+# testing connection (the ciphertext assertion, the fail-closed refusal).
+rusqlite.workspace = true
 # The harness crypto proof decodes the wire's base64 transports.
 base64 = "0.23"
 reqwest.workspace = true

@@ -89,6 +89,14 @@ impl CryptoStore {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
+    /// The raw connection for a test's own setup and assertions (the at-rest
+    /// proof reads the ciphertext row, the refusal test breaks the mirror
+    /// table). Test-only (the `testing` feature), never a product path.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn conn_for_test(&self) -> MutexGuard<'_, Connection> {
+        self.conn()
+    }
+
     /// Registers (or refreshes) the minimal account row the schema's foreign
     /// keys and the keystore bridge's email lookup need. The app calls this
     /// when a mail account is configured; it is idempotent.

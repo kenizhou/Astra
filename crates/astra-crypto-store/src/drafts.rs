@@ -113,6 +113,32 @@ pub fn delete_encrypted_draft(
     Ok(())
 }
 
+/// The raw stored vault blob for a draft key, hex and all, without decrypting:
+/// the test hook the at-rest proof reads to assert the row is ciphertext, never
+/// the plaintext. Test-only (the `testing` feature), never a product read.
+///
+/// # Errors
+/// Fails on a store error.
+#[cfg(any(test, feature = "testing"))]
+pub fn encrypted_draft_blob(
+    store: &CryptoStore,
+    account_id: &str,
+    draft_key: &str,
+) -> Result<Option<String>, DraftMirrorError> {
+    store
+        .conn()
+        .query_row(
+            "SELECT body_enc FROM encrypted_drafts WHERE account_id = ?1 AND draft_key = ?2",
+            rusqlite::params![account_id, draft_key],
+            |row| row.get(0),
+        )
+        .map(Some)
+        .or_else(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => Ok(None),
+            other => Err(DraftMirrorError::Store(other.to_string())),
+        })
+}
+
 #[cfg(test)]
 #[path = "drafts_tests.rs"]
 mod drafts_tests;

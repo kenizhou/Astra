@@ -65,6 +65,8 @@ pub use default::{
     backfill_cert_summaries, delete_crypto_key, get_default_signing_key, set_default_signing_key,
     DefaultKeyRow,
 };
+#[cfg(any(test, feature = "testing"))]
+pub use drafts::encrypted_draft_blob;
 pub use drafts::{
     delete_encrypted_draft, get_encrypted_draft, put_encrypted_draft, DraftMirrorError,
 };
