@@ -15,9 +15,10 @@
  *   dir's agent directory, never ~/.pi. Session ids are sanitised because
  *   pi writes them verbatim into the JSONL filename and ':' is illegal on
  *   Windows.
- * - The ten mail tools mount via customTools; the built-in coding tools
- *   and any auto-discovered extension tools stay disabled by the explicit
- *   tools: allowlist (CHAT_TOOL_ALLOWLIST), so only the ten names enable.
+ * - The ten mail tools and the five key tools mount via customTools; the
+ *   built-in coding tools and any auto-discovered extension tools stay
+ *   disabled by the explicit tools: allowlist (CHAT_TOOL_ALLOWLIST), so only
+ *   those fifteen names enable.
  * - The astra-cli skill index rides the system prompt through a
  *   DefaultResourceLoader appendSystemPrompt entry. When a resourceLoader
  *   is supplied, createAgentSession does NOT reload it, so the adapter owns

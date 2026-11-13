@@ -325,3 +325,53 @@ fn keys_import_refuses_secret_material_pointing_at_the_desktop() {
     ));
     assert_eq!(listed["keys"], serde_json::json!([]));
 }
+
+#[test]
+fn the_strict_flags_still_refuse_a_dash_leading_value() {
+    let dir = seeded();
+    // Only --plain relaxes the reader (armored material starts with -----BEGIN).
+    // Every other flag keeps the strict reader, so a dash-leading value is a
+    // usage error, never silently taken as the value. Each line carries all
+    // three required flags, exactly one of them dash-leading.
+    let cases: [&[&str]; 3] = [
+        &[
+            "keys",
+            "promote",
+            "--account",
+            "--evil",
+            "--standard",
+            "openpgp",
+            "--fingerprint",
+            "ABCD",
+        ],
+        &[
+            "keys",
+            "promote",
+            "--account",
+            "alpha",
+            "--standard",
+            "--evil",
+            "--fingerprint",
+            "ABCD",
+        ],
+        &[
+            "keys",
+            "promote",
+            "--account",
+            "alpha",
+            "--standard",
+            "openpgp",
+            "--fingerprint",
+            "--evil",
+        ],
+    ];
+    for case in cases {
+        let outcome = run(&line(case), &dir, &mut std::io::empty());
+        assert_eq!(
+            outcome.code.exit(),
+            2,
+            "a strict flag must refuse a dash-leading value: {}",
+            outcome.envelope.render(false).unwrap()
+        );
+    }
+}
