@@ -70,12 +70,40 @@ framing（发送先例的镜像）。
 OpenPGP 失败即关闭。p12 中间证书以 `key_type='intermediate'` 存储，绝不经
 keystore 的证书路径（那会把它们泄入锚集）。
 
+## Autocrypt 消费路径（SP4c-3a）
+
+`receive_openpgp` 将传入的 Autocrypt 密钥消费进已收集暂存区，静默且在裁决
+之后。两种头形态喂给它：
+
+- 外层头块上的明文 `Autocrypt:` 头携带发送者密钥。消费展开值、按 `;` 拆分
+  属性、提取 `addr`、`prefer-encrypt` 与 `keydata`、base64 解码 keydata
+  （二进制最小导出）并解析第一个证书取其指纹。Autocrypt Level 1 将 `addr`
+  绑定到 From 地址（忽略大小写）；不匹配则丢弃该头。
+- `Autocrypt-Gossip:` 头骑在加密部分内部，位于解密后内层实体的根头块
+  （发送门发出的受保护头包装器）。gossip 的 `addr` 是收件人对等体，无 From
+  绑定；每个对等体密钥入暂存。
+
+暂存是静默的：`stage_collected_key_if_absent` 写一行 `source='autocrypt'` 的
+`collected_keys`，按（account, standard, fingerprint, source）去重，故重新
+打开的邮件绝不重复。畸形 keydata 不入暂存且绝不 panic。消费在裁决计算并
+持久化之后运行，故绝不改变本邮件的解密或签名结果；失败即关闭臂在其之前
+返回，故失败的接收不入暂存。
+
+收益是即时的：`receive_openpgp` 已将已收集证书提供给 `decrypt_with_signers`
+与 `resolve_signer`，故入暂存的密钥改善下一封邮件的内嵌签名验证。已收集
+密钥的审阅/提升面是 SP4d；此处暂存静默。
+
 ## 已知缺口，记录而非静默
 
 - 按标准仅加密接收：OpenPGP PGP/MIME（SP4c-1）与 S/MIME enveloped-data
   （SP4c-2）。内联 PGP armor 与分离签名形态（PGP multipart/signed、S/MIME
-  multipart/signed 与不透明 signed-data）是后续；Autocrypt 消费、CRL 抓取与
-  W9 密码流程是 SP4c-3；静态加密草稿是 SP4c-4。
+  multipart/signed 与不透明 signed-data）是后续；Autocrypt 消费在 SP4c-3a
+  落地（上述接收半）；CRL 抓取（SP4c-3b）与 W9 密码流程（SP4c-3c）仍在；
+  静态加密草稿是 SP4c-4。
+- Autocrypt 暂存静默：已收集密钥的审阅/提升 UI 是 SP4d。发送门在密文内发出
+  `Autocrypt-Gossip`，但尚无明文自身 `Autocrypt` 头；当传入邮件携带明文头
+  （对等客户端的）时消费读取它，自身头的发出是后续。gossip 消费读取发送门
+  发出的受保护头包装器；超出该包装器的第三方 gossip 放置是后续。
 - S/MIME 吊销仅缓存：CRL 缓存在 SP4c-3 抓取器落地前为空，故实践中吊销读作
   unchecked（有 CRL 时吊销证书仍使链硬失败）。链的 Stale 吊销状态在抓取器
   落地前持久化为 unchecked。
@@ -100,6 +128,7 @@ keystore 的证书路径（那会把它们泄入锚集）。
 | 阅读集成：腿、banner、恢复主题、隐藏芯片 | ✅ | `astra-app/src/crypto_decode.rs`、`reading.rs` |
 | 复合解码器（加密裁决优先、插件落穿） | ✅ | `client/desktop/src/decode.rs` |
 | 失败即关闭：无密钥/失败/篡改绝不渲染密文 | ✅ | closed 臂 + 结构性接缝清除 |
-| 活实证（发送加密、打开、解密、否定臂） | ✅ | `tests_live_harness/crypto_receive.rs`、`crypto_receive_smime.rs` |
+| Autocrypt 消费：传入解析、addr 绑定、静默暂存 | ✅ | `astra-crypto-store/src/autocrypt.rs`、`receive.rs` |
+| 活实证（发送加密、打开、解密、否定臂） | ✅ | `tests_live_harness/crypto_receive.rs`、`crypto_receive_smime.rs`、`crypto_receive_autocrypt.rs` |
 | 内联 armor、分离签名、CRL 抓取、静态草稿 | N/A | SP4c-3/4，上述缺口 |
 | 密钥管理、token 注册表、原生安全 UI | N/A | SP4d |

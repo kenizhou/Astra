@@ -91,13 +91,49 @@ distinguished); the no-key / failed arms fail closed exactly as OpenPGP.
 The p12 intermediates are stored `key_type='intermediate'`, never through
 the keystore's cert path (which would leak them into the anchor set).
 
+## The Autocrypt consume path (SP4c-3a)
+
+`receive_openpgp` consumes the inbound Autocrypt keys into the collected
+staging area, silent and after the verdict. Two header shapes feed it:
+
+- The cleartext `Autocrypt:` header on the outer header block carries the
+  sender's key. The consume unfolds the value, splits the attributes on `;`,
+  extracts `addr`, `prefer-encrypt` and `keydata`, base64-decodes the keydata
+  (the binary minimal export) and parses the first cert for its fingerprint.
+  Autocrypt Level 1 binds the `addr` to the From address (case-insensitive);
+  a mismatch discards the header.
+- The `Autocrypt-Gossip:` headers ride inside the encrypted part, in the
+  decrypted inner entity's root header block (the protected-headers wrapper
+  the send gate emits). A gossip `addr` is the recipient peer, with no From
+  binding; each peer key stages.
+
+Staging is silent: `stage_collected_key_if_absent` writes a `collected_keys`
+row with `source='autocrypt'`, deduped on (account, standard, fingerprint,
+source) so a re-opened message never duplicates. Malformed keydata stages
+nothing and never panics. The consume runs after the verdict is computed and
+persisted, so it never changes this message's decrypt or signature outcome;
+the fail-closed arms return before it, so a failed receive stages nothing.
+
+The payoff is immediate: `receive_openpgp` already offers the collected certs
+to `decrypt_with_signers` and `resolve_signer`, so a staged key improves the
+next message's embedded-signature verification. The review/promote surface
+for collected keys is SP4d; staging here is silent.
+
 ## Known gaps, recorded rather than left silent
 
 - Encrypted receive only, per standard: OpenPGP PGP/MIME (SP4c-1) and S/MIME
   enveloped-data (SP4c-2). Inline PGP armor and the detached-signature shapes
   (PGP multipart/signed, S/MIME multipart/signed and opaque signed-data) are
-  follow-ups; Autocrypt consume, CRL fetching, and the W9 password flow are
-  SP4c-3; encrypted drafts at rest are SP4c-4.
+  follow-ups; Autocrypt consume landed in SP4c-3a (the receive half above);
+  CRL fetching (SP4c-3b) and the W9 password flow (SP4c-3c) remain; encrypted
+  drafts at rest are SP4c-4.
+- Autocrypt staging is silent: the review/promote UI for collected keys is
+  SP4d. The send gate emits `Autocrypt-Gossip` inside the ciphertext but no
+  cleartext own `Autocrypt` header yet; the consume reads a cleartext header
+  when an incoming message carries one (a peer client's), and the own-header
+  emission is a follow-up. Gossip consume reads the protected-headers wrapper
+  the send gate emits; third-party gossip placements beyond that wrapper are
+  a follow-up.
 - S/MIME revocation is cache-only: the CRL cache is empty until the SP4c-3
   fetcher lands, so revocation reads unchecked in practice (a revoked cert
   still hard-fails the chain when a CRL is present). The chain's Stale
@@ -127,6 +163,7 @@ the keystore's cert path (which would leak them into the anchor set).
 | The reading integration: legs, banner, restored subject, hidden chip | ✅ | `astra-app/src/crypto_decode.rs`, `reading.rs` |
 | The composite decoder (crypto verdict precedence, plugin fall-through) | ✅ | `client/desktop/src/decode.rs` |
 | Fail closed: no key / failure / tamper never renders ciphertext | ✅ | the closed arms + the structural seam clear |
-| The live proofs (send encrypted, open, decrypt, the negative arms) | ✅ | `tests_live_harness/crypto_receive.rs`, `crypto_receive_smime.rs` |
+| Autocrypt consume: inbound parse, addr binding, silent staging | ✅ | `astra-crypto-store/src/autocrypt.rs`, `receive.rs` |
+| The live proofs (send encrypted, open, decrypt, the negative arms) | ✅ | `tests_live_harness/crypto_receive.rs`, `crypto_receive_smime.rs`, `crypto_receive_autocrypt.rs` |
 | Inline armor, detached signatures, CRL fetch, drafts at rest | N/A | SP4c-3/4, the gaps above |
 | Key management, the token registry, the native security UI | N/A | SP4d |
