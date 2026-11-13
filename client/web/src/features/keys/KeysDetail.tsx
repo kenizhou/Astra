@@ -12,6 +12,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { importKey, listKeys, type CryptoKeyRow } from '@/services/crypto';
 import { useSettingsStore } from '@/features/settings/settingsStore';
+import { CollectedKeysReview } from './CollectedKeysReview';
 
 const selectClass =
   'h-7 w-full rounded-full border border-input bg-background px-3 text-xs text-foreground outline-none transition-colors focus:border-primary';
@@ -191,6 +192,8 @@ export function KeysDetail() {
           </ul>
         )}
       </div>
+
+      <CollectedKeysReview account={chosen} />
     </section>
   );
 }

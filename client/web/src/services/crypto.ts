@@ -94,3 +94,66 @@ export function importKey(
 export function listKeys(account: string): Promise<CryptoKeyRow[]> {
   return invoke('list_keys', { account });
 }
+
+/**
+ * One staged collected key as the host's review list answers it: the public
+ * material a discovery source (Autocrypt, gossip, WKD, ...) observed but the
+ * person has not yet accepted. The fields mirror the desktop host's camelCase
+ * serde exactly; `publicData` is the base64 key bytes, `seenAt` a unix-seconds
+ * string. No secret crosses this surface.
+ */
+export interface CollectedKeyRow {
+  id: number;
+  accountId?: string;
+  peerEmail?: string;
+  /** 'openpgp' | 'smime' | 'sm'. */
+  standard?: string;
+  fingerprint?: string;
+  /** The raw key bytes as base64, when present. */
+  publicData?: string;
+  /** The discovery source ('autocrypt', 'wkd', 'harvested', ...). */
+  source?: string;
+  seenAt: string;
+}
+
+/**
+ * Lists the account's staged collected keys across both standards, newest
+ * first: the review surface's list. Public material only.
+ */
+export function listCollected(account: string): Promise<CollectedKeyRow[]> {
+  return invoke('list_collected', { account });
+}
+
+/**
+ * Accepts a staged collected key into the keystore paired with the trust
+ * decision that makes it send-usable: `verified` true records the out-of-band
+ * verification (an upgrade), false accepts without verification (never
+ * downgrading a standing decision). The email binds the acceptance, or null
+ * when the key carries no peer address. Answers the landed row (public view).
+ */
+export function promoteCollected(
+  account: string,
+  standard: string,
+  fingerprint: string,
+  email: string | null,
+  verified: boolean,
+): Promise<CryptoKeyRow> {
+  return invoke('promote_collected', { account, standard, fingerprint, email, verified });
+}
+
+/**
+ * Rejects a staged collected key by its staging id: removes the staging row
+ * and records a rejected decision. Staging is decision-blind, so a re-opened
+ * source re-stages and the list re-offers it; the rejection stands (an
+ * unverified promote never downgrades it; the resolver answers Rejected once a
+ * keystore row exists). The email binds the decision, or null when absent.
+ */
+export function rejectCollected(
+  account: string,
+  id: number,
+  standard: string,
+  fingerprint: string,
+  email: string | null,
+): Promise<void> {
+  return invoke('reject_collected', { account, id, standard, fingerprint, email });
+}

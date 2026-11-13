@@ -15,7 +15,7 @@
 //! A child of [`super`], whose command registration this module continues,
 //! under the same split the other command halves made for the line cap.
 
-use astra_crypto_core::SecretBox;
+use astra_crypto_core::{SecretBox, Standard};
 use astra_viewmodel::PasswordPromptState;
 use engine_api::{AccountId, ProviderKey};
 use tauri::State;
@@ -118,6 +118,122 @@ pub(crate) fn list_keys(
     list_keys_of(&state, &account)
 }
 
+/// The account's staged collected keys across both standards, newest first:
+/// the review surface's list. Public material only, no secret crosses.
+pub(crate) fn list_collected_of(
+    state: &AppState,
+    account: &AccountId,
+) -> Result<Vec<astra_crypto_store::CollectedKeyRow>, String> {
+    let app = std::sync::Arc::clone(&state.app);
+    let account = account.clone();
+    state
+        .runtime
+        .block_on(|| async move { app.list_collected(&account).await })
+}
+
+/// Promotes a staged key into the keystore paired with the trust decision that
+/// makes it send-usable: the review surface's accept (`verified` false) or
+/// accept-as-verified (`verified` true). Answers the landed row (public view).
+pub(crate) fn promote_collected_of(
+    state: &AppState,
+    account: &AccountId,
+    standard: Standard,
+    fingerprint: &str,
+    email: Option<&str>,
+    verified: bool,
+) -> Result<astra_crypto_store::CryptoKeyRow, String> {
+    let app = std::sync::Arc::clone(&state.app);
+    let account = account.clone();
+    let fingerprint = fingerprint.to_owned();
+    let email = email.map(str::to_owned);
+    state.runtime.block_on(|| async move {
+        app.promote_collected(&account, standard, &fingerprint, email.as_deref(), verified)
+            .await
+    })
+}
+
+/// Rejects a staged key by its staging id, recording a rejected decision.
+/// Staging is decision-blind, so a re-opened source re-stages and the list
+/// re-offers it; the rejection stands (an unverified promote never downgrades
+/// it; the resolver answers Rejected once a keystore row exists).
+pub(crate) fn reject_collected_of(
+    state: &AppState,
+    account: &AccountId,
+    id: i64,
+    standard: Standard,
+    fingerprint: &str,
+    email: Option<&str>,
+) -> Result<(), String> {
+    let app = std::sync::Arc::clone(&state.app);
+    let account = account.clone();
+    let fingerprint = fingerprint.to_owned();
+    let email = email.map(str::to_owned);
+    state.runtime.block_on(|| async move {
+        app.reject_collected(&account, id, standard, &fingerprint, email.as_deref())
+            .await
+    })
+}
+
+/// Lists the account's staged collected keys: the settings Keys review
+/// affordance's list. Public material only, no secret crosses this surface.
+// Tauri's command macro hands `State` by value; the wrapper only reads through it.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) fn list_collected(
+    state: State<'_, AppState>,
+    account: AccountId,
+) -> Result<Vec<astra_crypto_store::CollectedKeyRow>, String> {
+    list_collected_of(&state, &account)
+}
+
+/// Accepts a staged collected key into the keystore with its trust decision:
+/// the review surface's Accept (unverified) or Accept as verified. The
+/// fingerprint is shown so a person can verify it out of band first. Public
+/// material only.
+// Tauri's command macro hands `State` by value; the wrapper only reads through it.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) fn promote_collected(
+    state: State<'_, AppState>,
+    account: AccountId,
+    standard: Standard,
+    fingerprint: String,
+    email: Option<String>,
+    verified: bool,
+) -> Result<astra_crypto_store::CryptoKeyRow, String> {
+    promote_collected_of(
+        &state,
+        &account,
+        standard,
+        &fingerprint,
+        email.as_deref(),
+        verified,
+    )
+}
+
+/// Rejects a staged collected key: the review surface's Reject. Removes the
+/// staging row and records a rejected decision. Public material only.
+// Tauri's command macro hands `State` by value; the wrapper only reads through it.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) fn reject_collected(
+    state: State<'_, AppState>,
+    account: AccountId,
+    id: i64,
+    standard: Standard,
+    fingerprint: String,
+    email: Option<String>,
+) -> Result<(), String> {
+    reject_collected_of(
+        &state,
+        &account,
+        id,
+        standard,
+        &fingerprint,
+        email.as_deref(),
+    )
+}
+
 #[cfg(test)]
 #[path = "crypto_tests.rs"]
 mod tests;
@@ -125,3 +241,7 @@ mod tests;
 #[cfg(test)]
 #[path = "crypto_keys_tests.rs"]
 mod keys_tests;
+
+#[cfg(test)]
+#[path = "crypto_collected_tests.rs"]
+mod collected_tests;

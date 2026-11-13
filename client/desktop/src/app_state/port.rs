@@ -66,6 +66,37 @@ impl AppPort for App<HostProvider> {
         App::list_keys(self, account).map_err(|e| e.to_string())
     }
 
+    async fn list_collected(
+        &self,
+        account: &AccountId,
+    ) -> Result<Vec<astra_crypto_store::CollectedKeyRow>, String> {
+        App::list_collected(self, account).map_err(|e| e.to_string())
+    }
+
+    async fn promote_collected(
+        &self,
+        account: &AccountId,
+        standard: astra_crypto_core::Standard,
+        fingerprint: &str,
+        email: Option<&str>,
+        verified: bool,
+    ) -> Result<astra_crypto_store::CryptoKeyRow, String> {
+        App::promote_collected(self, account, standard, fingerprint, email, verified)
+            .map_err(|e| e.to_string())
+    }
+
+    async fn reject_collected(
+        &self,
+        account: &AccountId,
+        id: i64,
+        standard: astra_crypto_core::Standard,
+        fingerprint: &str,
+        email: Option<&str>,
+    ) -> Result<(), String> {
+        App::reject_collected(self, account, id, standard, fingerprint, email)
+            .map_err(|e| e.to_string())
+    }
+
     async fn attachment_content(
         &self,
         account: &AccountId,

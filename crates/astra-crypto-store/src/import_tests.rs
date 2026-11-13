@@ -11,7 +11,7 @@ use crate::keys::{
     list_crypto_keys_for_account,
 };
 use crate::store::CryptoStore;
-use crate::trust::{get_latest_trust_decision, list_decisions_for_email};
+use crate::trust::{get_latest_trust_decision, list_decisions_for_email, put_trust_decision};
 use astra_crypto_openpgp::keymap::{
     cert_to_armored_public, cert_to_public_blob, cert_to_secret_blob, fingerprint_of, parse_certs,
 };
@@ -382,4 +382,115 @@ fn a_smime_public_reimport_preserves_the_standing_default_signer() {
     assert!(row.is_default_sign, "the standing default survives");
     assert!(row.has_private, "the private blob survives");
     assert_eq!(row.key_type, "cert", "a private key is not demoted");
+}
+
+#[test]
+fn the_promote_helper_records_an_unverified_acceptance_when_none_stands() {
+    let store = test_store();
+    record_promote_trust(
+        &store,
+        "a1",
+        Some("peer@x.com"),
+        "openpgp",
+        "fpPromote",
+        false,
+    )
+    .unwrap();
+    let latest = get_latest_trust_decision(&store, "a1", "peer@x.com", "openpgp", "fpPromote")
+        .unwrap()
+        .expect("the acceptance stands");
+    assert_eq!(latest.decision, "unverified");
+}
+
+#[test]
+fn a_verified_promote_upgrades_a_standing_unverified_decision() {
+    let store = test_store();
+    record_promote_trust(
+        &store,
+        "a1",
+        Some("peer@x.com"),
+        "openpgp",
+        "fpPromote",
+        false,
+    )
+    .unwrap();
+    record_promote_trust(
+        &store,
+        "a1",
+        Some("peer@x.com"),
+        "openpgp",
+        "fpPromote",
+        true,
+    )
+    .unwrap();
+    let latest = get_latest_trust_decision(&store, "a1", "peer@x.com", "openpgp", "fpPromote")
+        .unwrap()
+        .expect("the decision stands");
+    assert_eq!(
+        latest.decision, "verified",
+        "a verified choice always upgrades"
+    );
+}
+
+#[test]
+fn an_unverified_promote_never_downgrades_a_standing_verified_decision() {
+    let store = test_store();
+    record_import_trust(&store, "a1", "peer@x.com", "openpgp", "fpPromote", true).unwrap();
+    record_promote_trust(
+        &store,
+        "a1",
+        Some("peer@x.com"),
+        "openpgp",
+        "fpPromote",
+        false,
+    )
+    .unwrap();
+    let latest = get_latest_trust_decision(&store, "a1", "peer@x.com", "openpgp", "fpPromote")
+        .unwrap()
+        .expect("the decision stands");
+    assert_eq!(
+        latest.decision, "verified",
+        "an unverified promote never downgrades a standing decision"
+    );
+}
+
+#[test]
+fn an_unverified_promote_never_downgrades_a_standing_personal_decision() {
+    let store = test_store();
+    put_trust_decision(
+        &store,
+        "a1",
+        "peer@x.com",
+        "openpgp",
+        "fpPromote",
+        "personal",
+        None,
+    )
+    .unwrap();
+    record_promote_trust(
+        &store,
+        "a1",
+        Some("peer@x.com"),
+        "openpgp",
+        "fpPromote",
+        false,
+    )
+    .unwrap();
+    let latest = get_latest_trust_decision(&store, "a1", "peer@x.com", "openpgp", "fpPromote")
+        .unwrap()
+        .expect("the decision stands");
+    assert_eq!(latest.decision, "personal");
+}
+
+#[test]
+fn a_no_email_promote_records_no_decision() {
+    let store = test_store();
+    record_promote_trust(&store, "a1", None, "openpgp", "fpPromote", false).unwrap();
+    record_promote_trust(&store, "a1", None, "openpgp", "fpPromote", true).unwrap();
+    // No address to decide against: the audit holds nothing for this key.
+    let history = list_decisions_for_email(&store, "a1", "openpgp", "").unwrap();
+    assert!(
+        history.is_empty(),
+        "a no-email promote decides against nothing"
+    );
 }

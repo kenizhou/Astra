@@ -11,6 +11,11 @@
 #[path = "keys.rs"]
 pub(crate) mod keys;
 
+// The collected-key review surface (SP4d-2): the same sibling-file idiom, the
+// list/accept/verify/reject methods over the staged keys.
+#[path = "collected.rs"]
+pub(crate) mod collected;
+
 use serde::{Deserialize, Serialize};
 
 /// The composer's per-draft crypto toggles on a submit intent. `None`

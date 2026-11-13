@@ -149,6 +149,37 @@ impl AppPort for ShowcaseApp {
         Ok(Vec::new())
     }
 
+    async fn list_collected(
+        &self,
+        _account: &AccountId,
+    ) -> Result<Vec<astra_crypto_store::CollectedKeyRow>, String> {
+        Ok(Vec::new())
+    }
+
+    async fn promote_collected(
+        &self,
+        _account: &AccountId,
+        _standard: astra_crypto_core::Standard,
+        _fingerprint: &str,
+        _email: Option<&str>,
+        _verified: bool,
+    ) -> Result<astra_crypto_store::CryptoKeyRow, String> {
+        // The showcase carries no crypto store: a promote has nothing to land
+        // against, so it refuses.
+        Err("no crypto store is installed".to_owned())
+    }
+
+    async fn reject_collected(
+        &self,
+        _account: &AccountId,
+        _id: i64,
+        _standard: astra_crypto_core::Standard,
+        _fingerprint: &str,
+        _email: Option<&str>,
+    ) -> Result<(), String> {
+        Err("no crypto store is installed".to_owned())
+    }
+
     async fn attachment_content(
         &self,
         _account: &AccountId,
