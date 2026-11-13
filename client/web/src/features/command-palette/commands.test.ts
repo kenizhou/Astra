@@ -19,6 +19,7 @@ vi.mock('@/features/composer/composeWindow', () => ({
 }));
 
 import { registerSearchIslandOpener } from '@/components/layout/searchIsland';
+import { usePinnedSearchesStore } from '@/features/pinned-searches/pinnedSearchesStore';
 import { useAppearanceStore } from '@/services/appearance';
 import type { AccountFolderRow, FolderRow, MessageRowView } from '@/services/surfaces';
 import { useAccountStore } from '@/stores/accountStore';
@@ -96,6 +97,7 @@ beforeEach(() => {
   useListStore.setState({ rows: [], selectedKey: null, selectedKeys: [] });
   useReadingStore.setState({ snapshot: null, showRemoteImages: false });
   useAppearanceStore.setState({ readingPosition: 'right' });
+  usePinnedSearchesStore.setState({ searches: [], panelOpen: false });
   registerSearchIslandOpener(null);
 });
 
@@ -266,6 +268,12 @@ describe('the Search, App, and View commands', () => {
     registerSearchIslandOpener(open);
     command('search-mail').run();
     expect(open).toHaveBeenCalledTimes(1);
+  });
+
+  it('Saved searches opens the panel through the store gate', () => {
+    command('saved-searches').run();
+    expect(usePinnedSearchesStore.getState().panelOpen).toBe(true);
+    expect(ipc.dispatch).not.toHaveBeenCalled();
   });
 
   it('Settings and Add account open their surfaces', () => {

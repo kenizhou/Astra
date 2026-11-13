@@ -114,6 +114,29 @@ the scope dropdown riding inside it. That is Outlook's own placement, and the
 only surface whose centre is not a pane's. Further surfaces take the field's
 contract from this document, not from this paragraph.
 
+## Saved searches
+
+The island's recent history is **session state**: the queries a session
+submitted, newest first, gone when the session ends. Pinned searches are its
+**persistent sibling**: a query saved under a name, kept on the device
+(localStorage, capped at **20**), listed in the Saved searches panel beside
+the title bar's notification bell. The island's Save search affordance
+captures the live query under a name while a query stands; a blank field
+offers nothing to save.
+
+**Only the query string is saved, never the scope** (rule 7). A saved search
+is a query, not a narrowing: running one opens the island and dispatches the
+query exactly as a typed search does, over the session's standing scope,
+which defaults to every account and folder except Trash. The narrowing the
+query was saved under is not restored, because no narrowing was stored.
+
+A save with a blank query is refused; duplicate names are allowed (the id is
+the identity), and a save of an identical query and name is idempotent. The
+panel runs, renames, and deletes; a malformed persisted entry drops on parse,
+and a storage failure is logged, never thrown. A saved query re-runs against
+the current sync depth, so its results may differ from when it was saved
+(rule 8's horizon note already states the depth policy).
+
 ## The surface matrix
 
 | Rule | The shipped surface (web UI, desktop shell) |
@@ -177,3 +200,12 @@ contract from this document, not from this paragraph.
 - **Junk is searched by default.** Deliberate (rule 2 names Trash only,
   matching Outlook), but worth revisiting if it proves noisy: Gmail excludes
   both.
+- **A pinned search saves the query alone, never the scope.** Rule 7 pins
+  the scope as session state, so a saved search re-runs over the session's
+  standing scope (the default unless a narrowing stands), not the narrowing
+  it was saved under. The save affordance captures the query only.
+- **Pinned searches are device-local.** localStorage, no cross-device sync;
+  the list caps at 20, and a malformed entry drops on parse.
+- **A saved query re-runs against the current sync depth.** Its results may
+  differ from when it was saved; rule 8's horizon note states the depth
+  policy the re-run reads.
