@@ -197,6 +197,64 @@ needs-password and wrong-password states are transient interactions, not
 persisted rows (the `decrypt_state` CHECK stays ok/no-key/failed/n/a); success
 writes ok. A re-open re-prompts (no cached passphrase).
 
+## The drafts-at-rest mirror (SP4c-4)
+
+The engine persists compose drafts as plaintext (the outbox payload while
+queued, the synced blob cache and message_body/FTS after warm) and cannot be
+changed. Astra builds the Draft itself before `engine.put_draft`, so the body
+is interceptable. SP4c-4 adds an encrypted draft MIRROR held by Astra plus a
+resume read seam: the durable Astra-held copy is vault-encrypted and resume
+prefers it, falling back to the engine body only for a draft that was never
+mirrored.
+
+The mirror is the `encrypted_drafts` table (migration 0005), keyed by
+(account_id, draft_key) where the draft_key is the draft's stable Message-ID
+(`Draft.message_id`, pre-generated, no angle brackets), the same identity the
+resume derives from the stored message. The body is the vault blob
+(`hex(0x01 || nonce || ct+tag)`, AES-256-GCM under the OS-keyring master key),
+wrapped with the AAD `astra:{account}:draft:{message_id}:1` mirroring the
+private-key AAD, so a blob lifted from one account or draft fails AEAD
+verification anywhere else. The store treats the payload as opaque bytes; the
+Draft to JSON serde lives in astra-app (`drafts/encrypt.rs`).
+
+The save hook runs BEFORE `engine.put_draft`: it serialises the rendered Draft
+and writes the mirror. A vault error refuses the save (fail closed, no
+plaintext persisted; the composer keeps the draft in memory and the refusal is
+logged). The account row is registered idempotently first (the FK target, the
+MIME-wrapper idiom), so a plain account with no crypto wrapper still saves.
+The mirror survives a save the engine KEEPS: a parked save (the outbox records
+the op before the provider call) and an applied-but-unrecorded write both keep
+the draft, so the mirror stands. It rolls back only when the engine kept
+nothing (a payload-encode failure before the op is enqueued); an ambiguous
+store error keeps the mirror conservatively, since an orphan mirror is harmless
+ciphertext while rolling back a kept draft's mirror would strip its at-rest
+protection. A re-save upserts the same key; the digest/supersede logic is
+untouched. The delete hook fires on both discard paths and the post-send
+cleanup (which routes through the composition discard).
+
+The resume read seam calls `get_encrypted_draft` first. The three outcomes are
+distinct: a present mirror deserialises the Draft and maps it to DraftResume
+(the words come from the vault, not the engine cache); an absent mirror
+(`Ok(None)`, the draft was never mirrored) falls back to `engine.message_body`
+as before; a mirror that exists but cannot be decrypted fails closed (a
+"cannot decrypt" banner on the reading snapshot, no resume, NEVER the plaintext
+fallback). The DraftResume and reading snapshot shapes are unchanged.
+
+The plaintext lives only in memory and inside the vault blob: the master key
+stays in the OS keyring (zeroized, never logged), and nothing here logs the
+draft's content.
+
+Recorded gap: the engine's own at-rest copies remain plaintext (the outbox
+payload while queued, the synced blob cache, message_body/FTS after warm). This
+slice protects the durable Astra-held copy and routes resume through the vault;
+it does not purge the engine residue. Encrypt-before-engine (hand put_draft a
+ciphertext-bearing Draft) is the follow-up if "never plaintext on disk" is the
+requirement; it makes server-side drafts unreadable to other clients and
+degrades search/snippets, so it is a product decision, not this slice. The AI
+draft_pool.reply plaintext is adjacent at-rest exposure, out of scope (same
+vault, a follow-up). CLI parity: the CLI reads engine bodies directly; the
+mirror is a desktop reading-path protection, like the other receive surfaces.
+
 ## Known gaps, recorded rather than left silent
 
 - Encrypted receive only, per standard: OpenPGP PGP/MIME (SP4c-1) and S/MIME
@@ -205,7 +263,7 @@ writes ok. A re-open re-prompts (no cached passphrase).
   follow-ups; Autocrypt consume landed in SP4c-3a (the receive half above);
   CRL fetching landed in SP4c-3b (the fetching path above); the W9 password
   flow landed in SP4c-3c (the password flow above); encrypted drafts at rest
-  are SP4c-4.
+  landed in SP4c-4 (the mirror above).
 - The W9 SEND side is itself unwired (`apply_password_crypto` has no callers,
   `SendDraft` has no `password_protected` field): the live proof hand-builds a
   SKESK message via `encrypt_symmetric`. Wiring W9 send is a coordination
@@ -255,6 +313,7 @@ writes ok. A re-open re-prompts (no cached passphrase).
 | Autocrypt consume: inbound parse, addr binding, silent staging | ✅ | `astra-crypto-store/src/autocrypt.rs`, `receive.rs` |
 | CRL fetching: DP extraction, the fail-soft fetcher port, the receive hook | ✅ | `astra-crypto-smime/src/cert.rs`, `astra-crypto-store/src/crl.rs`, `receive_smime.rs`, `client/desktop/src/crl_fetch.rs` |
 | The W9 password flow: SKESK detection, needs-password verdict, in-memory passphrase, re-prompt | ✅ | `astra-crypto-store/src/receive.rs`, `astra-app/src/reading_password.rs`, `crypto_decode.rs`, `client/desktop/src/commands/crypto.rs`, `client/web/src/components/reading-pane/PasswordDialog.tsx` |
-| The live proofs (send encrypted, open, decrypt, the negative arms) | ✅ | `tests_live_harness/crypto_receive.rs`, `crypto_receive_smime.rs`, `crypto_receive_autocrypt.rs`, `crypto_receive_crl.rs`, `crypto_receive_password.rs` |
-| Inline armor, detached signatures, drafts at rest | N/A | SP4c-3/4, the gaps above |
+| Drafts at rest: the encrypted mirror, the save/discard hooks, the resume read seam, fail-closed refusal | ✅ | `astra-crypto-store/src/drafts.rs`, `migrations/0005_encrypted_drafts.sql`, `astra-app/src/drafts/encrypt.rs`, `drafts.rs`, `drafts/resume.rs` |
+| The live proofs (send encrypted, open, decrypt, the negative arms, drafts at rest) | ✅ | `tests_live_harness/crypto_receive.rs`, `crypto_receive_smime.rs`, `crypto_receive_autocrypt.rs`, `crypto_receive_crl.rs`, `crypto_receive_password.rs`, `crypto_drafts_at_rest.rs` |
+| Inline armor, detached signatures | N/A | SP4c-3, the gaps above |
 | Key management, the token registry, the native security UI | N/A | SP4d |

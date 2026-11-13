@@ -30,6 +30,7 @@ mod collected;
 mod crl;
 pub mod crypto_policy;
 mod default;
+mod drafts;
 mod keys;
 mod keystore;
 mod password;
@@ -63,6 +64,11 @@ pub use astra_crypto_smime::{crl_metadata_of_der, CrlMetadata};
 pub use default::{
     backfill_cert_summaries, delete_crypto_key, get_default_signing_key, set_default_signing_key,
     DefaultKeyRow,
+};
+#[cfg(any(test, feature = "testing"))]
+pub use drafts::encrypted_draft_blob;
+pub use drafts::{
+    delete_encrypted_draft, get_encrypted_draft, put_encrypted_draft, DraftMirrorError,
 };
 pub use keys::{
     get_crypto_key_full, get_crypto_key_public, get_crypto_key_public_with_blob,

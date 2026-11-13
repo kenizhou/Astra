@@ -37,6 +37,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "smime_receive",
         sql: include_str!("migrations/0004_smime_receive.sql"),
     },
+    Migration {
+        version: 5,
+        name: "encrypted_drafts",
+        sql: include_str!("migrations/0005_encrypted_drafts.sql"),
+    },
 ];
 
 /// The sqlite-backed crypto store. All query layers in this crate take a
@@ -82,6 +87,14 @@ impl CryptoStore {
         self.conn
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// The raw connection for a test's own setup and assertions (the at-rest
+    /// proof reads the ciphertext row, the refusal test breaks the mirror
+    /// table). Test-only (the `testing` feature), never a product path.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn conn_for_test(&self) -> MutexGuard<'_, Connection> {
+        self.conn()
     }
 
     /// Registers (or refreshes) the minimal account row the schema's foreign

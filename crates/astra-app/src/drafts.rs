@@ -26,6 +26,7 @@ use crate::{App, CompositionId, DraftsIntent};
 
 mod autosave;
 mod build;
+mod encrypt;
 mod record;
 mod resume;
 
@@ -228,6 +229,13 @@ impl<P: Provider> App<P> {
                 .await;
             return;
         }
+        // The drafts-at-rest mirror: seal the draft before the engine's own plaintext
+        // put. A vault error refuses the save (fail closed, no plaintext persisted);
+        // the composer keeps the draft in memory.
+        if let Err(err) = encrypt::mirror_save(self, &account, &draft) {
+            log::warn!("drafts: the draft could not be sealed at rest; the save is refused: {err}");
+            return;
+        }
         let replacing = self.composition_key(composition);
         match self
             .engine
@@ -247,6 +255,11 @@ impl<P: Provider> App<P> {
             // period settles it. The queued-versus-failed split arrives with the sending
             // slice's richer status.
             Err(err) => {
+                // The mirror survives a draft the engine kept (parked or applied); it
+                // rolls back only when the engine kept nothing.
+                if !encrypt::engine_kept_draft(&err) {
+                    encrypt::mirror_delete(self, &account, draft.message_id.as_str());
+                }
                 log::info!("drafts: the save is waiting for the server: {err}");
             }
         }
@@ -323,6 +336,9 @@ impl<P: Provider> App<P> {
             // discarding it is already done.
             return;
         };
+        // The encrypted mirror goes with the discarded draft, keyed by the same
+        // Message-ID every save of the composition carried.
+        encrypt::mirror_delete(self, &record.account, record.message_id.as_str());
         // A save still waiting for a network would otherwise store the discarded message
         // after the composer is gone, leaving a draft nothing here can name any more.
         if let Some((op, _)) = self.parked_save(&record.account, &record.message_id).await {
@@ -373,6 +389,9 @@ impl<P: Provider> App<P> {
         // the engine settles a removal of what is gone as done.
         if let Some(stored) = crate::reading::resolve(&self.engine, message).await {
             if let Some(header) = stored.envelope.message_id.first() {
+                // The encrypted mirror goes with the removed copy, keyed by its
+                // own Message-ID.
+                encrypt::mirror_delete(self, &message.account, header.as_str());
                 if let Some((op, _)) = self.parked_save(&message.account, header).await {
                     match self.engine.cancel_pending_op(&message.account, op).await {
                         Ok(_) => log::info!("drafts: a queued save was withdrawn with the row"),

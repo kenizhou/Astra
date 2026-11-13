@@ -12,6 +12,7 @@
 
 use engine_api::{AccountId, AttachmentPartId, EmailAddress, Message, Provider};
 
+use super::encrypt::{self, MirrorRead};
 use super::{CarriedPart, Composition, CompositionId};
 use crate::{compose_request::carry, reading::resolve, reference::MessageRef, App};
 
@@ -70,18 +71,31 @@ impl<P: Provider> App<P> {
             .collect();
         stored.sort_by_key(|message| message.received_at.or(message.sent_at));
         let newest = stored.pop()?;
-        let body = self
-            .engine
-            .message_body(provider, account, &newest)
-            .await
-            .ok()?;
         let parts = self.read_carried_parts(provider, account, &newest).await;
-        let resumed = resume_record(
-            account.as_str(),
-            &newest,
-            body.plain().unwrap_or_default(),
-            &parts,
-        );
+        // The vault seam: the mirror's words win; an absent mirror falls back to
+        // the engine body; a mirror that will not decrypt fails closed.
+        let resumed = match encrypt::read_mirror(self, account, &newest) {
+            MirrorRead::Words(draft) => {
+                encrypt::resume_from_draft(account.as_str(), &draft, &parts)
+            }
+            MirrorRead::Absent => {
+                let body = self
+                    .engine
+                    .message_body(provider, account, &newest)
+                    .await
+                    .ok()?;
+                resume_record(
+                    account.as_str(),
+                    &newest,
+                    body.plain().unwrap_or_default(),
+                    &parts,
+                )
+            }
+            MirrorRead::Closed => {
+                encrypt::publish_closed_banner(self, account, &newest);
+                return None;
+            }
+        };
         if !self.adopt_stored_draft(&composition, account, &newest) {
             return None;
         }
@@ -114,20 +128,33 @@ impl<P: Provider> App<P> {
             log::warn!("drafts: the key names a message that is not a draft");
             return None;
         }
-        let body = self
-            .engine
-            .message_body(provider, &message.account, &stored)
-            .await
-            .ok()?;
         let parts = self
             .read_carried_parts(provider, &message.account, &stored)
             .await;
-        let resumed = resume_record(
-            message.account.as_str(),
-            &stored,
-            body.plain().unwrap_or_default(),
-            &parts,
-        );
+        // The vault seam: the mirror's words win; an absent mirror falls back to
+        // the engine body; a mirror that will not decrypt fails closed.
+        let resumed = match encrypt::read_mirror(self, &message.account, &stored) {
+            MirrorRead::Words(draft) => {
+                encrypt::resume_from_draft(message.account.as_str(), &draft, &parts)
+            }
+            MirrorRead::Absent => {
+                let body = self
+                    .engine
+                    .message_body(provider, &message.account, &stored)
+                    .await
+                    .ok()?;
+                resume_record(
+                    message.account.as_str(),
+                    &stored,
+                    body.plain().unwrap_or_default(),
+                    &parts,
+                )
+            }
+            MirrorRead::Closed => {
+                encrypt::publish_closed_banner(self, &message.account, &stored);
+                return None;
+            }
+        };
         if !self.adopt_stored_draft(&composition, &message.account, &stored) {
             return None;
         }
