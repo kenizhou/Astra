@@ -22,10 +22,10 @@ use std::sync::Arc;
 
 use astra_crypto_core::{
     mime, pgp_mime, smime_mime, CryptoError, CryptoPolicy, EncryptedEnvelope, EncryptedPart,
-    Fingerprint, KeyHandle, KeyHandleRef, KeyId, KeyUsage, PartId, PartKind, SerializationStrategy,
-    SignatureState, Standard, TokenKeyId,
+    Fingerprint, KeyHandle, KeyHandleRef, KeyId, KeyUsage, PartId, PartKind, SecretBox,
+    SerializationStrategy, SignatureState, Standard, TokenKeyId,
 };
-use astra_crypto_openpgp::{keymap, OpenpgpBackend};
+use astra_crypto_openpgp::{engine, keymap, OpenpgpBackend};
 use sequoia_openpgp as openpgp;
 
 use crate::{
@@ -48,6 +48,16 @@ pub enum ReceiveState {
     Failed,
     /// The ciphertext decrypted; the legs and the security state are carried.
     Decrypted,
+    /// The message is passphrase-protected (a SKESK slot) and no PKESK key fits:
+    /// the caller prompts for a passphrase and re-enters through
+    /// [`receive_openpgp_password`]. A transient interaction, not a persisted
+    /// row (the `decrypt_state` CHECK stays ok/no-key/failed/n/a). Fail closed:
+    /// no plaintext until the passphrase decrypts.
+    NeedsPassword,
+    /// The supplied passphrase fit no SKESK slot: the caller re-prompts. A
+    /// transient re-prompt signal, not a persisted row, and never a plaintext
+    /// leak. Distinct from [`ReceiveState::Failed`] (a structural failure).
+    WrongPassword,
 }
 
 /// The neutral receive answer: the decrypted legs, the security state, and the
@@ -163,6 +173,12 @@ pub async fn receive_openpgp(
         return ReceiveOutcome::closed(ReceiveState::NotEncrypted, SignatureState::NotSigned);
     };
 
+    // A SKESK slot marks a passphrase-protected message. When no PKESK key fits
+    // it, the verdict is needs-password (a prompt) rather than no-key/failed. A
+    // message may carry BOTH a PKESK and a SKESK: the key path still wins when a
+    // key fits, so this flag only redirects the no-fitting-key arms below.
+    let passphrase_protected = engine::has_skesk(&ciphertext);
+
     // 2. Resolve the account's private OpenPGP keys (decryption candidates).
     let Ok(rows) = list_crypto_keys_for_account(store, account_id, "openpgp") else {
         return ReceiveOutcome::closed(ReceiveState::Failed, SignatureState::Invalid);
@@ -176,6 +192,11 @@ pub async fn receive_openpgp(
     ranked.sort_by_key(|entry| std::cmp::Reverse(entry.0));
     let candidates: Vec<KeyHandleRef> = ranked.into_iter().map(|(_, handle)| handle).collect();
     if candidates.is_empty() {
+        // A passphrase-protected message with no private key still prompts: the
+        // SKESK slot is openable without any key. Transient, so no row is written.
+        if passphrase_protected {
+            return ReceiveOutcome::closed(ReceiveState::NeedsPassword, SignatureState::NotSigned);
+        }
         write_result(
             store,
             account_id,
@@ -209,6 +230,10 @@ pub async fn receive_openpgp(
         recipients: Vec::new(),
     };
     let mut decrypted = None;
+    // Whether every candidate failed only with NoMatchingKey (no PKESK fit). A
+    // hard error (tamper, bad signature) clears it: such a message fails closed
+    // even when a SKESK slot is present, never downgraded to a passphrase prompt.
+    let mut all_no_matching_key = true;
     for handle in &candidates {
         match backend
             .decrypt_with_signers(&envelope, handle, &known_signers, &extra_signer_blobs)
@@ -221,10 +246,18 @@ pub async fn receive_openpgp(
             // A wrong key fits no PKESK: the next candidate may fit.
             Err(CryptoError::NoMatchingKey(_)) => {}
             // A tampered ciphertext or a bad signature fails for every key.
-            Err(_) => break,
+            Err(_) => {
+                all_no_matching_key = false;
+                break;
+            }
         }
     }
     let Some(outcome) = decrypted else {
+        // No PKESK key fit, but a SKESK slot is present: prompt for the
+        // passphrase instead of failing. Transient, so no row is written.
+        if passphrase_protected && all_no_matching_key {
+            return ReceiveOutcome::closed(ReceiveState::NeedsPassword, SignatureState::NotSigned);
+        }
         write_result(
             store,
             account_id,
@@ -234,9 +267,28 @@ pub async fn receive_openpgp(
         return ReceiveOutcome::closed(ReceiveState::Failed, SignatureState::Invalid);
     };
 
-    // 4. Map the outcome to the signature state. An unknown signer degrades to
-    //    UnknownKey (never a failure); a verified embedded signature is
-    //    ValidVerified; no embedded signature is NotSigned.
+    // 4-7. Map the signature state, resolve the signer, restore the protected
+    //      subject, persist the ok row, and consume the inbound Autocrypt keys.
+    //      Shared with the password orchestrator so both decrypt paths land the
+    //      identical verdict, signer resolution, and subject restore.
+    decrypted_outcome(store, account_id, message_id, source, &outer, outcome)
+}
+
+/// The shared success tail of both OpenPGP decrypt paths (the PKESK key path and
+/// the SKESK password path): map the outcome to the signature state, resolve the
+/// signer, restore the protected subject, persist the `ok` result row, and
+/// consume the inbound Autocrypt keys (silent, after the verdict). An unknown
+/// signer degrades to UnknownKey (never a failure); a verified embedded signature
+/// is ValidVerified; no embedded signature is NotSigned. Only a successful
+/// decrypt reaches here, so the fail-closed arms never write a row through it.
+fn decrypted_outcome(
+    store: &Arc<CryptoStore>,
+    account_id: &str,
+    message_id: &str,
+    source: &[u8],
+    outer: &mime::MessageHeaders,
+    outcome: engine::DecryptOutcome,
+) -> ReceiveOutcome {
     let signed = !outcome.signer_fingerprints.is_empty();
     let signature_state = if outcome.unverifiable_signature {
         SignatureState::UnknownKey
@@ -248,15 +300,15 @@ pub async fn receive_openpgp(
     let (signer_fingerprint, signer_email) =
         resolve_signer(store, account_id, &outcome.signer_fingerprints);
 
-    // 5. Restore the protected subject and extract the decrypted legs.
+    // Restore the protected subject and extract the decrypted legs. The legs
+    // borrow the inner entity (rather than moving it) so the gossip consume
+    // below can still read its header block.
     let inner = outcome
         .payload
         .parts
         .iter()
         .find_map(|part| matches!(part.kind, PartKind::Body).then(|| part.data.clone()))
         .unwrap_or_default();
-    // The legs borrow the inner entity (rather than moving it) so the gossip
-    // consume below can still read its header block.
     let protected = mime::unwrap_protected_headers(&inner);
     let (subject, legs_entity) = match &protected {
         Some((subject, body)) => (subject.clone(), body.as_slice()),
@@ -264,7 +316,7 @@ pub async fn receive_openpgp(
     };
     let (plain, html) = mime::body_legs(legs_entity);
 
-    // 6. Persist the result row (the first writer of message_crypto_results).
+    // Persist the result row (the first writer of message_crypto_results).
     let crypto_kind = if signed {
         "encrypted-signed"
     } else {
@@ -283,14 +335,12 @@ pub async fn receive_openpgp(
         ),
     );
 
-    // 7. Consume the inbound Autocrypt keys into the collected staging (silent).
-    //    This runs AFTER the verdict is computed and persisted, so it never
-    //    changes this message's outcome; the staged keys improve the NEXT
-    //    message's embedded-signature verification. The cleartext Autocrypt
-    //    header binds the sender's key to From; the gossip headers ride the
-    //    decrypted inner entity's protected-headers wrapper and carry the
-    //    recipient peers. The fail-closed arms above return before this point,
-    //    so a failed receive stages nothing.
+    // Consume the inbound Autocrypt keys into the collected staging (silent).
+    // This runs AFTER the verdict is computed and persisted, so it never changes
+    // this message's outcome; the staged keys improve the NEXT message's
+    // embedded-signature verification. The cleartext Autocrypt header binds the
+    // sender's key to From; the gossip headers ride the decrypted inner entity's
+    // protected-headers wrapper and carry the recipient peers.
     crate::autocrypt::consume_autocrypt_header(
         store,
         account_id,
@@ -315,6 +365,107 @@ pub async fn receive_openpgp(
         failure_reason: None,
         revocation_reason: None,
     }
+}
+
+/// Opens one passphrase-protected (SKESK) PGP/MIME message for `account_id` with
+/// the user-supplied `passphrase`: the password orchestrator the reading flow
+/// re-enters after [`receive_openpgp`] answers [`ReceiveState::NeedsPassword`].
+///
+/// The steps mirror the key path: detect + unwrap the `multipart/encrypted`
+/// framing; resolve the account's keystore signers + collected certs (the SAME
+/// `known_signers` / `extra_signer_blobs` resolution, so an embedded signature
+/// verifies against known peers and an unknown signer degrades, never aborts);
+/// decrypt through [`OpenpgpBackend::decrypt_symmetric`]; on success land the
+/// identical verdict, restored subject, and `ok` row as the key path. A wrong
+/// passphrase answers the transient [`ReceiveState::WrongPassword`] re-prompt
+/// signal (no plaintext, no row); a structural failure fails closed exactly as
+/// the key path. A source that is not the crypto framing answers
+/// [`ReceiveState::NotEncrypted`] and writes no row.
+///
+/// **Privacy.** The passphrase is held only in memory: it moves into the backend
+/// as a [`SecretBox`] (zeroized on drop) and is never logged or persisted. No
+/// result row records it, and the transient verdicts write no row at all.
+pub async fn receive_openpgp_password(
+    store: &Arc<CryptoStore>,
+    account_id: &str,
+    message_id: &str,
+    source: &[u8],
+    passphrase: SecretBox<String>,
+) -> ReceiveOutcome {
+    // 1. Detect + unwrap the PGP/MIME framing. Anything else is left untouched.
+    let Ok((outer, entity)) = mime::split_message(source) else {
+        return ReceiveOutcome::closed(ReceiveState::NotEncrypted, SignatureState::NotSigned);
+    };
+    let Some(ciphertext) = pgp_mime::unwrap_encrypted(&entity.0) else {
+        if pgp_mime::is_pgp_encrypted(&entity.0) {
+            write_result(
+                store,
+                account_id,
+                message_id,
+                ResultVerdict::openpgp("encrypted", "failed", SignatureState::Invalid, None, None),
+            );
+            return ReceiveOutcome::closed(ReceiveState::Failed, SignatureState::Invalid);
+        }
+        return ReceiveOutcome::closed(ReceiveState::NotEncrypted, SignatureState::NotSigned);
+    };
+
+    // 2. Resolve the signer candidates exactly as the key path: the account's
+    //    keystore certs plus the collected (staged) certs. A symmetric message
+    //    has no decryption cert, so embedded-signature verification is entirely
+    //    driven by this set.
+    let Ok(rows) = list_crypto_keys_for_account(store, account_id, "openpgp") else {
+        return ReceiveOutcome::closed(ReceiveState::Failed, SignatureState::Invalid);
+    };
+    let backend = OpenpgpBackend::new(
+        Arc::new(SqliteKeyStore::new(store.clone(), account_id)),
+        CryptoPolicy::default(),
+    );
+    let known_signers: Vec<KeyHandleRef> = rows.iter().map(handle_for_row).collect();
+    let extra_signer_blobs: Vec<Vec<u8>> =
+        list_collected_keys_for_account(store, account_id, "openpgp")
+            .unwrap_or_default()
+            .into_iter()
+            .map(|row| row.public_data)
+            .collect();
+    let envelope = EncryptedEnvelope {
+        standard: Standard::OpenPgp,
+        serialization: SerializationStrategy::SingleMimeBlob,
+        parts: vec![EncryptedPart {
+            id: PartId("body".into()),
+            kind: PartKind::Body,
+            ciphertext,
+            signature: None,
+        }],
+        recipients: Vec::new(),
+    };
+
+    // 3. Decrypt with the passphrase. The SecretBox moves into the backend (and
+    //    on into Sequoia's zeroizing Password); it is never logged or persisted.
+    let outcome = match backend
+        .decrypt_symmetric(&envelope, passphrase, &known_signers, &extra_signer_blobs)
+        .await
+    {
+        Ok(outcome) => outcome,
+        // A wrong passphrase is a re-prompt, never a structural failure and
+        // never a plaintext leak. Transient: no row is written.
+        Err(CryptoError::WrongPassphrase(_)) => {
+            return ReceiveOutcome::closed(ReceiveState::WrongPassword, SignatureState::NotSigned);
+        }
+        // A tampered ciphertext or a bad signature fails closed, as the key path.
+        Err(_) => {
+            write_result(
+                store,
+                account_id,
+                message_id,
+                ResultVerdict::openpgp("encrypted", "failed", SignatureState::Invalid, None, None),
+            );
+            return ReceiveOutcome::closed(ReceiveState::Failed, SignatureState::Invalid);
+        }
+    };
+
+    // 4. The shared success tail: the signature verdict, signer resolution,
+    //    restored subject, ok row, and silent Autocrypt consume.
+    decrypted_outcome(store, account_id, message_id, source, &outer, outcome)
 }
 
 /// Build the canonical keystore handle for a key row (software or token), the

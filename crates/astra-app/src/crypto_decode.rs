@@ -75,6 +75,13 @@ impl MessageDecoder for CryptoDecoder {
             ReceiveState::NoKey => Some(closed("Encrypted message; cannot decrypt (no key).")),
             ReceiveState::Failed => Some(closed("Encrypted message; cannot decrypt.")),
             ReceiveState::Decrypted => Some(decrypted(&outcome)),
+            // A passphrase-protected message stays fail closed: the banner
+            // alone, never the ciphertext. The password prompt and re-entry
+            // (SP4c-3c) replace this interim arm with the needs-password banner
+            // and the passphrase affordance.
+            ReceiveState::NeedsPassword | ReceiveState::WrongPassword => {
+                Some(closed("Encrypted message; a passphrase is required."))
+            }
         }
     }
 }

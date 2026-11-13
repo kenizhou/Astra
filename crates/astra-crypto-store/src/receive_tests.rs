@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use astra_crypto_core::{
     mime, pgp_mime, CryptoBackend, CryptoPolicy, EncryptOp, KeyGenParams, KeyHandleRef, Part,
-    PartId, PartKind, SerializationStrategy, SignatureState, Standard,
+    PartId, PartKind, SecretBox, SerializationStrategy, SignatureState, Standard,
 };
 use astra_crypto_openpgp::{engine, keymap, OpenpgpBackend};
 
@@ -533,4 +533,312 @@ async fn a_failed_decrypt_stages_nothing_and_stays_failed() {
             .is_empty(),
         "a failed receive stages nothing"
     );
+}
+
+// --- The W9 password flow (SP4c-3c D1): the needs-password verdict + the
+//     password orchestrator ---
+
+/// A passphrase as the in-memory secret the orchestrator consumes (never
+/// logged, never persisted).
+fn passphrase(s: &str) -> SecretBox<String> {
+    SecretBox::new(Box::new(s.to_string()))
+}
+
+/// The raw SKESK ciphertext for `inner_entity` under `passphrase`, optionally
+/// inline-signed by `signer`. The send-side primitive the live proof also uses
+/// (W9 send is itself unwired, so the fixture hand-builds the SKESK message).
+async fn symmetric_ciphertext(
+    store: &Arc<CryptoStore>,
+    sender: &str,
+    pass: &str,
+    signer: Option<&KeyHandleRef>,
+    inner_entity: &[u8],
+) -> Vec<u8> {
+    let backend = OpenpgpBackend::new(
+        Arc::new(SqliteKeyStore::new(store.clone(), sender)),
+        CryptoPolicy::default(),
+    );
+    let env = backend
+        .encrypt_symmetric(
+            &[Part {
+                id: PartId("body".into()),
+                kind: PartKind::Body,
+                data: inner_entity.to_vec(),
+            }],
+            SerializationStrategy::SingleMimeBlob,
+            passphrase(pass),
+            signer,
+        )
+        .await
+        .expect("symmetric encrypt the fixture");
+    env.parts[0].ciphertext.clone()
+}
+
+/// The full RFC5322 source for a SKESK (passphrase-protected) PGP/MIME message:
+/// outer headers plus the `multipart/encrypted` framing a symmetric envelope.
+async fn symmetric_source(
+    store: &Arc<CryptoStore>,
+    sender: &str,
+    pass: &str,
+    signer: Option<&KeyHandleRef>,
+    inner_entity: &[u8],
+    outer_subject: &str,
+) -> Vec<u8> {
+    let ciphertext = symmetric_ciphertext(store, sender, pass, signer, inner_entity).await;
+    let entity = pgp_mime::wrap_encrypted(&ciphertext);
+    let mut source =
+        format!("From: a1@x.com\r\nTo: a2@x.com\r\nSubject: {outer_subject}\r\n").into_bytes();
+    source.extend_from_slice(&entity);
+    source
+}
+
+/// A hybrid ciphertext carrying BOTH a PKESK slot (encrypted to `recipient_cert`)
+/// and a SKESK slot (the passphrase), wrapping ONE session key over ONE SEIPD
+/// packet. Sequoia's `for_recipients(...).add_passwords(...)` builds exactly this
+/// shape: either the recipient's key OR the passphrase opens the same ciphertext.
+fn hybrid_ciphertext(recipient_cert: &openpgp::Cert, pass: &str, inner_entity: &[u8]) -> Vec<u8> {
+    use openpgp::policy::StandardPolicy;
+    use openpgp::serialize::stream::{Encryptor, LiteralWriter, Message};
+    use std::io::Write;
+
+    let policy = StandardPolicy::new();
+    let recipients = recipient_cert
+        .keys()
+        .with_policy(&policy, None)
+        .supported()
+        .alive()
+        .revoked(false)
+        .for_transport_encryption();
+    let mut sink: Vec<u8> = Vec::new();
+    let encryptor = Encryptor::for_recipients(Message::new(&mut sink), recipients)
+        .add_passwords(Some(pass))
+        .build()
+        .expect("build the hybrid encryptor");
+    let mut literal = LiteralWriter::new(encryptor)
+        .build()
+        .expect("build the literal writer");
+    literal
+        .write_all(inner_entity)
+        .expect("write the inner entity");
+    literal.finalize().expect("finalize the hybrid ciphertext");
+    sink
+}
+
+/// A hybrid PGP/MIME source carrying BOTH a PKESK slot (encrypted to
+/// `recipient`) and a SKESK slot (the passphrase). The key path must win when a
+/// fitting key is present; otherwise the verdict is needs-password. The hybrid
+/// is unsigned: the test isolates the slot-selection behaviour.
+fn hybrid_source(
+    store: &Arc<CryptoStore>,
+    recipient: &KeyHandleRef,
+    pass: &str,
+    inner_entity: &[u8],
+    outer_subject: &str,
+) -> Vec<u8> {
+    let blob = public_blob(store, "a2", recipient.fingerprint.as_str());
+    let cert = keymap::parse_certs(&blob)
+        .expect("parse the recipient cert")
+        .remove(0);
+    let ciphertext = hybrid_ciphertext(&cert, pass, inner_entity);
+    let entity = pgp_mime::wrap_encrypted(&ciphertext);
+    let mut source =
+        format!("From: a1@x.com\r\nTo: a2@x.com\r\nSubject: {outer_subject}\r\n").into_bytes();
+    source.extend_from_slice(&entity);
+    source
+}
+
+#[tokio::test]
+async fn a_skesk_message_with_no_key_answers_needs_password_and_writes_no_row() {
+    let store = test_store();
+    let a1 = seed_own(&store, "a1", "a1@x.com").await;
+    // a2 holds no private key at all: a SKESK message must prompt, not no-key.
+    let source = symmetric_source(&store, "a1", "hunter2", Some(&a1), PLAIN_ENTITY, "...").await;
+
+    let out = receive_openpgp(&store, "a2", "pw1", &source).await;
+    assert_eq!(out.state, ReceiveState::NeedsPassword);
+    assert!(out.plain.is_none(), "needs-password never yields plaintext");
+    assert!(out.html.is_none());
+    assert!(out.subject.is_none());
+    assert!(
+        read_result(&store, "a2", "pw1").is_none(),
+        "needs-password is transient: no result row is persisted"
+    );
+}
+
+#[tokio::test]
+async fn a_skesk_message_with_an_unfitting_key_answers_needs_password() {
+    let (store, a1, _a2) = two_accounts(false).await;
+    // a2 holds a private key, but the message is SKESK-only: no PKESK fits, so
+    // the verdict is needs-password (not no-key, not failed).
+    let source = symmetric_source(&store, "a1", "hunter2", Some(&a1), PLAIN_ENTITY, "...").await;
+
+    let out = receive_openpgp(&store, "a2", "pw2", &source).await;
+    assert_eq!(out.state, ReceiveState::NeedsPassword);
+    assert!(out.plain.is_none());
+    assert!(
+        read_result(&store, "a2", "pw2").is_none(),
+        "needs-password writes no row even when a key was offered"
+    );
+}
+
+#[tokio::test]
+async fn the_correct_passphrase_decrypts_to_the_words_and_restores_the_subject() {
+    let (store, a1, _a2) = two_accounts(true).await;
+    let inner = mime::wrap_protected_headers(PLAIN_ENTITY, Some("Subject: the real subject"), true);
+    let source = symmetric_source(&store, "a1", "hunter2", Some(&a1), &inner, "...").await;
+
+    let out = receive_openpgp_password(&store, "a2", "pw3", &source, passphrase("hunter2")).await;
+    assert_eq!(out.state, ReceiveState::Decrypted);
+    assert_eq!(out.plain.as_deref(), Some("the secret words"));
+    assert_eq!(out.subject.as_deref(), Some("the real subject"));
+    assert_eq!(out.standard, Standard::OpenPgp);
+
+    let row = read_result(&store, "a2", "pw3").expect("success writes an ok row");
+    assert_eq!(row.decrypt, "ok");
+    assert_eq!(row.kind, "encrypted-signed");
+    assert_eq!(row.signature, "valid-verified");
+}
+
+#[tokio::test]
+async fn an_unsigned_skesk_message_decrypts_to_not_signed() {
+    let store = test_store();
+    seed_own(&store, "a1", "a1@x.com").await;
+    let source = symmetric_source(&store, "a1", "hunter2", None, PLAIN_ENTITY, "...").await;
+
+    let out = receive_openpgp_password(&store, "a2", "pw4", &source, passphrase("hunter2")).await;
+    assert_eq!(out.state, ReceiveState::Decrypted);
+    assert_eq!(out.signature_state, SignatureState::NotSigned);
+    assert_eq!(out.plain.as_deref(), Some("the secret words"));
+    let row = read_result(&store, "a2", "pw4").expect("an ok row lands");
+    assert_eq!(row.decrypt, "ok");
+    assert_eq!(row.kind, "encrypted");
+    assert_eq!(row.signature, "not-signed");
+}
+
+#[tokio::test]
+async fn a_wrong_passphrase_returns_the_re_prompt_signal_with_no_plaintext() {
+    let store = test_store();
+    let a1 = seed_own(&store, "a1", "a1@x.com").await;
+    let source = symmetric_source(&store, "a1", "hunter2", Some(&a1), PLAIN_ENTITY, "...").await;
+
+    let out = receive_openpgp_password(&store, "a2", "pw5", &source, passphrase("wrong")).await;
+    assert_eq!(out.state, ReceiveState::WrongPassword);
+    assert!(
+        out.plain.is_none(),
+        "a wrong passphrase never leaks plaintext"
+    );
+    assert!(out.html.is_none());
+    assert!(out.subject.is_none());
+    assert!(
+        read_result(&store, "a2", "pw5").is_none(),
+        "the re-prompt signal is transient: no result row is persisted"
+    );
+
+    // The same message still decrypts with the correct passphrase afterwards.
+    let ok = receive_openpgp_password(&store, "a2", "pw5", &source, passphrase("hunter2")).await;
+    assert_eq!(ok.state, ReceiveState::Decrypted);
+    assert_eq!(ok.plain.as_deref(), Some("the secret words"));
+    assert_eq!(
+        read_result(&store, "a2", "pw5")
+            .expect("the retry writes an ok row")
+            .decrypt,
+        "ok"
+    );
+}
+
+#[tokio::test]
+async fn a_password_message_with_a_known_signer_verifies_the_embedded_signature() {
+    let (store, a1, _a2) = two_accounts(true).await;
+    let source = symmetric_source(&store, "a1", "hunter2", Some(&a1), PLAIN_ENTITY, "...").await;
+
+    let out = receive_openpgp_password(&store, "a2", "pw6", &source, passphrase("hunter2")).await;
+    assert_eq!(out.state, ReceiveState::Decrypted);
+    assert_eq!(out.signature_state, SignatureState::ValidVerified);
+    assert_eq!(
+        out.signer_fingerprint.as_deref(),
+        Some(a1.fingerprint.as_str()),
+        "the embedded signature resolves to the sender's primary fingerprint"
+    );
+    assert_eq!(out.signer_email.as_deref(), Some("a1@x.com"));
+    assert_eq!(out.plain.as_deref(), Some("the secret words"));
+}
+
+#[tokio::test]
+async fn a_password_message_with_an_unknown_signer_degrades_but_still_decrypts() {
+    let (store, a1, _a2) = two_accounts(false).await;
+    let source = symmetric_source(&store, "a1", "hunter2", Some(&a1), PLAIN_ENTITY, "...").await;
+
+    let out = receive_openpgp_password(&store, "a2", "pw7", &source, passphrase("hunter2")).await;
+    assert_eq!(out.state, ReceiveState::Decrypted);
+    assert_eq!(out.signature_state, SignatureState::UnknownKey);
+    assert_eq!(
+        out.plain.as_deref(),
+        Some("the secret words"),
+        "an unknown signer is not a decrypt failure"
+    );
+    let row = read_result(&store, "a2", "pw7").expect("an ok row lands");
+    assert_eq!(row.decrypt, "ok");
+    assert_eq!(row.signature, "unknown-key");
+}
+
+#[tokio::test]
+async fn a_pkesk_plus_skesk_message_with_a_fitting_key_uses_the_key_path() {
+    let (store, _a1, a2) = two_accounts(true).await;
+    let source = hybrid_source(&store, &a2, "hunter2", PLAIN_ENTITY, "...");
+
+    // The key path wins: no passphrase is offered, yet the message decrypts.
+    let out = receive_openpgp(&store, "a2", "pw8", &source).await;
+    assert_eq!(out.state, ReceiveState::Decrypted);
+    assert_eq!(out.plain.as_deref(), Some("the secret words"));
+    let row = read_result(&store, "a2", "pw8").expect("the key path writes an ok row");
+    assert_eq!(row.decrypt, "ok");
+}
+
+#[tokio::test]
+async fn a_pkesk_plus_skesk_message_with_no_fitting_key_answers_needs_password() {
+    let store = test_store();
+    // a2 holds a PUBLIC cert only: the PKESK slot cannot be decrypted, so the
+    // SKESK slot drives the needs-password verdict.
+    let a2_cert = engine::generate("A Two <a2@x.com>").unwrap();
+    let a2_public = keymap::cert_to_public_blob(&a2_cert).unwrap();
+    import_contact(&store, "a2", "a2@x.com", &a2_public);
+    let a2_handle = keymap::cert_to_handle(&a2_cert);
+
+    let source = hybrid_source(&store, &a2_handle, "hunter2", PLAIN_ENTITY, "...");
+    let out = receive_openpgp(&store, "a2", "pw9", &source).await;
+    assert_eq!(out.state, ReceiveState::NeedsPassword);
+    assert!(out.plain.is_none());
+    assert!(
+        read_result(&store, "a2", "pw9").is_none(),
+        "needs-password writes no row"
+    );
+
+    // The passphrase still opens the SKESK slot.
+    let ok = receive_openpgp_password(&store, "a2", "pw9", &source, passphrase("hunter2")).await;
+    assert_eq!(ok.state, ReceiveState::Decrypted);
+    assert_eq!(ok.plain.as_deref(), Some("the secret words"));
+}
+
+#[tokio::test]
+async fn the_password_entry_leaves_a_non_encrypted_source_untouched() {
+    let store = test_store();
+    let source = b"From: a1@x.com\r\nTo: a2@x.com\r\nSubject: hi\r\nContent-Type: text/plain\r\n\r\na plain body";
+    let out = receive_openpgp_password(&store, "a2", "pw10", source, passphrase("hunter2")).await;
+    assert_eq!(out.state, ReceiveState::NotEncrypted);
+    assert!(out.plain.is_none());
+    assert!(
+        read_result(&store, "a2", "pw10").is_none(),
+        "a non-encrypted message writes no result row"
+    );
+}
+
+#[tokio::test]
+async fn the_password_entry_fails_closed_on_unextractable_framing() {
+    let store = test_store();
+    let source = b"From: a1@x.com\r\nTo: a2@x.com\r\nSubject: hi\r\nContent-Type: multipart/encrypted; protocol=\"application/pgp-encrypted\"; boundary=\"b\"\r\n\r\n--b\r\nContent-Type: application/pgp-encrypted\r\n\r\nVersion: 1\r\n--b--\r\n";
+    let out = receive_openpgp_password(&store, "a2", "pw11", source, passphrase("hunter2")).await;
+    assert_eq!(out.state, ReceiveState::Failed);
+    assert!(out.plain.is_none());
+    let row = read_result(&store, "a2", "pw11").expect("a recognised message writes a failed row");
+    assert_eq!(row.decrypt, "failed");
 }
