@@ -25,7 +25,6 @@ impl LoadedOp {
             None => PendingOutcome::Failed {
                 class: engine_core::error::FailureClass::Retryable,
                 retry_after: None,
-                detail: String::new(),
             },
         }
     }

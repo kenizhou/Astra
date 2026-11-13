@@ -75,11 +75,7 @@ pub fn record_outcome(
             detail: None,
             keeps_hand_over: false,
         },
-        PendingOutcome::Failed {
-            class,
-            retry_after,
-            detail,
-        } => {
+        PendingOutcome::Failed { class, retry_after } => {
             let parks =
                 class.is_retryable() && (!settles_on_attempts(kind) || attempts < MAX_ATTEMPTS);
             let next_attempt_at = if parks {
@@ -99,7 +95,7 @@ pub fn record_outcome(
                 attempts,
                 next_attempt_at,
                 failure_class: Some(*class),
-                detail: (!detail.is_empty()).then(|| detail.clone()),
+                detail: None,
                 keeps_hand_over: false,
             }
         }
@@ -138,7 +134,6 @@ pub fn interrupted_outcome(kind: PendingOpKind, handed_over: bool) -> PendingOut
         PendingOpKind::MailSubmit => PendingOutcome::Failed {
             class: FailureClass::Retryable,
             retry_after: Some(engine_core::time::Duration::ZERO),
-            detail: "the attempt ended before the server answered; the queue retries it".to_owned(),
         },
         PendingOpKind::MailEdit
         | PendingOpKind::MailReport
@@ -155,7 +150,6 @@ pub fn interrupted_outcome(kind: PendingOpKind, handed_over: bool) -> PendingOut
         | PendingOpKind::ContactDelete => PendingOutcome::Failed {
             class: FailureClass::Retryable,
             retry_after: None,
-            detail: "the attempt ended before the server answered; the queue retries it".to_owned(),
         },
     }
 }
