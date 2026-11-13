@@ -89,6 +89,13 @@ pub(crate) struct FakeApp {
     pub(crate) mailbox_list: MailboxListSnapshot,
     pub(crate) sync_progress: SyncProgressSnapshot,
     pub(crate) reading: Mutex<Option<ReadingSnapshot>>,
+    /// The password re-entry's answer: the prompt affordance the snapshot
+    /// carries after the submission (`None` once it decrypts).
+    pub(crate) password_prompt: Mutex<Option<astra_viewmodel::PasswordPromptState>>,
+    /// The (account, key) pairs the password re-entry was asked for, so a test
+    /// can assert the command hands the webview's ids through to the core. The
+    /// passphrase itself is never recorded: it stays in-process.
+    pub(crate) password_into: Mutex<Vec<(String, String)>>,
     /// The attachment read's answer; `Err` stands in for the typed refusal.
     pub(crate) attachment: Mutex<Result<Option<AttachmentContent>, AttachmentReadError>>,
     /// The (account, key, id) triples the attachment read was asked for, so
@@ -214,6 +221,8 @@ impl FakeApp {
             mailbox_list,
             sync_progress,
             reading: Mutex::new(None),
+            password_prompt: Mutex::new(None),
+            password_into: Mutex::new(Vec::new()),
             attachment: Mutex::new(Ok(None)),
             attachment_into: Mutex::new(Vec::new()),
             eml: Mutex::new(Err(EmlReadError::Unresolved)),

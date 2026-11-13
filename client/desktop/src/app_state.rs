@@ -69,6 +69,19 @@ pub(crate) trait AppPort: Send + Sync {
     /// message's body, or `None` when nothing is open.
     fn reading(&self) -> Option<ReadingSnapshot>;
 
+    /// Re-opens the passphrase-protected message with the reader's passphrase:
+    /// the password re-entry over a fresh source, republishing the reading
+    /// snapshot. Answers the prompt affordance the snapshot now carries:
+    /// `None` once the passphrase decrypts (or on a structural failure),
+    /// `Some(WrongPassword)` when it fit no slot and the dialog re-prompts.
+    /// The passphrase stays in-process: it moves into the core as a secret and
+    /// is never logged or persisted.
+    async fn submit_reading_password(
+        &self,
+        message: &astra_app::MessageRef,
+        passphrase: astra_crypto_core::SecretBox<String>,
+    ) -> Option<astra_viewmodel::PasswordPromptState>;
+
     /// Reads one attachment's decoded bytes for the host's Save As: the
     /// row's suggested file name beside the bytes. `Ok(None)` when the
     /// message's source reads but no downloadable part matches the id.

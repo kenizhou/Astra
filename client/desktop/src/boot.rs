@@ -191,6 +191,10 @@ pub(crate) fn assemble_state(
         Arc::clone(&refusals),
         Arc::clone(&crypto_store),
     )));
+    // The password re-entry decrypts through the same crypto store the
+    // built-in decoder reads its keys from, installed beside the account
+    // store so the first passphrase submission finds it standing.
+    core.install_crypto_store(Arc::clone(&crypto_store));
     // The analytics ledger beside the account store: the consented
     // product events append to the same sqlite the AI ledgers live
     // in, installed before the state hands anything to a command so

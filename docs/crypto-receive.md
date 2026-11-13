@@ -44,6 +44,10 @@ ciphertext or the outer framing:
 - **Failed** (a tampered ciphertext, a bad signature, a wrong key, or
   recognised framing whose ciphertext will not extract): a "cannot decrypt"
   banner, no plaintext, a `failed` result row.
+- **Needs password** (a SKESK slot and no PKESK key fits): a "passphrase
+  required" banner beside the password prompt affordance, no plaintext, no
+  result row (a transient interaction, not a persisted state). The W9 password
+  flow below decrypts it with a user-supplied passphrase.
 - **Decrypted**: the legs and the signature verdict (verified, or
   unverified for an unknown signer), the restored subject, an `ok` row.
 
@@ -157,6 +161,42 @@ malicious distribution point can still aim the bounded GET at an internal
 host; address-range filtering is a hardening follow-up. The fetch stays bounded
 and inline; a background prefetch is a follow-up.
 
+## The W9 password flow (SP4c-3c)
+
+A passphrase-protected OpenPGP message carries a SKESK slot (symmetric
+encryption) rather than, or beside, a PKESK key-wrap. After unwrap,
+`has_skesk` detects it. When no PKESK key fits, `receive_openpgp` answers the
+transient `NeedsPassword` verdict instead of no-key/failed: a message may carry
+BOTH slots, and the key path still wins when a key fits, so the SKESK flag only
+redirects the no-fitting-key arms. A hard error (tamper, bad signature) fails
+closed even when a SKESK slot is present, never downgraded to a prompt.
+
+The decoder maps `NeedsPassword` to a fail-closed "passphrase required" banner
+beside the password prompt affordance (`ReadingSnapshot.password_prompt`): no
+legs, no ciphertext, no result row. The reading pane mounts its password dialog
+on the affordance. The dialog collects the passphrase and submits it through a
+desktop command that carries it in-process (the `crypto_wrapper` precedent:
+secrets stay in host memory, never logged or persisted). The command re-runs
+`receive_openpgp_password` over a fresh `engine.message_source` and refreshes
+the reading snapshot through the identical render seam (the reading re-entry
+module, split from `reading.rs` near the cap).
+
+`receive_openpgp_password` decrypts through `decrypt_symmetric` with the SAME
+`known_signers` / `extra_signer_blobs` resolution as the key path, so an
+embedded signature still verifies against known peers and an unknown signer
+degrades, never aborts. On success it lands the identical verdict, restored
+subject, and `ok` row as the key path, and the affordance drops (the dialog
+closes over the words). A wrong passphrase answers the transient `WrongPassword`
+re-prompt signal: the dialog re-prompts, naming the refusal, no plaintext, no
+row. A structural failure fails closed exactly as the key path. A cancel never
+reaches the orchestrator: the verdict stays needs-password (fail closed).
+
+The passphrase is held only in memory: it moves into the backend as a
+`SecretBox` (zeroized on drop) and is never logged or persisted. The
+needs-password and wrong-password states are transient interactions, not
+persisted rows (the `decrypt_state` CHECK stays ok/no-key/failed/n/a); success
+writes ok. A re-open re-prompts (no cached passphrase).
+
 ## Known gaps, recorded rather than left silent
 
 - Encrypted receive only, per standard: OpenPGP PGP/MIME (SP4c-1) and S/MIME
@@ -164,7 +204,14 @@ and inline; a background prefetch is a follow-up.
   (PGP multipart/signed, S/MIME multipart/signed and opaque signed-data) are
   follow-ups; Autocrypt consume landed in SP4c-3a (the receive half above);
   CRL fetching landed in SP4c-3b (the fetching path above); the W9 password
-  flow (SP4c-3c) remains; encrypted drafts at rest are SP4c-4.
+  flow landed in SP4c-3c (the password flow above); encrypted drafts at rest
+  are SP4c-4.
+- The W9 SEND side is itself unwired (`apply_password_crypto` has no callers,
+  `SendDraft` has no `password_protected` field): the live proof hand-builds a
+  SKESK message via `encrypt_symmetric`. Wiring W9 send is a coordination
+  follow-up. The passphrase is never persisted, so a re-open re-prompts; a
+  session passphrase cache is a follow-up. The password dialog is shell-only
+  (the reading pane), like the other receive surfaces.
 - Autocrypt staging is silent: the review/promote UI for collected keys is
   SP4d. The send gate emits `Autocrypt-Gossip` inside the ciphertext but no
   cleartext own `Autocrypt` header yet; the consume reads a cleartext header
@@ -207,6 +254,7 @@ and inline; a background prefetch is a follow-up.
 | Fail closed: no key / failure / tamper never renders ciphertext | ✅ | the closed arms + the structural seam clear |
 | Autocrypt consume: inbound parse, addr binding, silent staging | ✅ | `astra-crypto-store/src/autocrypt.rs`, `receive.rs` |
 | CRL fetching: DP extraction, the fail-soft fetcher port, the receive hook | ✅ | `astra-crypto-smime/src/cert.rs`, `astra-crypto-store/src/crl.rs`, `receive_smime.rs`, `client/desktop/src/crl_fetch.rs` |
-| The live proofs (send encrypted, open, decrypt, the negative arms) | ✅ | `tests_live_harness/crypto_receive.rs`, `crypto_receive_smime.rs`, `crypto_receive_autocrypt.rs`, `crypto_receive_crl.rs` |
+| The W9 password flow: SKESK detection, needs-password verdict, in-memory passphrase, re-prompt | ✅ | `astra-crypto-store/src/receive.rs`, `astra-app/src/reading_password.rs`, `crypto_decode.rs`, `client/desktop/src/commands/crypto.rs`, `client/web/src/components/reading-pane/PasswordDialog.tsx` |
+| The live proofs (send encrypted, open, decrypt, the negative arms) | ✅ | `tests_live_harness/crypto_receive.rs`, `crypto_receive_smime.rs`, `crypto_receive_autocrypt.rs`, `crypto_receive_crl.rs`, `crypto_receive_password.rs` |
 | Inline armor, detached signatures, drafts at rest | N/A | SP4c-3/4, the gaps above |
 | Key management, the token registry, the native security UI | N/A | SP4d |

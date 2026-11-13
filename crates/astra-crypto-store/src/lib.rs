@@ -73,7 +73,10 @@ pub use keystore::SqliteKeyStore;
 pub use password::apply_password_crypto;
 pub use pinned::{list_pinned_keys, remove_pinned_key, set_pinned_key, PinnedKey};
 pub use policy::StoreCryptoPolicy;
-pub use receive::{receive, receive_openpgp, receive_with_fetcher, ReceiveOutcome, ReceiveState};
+pub use receive::{
+    receive, receive_openpgp, receive_openpgp_password, receive_with_fetcher, ReceiveOutcome,
+    ReceiveState,
+};
 pub use receive_smime::{receive_smime, receive_smime_with_fetcher};
 pub use resolve::{
     key_material_expired, pin_preferred_handle, recipient_trust_failures, resolve_recipient_status,

@@ -34,8 +34,8 @@ pub use people::{
     PersonDetail, PersonRow, PersonSourceRow, PersonValueKind, PersonValueRow,
 };
 pub use reading::{
-    AttachmentRow, InvitationBlock, InvitationKind, MessageKey, NotAMessageRow, ReadingSnapshot,
-    SecurityBannerView, SecurityLevelView,
+    AttachmentRow, InvitationBlock, InvitationKind, MessageKey, NotAMessageRow,
+    PasswordPromptState, ReadingSnapshot, SecurityBannerView, SecurityLevelView,
 };
 pub use rows::{MessageRowView, RowKey, ViewMode};
 pub use search::{SearchScope, SearchState};

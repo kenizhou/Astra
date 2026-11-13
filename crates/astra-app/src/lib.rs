@@ -42,6 +42,7 @@ mod preferences;
 mod protocol;
 mod query;
 mod reading;
+mod reading_password;
 mod reference;
 mod report_writes;
 mod row_cache;
@@ -254,35 +255,30 @@ pub struct App<P> {
     autosave_idle: Duration,
     /// The message the reading pane is showing, so a refresh knows what to
     /// re-render (or to close, when the message is gone). Held beside the
-    /// snapshot rather than read back out of it: what is open and what was last
-    /// published are two facts, and only this one drives the republish.
+    /// snapshot: what is open and what was last published are two facts.
     open_reading: Mutex<Option<crate::reference::MessageRef>>,
     /// The calendar snapshot and its signal: the calendar manager set, the
     /// visible window's occurrences, the write states, and the now line, as
     /// one thing. See `calendar`.
     calendar: Surfaced<astra_viewmodel::CalendarSnapshot>,
     /// The calendar view state a rebuild projects and the intents move: the
-    /// view kind, the window, the visible set, the anchor, the horizon
-    /// watermark, the write states, and the reply prompts. See `calendar`.
+    /// view kind, window, visible set, anchor, horizon watermark, write
+    /// states, and reply prompts. See `calendar`.
     calendar_state: Mutex<calendar::CalendarState>,
     /// The people snapshot and its signal: the unified rows, the open
-    /// person's detail, the write states, and the create targets, as one
-    /// thing. See `people`.
+    /// person's detail, the write states, and the create targets. See `people`.
     people: Surfaced<astra_viewmodel::PeopleSnapshot>,
     /// The people view state a rebuild projects and the intents move: the
-    /// contacts legs the host installed, the current query, the open person,
-    /// and the write states. See `people`.
+    /// contacts legs, current query, open person, and write states. See `people`.
     people_state: Mutex<people::PeopleState>,
     /// The settings snapshot and its signal: the persisted settings block,
     /// the account rows, and the about block, as one thing. See `settings`.
     settings: Surfaced<astra_viewmodel::SettingsSnapshot>,
     /// The settings view state a rebuild projects and the intents move: the
-    /// per-account dav failures and the newest write's refusal. See
-    /// `settings`.
+    /// per-account dav failures and the newest write's refusal. See `settings`.
     settings_state: Mutex<settings::SettingsState>,
     /// The host-installed account store: the seam the settings surface reads
-    /// the account configs through and writes them back over. `None` (the
-    /// default) until the host installs one; see `settings`.
+    /// the account configs through and writes back over. `None` until installed.
     account_ops: Mutex<Option<Arc<dyn settings::HostAccountOps<P>>>>,
     /// The sync-progress snapshot and its signal: what every mail pass reports its
     /// per-account position through, published on change by the
@@ -356,6 +352,9 @@ pub struct App<P> {
     /// The plugin message decoder: every reading open's raw source passes it
     /// before the render. `None` (the default) renders the store's own read.
     pub(crate) decoder: Option<Arc<dyn crate::decode::MessageDecoder>>,
+    /// The shared crypto store the password re-entry decrypts through (the
+    /// decoder's own instance); `None` and a submission stays needs-password.
+    crypto_store: Mutex<Option<Arc<astra_crypto_store::CryptoStore>>>,
     /// The ledger the consented analytics events append to, installed by
     /// the host beside the account store. `None` (the default) and the
     /// recorder records nothing. See `analytics`.
@@ -435,6 +434,7 @@ impl<P: Provider> App<P> {
             send_gate: None,
             compose_transform: None,
             decoder: None,
+            crypto_store: Mutex::new(None),
             analytics: Mutex::new(None),
         }
     }

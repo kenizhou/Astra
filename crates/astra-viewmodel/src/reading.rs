@@ -146,6 +146,26 @@ pub struct ReadingSnapshot {
     /// the body. Absent when no plugin answered or it answered no banner.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub security_banner: Option<SecurityBannerView>,
+    /// The password prompt affordance, when the open message is
+    /// passphrase-protected (a SKESK slot) and no key fits: the signal a
+    /// surface mounts its password dialog on. Absent once the passphrase
+    /// decrypts (or on any verdict that is not a passphrase prompt), so the
+    /// dialog never stands over a decrypted or non-crypto body.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password_prompt: Option<PasswordPromptState>,
+}
+
+/// Where the passphrase prompt stands for a passphrase-protected message:
+/// the affordance the reading pane's password dialog reads. Crosses as a
+/// snake_case word. A transient interaction, never a persisted state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PasswordPromptState {
+    /// The message needs a passphrase to open: the dialog collects one.
+    NeedsPassword,
+    /// The supplied passphrase fit no slot: the dialog re-prompts, naming
+    /// the refusal. Never a plaintext leak; the body stays closed.
+    WrongPassword,
 }
 
 /// How much the reader should trust what a security banner says, crossing as a

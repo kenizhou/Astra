@@ -149,7 +149,7 @@
 | 桌面注册表：发现、启停、授权审批 | 🚧 | 受管理的插件目录加 ASTRA_PLUGIN_DEV 路径、生命周期机、四条精简命令；授权在分发切片的同意对话框落地前为会话状态；plugins.md |
 | echo 符合性插件 | 🚧 | 桩 worker 在进程内与真实 spawn 进程两种形态下完成 envelope 往返；随仓库提供，绝不进入构建 |
 | S/MIME 签名与加密 | 🚧 | 内置（2026-10-20 决定）：astra-crypto-smime 已迁入且全量电池绿（链验证、CMS 构建/解析、pkcs12 导入、令牌路由、openssl 互操作）；SP4b+ECS 落地了存储、发送闸门与引擎 MIME-wrap 接缝（加密发送骑乘引擎发件箱、受保护主题、信任门控收件人落失败 op 并以 Send Now 重试、按账户的方法开关写入即重拨），已经过 harness 实证；S/MIME 接收半在 SP4c-2 落地（enveloped-data 经阅读管线解密、链验证状态阶梯、失败即关闭 banner、链字段结果行，已经过 harness 实证）；SP4c-3b 落地了接收吊销检查的 CRL 抓取（分发点提取、失败即软抓取器端口、revoked 与 unchecked 状态，已经过 harness 实证）；分离签名形态、安全 UI 与密钥管理仍在（SP4c-3/SP4d）；crypto-receive.md |
-| OpenPGP 签名与加密 | 🚧 | 同上：astra-crypto-openpgp 已迁入全绿（引擎往返、卡片路由、gpg/sq 互操作）；SP4b+ECS 落地了发送半（含 Autocrypt-Gossip 与 W9 密码臂），已经过 harness 实证（经引擎队列密封送达、收件人解密回读）；OpenPGP 接收半在 SP4c-1 落地（经阅读管线解密、失败即关闭的安全 banner、结果行、恢复的受保护主题，已经过 harness 实证）；Autocrypt 消费半在 SP4c-3a 落地（传入解析、addr 到 From 的绑定、静默暂存进已收集区并带来即时的下一封邮件验证收益，已经过 harness 实证）；CRL 抓取、安全 UI 与密钥管理仍在（SP4c-3/SP4d）；crypto-receive.md |
+| OpenPGP 签名与加密 | 🚧 | 同上：astra-crypto-openpgp 已迁入全绿（引擎往返、卡片路由、gpg/sq 互操作）；SP4b+ECS 落地了发送半（含 Autocrypt-Gossip 与 W9 密码臂），已经过 harness 实证（经引擎队列密封送达、收件人解密回读）；OpenPGP 接收半在 SP4c-1 落地（经阅读管线解密、失败即关闭的安全 banner、结果行、恢复的受保护主题，已经过 harness 实证）；Autocrypt 消费半在 SP4c-3a 落地（传入解析、addr 到 From 的绑定、静默暂存进已收集区并带来即时的下一封邮件验证收益，已经过 harness 实证）；W9 密码接收在 SP4c-3c 落地（SKESK 检测、needs-password 裁决与提示、内存口令重入及错误口令重提示，已经过 harness 实证）；CRL 抓取在 SP4c-3b 落地；安全 UI 与密钥管理仍在（SP4d）；crypto-receive.md |
 
 ## Astra：CLI
 

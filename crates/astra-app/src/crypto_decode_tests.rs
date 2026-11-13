@@ -16,11 +16,13 @@ use std::sync::{Arc, Mutex};
 
 use astra_crypto_core::{
     mime, pgp_mime, CryptoBackend, CryptoPolicy, EncryptOp, KeyGenParams, KeyHandleRef, Part,
-    PartId, PartKind, SerializationStrategy, Standard,
+    PartId, PartKind, SecretBox, SerializationStrategy, Standard,
 };
 use astra_crypto_openpgp::{engine, keymap, OpenpgpBackend};
 use astra_crypto_store::{CryptoKeyRecord, CryptoKeyRow, CryptoStore, SqliteKeyStore};
-use astra_viewmodel::{ReadingSnapshot, SecurityBannerView, SecurityLevelView};
+use astra_viewmodel::{
+    PasswordPromptState, ReadingSnapshot, SecurityBannerView, SecurityLevelView,
+};
 
 use crate::{
     crypto_decode::CryptoDecoder, dispatch_fakes as fakes, App, DecodeOutcome, Intent,
@@ -471,3 +473,8 @@ async fn a_crypto_verdict_clears_the_store_own_legs() {
         "the envelope subject stands"
     );
 }
+
+// The W9 password prompt's decoder proof, split into its own child so this
+// file stays under the line cap; it reuses this module's fixtures.
+#[path = "crypto_decode_password_tests.rs"]
+mod password_tests;

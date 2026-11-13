@@ -122,6 +122,7 @@ pub fn run() {
             commands::mailbox_list,
             commands::sync_progress,
             commands::reading,
+            commands::crypto::submit_reading_password,
             commands::attachments::save_attachment,
             commands::eml::eml_save,
             commands::drafts::draft_status,

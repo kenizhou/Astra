@@ -130,7 +130,7 @@ impl<P: Provider> App<P> {
     /// a slower render of a superseded open (or of an already-closed pane) from
     /// publishing over a newer state. The reading sibling of the list's
     /// generation counter, an identity check because one pane holds one message.
-    fn still_open(&self, message: &MessageRef) -> bool {
+    pub(crate) fn still_open(&self, message: &MessageRef) -> bool {
         self.open_reading
             .lock()
             .expect("open-reading mutex poisoned")
@@ -295,6 +295,7 @@ pub(crate) async fn render_reading<P: Provider>(
     let mut security_banner = None;
     let mut restored_subject = None;
     let mut crypto_verdict = false;
+    let mut password_prompt = None;
     if let Some(decoder) = decoder {
         if let Ok(source) = engine
             .message_source(provider, &message.account, &original)
@@ -310,6 +311,10 @@ pub(crate) async fn render_reading<P: Provider>(
                     remote_image_count = 0;
                     crypto_verdict = true;
                 }
+                // The passphrase prompt affordance rides the snapshot on a
+                // password verdict, so the pane mounts its dialog; absent on
+                // every other answer.
+                password_prompt = outcome.password_prompt;
                 if outcome.html.is_some()
                     || outcome.plain.is_some()
                     || outcome.banner.is_some()
@@ -375,6 +380,7 @@ pub(crate) async fn render_reading<P: Provider>(
         remote_image_count,
         invitation: None,
         security_banner,
+        password_prompt,
     })
     .map(|snapshot| (snapshot, original))
 }
