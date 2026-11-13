@@ -119,14 +119,52 @@ to `decrypt_with_signers` and `resolve_signer`, so a staged key improves the
 next message's embedded-signature verification. The review/promote surface
 for collected keys is SP4d; staging here is silent.
 
+## The CRL fetching path (SP4c-3b)
+
+The S/MIME chain check consumes the CRL cache; SP4c-3b populates it. Before
+`verify_with_context`, the receive hook extracts the CRL distribution-point
+URLs from the signer leaf and every intermediate (`crl_distribution_point_urls`
+in the smime crate, the SP4c-2 parsing rule), deduplicates them, and
+fetches-or-caches each through the `CrlFetcher` port. Only `http` and `https`
+URLs are admissible: a distribution-point URL is attacker-influenced (it comes
+from the cert), so any other scheme is dropped.
+
+The port follows the `SendCryptoPolicy` precedent: the store defines
+`CrlFetcher`, the host implements it, so the store never depends on astra-app.
+The desktop implementation (`HttpCrlFetcher`) does a bounded HTTP GET: a short
+timeout, a response-size cap, http(s) only, and no redirects. A fresh cached
+CRL stands without a fetch; a stale or missing one triggers a fetch and an
+upsert. The fetch is fail-soft: any transport, scheme, size, or parse failure
+degrades the cert to unchecked revocation and NEVER blocks the message open
+(the chain already soft-fails). The chain validates as-of signing time, so a
+freshly fetched CRL is still checked against the signing instant. A forged CRL
+from a malicious URL fails the chain's CRL-signature check (the checker
+verifies against the issuing CA).
+
+The revocation states are now reachable in practice. A CRL that revokes the
+signer's serial hard-fails the chain: `chain_valid=false`,
+`revocation_state=revoked`, the Invalid signature state, and the distinguished
+revoked banner. With no usable CRL (an empty cache, a failed fetch, or a stale
+CRL the chain reads as unchecked) the open proceeds with
+`revocation_state=unchecked`. The offline no-op fetcher keeps the reading path
+cache-only when no host fetcher is attached.
+
+Two considerations are recorded rather than hidden. Privacy: fetching a CRL
+reveals to the CA which certs are being validated (a tracking vector); an
+OCSP/stapling alternative is a follow-up. Residual blind SSRF: the scheme
+filter admits http(s) but does not block private or loopback addresses, so a
+malicious distribution point can still aim the bounded GET at an internal
+host; address-range filtering is a hardening follow-up. The fetch stays bounded
+and inline; a background prefetch is a follow-up.
+
 ## Known gaps, recorded rather than left silent
 
 - Encrypted receive only, per standard: OpenPGP PGP/MIME (SP4c-1) and S/MIME
   enveloped-data (SP4c-2). Inline PGP armor and the detached-signature shapes
   (PGP multipart/signed, S/MIME multipart/signed and opaque signed-data) are
   follow-ups; Autocrypt consume landed in SP4c-3a (the receive half above);
-  CRL fetching (SP4c-3b) and the W9 password flow (SP4c-3c) remain; encrypted
-  drafts at rest are SP4c-4.
+  CRL fetching landed in SP4c-3b (the fetching path above); the W9 password
+  flow (SP4c-3c) remains; encrypted drafts at rest are SP4c-4.
 - Autocrypt staging is silent: the review/promote UI for collected keys is
   SP4d. The send gate emits `Autocrypt-Gossip` inside the ciphertext but no
   cleartext own `Autocrypt` header yet; the consume reads a cleartext header
@@ -134,10 +172,14 @@ for collected keys is SP4d; staging here is silent.
   emission is a follow-up. Gossip consume reads the protected-headers wrapper
   the send gate emits; third-party gossip placements beyond that wrapper are
   a follow-up.
-- S/MIME revocation is cache-only: the CRL cache is empty until the SP4c-3
-  fetcher lands, so revocation reads unchecked in practice (a revoked cert
-  still hard-fails the chain when a CRL is present). The chain's Stale
-  revocation state persists as unchecked until the fetcher lands.
+- S/MIME revocation fetching landed in SP4c-3b (the CRL fetching path above):
+  the receive hook fetches-or-caches the signer chain's distribution-point CRLs
+  through the fail-soft `CrlFetcher` port, so a revoked signer hard-fails the
+  chain in practice. A fetch failure or an empty cache still reads unchecked
+  (fail-soft, never blocks the open). The chain's Stale revocation state
+  persists as unchecked (the Good/Stale granularity is a follow-up). The
+  residual blind-SSRF hardening (private/loopback address filtering) and the
+  privacy-preserving OCSP/stapling alternative remain follow-ups.
 - No key-management surface yet (SP4d): the live proof seeds the recipient
   key programmatically. A minimal import path is the load-bearing follow-up
   that makes receive usable beyond tests.
@@ -164,6 +206,7 @@ for collected keys is SP4d; staging here is silent.
 | The composite decoder (crypto verdict precedence, plugin fall-through) | ✅ | `client/desktop/src/decode.rs` |
 | Fail closed: no key / failure / tamper never renders ciphertext | ✅ | the closed arms + the structural seam clear |
 | Autocrypt consume: inbound parse, addr binding, silent staging | ✅ | `astra-crypto-store/src/autocrypt.rs`, `receive.rs` |
-| The live proofs (send encrypted, open, decrypt, the negative arms) | ✅ | `tests_live_harness/crypto_receive.rs`, `crypto_receive_smime.rs`, `crypto_receive_autocrypt.rs` |
-| Inline armor, detached signatures, CRL fetch, drafts at rest | N/A | SP4c-3/4, the gaps above |
+| CRL fetching: DP extraction, the fail-soft fetcher port, the receive hook | ✅ | `astra-crypto-smime/src/cert.rs`, `astra-crypto-store/src/crl.rs`, `receive_smime.rs`, `client/desktop/src/crl_fetch.rs` |
+| The live proofs (send encrypted, open, decrypt, the negative arms) | ✅ | `tests_live_harness/crypto_receive.rs`, `crypto_receive_smime.rs`, `crypto_receive_autocrypt.rs`, `crypto_receive_crl.rs` |
+| Inline armor, detached signatures, drafts at rest | N/A | SP4c-3/4, the gaps above |
 | Key management, the token registry, the native security UI | N/A | SP4d |

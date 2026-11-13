@@ -39,7 +39,7 @@ fetched CRL is still checked against the signing instant.
 Security: the DP URL is untrusted input (http(s) only, timeout, size cap);
 a forged CRL from a malicious URL fails the chain's CRL-signature check
 (AstraCrlChecker verifies against the issuing CA). Privacy: fetching a CRL
-reveals to the CA which certs are being validated (a tracking vector) —
+reveals to the CA which certs are being validated (a tracking vector),
 recorded as a known consideration.
 
 ## D3: the contract
