@@ -22,6 +22,9 @@ use engine_api::{AccountId, CalendarDate, ProviderKey, RecipientSuggestion};
 
 use super::{AppPort, HostAccount, HostProvider};
 
+// The category leg's CategoriesPort impl, its own child (a distinct trait).
+mod categories;
+
 #[async_trait]
 impl AppPort for App<HostProvider> {
     async fn dispatch(&self, intent: Intent) -> Result<(), astra_app::AppError> {

@@ -33,6 +33,9 @@ use crate::app_state::{AppPort, HostAccount};
 
 use super::Screen;
 
+// The category leg's CategoriesPort impl, its own child (a distinct trait).
+mod categories;
+
 // The recorded answers, embedded from the fixture harness's directory at
 // compile time: the same JSON the browser harness serves, parsed here
 // into the snapshots the command layer hands the webview.

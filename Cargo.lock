@@ -511,6 +511,7 @@ dependencies = [
  "astra-ai",
  "astra-app",
  "astra-autodetect",
+ "astra-categories",
  "astra-composer",
  "astra-crypto-core",
  "astra-crypto-store",

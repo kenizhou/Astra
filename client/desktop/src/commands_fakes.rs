@@ -6,9 +6,7 @@
 //! and ai tests) includes the same module rather than its own.
 
 // The fake's preset snapshots, AppPort impl, assist seeds, browser pull, and
-// MCP host fixture: each its own child for the 500-line cap (one trait impl
-// for the one fake cannot split); the re-exports keep the `commands_fakes::…`
-// paths every test module already uses.
+// MCP host fixture: each its own child for the cap; the re-exports keep the paths.
 mod browser;
 mod mcp_host;
 mod port;
@@ -194,6 +192,7 @@ pub(crate) struct FakeApp {
     pub(crate) snoozed: Mutex<Vec<(astra_app::RowRef, i64)>>,
     pub(crate) woken: Mutex<Vec<i64>>,
     pub(crate) reminded: Mutex<Vec<(astra_app::RowRef, i64)>>,
+    pub(crate) categories: Mutex<port::CategoriesFake>,
 }
 
 impl FakeApp {
@@ -262,6 +261,7 @@ impl FakeApp {
             snoozed: Mutex::new(Vec::new()),
             woken: Mutex::new(Vec::new()),
             reminded: Mutex::new(Vec::new()),
+            categories: Mutex::new(port::CategoriesFake::default()),
         })
     }
 

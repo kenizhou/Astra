@@ -55,10 +55,10 @@ pub(crate) mod platform;
 // The mcp and plugin surfaces (the advanced panel's seam, the registry's verbs).
 pub(crate) mod mcp;
 pub(crate) mod plugin;
-
-// The jmap add, attachments Save As, attachment browser, eml save, crypto receive, snooze, and reminder surfaces.
+// The jmap add, attachments Save As, attachment browser, eml save, crypto receive, category, snooze, and reminder surfaces.
 pub(crate) mod attachment_browser;
 pub(crate) mod attachments;
+pub(crate) mod categories;
 pub(crate) mod crypto;
 pub(crate) mod eml;
 pub(crate) mod jmap;

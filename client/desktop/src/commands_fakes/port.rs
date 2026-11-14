@@ -25,6 +25,8 @@ use super::{compose_prefill, open_snapshot, FakeApp};
 // The key fake's state, its own child for the cap; the re-export keeps the path.
 mod keys_fake;
 pub(crate) use keys_fake::KeysFake;
+mod categories_fake;
+pub(crate) use categories_fake::CategoriesFake;
 
 #[async_trait::async_trait]
 impl AppPort for FakeApp {

@@ -229,6 +229,13 @@ pub(crate) fn assemble_state(
         notify,
         &runtime,
     );
+    // The device-local category store beside the reminder store: a local
+    // overlay the core defines and assigns over. No timer and no AppState
+    // field (nothing wakes), so the drop order stays as it stands.
+    let categories_store = Arc::new(astra_categories::CategoryStore::open(
+        &data_dir.join(CATEGORIES_STORE_FILE),
+    )?);
+    core.install_categories_store(categories_store);
     // The crypto store opened before the dial (above) rides the state: the
     // account-add flow and the headless dial build wrappers from it too.
     // Prime the settings snapshot: nothing republishes it until a settings
@@ -311,6 +318,10 @@ const SNOOZE_STORE_FILE: &str = "snooze.sqlite";
 /// The reminder store's file name, under the data directory: device-local,
 /// the host wake timer's alone (the CLI does not share it).
 const REMINDER_STORE_FILE: &str = "reminders.sqlite";
+
+/// The category store's file name, under the data directory: device-local, a
+/// local overlay the CLI does not share (the snooze/reminders precedent).
+const CATEGORIES_STORE_FILE: &str = "categories.sqlite";
 
 /// The crypto store's file name, under the data directory: key material and
 /// trust decisions. Opened before the account dial so every IMAP dial can
