@@ -227,6 +227,7 @@ impl PreferencesState {
             view_mode: prefs.view_mode,
             plugins_enabled: prefs.plugins_enabled,
             notifications_enabled: prefs.notifications_enabled,
+            watch_replies_enabled: prefs.watch_replies_enabled,
             debug_enabled: prefs.debug_enabled,
             analytics_consented: prefs.analytics_consented,
             language: prefs.language.clone(),
@@ -301,6 +302,7 @@ impl PreferencesState {
             .clone_from(&self.prefs.default_send_account);
         on_disk.plugins_enabled = self.prefs.plugins_enabled;
         on_disk.notifications_enabled = self.prefs.notifications_enabled;
+        on_disk.watch_replies_enabled = self.prefs.watch_replies_enabled;
         on_disk.debug_enabled = self.prefs.debug_enabled;
         on_disk.analytics_consented = self.prefs.analytics_consented;
         on_disk.language.clone_from(&self.prefs.language);

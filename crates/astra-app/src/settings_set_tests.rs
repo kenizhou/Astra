@@ -125,6 +125,28 @@ async fn every_total_set_arm_persists_and_republishes_the_block() {
 }
 
 #[tokio::test]
+async fn the_watch_replies_switch_persists_and_republishes_the_block() {
+    let dir = scratch("watch-replies-switch");
+    let path = dir.join("preferences.toml");
+    let app = app(Some(path.clone()));
+
+    // On by default; the switch turns it off and the block reads back off.
+    lands(&app, SettingsIntent::Refresh).await;
+    assert!(app.settings().settings.watch_replies_enabled);
+    lands(
+        &app,
+        SettingsIntent::SetWatchRepliesEnabled { enabled: false },
+    )
+    .await;
+    assert!(!app.settings().settings.watch_replies_enabled);
+    assert_eq!(app.settings().error, None, "the write landed");
+
+    // The block on screen is the block on disk: a relaunch holds the choice.
+    let persisted = load_preferences(&path);
+    assert!(!persisted.watch_replies_enabled);
+}
+
+#[tokio::test]
 async fn an_unresolvable_zone_is_refused_typed_and_the_old_zone_stands() {
     let dir = scratch("zone-refusal");
     let path = dir.join("preferences.toml");

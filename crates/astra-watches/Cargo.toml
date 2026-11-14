@@ -1,0 +1,22 @@
+[package]
+name = "astra-watches"
+description = "The device-local watch-replies store: one membership row per watched (account, thread), carrying a representative member key the check re-resolves through the engine so a derived thread's re-keying never strands the watch."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# The identity newtypes the store carries across the boundary: the owning
+# account and the representative member key the check re-resolves by.
+engine-api.workspace = true
+# The row types cross the host boundary as serde types.
+serde.workspace = true
+# The WatchError enum.
+thiserror.workspace = true
+# The watch store's sqlite: the engine's own stack, so one linked sqlite3
+# serves the engine store and the watch store (see the workspace table).
+rusqlite = { workspace = true, features = ["fallible_uint"] }

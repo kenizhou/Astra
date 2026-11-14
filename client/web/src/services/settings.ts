@@ -42,6 +42,9 @@ export interface SettingsBlock {
   plugins_enabled?: boolean;
   /** Whether new mail raises OS notifications; on by default. */
   notifications_enabled?: boolean;
+  /** Whether the first reply to a watched conversation raises a "Reply
+   *  received" notification; on by default. */
+  watch_replies_enabled?: boolean;
   /** Whether the log level is debug, the Diagnostics toggle; off by default,
    *  and the logger reads it at boot, so the change lands with the next
    *  launch. */
@@ -222,6 +225,7 @@ export type SettingsIntentBody =
   | { set_clock: { twenty_four: boolean } }
   | { set_plugins_enabled: { enabled: boolean } }
   | { set_notifications_enabled: { enabled: boolean } }
+  | { set_watch_replies_enabled: { enabled: boolean } }
   | { set_zone: { zone: string } }
   | { set_first_day_of_week: { weekday: WeekdayWire } }
   | { set_horizon: { days: number } }
@@ -285,6 +289,10 @@ export const settingsIntents = {
   /** Set whether new mail raises OS notifications. */
   setNotificationsEnabled: (enabled: boolean) => ({
     settings: { set_notifications_enabled: { enabled } },
+  }),
+  /** Set whether a watched conversation's first reply raises a notification. */
+  setWatchRepliesEnabled: (enabled: boolean) => ({
+    settings: { set_watch_replies_enabled: { enabled } },
   }),
   /** Set the calendar's display zone; the core refuses an id it cannot resolve. */
   setZone: (zone: string) => ({ settings: { set_zone: { zone } } }),

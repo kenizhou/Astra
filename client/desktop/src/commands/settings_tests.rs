@@ -35,6 +35,7 @@ fn the_settings_pull_round_trips_the_published_snapshot() {
             default_send_account: None,
             plugins_enabled: true,
             notifications_enabled: true,
+            watch_replies_enabled: true,
             debug_enabled: false,
             analytics_consented: false,
             language: "en-GB".to_owned(),

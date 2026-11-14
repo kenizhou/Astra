@@ -80,6 +80,12 @@ pub enum SettingsIntent {
         /// On or off.
         enabled: bool,
     },
+    /// Set whether the first reply to a watched conversation raises a
+    /// "Reply received" notification.
+    SetWatchRepliesEnabled {
+        /// On or off.
+        enabled: bool,
+    },
     /// Set the calendar's display zone.
     SetZone {
         /// The IANA id, carried verbatim; the core validates it on dispatch.

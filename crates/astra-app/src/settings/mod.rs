@@ -138,12 +138,9 @@ impl<P: Provider> App<P> {
     }
 
     /// Routes one [`SettingsIntent`] to its handler. Every arm publishes the
-    /// settings surface on completion, because every arm moves something the
-    /// snapshot shows (a setting, an account's row, the newest error) or
-    /// nothing at all when it refused, which is itself something the surface
-    /// must hear. The one exception is the device-zone offer's dismissal
-    /// with nothing standing: an already-absent offer publishes nothing,
-    /// the snapshot being already accurate.
+    /// settings surface on completion: each moves something the snapshot shows
+    /// or nothing when it refused, which the surface must hear too. The one
+    /// exception is dismissing an already-absent device-zone offer.
     pub(crate) async fn dispatch_settings(&self, intent: SettingsIntent) {
         match intent {
             SettingsIntent::Refresh => self.rebuild_settings().await,
@@ -160,6 +157,10 @@ impl<P: Provider> App<P> {
             }
             SettingsIntent::SetNotificationsEnabled { enabled } => {
                 self.set_setting(|prefs| prefs.notifications_enabled = enabled)
+                    .await;
+            }
+            SettingsIntent::SetWatchRepliesEnabled { enabled } => {
+                self.set_setting(|prefs| prefs.watch_replies_enabled = enabled)
                     .await;
             }
             SettingsIntent::SetZone { zone } => {
