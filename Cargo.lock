@@ -261,7 +261,7 @@ dependencies = [
 
 [[package]]
 name = "astra-account"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "astra-autodetect",
  "astra-oauth",
@@ -292,7 +292,7 @@ dependencies = [
 
 [[package]]
 name = "astra-ai"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "rusqlite",
  "serde",
@@ -303,7 +303,7 @@ dependencies = [
 
 [[package]]
 name = "astra-app"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "ammonia",
  "astra-account",
@@ -346,7 +346,7 @@ dependencies = [
 
 [[package]]
 name = "astra-autodetect"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "engine-tls",
@@ -363,7 +363,7 @@ dependencies = [
 
 [[package]]
 name = "astra-categories"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "engine-api",
  "rusqlite",
@@ -373,7 +373,7 @@ dependencies = [
 
 [[package]]
 name = "astra-cli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "astra-ai",
  "astra-crypto-openpgp",
@@ -394,7 +394,7 @@ dependencies = [
 
 [[package]]
 name = "astra-composer"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -506,7 +506,7 @@ dependencies = [
 
 [[package]]
 name = "astra-desktop"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "astra-account",
  "astra-ai",
@@ -553,7 +553,7 @@ dependencies = [
 
 [[package]]
 name = "astra-mcp"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "astra-ai",
  "astra-app",
@@ -569,7 +569,7 @@ dependencies = [
 
 [[package]]
 name = "astra-mcp-relay"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "astra-account",
  "astra-ai",
@@ -584,7 +584,7 @@ dependencies = [
 
 [[package]]
 name = "astra-oauth"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64 0.23.1",
  "engine-tls",
@@ -601,7 +601,7 @@ dependencies = [
 
 [[package]]
 name = "astra-plugin"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "ring",
  "serde",
@@ -613,7 +613,7 @@ dependencies = [
 
 [[package]]
 name = "astra-plugin-echo"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "astra-plugin",
  "serde_json",
@@ -622,7 +622,7 @@ dependencies = [
 
 [[package]]
 name = "astra-reminders"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "engine-api",
  "rusqlite",
@@ -632,7 +632,7 @@ dependencies = [
 
 [[package]]
 name = "astra-snooze"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "engine-api",
  "rusqlite",
@@ -642,7 +642,7 @@ dependencies = [
 
 [[package]]
 name = "astra-viewmodel"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "astra-categories",
  "astra-composer",
@@ -653,7 +653,7 @@ dependencies = [
 
 [[package]]
 name = "astra-watches"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "engine-api",
  "rusqlite",
@@ -9438,7 +9438,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "astra-plugin",
  "image",
