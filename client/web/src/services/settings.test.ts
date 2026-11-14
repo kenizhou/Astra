@@ -254,6 +254,15 @@ describe('the settings intent wire', () => {
     expect(row.needs_sender_name).toBeUndefined();
     expect(row.sender_name_error).toBeUndefined();
   });
+
+  it('carries the block and unblock addresses verbatim', () => {
+    expect(JSON.stringify(settingsIntents.blockSender('Ada <ada@example.test>'))).toBe(
+      '{"settings":{"block_sender":{"address":"Ada <ada@example.test>"}}}',
+    );
+    expect(JSON.stringify(settingsIntents.unblockSender('ada@example.test'))).toBe(
+      '{"settings":{"unblock_sender":{"address":"ada@example.test"}}}',
+    );
+  });
 });
 
 // The platform arms the Diagnostics, Privacy, language, and device-zone

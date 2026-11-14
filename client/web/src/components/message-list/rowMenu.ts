@@ -33,6 +33,7 @@ import { openMessageWindow } from '@/features/reader/readerWindows';
 import { openDraftRow, openDraftRowWindow } from '@/features/composer/draftOpen';
 import { usePinnedRowsStore } from '@/features/list-pin/pinnedRowsStore';
 import { useVipSendersStore } from '@/features/vip/vipSendersStore';
+import { blockSenderItem } from '@/features/junk-blocking/blockSenderMenu';
 import { useSweepStore } from '@/features/sweep/sweepStore';
 import { useSnoozeStore } from '@/features/snooze/snoozeStore';
 import { useReminderStore } from '@/features/reminders/reminderStore';
@@ -168,25 +169,30 @@ const JUNK_FOLDER_NAMES: readonly string[] = [
   'ongewenste e-mail',
 ];
 
-/** The spam-report verb: one mark_junk per target through the report
- *  family, the report that files the message into Junk as part of itself.
- *  Offered only where the account's provider can report its mail AND the
- *  tree resolves a junk destination (the RFC 6154 role or a conventional
- *  name), so the verb never stands where dispatching it would only be
- *  refused or silently skipped. */
-function spamItem(
-  targets: MessageRowView[],
-  context: RowAccountContext | undefined,
-): ContextMenuItem | null {
+/** Whether the account can report mail as junk: the provider can report AND
+ *  the tree resolves a junk destination (the RFC 6154 role or a conventional
+ *  name). The spam verb's visibility rule, shared by the block dialog's
+ *  optional report leg so the two never disagree. */
+function junkReportable(context: RowAccountContext | undefined): boolean {
   if (context === undefined || !context.canReportMail) {
-    return null;
+    return false;
   }
-  const junk = context.folders.some(
+  return context.folders.some(
     (folder) =>
       folder.role === 'junk' ||
       JUNK_FOLDER_NAMES.includes(folder.name.trim().toLowerCase()),
   );
-  if (!junk) {
+}
+
+/** The spam-report verb: one mark_junk per target through the report
+ *  family, the report that files the message into Junk as part of itself.
+ *  Offered only where the account can report junk, so the verb never stands
+ *  where dispatching it would only be refused or silently skipped. */
+function spamItem(
+  targets: MessageRowView[],
+  context: RowAccountContext | undefined,
+): ContextMenuItem | null {
+  if (!junkReportable(context)) {
     return null;
   }
   return {
@@ -359,6 +365,7 @@ export function buildRowMenu(
     openWindowItem(one, oneMessage, context),
     pinItem(targets),
     vipItem(targets),
+    blockSenderItem(targets, junkReportable(context)),
     { separator: true },
     {
       label: 'Reply',

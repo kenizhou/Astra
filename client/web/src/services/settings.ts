@@ -54,6 +54,10 @@ export interface SettingsBlock {
   language?: string;
   /** The device-zone offer's once-latch: whether any offer was ever made. */
   zone_offered?: boolean;
+  /** The senders whose mail raises no new-mail notification, normalised bare
+   *  addresses; suppression only, their mail still lands in the Inbox.
+   *  Absent reads back as an empty blocklist. */
+  blocked_senders?: string[];
 }
 
 /** One account's signature assignment: what its new mail and its replies
@@ -238,6 +242,8 @@ export type SettingsIntentBody =
       };
     }
   | { set_sender_name: { account: string; name: string } }
+  | { block_sender: { address: string } }
+  | { unblock_sender: { address: string } }
   | { set_debug_enabled: { enabled: boolean } }
   | { set_analytics_consented: { consented: boolean } }
   | { set_language: { language: string } }
@@ -349,6 +355,12 @@ export const settingsIntents = {
   setSenderName: (account: string, name: string) => ({
     settings: { set_sender_name: { account, name } },
   }),
+  /** Block a sender: their mail raises no new-mail notification. The address
+   *  crosses verbatim; the core normalises it. Suppression only: the mail
+   *  still lands in the Inbox. */
+  blockSender: (address: string) => ({ settings: { block_sender: { address } } }),
+  /** Unblock a sender: their mail raises new-mail notifications again. */
+  unblockSender: (address: string) => ({ settings: { unblock_sender: { address } } }),
   /** Set whether the log level is debug, the Diagnostics toggle; the logger
    *  reads it at boot, so the change lands with the next launch. */
   setDebugEnabled: (enabled: boolean) => ({

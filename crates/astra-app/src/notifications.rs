@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! The new-mail notification queue: the core surface a pass's commits feed
 //! and the host bridge drains. One row qualifies when it is **new** (no
-//! prior key in the store), lands in an inbox-class folder, and is not the
-//! account's own filing of a message it sent; everything else a commit
-//! carries (a flag change, a moved copy, the sent filing) is state the
-//! person already knows.
+//! prior key in the store), lands in an inbox-class folder, is not the
+//! account's own filing of a message it sent, and is not from a blocked
+//! sender; everything else a commit carries (a flag change, a moved copy,
+//! the sent filing) is state the person already knows.
 //!
 //! The new-versus-changed call is honest by construction rather than by
 //! timing: the engine reports a commit only after it has applied, so a
@@ -70,6 +70,10 @@ struct Armed {
     identity: EmailAddress,
     /// The account's inbox-class folders, by id.
     inbox: BTreeSet<MailboxId>,
+    /// The blocked senders' normalised addresses, refreshed every pass: a
+    /// sender in this set raises no notice. An empty set (the state a failed
+    /// blocklist read leaves) suppresses nothing, the filter's fail-open.
+    blocked: BTreeSet<String>,
     /// Every key the account held at its first arming plus every key the
     /// queue has watched land since; a commit's row is new exactly when its
     /// key is not in this set.
@@ -111,16 +115,22 @@ impl NewMailQueue {
         }
     }
 
-    /// Arms `account`'s next pass: refreshes the inbox-class folder set and
-    /// the sending identity, and seeds the account's known keys from the
-    /// store the first time it is armed in this process. The seed is the
-    /// honest "prior key" test the engine's post-commit observer cannot run
-    /// for itself; from here on the queue maintains the set as commits land.
-    /// The import suppression is decided at that first arming and cleared by
-    /// [`NewMailQueue::import_done`] once a pass reaches the server, so a
-    /// pass that failed offline keeps it and an account that starts empty
-    /// does not swallow its first delivery.
-    pub(crate) async fn arm(&self, engine: &Engine, account: &AccountId, identity: &EmailAddress) {
+    /// Arms `account`'s next pass: refreshes the inbox-class folder set, the
+    /// sending identity, and the blocked-sender set, and seeds the account's
+    /// known keys from the store the first time it is armed in this process.
+    /// The seed is the honest "prior key" test the engine's post-commit
+    /// observer cannot run for itself; from here on the queue maintains the
+    /// set as commits land. The import suppression is decided at that first
+    /// arming and cleared by [`NewMailQueue::import_done`] once a pass reaches
+    /// the server, so a pass that failed offline keeps it and an account that
+    /// starts empty does not swallow its first delivery.
+    pub(crate) async fn arm(
+        &self,
+        engine: &Engine,
+        account: &AccountId,
+        identity: &EmailAddress,
+        blocked: &BTreeSet<String>,
+    ) {
         let seeded = {
             let state = self.state.lock().expect("new-mail mutex poisoned");
             state.armed.contains_key(account)
@@ -149,11 +159,14 @@ impl NewMailQueue {
                 .map(|row| row.mail.key)
                 .collect()
         };
+        // The blocklist is re-read every pass, the way the folder set is: a
+        // block or unblock lands on the next delivery, never a stale set.
         let mut state = self.state.lock().expect("new-mail mutex poisoned");
         match state.armed.get_mut(account) {
             Some(armed) => {
                 armed.identity = identity.clone();
                 armed.inbox = inbox;
+                armed.blocked.clone_from(blocked);
             }
             None => {
                 state.armed.insert(
@@ -161,6 +174,7 @@ impl NewMailQueue {
                     Armed {
                         identity: identity.clone(),
                         inbox,
+                        blocked: blocked.clone(),
                         importing: known.is_empty(),
                         known,
                     },
@@ -233,9 +247,12 @@ impl NewMailQueue {
 }
 
 /// Whether `message` is one the host should hear about: filed in one of the
-/// account's inbox-class folders, and sent by someone other than the
-/// account's own identity (the sent filing a provider presents in the
-/// Inbox, the way a label-shaped server does).
+/// account's inbox-class folders, sent by someone other than the account's
+/// own identity (the sent filing a provider presents in the Inbox, the way a
+/// label-shaped server does), and not from a blocked sender. The block leg
+/// is an absolute veto with no bypass (the reference order: blocked beats
+/// VIP); an empty blocklist, the state a failed read leaves, suppresses
+/// nothing.
 fn qualifies(message: &Message, armed: &Armed) -> bool {
     let inbox_filed = message
         .mailboxes
@@ -246,7 +263,12 @@ fn qualifies(message: &Message, armed: &Armed) -> bool {
         .from
         .iter()
         .any(|from| from.email.eq_ignore_ascii_case(&armed.identity.email));
-    inbox_filed && !own_filing
+    let blocked = message.envelope.from.iter().any(|from| {
+        armed
+            .blocked
+            .contains(&crate::preferences::normalise_sender_address(&from.email))
+    });
+    inbox_filed && !own_filing && !blocked
 }
 
 impl<P> crate::App<P> {

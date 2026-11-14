@@ -216,6 +216,13 @@ impl<P: Provider> App<P> {
             SettingsIntent::SetSenderName { account, name } => {
                 self.set_sender_name(account, name).await;
             }
+            SettingsIntent::BlockSender { address } => {
+                self.set_setting(|prefs| prefs.block_sender(&address)).await;
+            }
+            SettingsIntent::UnblockSender { address } => {
+                self.set_setting(|prefs| prefs.unblock_sender(&address))
+                    .await;
+            }
             SettingsIntent::SetDebugEnabled { enabled } => {
                 self.set_setting(|prefs| prefs.debug_enabled = enabled)
                     .await;

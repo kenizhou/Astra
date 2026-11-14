@@ -86,8 +86,16 @@ impl<P: Provider> App<P> {
             return;
         }
         let tuning = self.sync_tuning_for(&account.id);
+        // The blocklist the pass's notices classify against, read from the
+        // preferences the way the sync settings are; an unreadable file left
+        // an empty set at load, so a failed read suppresses nothing.
+        let blocked = self
+            .pane
+            .lock()
+            .expect("preferences mutex poisoned")
+            .blocked_senders();
         self.new_mail
-            .arm(&self.engine, &account.id, &account.identity)
+            .arm(&self.engine, &account.id, &account.identity, &blocked)
             .await;
         let report = sync_account_providers(
             &self.engine,

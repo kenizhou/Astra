@@ -9,6 +9,8 @@
 //! row's dav echo carries no password: the snapshot answers whether one is
 //! stored, never the credential itself.
 
+use std::collections::BTreeSet;
+
 use engine_api::{AccountId, CalendarId};
 use serde::{Deserialize, Serialize};
 
@@ -143,6 +145,11 @@ pub struct SettingsBlock {
     /// snapshot from a build before the field reads back as off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub zone_offered: bool,
+    /// The senders whose mail raises no new-mail notification, normalised
+    /// bare addresses. Suppression only: their mail still lands in the Inbox.
+    /// Absent on a snapshot from a build before the field reads back empty.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub blocked_senders: BTreeSet<String>,
 }
 
 /// The switch's default: plugins run unless the preference says otherwise.
