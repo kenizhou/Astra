@@ -271,6 +271,8 @@ mod snooze_proof;
 mod unified;
 #[path = "tests_live_harness/warm_proof.rs"]
 mod warm_proof;
+#[path = "tests_live_harness/watch_replies_proof.rs"]
+mod watch_replies_proof;
 
 /// The harness connection details from the environment, or `None` to skip.
 fn harness() -> Option<(String, String, String, String)> {

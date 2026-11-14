@@ -146,6 +146,10 @@ pub struct Preferences {
     /// none whatever the window state.
     #[serde(default = "default_true")]
     pub notifications_enabled: bool,
+    /// Whether the first reply to a watched conversation raises a "Reply
+    /// received" notification; on by default (the watch-replies switch).
+    #[serde(default = "default_true")]
+    pub watch_replies_enabled: bool,
     /// Each account's own sync settings, by account id; the file holds only
     /// the fields the user set, and an absent row or field falls back to
     /// the product defaults.
@@ -163,10 +167,8 @@ pub struct Preferences {
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub blocked_senders: BTreeSet<String>,
     /// Whether the log level is debug, the Diagnostics toggle. Off by
-    /// default: the log runs at info until the person raises it, and the
-    /// logger reads the level at boot, so the change lands with the next
-    /// launch. A default (off) leaves the file, the same canonicalisation
-    /// the expansion maps follow.
+    /// default; the logger reads the level at boot, so the change lands with
+    /// the next launch. A default (off) leaves the file.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub debug_enabled: bool,
     /// Whether analytics consent stands, the Privacy switch. Off by
@@ -190,11 +192,9 @@ pub struct Preferences {
     /// never returns on a later launch. A default (off) leaves the file.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub zone_offered: bool,
-    /// Whether the standing zone was picked, the marker the device-zone
-    /// offer defers to: a picked zone stands, the offer is not even made,
-    /// and an accepted offer never overrides one. Set by the zone picker's
-    /// own write, never by the offer's acceptance. A default (off) leaves
-    /// the file.
+    /// Whether the standing zone was picked, the marker the device-zone offer
+    /// defers to: a picked zone stands and an accepted offer never overrides
+    /// one. Set by the zone picker's write. A default (off) leaves the file.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub zone_picked: bool,
 }
@@ -222,6 +222,7 @@ impl Default for Preferences {
             signatures: BTreeMap::new(),
             plugins_enabled: true,
             notifications_enabled: true,
+            watch_replies_enabled: true,
             sync: BTreeMap::new(),
             sender_names: BTreeMap::new(),
             blocked_senders: BTreeSet::new(),

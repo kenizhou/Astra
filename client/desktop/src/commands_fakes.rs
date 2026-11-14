@@ -193,6 +193,7 @@ pub(crate) struct FakeApp {
     pub(crate) woken: Mutex<Vec<i64>>,
     pub(crate) reminded: Mutex<Vec<(astra_app::RowRef, i64)>>,
     pub(crate) categories: Mutex<port::CategoriesFake>,
+    pub(crate) watches: Mutex<port::WatchFake>,
 }
 
 impl FakeApp {
@@ -262,6 +263,7 @@ impl FakeApp {
             woken: Mutex::new(Vec::new()),
             reminded: Mutex::new(Vec::new()),
             categories: Mutex::new(port::CategoriesFake::default()),
+            watches: Mutex::new(port::WatchFake::default()),
         })
     }
 

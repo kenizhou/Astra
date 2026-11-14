@@ -236,6 +236,14 @@ pub(crate) fn assemble_state(
         &data_dir.join(CATEGORIES_STORE_FILE),
     )?);
     core.install_categories_store(categories_store);
+    // The device-local watch store beside the category store: a membership
+    // mark the core records and the delivery hook checks over. No timer and
+    // no AppState field (the arrival lane is the only trigger), so the drop
+    // order stays as it stands.
+    let watches_store = Arc::new(astra_watches::WatchStore::open(
+        &data_dir.join(WATCHES_STORE_FILE),
+    )?);
+    core.install_watch_store(watches_store);
     // The crypto store opened before the dial (above) rides the state: the
     // account-add flow and the headless dial build wrappers from it too.
     // Prime the settings snapshot: nothing republishes it until a settings
@@ -322,6 +330,10 @@ const REMINDER_STORE_FILE: &str = "reminders.sqlite";
 /// The category store's file name, under the data directory: device-local, a
 /// local overlay the CLI does not share (the snooze/reminders precedent).
 const CATEGORIES_STORE_FILE: &str = "categories.sqlite";
+
+/// The watch store's file name, under the data directory: device-local, a
+/// membership mark the CLI does not share (the snooze/reminders precedent).
+const WATCHES_STORE_FILE: &str = "watches.sqlite";
 
 /// The crypto store's file name, under the data directory: key material and
 /// trust decisions. Opened before the account dial so every IMAP dial can

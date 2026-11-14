@@ -117,6 +117,12 @@ pub struct SettingsBlock {
     /// snapshot from a build before the field reads back on.
     #[serde(default = "default_notifications_enabled")]
     pub notifications_enabled: bool,
+    /// Whether the first reply to a watched conversation raises a "Reply
+    /// received" notification. On by default; the watch-replies switch the
+    /// settings screen carries. Absent on a snapshot from a build before the
+    /// field reads back on.
+    #[serde(default = "default_watch_replies_enabled")]
+    pub watch_replies_enabled: bool,
     /// Whether the log level is debug, the Diagnostics toggle. Off by
     /// default: the log runs at info until the person raises it, and the
     /// logger reads the level at boot, so the change lands with the next
@@ -160,6 +166,12 @@ fn default_plugins_enabled() -> bool {
 /// The notifications switch's default: new mail is announced unless the
 /// preference says otherwise.
 fn default_notifications_enabled() -> bool {
+    true
+}
+
+/// The watch-replies switch's default: a watched conversation's first reply
+/// is announced unless the preference says otherwise.
+fn default_watch_replies_enabled() -> bool {
     true
 }
 

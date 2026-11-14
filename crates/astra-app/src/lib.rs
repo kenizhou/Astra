@@ -2,13 +2,11 @@
 //! The Astra Mail application core: the protocol of the unidirectional loop, and the
 //! runtime that drives it.
 //!
-//! A host observes a [`Surface`] through [`AppObserver`], pulls an immutable snapshot
-//! for it, and dispatches an [`Intent`] back; state flows one way and commands the
-//! other. The [`App`] owns one [`engine_api::Engine`] shared across every configured
-//! [`Account`], and [`boot`] assembles the whole sequence over a host-provided runtime.
-//! The crate root holds the runtime's state; the command surface, the projection,
-//! the sync paths, the preferences, the sender-name service, and the AI services
-//! each live in their own module.
+//! A host observes a [`Surface`] through [`AppObserver`], pulls an immutable snapshot,
+//! and dispatches an [`Intent`] back; state flows one way and commands the other. The
+//! [`App`] owns one [`engine_api::Engine`] shared across every configured [`Account`],
+//! and [`boot`] assembles the sequence over a host-provided runtime; the crate root
+//! holds the runtime's state and each service lives in its own module.
 
 mod accounts;
 mod ai_assist;
@@ -62,6 +60,7 @@ mod surfaced;
 mod sync;
 mod sync_account;
 mod sync_progress;
+mod watch_replies;
 mod window;
 
 // The gated live Stalwart-harness test: a sibling file that skips unless ASTRA_LIVE_HARNESS=1.
@@ -355,6 +354,8 @@ pub struct App<P> {
     reminders: Mutex<Option<Arc<astra_reminders::ReminderStore>>>,
     /// The device-local category store the host installs; `None` overlays nothing.
     categories: Mutex<Option<Arc<astra_categories::CategoryStore>>>,
+    /// The device-local watch store the host installs; `None` watches nothing.
+    watches: Mutex<Option<Arc<astra_watches::WatchStore>>>,
 }
 
 impl<P> core::fmt::Debug for App<P> {
@@ -435,6 +436,7 @@ impl<P: Provider> App<P> {
             snooze: Mutex::new(None),
             reminders: Mutex::new(None),
             categories: Mutex::new(None),
+            watches: Mutex::new(None),
         }
     }
 
@@ -493,7 +495,6 @@ impl<P: Provider> App<P> {
     // their own modules, beside the ports they install.
 }
 
-/// The idempotency-key mint, split into [`ids`] for the file cap and
-/// re-exported so every write family's `crate::` path stands.
+/// The idempotency-key mint, split into [`ids`] for the file cap.
 /// [`ids`]: self::ids
 pub(crate) use ids::mint_idempotency;

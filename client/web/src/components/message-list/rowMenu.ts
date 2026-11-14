@@ -35,6 +35,7 @@ import { usePinnedRowsStore } from '@/features/list-pin/pinnedRowsStore';
 import { useVipSendersStore } from '@/features/vip/vipSendersStore';
 import { blockSenderItem } from '@/features/junk-blocking/blockSenderMenu';
 import { categorizeItem } from '@/features/categories/categoryMenu';
+import { watchItem } from '@/features/watch-replies/watchMenu';
 import { useSweepStore } from '@/features/sweep/sweepStore';
 import { useSnoozeStore } from '@/features/snooze/snoozeStore';
 import { useReminderStore } from '@/features/reminders/reminderStore';
@@ -368,6 +369,7 @@ export function buildRowMenu(
     vipItem(targets),
     blockSenderItem(targets, junkReportable(context)),
     categorizeItem(targets),
+    watchItem(targets),
     { separator: true },
     {
       label: 'Reply',

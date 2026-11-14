@@ -52,6 +52,8 @@ astra-snooze = { path = "../../crates/astra-snooze" }
 astra-reminders = { path = "../../crates/astra-reminders" }
 # The device-local category store the core installs (a local overlay; no timer).
 astra-categories = { path = "../../crates/astra-categories" }
+# The device-local watch store the core installs (a membership mark; no timer).
+astra-watches = { path = "../../crates/astra-watches" }
 # The plugin platform's contracts and worker host: the registry's manifests,
 # permission table, and out-of-process workers.
 astra-plugin = { path = "../../crates/astra-plugin" }

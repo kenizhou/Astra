@@ -86,6 +86,14 @@ fn set_notifications_enabled_carries_its_flag() {
 }
 
 #[test]
+fn set_watch_replies_enabled_carries_its_flag() {
+    round_trips(
+        &Intent::Settings(SettingsIntent::SetWatchRepliesEnabled { enabled: false }),
+        r#"{"settings":{"set_watch_replies_enabled":{"enabled":false}}}"#,
+    );
+}
+
+#[test]
 fn block_and_unblock_sender_carry_the_address_verbatim() {
     // The address crosses as typed; the core normalises it on dispatch, the
     // same discipline the zone id follows.

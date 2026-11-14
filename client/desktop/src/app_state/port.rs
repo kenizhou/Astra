@@ -24,6 +24,8 @@ use super::{AppPort, HostAccount, HostProvider};
 
 // The category leg's CategoriesPort impl, its own child (a distinct trait).
 mod categories;
+// The watch-replies leg's WatchPort impl, its own child (a distinct trait).
+mod watch;
 
 #[async_trait]
 impl AppPort for App<HostProvider> {

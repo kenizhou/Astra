@@ -41,6 +41,7 @@ fn the_snapshot_crosses_its_full_shape_and_reads_back() {
             default_send_account: Some(account("work")),
             plugins_enabled: true,
             notifications_enabled: true,
+            watch_replies_enabled: true,
             debug_enabled: false,
             analytics_consented: false,
             language: "en-GB".to_owned(),
@@ -108,6 +109,7 @@ fn the_snapshot_crosses_its_full_shape_and_reads_back() {
                 "view_mode": "threaded",
                 "plugins_enabled": true,
                 "notifications_enabled": true,
+                "watch_replies_enabled": true,
                 "default_calendar": { "account": "work", "key": "cal-1" },
                 "default_send_account": "work"
             },
@@ -185,9 +187,8 @@ fn the_theme_words_cross_both_ways_and_default_to_the_host() {
 
 #[test]
 fn the_weekday_words_mirror_the_engine_s_serde() {
-    // The mirror is pinned against the engine's own type, so the words can
-    // never drift: a weekday stated to the settings surface and one stated to
-    // the calendar's repeat rules spell the same day the same way.
+    // The mirror is pinned against the engine's own type, so a weekday stated
+    // to settings and to the calendar's repeat rules spells the same day.
     for (day, engine_day) in [
         (WeekdayWire::Mo, engine_api::Weekday::Mo),
         (WeekdayWire::Tu, engine_api::Weekday::Tu),
@@ -232,9 +233,8 @@ fn the_grant_states_cross_both_ways_and_absent_means_healthy() {
         assert_eq!(serde_json::to_string(&state).unwrap(), word);
         assert_eq!(serde_json::from_str::<GrantState>(word).unwrap(), state);
     }
-    // A healthy account crosses no grant key at all: the absence is the
-    // state, and a snapshot from a build before the field parses as
-    // healthy rather than refusing.
+    // A healthy account crosses no grant key: the absence is the state, and a
+    // snapshot from a build before the field parses as healthy, not refusing.
     let mut healthy = row_fixture();
     let wire = serde_json::to_value(&healthy).expect("the healthy row serialises");
     assert!(
@@ -313,6 +313,7 @@ fn an_unpinned_default_calendar_and_empty_attributions_cross_no_key() {
         default_send_account: None,
         plugins_enabled: true,
         notifications_enabled: true,
+        watch_replies_enabled: true,
         debug_enabled: false,
         analytics_consented: false,
         language: "en-GB".to_owned(),
@@ -343,9 +344,8 @@ fn an_unpinned_default_calendar_and_empty_attributions_cross_no_key() {
 
 #[test]
 fn the_shared_web_fixture_parses_as_the_snapshot() {
-    // The web service's settings.test.ts parses this same file, so the
-    // fixture the surface mirrors and the snapshot the host publishes can
-    // never drift apart.
+    // The web service's settings.test.ts parses this same file, so the fixture
+    // the surface mirrors and the snapshot the host publishes never drift.
     let raw = include_str!("../../../client/web/src/services/__fixtures__/settings_snapshot.json");
     let back: SettingsSnapshot = serde_json::from_str(raw).expect("the fixture parses");
     let wire = serde_json::to_value(&back).expect("the snapshot serialises");
@@ -446,6 +446,7 @@ fn block_fixture() -> SettingsBlock {
         default_send_account: None,
         plugins_enabled: true,
         notifications_enabled: true,
+        watch_replies_enabled: true,
         debug_enabled: false,
         analytics_consented: false,
         language: "en-GB".to_owned(),

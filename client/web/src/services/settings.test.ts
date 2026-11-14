@@ -31,6 +31,7 @@ describe('the settings snapshot wire', () => {
       view_mode: 'threaded',
       plugins_enabled: true,
       notifications_enabled: true,
+      watch_replies_enabled: true,
       default_calendar: { account: 'work', key: 'cal-1' },
       language: 'fr-FR',
       debug_enabled: true,
@@ -261,6 +262,15 @@ describe('the settings intent wire', () => {
     );
     expect(JSON.stringify(settingsIntents.unblockSender('ada@example.test'))).toBe(
       '{"settings":{"unblock_sender":{"address":"ada@example.test"}}}',
+    );
+  });
+
+  it('carries the watch-replies switch both ways', () => {
+    expect(JSON.stringify(settingsIntents.setWatchRepliesEnabled(false))).toBe(
+      '{"settings":{"set_watch_replies_enabled":{"enabled":false}}}',
+    );
+    expect(JSON.stringify(settingsIntents.setWatchRepliesEnabled(true))).toBe(
+      '{"settings":{"set_watch_replies_enabled":{"enabled":true}}}',
     );
   });
 });

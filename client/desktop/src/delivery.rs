@@ -273,7 +273,25 @@ impl DeliveryHost for Arc<HostDelivery> {
 
     async fn pass(&self) -> NewMailBatch {
         self.app.sync_added_account(&self.account).await;
-        self.app.drain_new_mail()
+        let batch = self.app.drain_new_mail();
+        // The watch-replies check rides the pass after the drain (the sync
+        // commit fold is untouched), gated on the notification switch: a
+        // watched conversation's first reply raises its own notice beside the
+        // base new-mail one, and consumes the watch.
+        let enabled = self.app.settings().settings.notifications_enabled;
+        if enabled {
+            let replies = self.app.check_watched_replies(&batch.messages).await;
+            if !replies.is_empty() {
+                self.notify.deliver_replies(
+                    &NewMailBatch {
+                        messages: replies,
+                        overflow: 0,
+                    },
+                    enabled,
+                );
+            }
+        }
+        batch
     }
 
     fn record(&self, outcome: PassOutcome) {

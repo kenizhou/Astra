@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! The shell's managed state: the app core the command surface drives, the runtime
-//! it drives on, the per-account dial table, and the credential store. One value,
-//! registered once at boot, read back by every command through Tauri's `State`.
+//! it drives on, the dial table, and the credential store, registered once at boot.
 
-// The core's `AppPort` impl and the category supertrait, each its own child for the cap.
+// The core's `AppPort` impl and its supertraits, each its own child for the cap.
 mod categories_port;
 mod port;
-pub(crate) use categories_port::CategoriesPort;
+mod watch_port;
+pub(crate) use {categories_port::CategoriesPort, watch_port::WatchPort};
 
 use std::sync::Arc;
 
@@ -47,7 +47,7 @@ pub(crate) type HostAccount = Account<HostProvider>;
 /// Production installs `App<HostProvider>` here; a test installs a fake over the
 /// same trait, so the surface is exercised against the contract, not a dialled server.
 #[async_trait]
-pub(crate) trait AppPort: CategoriesPort {
+pub(crate) trait AppPort: CategoriesPort + WatchPort {
     /// Handles one inbound intent; the changed surface is signalled on completion.
     ///
     /// # Errors

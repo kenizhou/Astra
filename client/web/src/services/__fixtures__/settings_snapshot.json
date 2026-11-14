@@ -13,6 +13,7 @@
     },
     "plugins_enabled": true,
     "notifications_enabled": true,
+    "watch_replies_enabled": true,
     "debug_enabled": true,
     "analytics_consented": true,
     "language": "fr-FR",

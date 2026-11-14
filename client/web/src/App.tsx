@@ -20,6 +20,7 @@ import { mountAgentEvents } from '@/events/agentEvents';
 import { mountMailtoEvents } from '@/events/mailtoEvents';
 import { mountNewMailEvents } from '@/events/newMailEvents';
 import { mountReminderEvents } from '@/events/reminderEvents';
+import { mountReplyEvents } from '@/events/replyEvents';
 import { mountShareEvents } from '@/events/shareEvents';
 import { hydrate, mountSurfaceEvents } from '@/events/surfaceEvents';
 import { reportDeviceZone } from '@/features/settings/deviceZone';
@@ -52,6 +53,8 @@ export default function App() {
   useEffect(() => mountNewMailEvents(), []);
 
   useEffect(() => mountReminderEvents(), []);
+
+  useEffect(() => mountReplyEvents(), []);
 
   useEffect(() => mountShareEvents(), []);
 

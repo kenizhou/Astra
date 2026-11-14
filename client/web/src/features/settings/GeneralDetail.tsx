@@ -271,6 +271,16 @@ export function GeneralDetail() {
         />
         New mail notifications
       </label>
+      <label className="flex items-center gap-2 text-xs text-foreground">
+        <input
+          type="checkbox"
+          checked={settings.watch_replies_enabled ?? true}
+          onChange={(event) =>
+            void dispatch(intents.setWatchRepliesEnabled(event.target.checked))
+          }
+        />
+        Watched conversation replies
+      </label>
       <BlockedSenders />
       <div className="flex flex-col gap-1">
         <Picker

@@ -26,6 +26,10 @@ pub(crate) const NEW_MAIL_EVENT: &str = "new-mail";
 /// store records it, the reminder listener's own channel beside new-mail.
 pub(crate) const REMINDER_EVENT: &str = "reminder";
 
+/// The event a watched reply batch crosses to the web on: the same history
+/// store records it, the reply listener's own channel beside new-mail.
+pub(crate) const REPLY_EVENT: &str = "reply";
+
 /// Where an OS notification goes: the notification plugin in the running
 /// app, a recorder in a test.
 pub(crate) trait OsNotifier: Send + Sync {
@@ -60,6 +64,9 @@ pub(crate) struct NotifyBridge {
     /// Where a woken reminder batch crosses to the web history; the headless
     /// host holds none.
     reminder_history: Option<Box<dyn HistoryEmitter>>,
+    /// Where a watched reply batch crosses to the web history; the headless
+    /// host holds none.
+    reply_history: Option<Box<dyn HistoryEmitter>>,
 }
 
 impl NotifyBridge {
@@ -71,6 +78,7 @@ impl NotifyBridge {
             focused,
             history: None,
             reminder_history: None,
+            reply_history: None,
         }
     }
 
@@ -83,6 +91,12 @@ impl NotifyBridge {
     /// Attaches the history channel a woken reminder batch crosses on.
     pub(crate) fn with_reminder_history(mut self, history: Box<dyn HistoryEmitter>) -> Self {
         self.reminder_history = Some(history);
+        self
+    }
+
+    /// Attaches the history channel a watched reply batch crosses on.
+    pub(crate) fn with_reply_history(mut self, history: Box<dyn HistoryEmitter>) -> Self {
+        self.reply_history = Some(history);
         self
     }
 
@@ -110,8 +124,12 @@ impl NotifyBridge {
             event: NEW_MAIL_EVENT,
         }))
         .with_reminder_history(Box::new(TauriHistoryEmitter {
-            handle,
+            handle: handle.clone(),
             event: REMINDER_EVENT,
+        }))
+        .with_reply_history(Box::new(TauriHistoryEmitter {
+            handle,
+            event: REPLY_EVENT,
         }))
     }
 
@@ -167,6 +185,27 @@ impl NotifyBridge {
         if let Some(history) = &self.reminder_history {
             if let Err(err) = history.emit(batch) {
                 log::warn!("notifications: the reminder history event could not be emitted: {err}");
+            }
+        }
+    }
+
+    /// Delivers one watched reply batch under the reply rules: nothing while
+    /// the switch is off, one notification per reply titled "Reply received",
+    /// and NO focus suppression (an explicit user request fires while the
+    /// window is focused; the enabled switch is the only gate, the reminder
+    /// precedent). The batch then crosses to the web history on the reply
+    /// event; a channel failure is logged, never raised, so it cannot suppress
+    /// the OS notification that already crossed.
+    pub(crate) fn deliver_replies(&self, batch: &NewMailBatch, enabled: bool) {
+        if !enabled || batch.messages.is_empty() {
+            return;
+        }
+        for message in &batch.messages {
+            self.sink.show("Reply received", &reply_body(message));
+        }
+        if let Some(history) = &self.reply_history {
+            if let Err(err) = history.emit(batch) {
+                log::warn!("notifications: the reply history event could not be emitted: {err}");
             }
         }
     }
@@ -277,6 +316,34 @@ fn reminder_body(message: &NewMailNotice) -> String {
         .unwrap_or_else(|| "You have a reminder".to_owned())
 }
 
+/// One reply's notification body: who answered and what about, the parts the
+/// envelope carried joined by a newline, or the generic word when it carried
+/// neither.
+fn reply_body(message: &NewMailNotice) -> String {
+    let mut lines = Vec::new();
+    if let Some(from) = &message.from {
+        let sender = from
+            .name
+            .as_ref()
+            .filter(|name| !name.trim().is_empty())
+            .cloned()
+            .unwrap_or_else(|| from.email.clone());
+        lines.push(sender);
+    }
+    if let Some(subject) = message.subject.as_ref().filter(|s| !s.trim().is_empty()) {
+        lines.push(subject.clone());
+    }
+    if lines.is_empty() {
+        "You have a reply".to_owned()
+    } else {
+        lines.join("\n")
+    }
+}
+
 #[cfg(test)]
 #[path = "notify_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "notify_replies_tests.rs"]
+mod reply_tests;
