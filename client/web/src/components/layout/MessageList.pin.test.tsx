@@ -15,6 +15,11 @@ const ipc = vi.hoisted(() => ({
   imapTestConnection: vi.fn(),
 }));
 
+vi.mock('@/services/categories', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  listCategories: vi.fn().mockResolvedValue([]),
+}));
+
 vi.mock('@/services/ipc', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   ...ipc,
@@ -96,7 +101,7 @@ function optionWith(text: string): HTMLElement {
 
 /** The rendered rows' subjects, in render order. */
 function renderedOrder(): string[] {
-  return screen
+  return within(screen.getByRole('listbox'))
     .getAllByRole('option')
     .map((option) => SUBJECTS.find((s) => option.textContent?.includes(s)) ?? '?');
 }
@@ -259,7 +264,7 @@ describe('the list pin overlay', () => {
     render(<MessageList />);
 
     // The pinned hit keeps its search rank; the overlay is folder-only.
-    const order = screen
+    const order = within(screen.getByRole('listbox'))
       .getAllByRole('option')
       .map((option) => SUBJECTS.find((s) => option.textContent?.includes(s)) ?? '?');
     expect(order).toEqual(['Your weekly digest', 'Compiler design notes', 'Lunch on Friday']);
@@ -276,7 +281,7 @@ describe('the list pin overlay', () => {
 
     render(<MessageList />);
 
-    const order = screen
+    const order = within(screen.getByRole('listbox'))
       .getAllByRole('option')
       .map((option) => option.textContent?.includes('Home mail') ? 'Home mail' : 'Quarterly report');
     expect(order).toEqual(['Home mail', 'Quarterly report']);

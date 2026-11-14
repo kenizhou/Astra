@@ -33,7 +33,7 @@ import {
   type ListItem,
 } from '@/components/message-list/dateGroups';
 import { DENSITY_ROW_PX } from '@/components/message-list/density';
-import { filteredRows, filterCounts } from '@/components/message-list/listFilter';
+import { filteredRows, filterCounts, rowHasCategory } from '@/components/message-list/listFilter';
 import { allKeys, rangeKeys, resolveTargets, toggleKey } from '@/components/message-list/listSelection';
 import { buildDraftMenu, buildRowMenu, type RowAccountContext } from '@/components/message-list/rowMenu';
 import { SwipeToast } from '@/components/message-list/SwipeToast';
@@ -46,6 +46,8 @@ import { SweepDialog } from '@/features/sweep/SweepDialog';
 import { BlockSenderDialog } from '@/features/junk-blocking/BlockSenderDialog';
 import { SnoozeDialog } from '@/features/snooze/SnoozeDialog';
 import { ReminderDialog } from '@/features/reminders/ReminderDialog';
+import { CategoriesDialog } from '@/features/categories/CategoriesDialog';
+import { useCategoriesStore } from '@/features/categories/categoriesStore';
 import { dispatch, intents } from '@/services/ipc';
 import { useFolderStore } from '@/stores/folderStore';
 import { useListFilterStore } from '@/stores/listFilterStore';
@@ -198,6 +200,7 @@ export function MessageList() {
   const scope = useFolderStore((s) => s.scope);
   const outboxAccount = useFolderStore((s) => s.outboxAccount);
   const filter = useListFilterStore((s) => s.filter);
+  const categoryFilter = useListFilterStore((s) => s.categoryFilter);
   const pinned = usePinnedRowsStore((s) => s.pinned);
   const vip = useVipSendersStore((s) => s.vip);
   const menu = useContextMenu();
@@ -209,7 +212,12 @@ export function MessageList() {
   // choke point: the rendered items, the Shift range, and Select All all
   // derive from it, while the snapshot, the selection carry, and ShowMore's
   // raw count stay untouched. The search branch keeps its own order.
-  const shownRows = partitionPinnedFirst(filteredRows(rows, filter, vip), pinned);
+  const shownRows = partitionPinnedFirst(
+    categoryFilter === null
+      ? filteredRows(rows, filter, vip)
+      : filteredRows(rows, filter, vip).filter((row) => rowHasCategory(row, categoryFilter)),
+    pinned,
+  );
   const counts = filterCounts(rows, vip);
 
   // The folder switch resets the filter to All: a tab named over one
@@ -217,6 +225,12 @@ export function MessageList() {
   useEffect(() => {
     useListFilterStore.getState().reset();
   }, [folder]);
+
+  // The category definitions load once for the pane: the badges, the
+  // Categorize submenu, and the picker all resolve from this snapshot.
+  useEffect(() => {
+    void useCategoriesStore.getState().loadCategories();
+  }, []);
 
   // Whether the open folder is the account's drafts folder: its rows wear
   // the Draft chip and open the draft menu.
@@ -400,6 +414,7 @@ export function MessageList() {
       <BlockSenderDialog />
       <SnoozeDialog />
       <ReminderDialog />
+      <CategoriesDialog />
     </section>
   );
 }

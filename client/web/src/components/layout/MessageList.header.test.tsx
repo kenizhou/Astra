@@ -16,6 +16,11 @@ const ipc = vi.hoisted(() => ({
   imapTestConnection: vi.fn(),
 }));
 
+vi.mock('@/services/categories', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  listCategories: vi.fn().mockResolvedValue([]),
+}));
+
 vi.mock('@/services/ipc', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   ...ipc,

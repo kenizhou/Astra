@@ -101,6 +101,7 @@ describe('buildRowMenu', () => {
       'Pin',
       'Add VIP',
       'Block sender…',
+      'Categorize',
       '|',
       'Reply',
       'Reply All',

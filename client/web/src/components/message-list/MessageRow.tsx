@@ -31,6 +31,8 @@ import { dispatch, intents } from '@/services/ipc';
 import { Avatar } from '@/features/people/Avatar';
 import { usePinnedRowsStore } from '@/features/list-pin/pinnedRowsStore';
 import { useVipSendersStore } from '@/features/vip/vipSendersStore';
+import { useCategoriesStore } from '@/features/categories/categoriesStore';
+import type { CategoryDef } from '@/services/categories';
 import { useListStore } from '@/stores/listStore';
 import type { RowKey, MessageRowView } from '@/services/surfaces';
 import { resolveTargets } from './listSelection';
@@ -80,6 +82,15 @@ export function MessageRow({ row, selected, multiSelected = false, draft = false
   const density = useListStore((s) => s.density);
   const pinned = usePinnedRowsStore((s) => s.isPinned(rowKeyId(row.key)));
   const vip = useVipSendersStore((s) => s.has(row.sender_address));
+  const defs = useCategoriesStore((s) => s.defs);
+  // The leading colour bar: the first category's colour, the tooltip naming
+  // every category the row carries. A deleted def resolves to nothing, so its
+  // id simply drops out of the bar (the overlay sheds it on the next rebuild).
+  const rowCategories = (row.categories ?? [])
+    .map((id) => defs.find((def) => def.id === id))
+    .filter((def): def is CategoryDef => def !== undefined);
+  const barColor = rowCategories[0]?.color;
+  const barTitle = rowCategories.map((def) => def.name).join(', ');
   const swipe = useRowSwipe(row);
   const actionsVisible = hovered || selected || focusWithin;
   const sender = row.sender_name || row.sender_address;
@@ -187,6 +198,14 @@ export function MessageRow({ row, selected, multiSelected = false, draft = false
         style={{ transform: `translateX(${swipe.dx}px)` }}
         className={`relative z-10 flex min-w-0 flex-1 items-start gap-2.5 px-3 ${swipe.dx === 0 ? '' : 'bg-card'}`}
       >
+        {barColor !== undefined && (
+          <span
+            title={barTitle}
+            aria-label={barTitle}
+            className="absolute inset-y-0 left-0 w-1"
+            style={{ backgroundColor: barColor }}
+          />
+        )}
         {density !== 'compact' && <Avatar address={row.sender_address} size={28} />}
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline justify-between gap-2">

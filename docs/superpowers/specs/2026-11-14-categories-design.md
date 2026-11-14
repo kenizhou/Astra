@@ -18,7 +18,7 @@ categories are not AI). Faithful port, no reference deviation.
 A new crate crates/astra-categories (the astra-reminders shape: rusqlite under a
 Mutex, embedded migrations, open with the 5s busy timeout, open_in_memory). Two
 tables: categories (id TEXT PRIMARY KEY [slug], name TEXT NOT NULL UNIQUE COLLATE
-NOCASE, color TEXT NOT NULL [#RRGGBB], created_at) and thread_categories
+NOCASE, a #RRGGBB colour column [TEXT NOT NULL], created_at) and thread_categories
 (account_id, thread_id, category_id, created_at, PRIMARY KEY (account_id,
 thread_id, category_id), FOREIGN KEY category_id REFERENCES categories ON DELETE
 CASCADE), an index on category_id. CRITICAL: rusqlite does NOT enable foreign keys

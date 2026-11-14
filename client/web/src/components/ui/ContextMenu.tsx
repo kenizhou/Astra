@@ -21,6 +21,11 @@ export interface ContextMenuItem {
   /** Checkbox presentation: defined = the item renders a check slot (tick
    *  when true, empty gutter when false), the radio-style picker form. */
   checked?: boolean;
+  /** A colour swatch beside the label: the category's colour dot. */
+  swatch?: string;
+  /** Keep the menu open after selecting: the category toggle's multi-pick,
+   *  so one sitting can colour several categories without reopening. */
+  keepOpenOnSelect?: boolean;
   /** Native tooltip over the label: the honest-disable channel. */
   title?: string;
   /** The screen-reader leg of that channel, wired via aria-describedby. */
@@ -283,7 +288,11 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
                           event.stopPropagation();
                           if (child.disabled !== true) {
                             child.onSelect?.();
-                            onClose();
+                            // The category toggle keeps the menu open across
+                            // picks; an ordinary child closes the whole menu.
+                            if (child.keepOpenOnSelect !== true) {
+                              onClose();
+                            }
                           }
                         }}
                         className={`flex min-h-8 w-full cursor-pointer items-center gap-2 px-3 text-left text-[13px] ${
@@ -292,6 +301,18 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
                             : 'text-foreground hover:bg-hover'
                         }`}
                       >
+                        {child.checked !== undefined && (
+                          <span aria-hidden="true" className="inline-flex w-3.5 shrink-0 justify-center">
+                            {child.checked && <CheckIcon size={13} />}
+                          </span>
+                        )}
+                        {child.swatch !== undefined && (
+                          <span
+                            aria-hidden="true"
+                            className="h-2.5 w-2.5 shrink-0 rounded-full"
+                            style={{ backgroundColor: child.swatch }}
+                          />
+                        )}
                         <span className="flex-1 truncate" title={child.title}>
                           {child.label}
                         </span>

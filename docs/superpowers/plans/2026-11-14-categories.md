@@ -14,7 +14,7 @@ deviation.
 src/store.rs + src/migrations/0001_init.sql, the astra-reminders shape; the
 categories + thread_categories tables, FK ON DELETE CASCADE, PRAGMA foreign_keys ON
 in BOTH opens; CategoryId newtype; create/update/delete/assign/unassign/
-list_categories/assignments_for_threads, slug_for/valid_color/validate) + store
+list_categories/assignments_for_threads, slug_for/colour-validation/validate) + store
 tests; crates/astra-viewmodel/src/rows.rs (MessageRowView.categories Vec<CategoryId>
 serde default + skip_serializing_if empty) + Cargo.toml dep; crates/astra-app/src/
 categories.rs (install_categories_store + six core verbs, assign/unassign/delete
