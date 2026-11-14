@@ -162,6 +162,7 @@ fn hit_conversation(thread: &str, members: &[&SearchMessage]) -> MessageRowView 
         flagged: members.iter().any(|member| member.row.mail.flags.flagged()),
         has_attachments: members.iter().any(|member| member.row.mail.has_attachment),
         thread_count: Some(count(members.len())),
+        categories: Vec::new(),
     }
 }
 
@@ -266,6 +267,7 @@ fn conversation_row(
         flagged: members.iter().any(|row| row.mail.flags.flagged()),
         has_attachments: members.iter().any(|row| row.mail.has_attachment),
         thread_count: Some(count(members.len())),
+        categories: Vec::new(),
     }
 }
 
@@ -285,6 +287,7 @@ fn message_row(row: &MailListRow) -> MessageRowView {
         flagged: row.mail.flags.flagged(),
         has_attachments: row.mail.has_attachment,
         thread_count: None,
+        categories: Vec::new(),
     }
 }
 
@@ -306,7 +309,7 @@ fn in_own_inbox(row: &MailListRow, inboxes: &BTreeMap<String, String>) -> bool {
 
 /// The group a row belongs to: its resolved thread id, or its own provider key when the
 /// server never threaded it (a lone message is its own conversation).
-fn thread_key(row: &MailListRow) -> &str {
+pub(crate) fn thread_key(row: &MailListRow) -> &str {
     row.mail
         .thread_id
         .as_ref()

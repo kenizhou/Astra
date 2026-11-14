@@ -1,0 +1,23 @@
+[package]
+name = "astra-categories"
+description = "The device-local colour category store: global definitions and per-(account, thread) assignments, a local overlay that never writes the engine."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# The owning account's identity newtype the assignment rows carry across the
+# boundary.
+engine-api.workspace = true
+# The CategoryId newtype and the definition row cross the host boundary as
+# serde types.
+serde.workspace = true
+# The CategoryError enum.
+thiserror.workspace = true
+# The category store's sqlite: the engine's own stack, so one linked sqlite3
+# serves the engine store and the category store (see the workspace table).
+rusqlite = { workspace = true, features = ["fallible_uint"] }

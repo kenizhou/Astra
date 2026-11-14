@@ -309,6 +309,7 @@ dependencies = [
  "astra-account",
  "astra-ai",
  "astra-autodetect",
+ "astra-categories",
  "astra-composer",
  "astra-crypto-core",
  "astra-crypto-openpgp",
@@ -357,6 +358,16 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "url",
+]
+
+[[package]]
+name = "astra-categories"
+version = "0.2.0"
+dependencies = [
+ "engine-api",
+ "rusqlite",
+ "serde",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -630,6 +641,7 @@ dependencies = [
 name = "astra-viewmodel"
 version = "0.2.0"
 dependencies = [
+ "astra-categories",
  "astra-composer",
  "engine-api",
  "serde",

@@ -13,6 +13,7 @@
 //! the application core's protocol so an intent and the snapshot it changes
 //! name one type for the same concept.
 
+use astra_categories::CategoryId;
 use engine_api::{AccountId, ProviderKey, ThreadId};
 use serde::{Deserialize, Serialize};
 
@@ -110,6 +111,13 @@ pub struct MessageRowView {
     /// surface draws the count stack only when the field is present.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thread_count: Option<u32>,
+    /// The local colour categories the row's conversation carries, ids only.
+    ///
+    /// A device-local overlay folded onto the projected row, never engine
+    /// state: the names and colours resolve surface-side from the definitions
+    /// snapshot. Empty (and omitted on the wire) when the row carries none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub categories: Vec<CategoryId>,
 }
 
 #[cfg(test)]

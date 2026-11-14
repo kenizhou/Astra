@@ -23,6 +23,9 @@ astra-composer = { path = "../astra-composer" }
 astra-snooze = { path = "../astra-snooze" }
 # The device-local reminder store the core records and wakes over.
 astra-reminders = { path = "../astra-reminders" }
+# The device-local category store the core defines and assigns over (a local
+# overlay; no engine write).
+astra-categories = { path = "../astra-categories" }
 # The immutable snapshots the surfaces render, and the folder-row projection.
 astra-viewmodel = { path = "../astra-viewmodel" }
 # The built-in crypto: the send gate, the store and its outbox/transport, and

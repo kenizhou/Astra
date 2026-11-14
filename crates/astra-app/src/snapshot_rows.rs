@@ -27,10 +27,12 @@ impl<P: Provider> App<P> {
     ) -> Vec<astra_viewmodel::MessageRowView> {
         let window = self.load_window();
         let base = self.load_mail_rows(&folder.account, window).await;
-        let rows = self
+        let source = self
             .complete_threads(std::slice::from_ref(&folder.account), mode, base)
             .await;
-        list_rows::project(mode, &rows, &folder.key, limit)
+        let mut rows = list_rows::project(mode, &source, &folder.key, limit);
+        self.fold_categories(&mut rows, &source);
+        rows
     }
 
     /// Every account's inbox rows, merged newest first: the unified list. The
@@ -55,7 +57,7 @@ impl<P: Provider> App<P> {
                 .map(Arc::new)
                 .collect(),
         );
-        let rows = self.complete_threads(ids, mode, base).await;
+        let source = self.complete_threads(ids, mode, base).await;
         // Each account's inbox is its own key: an account whose tree holds no
         // role-bearing Inbox contributes no rows, never another account's.
         let inboxes: BTreeMap<String, String> = ids
@@ -67,7 +69,9 @@ impl<P: Provider> App<P> {
                     .map(|inbox| (id.as_str().to_owned(), inbox.id.as_str().to_owned()))
             })
             .collect();
-        list_rows::unified(mode, &rows, &inboxes, limit)
+        let mut rows = list_rows::unified(mode, &source, &inboxes, limit);
+        self.fold_categories(&mut rows, &source);
+        rows
     }
 
     /// The newest `window` rows of `account`, from the in-memory cache; one ordered

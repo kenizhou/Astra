@@ -133,6 +133,7 @@ fn a_snapshot_with_message_rows_crosses_with_the_list_fields_after_the_trees() {
         has_attachments: true,
         // A flat row carries no thread count; only a threaded one does.
         thread_count: None,
+        categories: Vec::new(),
     };
     let thread_row = MessageRowView {
         key: RowKey::Thread {
@@ -148,6 +149,7 @@ fn a_snapshot_with_message_rows_crosses_with_the_list_fields_after_the_trees() {
         flagged: true,
         has_attachments: false,
         thread_count: Some(3),
+        categories: Vec::new(),
     };
     let snapshot = MailboxListSnapshot {
         account_folders: vec![AccountFolderRow {
