@@ -22,11 +22,11 @@ use crate::app_state::{AppPort, HostAccount};
 
 use super::{compose_prefill, open_snapshot, FakeApp};
 
-// The key fake's state, its own child for the cap; the re-export keeps the path.
-mod keys_fake;
-pub(crate) use keys_fake::KeysFake;
+// The key, category, and watch fakes' state, each its own child for the cap.
 mod categories_fake;
-pub(crate) use categories_fake::CategoriesFake;
+mod keys_fake;
+mod watch_fake;
+pub(crate) use {categories_fake::CategoriesFake, keys_fake::KeysFake, watch_fake::WatchFake};
 
 #[async_trait::async_trait]
 impl AppPort for FakeApp {

@@ -35,6 +35,8 @@ use super::Screen;
 
 // The category leg's CategoriesPort impl, its own child (a distinct trait).
 mod categories;
+// The watch-replies leg's WatchPort impl, its own child (a distinct trait).
+mod watch;
 
 // The recorded answers, embedded from the fixture harness's directory at
 // compile time: the same JSON the browser harness serves, parsed here

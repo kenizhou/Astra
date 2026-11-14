@@ -4,10 +4,9 @@
 //! wrapper over [`AppState`]; the logic lives in the inner functions so the seam is
 //! exercised without a webview.
 //!
-//! The shape follows the unidirectional loop: `dispatch` takes an intent as JSON and
-//! hands it to the app on the runtime; `mailbox_list`, `sync_progress` and `reading`
-//! pull the immutable snapshots; `add_account` and `imap_test_connection` are the two
-//! account-setup verbs, the only commands that dial.
+//! The shape follows the unidirectional loop: `dispatch` hands an intent to the app on
+//! the runtime; the snapshot pulls read the immutable surfaces; `add_account` and
+//! `imap_test_connection` are the two account-setup verbs, the only commands that dial.
 
 use std::fmt::Write as _;
 
@@ -55,7 +54,7 @@ pub(crate) mod platform;
 // The mcp and plugin surfaces (the advanced panel's seam, the registry's verbs).
 pub(crate) mod mcp;
 pub(crate) mod plugin;
-// The jmap add, attachments Save As, attachment browser, eml save, crypto receive, category, snooze, and reminder surfaces.
+// The jmap add, attachments Save As, attachment browser, eml save, crypto receive, category, snooze, reminder, and watch surfaces.
 pub(crate) mod attachment_browser;
 pub(crate) mod attachments;
 pub(crate) mod categories;
@@ -64,6 +63,7 @@ pub(crate) mod eml;
 pub(crate) mod jmap;
 pub(crate) mod reminders;
 pub(crate) mod snooze;
+pub(crate) mod watch_replies;
 /// A command failure, serialised to the webview as its display string: a sentence a
 /// surface can show, with the reason the host saw.
 #[derive(Debug, thiserror::Error)]

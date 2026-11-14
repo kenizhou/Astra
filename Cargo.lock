@@ -523,6 +523,7 @@ dependencies = [
  "astra-reminders",
  "astra-snooze",
  "astra-viewmodel",
+ "astra-watches",
  "async-trait",
  "engine-api",
  "engine-provider",
