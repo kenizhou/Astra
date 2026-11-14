@@ -15,6 +15,8 @@
 import { dispatch, intents } from '@/services/ipc';
 import type { MessageRowView, SearchState, ViewMode } from '@/services/surfaces';
 import { useSettingsStore } from '@/features/settings/settingsStore';
+import { useCategoriesStore } from '@/features/categories/categoriesStore';
+import { useListFilterStore } from '@/stores/listFilterStore';
 import { useUiStore } from '@/stores/uiStore';
 import type { ListFilter } from './listFilter';
 
@@ -120,6 +122,9 @@ export function ListToolbar({ folderName, viewMode, filter, filterCounts, onFilt
   const exitSearch = () => {
     void dispatch(intents.search(null));
   };
+  const defs = useCategoriesStore((s) => s.defs);
+  const categoryFilter = useListFilterStore((s) => s.categoryFilter);
+  const setCategoryFilter = useListFilterStore((s) => s.setCategoryFilter);
 
   if (outbox) {
     return (
@@ -182,6 +187,25 @@ export function ListToolbar({ folderName, viewMode, filter, filterCounts, onFilt
                 </button>
               ))}
             </div>
+          )}
+          {search === null && (
+            <select
+              aria-label="Filter by category"
+              title="Filter by category"
+              disabled={defs.length === 0}
+              value={categoryFilter ?? ''}
+              onChange={(event) =>
+                setCategoryFilter(event.target.value === '' ? null : event.target.value)
+              }
+              className="shrink-0 rounded-[var(--radius-xs)] border border-border-subtle bg-background px-1.5 py-0.5 text-xs text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-50"
+            >
+              <option value="">All categories</option>
+              {defs.map((def) => (
+                <option key={def.id} value={def.id}>
+                  {def.name}
+                </option>
+              ))}
+            </select>
           )}
           <div
             role="group"

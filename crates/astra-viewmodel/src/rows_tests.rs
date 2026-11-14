@@ -101,6 +101,7 @@ fn a_flat_message_row_crosses_without_a_thread_count() {
         flagged: false,
         has_attachments: true,
         thread_count: None,
+        categories: Vec::new(),
     };
 
     let json = serde_json::to_string(&row).unwrap();
@@ -138,6 +139,7 @@ fn a_threaded_message_row_crosses_with_its_thread_count() {
         flagged: true,
         has_attachments: false,
         thread_count: Some(3),
+        categories: Vec::new(),
     };
 
     let json = serde_json::to_string(&row).unwrap();

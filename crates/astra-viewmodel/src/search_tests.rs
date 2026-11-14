@@ -28,6 +28,7 @@ fn thread_row() -> MessageRowView {
         flagged: true,
         has_attachments: false,
         thread_count: Some(3),
+        categories: Vec::new(),
     }
 }
 

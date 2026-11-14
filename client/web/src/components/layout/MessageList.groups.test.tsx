@@ -17,6 +17,11 @@ const ipc = vi.hoisted(() => ({
   imapTestConnection: vi.fn(),
 }));
 
+vi.mock('@/services/categories', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  listCategories: vi.fn().mockResolvedValue([]),
+}));
+
 vi.mock('@/services/ipc', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   ...ipc,
@@ -169,7 +174,7 @@ describe('the date group headers', () => {
     expect(
       screen.getAllByText('30 Sept').some((el) => el.getAttribute('role') === 'presentation'),
     ).toBe(true);
-    expect(screen.getAllByRole('option')).toHaveLength(4);
+    expect(within(screen.getByRole('listbox')).getAllByRole('option')).toHaveLength(4);
   });
 
   it('groups a row without a stamp under Earlier', () => {

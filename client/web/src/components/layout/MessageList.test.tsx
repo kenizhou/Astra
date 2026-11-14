@@ -19,6 +19,11 @@ const ipc = vi.hoisted(() => ({
   imapTestConnection: vi.fn(),
 }));
 
+vi.mock('@/services/categories', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  listCategories: vi.fn().mockResolvedValue([]),
+}));
+
 vi.mock('@/services/ipc', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   ...ipc,
@@ -130,7 +135,7 @@ describe('the message list', () => {
     expect(screen.getByText('notifications@example.test')).toBeTruthy();
     expect(screen.getByText('Your weekly digest')).toBeTruthy();
     expect(screen.getByText('8 Oct')).toBeTruthy();
-    expect(screen.getAllByRole('option')).toHaveLength(2);
+    expect(within(screen.getByRole('listbox')).getAllByRole('option')).toHaveLength(2);
     // The toolbar names the open folder.
     expect(screen.getByText('Inbox')).toBeTruthy();
   });
@@ -338,7 +343,7 @@ describe('the message list', () => {
     render(<MessageList />);
 
     expect(screen.getByText('No messages in this folder.')).toBeTruthy();
-    expect(screen.queryByRole('option')).toBeNull();
+    expect(screen.queryByRole('listbox')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull();
   });
 
@@ -349,7 +354,7 @@ describe('the message list', () => {
     render(<MessageList />);
 
     expect(screen.getByText('Select a folder to read its mail.')).toBeTruthy();
-    expect(screen.queryByRole('option')).toBeNull();
+    expect(screen.queryByRole('listbox')).toBeNull();
   });
 });
 
@@ -394,7 +399,7 @@ describe('the list filter', () => {
     act(() => {
       fireEvent.click(screen.getByRole('button', { name: 'Flagged 1' }));
     });
-    expect(screen.getAllByRole('option')).toHaveLength(1);
+    expect(within(screen.getByRole('listbox')).getAllByRole('option')).toHaveLength(1);
     expect(screen.getByText('Needs your sign off')).toBeTruthy();
     expect(screen.queryByText('Quarterly report')).toBeNull();
     expect(screen.queryByText('Your weekly digest')).toBeNull();
@@ -402,19 +407,19 @@ describe('the list filter', () => {
     act(() => {
       fireEvent.click(screen.getByRole('button', { name: 'Attachments 1' }));
     });
-    expect(screen.getAllByRole('option')).toHaveLength(1);
+    expect(within(screen.getByRole('listbox')).getAllByRole('option')).toHaveLength(1);
     expect(screen.getByText('Your weekly digest')).toBeTruthy();
 
     act(() => {
       fireEvent.click(screen.getByRole('button', { name: 'Unread 1' }));
     });
-    expect(screen.getAllByRole('option')).toHaveLength(1);
+    expect(within(screen.getByRole('listbox')).getAllByRole('option')).toHaveLength(1);
     expect(screen.getByText('Quarterly report')).toBeTruthy();
 
     act(() => {
       fireEvent.click(screen.getByRole('button', { name: 'All 3' }));
     });
-    expect(screen.getAllByRole('option')).toHaveLength(3);
+    expect(within(screen.getByRole('listbox')).getAllByRole('option')).toHaveLength(3);
   });
 
   it('resets the selection when the filter hides the selected row', () => {
@@ -461,7 +466,7 @@ describe('the list filter', () => {
     });
 
     expect(screen.getByText('Nothing matches this filter.')).toBeTruthy();
-    expect(screen.queryByRole('option')).toBeNull();
+    expect(screen.queryByRole('listbox')).toBeNull();
     // The folder itself is not empty, so the folder's own empty state stays away.
     expect(screen.queryByText('No messages in this folder.')).toBeNull();
   });

@@ -185,10 +185,10 @@ impl<P: Provider> App<P> {
         if mode == ViewMode::Threaded {
             self.complete_search_threads(&mut messages, ids).await;
         }
-        SearchOutcome {
-            rows: list_rows::search_project(mode, &messages, RESULT_LIMIT),
-            depth_months,
-        }
+        let mut rows = list_rows::search_project(mode, &messages, RESULT_LIMIT);
+        let source: Vec<_> = messages.iter().map(|m| Arc::clone(&m.row)).collect();
+        self.fold_categories(&mut rows, &source);
+        SearchOutcome { rows, depth_months }
     }
 
     /// Adds the non-matching members of every conversation the hits touch, so

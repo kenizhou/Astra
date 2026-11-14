@@ -34,6 +34,7 @@ import { openDraftRow, openDraftRowWindow } from '@/features/composer/draftOpen'
 import { usePinnedRowsStore } from '@/features/list-pin/pinnedRowsStore';
 import { useVipSendersStore } from '@/features/vip/vipSendersStore';
 import { blockSenderItem } from '@/features/junk-blocking/blockSenderMenu';
+import { categorizeItem } from '@/features/categories/categoryMenu';
 import { useSweepStore } from '@/features/sweep/sweepStore';
 import { useSnoozeStore } from '@/features/snooze/snoozeStore';
 import { useReminderStore } from '@/features/reminders/reminderStore';
@@ -366,6 +367,7 @@ export function buildRowMenu(
     pinItem(targets),
     vipItem(targets),
     blockSenderItem(targets, junkReportable(context)),
+    categorizeItem(targets),
     { separator: true },
     {
       label: 'Reply',

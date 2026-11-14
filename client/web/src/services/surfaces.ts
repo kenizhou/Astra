@@ -96,6 +96,9 @@ export interface MessageRowView {
   has_attachments: boolean;
   /** How many messages the conversation holds; absent on a flat row. */
   thread_count?: number;
+  /** The local colour categories the row carries, ids only; absent when none.
+   *  Names and colours resolve from the definitions snapshot, surface-side. */
+  categories?: string[];
 }
 
 /** What a search covers, crossing as a snake_case word. */

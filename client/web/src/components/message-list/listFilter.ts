@@ -36,6 +36,13 @@ export function filteredRows(
   }
 }
 
+/** Whether a row carries the category: the category filter's predicate,
+ *  ANDed onto the active tab at the list's render choke point. A local
+ *  overlay axis, separate from the tab; an absent category list carries none. */
+export function rowHasCategory(row: MessageRowView, categoryId: string): boolean {
+  return (row.categories ?? []).includes(categoryId);
+}
+
 /** The count badges the toolbar draws, over the unfiltered rows. */
 export function filterCounts(
   rows: MessageRowView[],

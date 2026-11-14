@@ -3,9 +3,10 @@
 //! it drives on, the per-account dial table, and the credential store. One value,
 //! registered once at boot, read back by every command through Tauri's `State`.
 
-// The core's whole `AppPort` impl, its own child for the line cap (one trait
-// impl for the one concrete type cannot split further).
+// The core's `AppPort` impl and the category supertrait, each its own child for the cap.
+mod categories_port;
 mod port;
+pub(crate) use categories_port::CategoriesPort;
 
 use std::sync::Arc;
 
@@ -43,11 +44,10 @@ pub(crate) type HostAccount = Account<HostProvider>;
 
 /// The app core the commands drive, behind the one seam the command surface holds.
 ///
-/// Production installs `App<HostProvider>` here. A test installs a fake over the
-/// same trait, so the command surface is exercised against the contract rather than
-/// a dialled server: what was dispatched, what was pulled, what an add registered.
+/// Production installs `App<HostProvider>` here; a test installs a fake over the
+/// same trait, so the surface is exercised against the contract, not a dialled server.
 #[async_trait]
-pub(crate) trait AppPort: Send + Sync {
+pub(crate) trait AppPort: CategoriesPort {
     /// Handles one inbound intent; the changed surface is signalled on completion.
     ///
     /// # Errors

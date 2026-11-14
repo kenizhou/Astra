@@ -22,6 +22,8 @@ mod attachments;
 mod body_warm;
 mod boot;
 mod calendar;
+mod categories;
+mod categories_overlay;
 mod compose_open;
 mod compose_request;
 mod crypto;
@@ -196,12 +198,9 @@ pub struct App<P> {
     /// The shared engine: one store, account-scoped, the only way mail is read or
     /// synced.
     engine: Arc<Engine>,
-    /// The configured accounts, each behind an [`Arc`]. Behind an async `RwLock`
-    /// because [`App::add_new_account_deferred`] mutates the set at runtime while the
-    /// sync and snapshot paths read it. The `Arc` lets a reader clone one account's
-    /// handle out under the guard and then **drop the guard before any network
-    /// `.await`**: so a long provider round-trip never holds the (write-preferring)
-    /// lock and stalls a concurrent add.
+    /// The configured accounts, each behind an [`Arc`] in an async `RwLock` so a
+    /// reader clones a handle out and drops the guard before any network `.await`:
+    /// a long provider round-trip never holds the lock and stalls a concurrent add.
     accounts: RwLock<Vec<Arc<Account<P>>>>,
     /// What the mailbox list is showing: the unified view, one account, or one folder
     /// of one account. One value, so a folder key never travels without the account it
@@ -215,9 +214,6 @@ pub struct App<P> {
     reading: Surfaced<Option<astra_viewmodel::ReadingSnapshot>>,
     /// The draft-status snapshot and its signal: the composition whose save moved
     /// and how it ended, or `None` when no composition has a save to report.
-    /// One cell for the same reason the reading pane has one: SP2d has one
-    /// composer, and the per-composition map is the multi-composer slice's to
-    /// add.
     draft_status: Surfaced<Option<astra_viewmodel::DraftStatusSnapshot>>,
     /// The compose-request snapshot and its signal: the composition the last
     /// reply or forward asked the host to open, or `None` when no request is
@@ -357,6 +353,8 @@ pub struct App<P> {
     snooze: Mutex<Option<Arc<astra_snooze::SnoozeStore>>>,
     /// The device-local reminder store the host installs; `None` records nothing.
     reminders: Mutex<Option<Arc<astra_reminders::ReminderStore>>>,
+    /// The device-local category store the host installs; `None` overlays nothing.
+    categories: Mutex<Option<Arc<astra_categories::CategoryStore>>>,
 }
 
 impl<P> core::fmt::Debug for App<P> {
@@ -436,6 +434,7 @@ impl<P: Provider> App<P> {
             analytics: Mutex::new(None),
             snooze: Mutex::new(None),
             reminders: Mutex::new(None),
+            categories: Mutex::new(None),
         }
     }
 
