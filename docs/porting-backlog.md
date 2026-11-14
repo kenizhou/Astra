@@ -76,7 +76,8 @@ tool budget.
   the loop (2026-11-12); the command palette, shortcuts help, hover
   actions, quote collapse, notification history, sweep, quick steps, pin,
   pinned searches, VIP, flag reminders, the attachment browser, junk
-  blocking, and categories have shipped, and the rest follow in turn.
+  blocking, categories, and watch-replies have shipped, and the rest follow
+  in turn.
 - **The AI remainder**: the assistant chat with tool budget was the one
   unstarted inbox-zero row; SP2y shipped it (2026-11-08, PR #60), live-proven
   armed over the harness and the model endpoint.

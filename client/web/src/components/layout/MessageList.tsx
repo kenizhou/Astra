@@ -48,6 +48,7 @@ import { SnoozeDialog } from '@/features/snooze/SnoozeDialog';
 import { ReminderDialog } from '@/features/reminders/ReminderDialog';
 import { CategoriesDialog } from '@/features/categories/CategoriesDialog';
 import { useCategoriesStore } from '@/features/categories/categoriesStore';
+import { useWatchStore } from '@/features/watch-replies/watchStore';
 import { dispatch, intents } from '@/services/ipc';
 import { useFolderStore } from '@/stores/folderStore';
 import { useListFilterStore } from '@/stores/listFilterStore';
@@ -230,6 +231,12 @@ export function MessageList() {
   // Categorize submenu, and the picker all resolve from this snapshot.
   useEffect(() => {
     void useCategoriesStore.getState().loadCategories();
+  }, []);
+
+  // The watch set loads once for the pane: the row menu's Watch replies /
+  // Unwatch label resolves from this snapshot.
+  useEffect(() => {
+    void useWatchStore.getState().loadWatches();
   }, []);
 
   // Whether the open folder is the account's drafts folder: its rows wear

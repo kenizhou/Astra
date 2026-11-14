@@ -21,6 +21,7 @@ import {
   CleanIcon as CleanIconData,
   Delete02Icon,
   EllipsisVerticalIcon as MoreIconData,
+  EyeIcon as EyeIconData,
   Flag02Icon,
   Folder01Icon,
   InformationCircleIcon as AboutIconData,
@@ -125,3 +126,4 @@ export const DiagnosticsIcon = makeIcon(Activity01Icon);
 export const PrivacyIcon = makeIcon(Shield01Icon);
 export const KeysIcon = makeIcon(Key01Icon);
 export const BellIcon = makeIcon(BellIconData);
+export const EyeIcon = makeIcon(EyeIconData);
