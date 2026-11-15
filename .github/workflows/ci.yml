@@ -29,7 +29,7 @@ jobs:
       # so the suite runs against a pinned one.
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 26
       # The offline agent e2e hosts the real sidecar bundle: install the
       # sidecar's dependencies and build it before the Rust tests run (the
       # test self-builds through esbuild when dist is absent, which needs
@@ -57,7 +57,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 26
       - name: Install sidecar dependencies
         run: npm --prefix sidecar ci
       - name: Build the sidecar bundle
@@ -85,7 +85,7 @@ jobs:
       # step; this node setup also serves the web client steps below.
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 26
       - name: Build the sidecar bundle for the Tauri resource
         run: |
           npm --prefix sidecar ci
