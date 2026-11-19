@@ -93,9 +93,9 @@ pub use engine_core::{
         OrganizationId, PersonId, ProviderKey, SharedAccountId, ThreadId, Uid,
     },
     mail::{
-        AttachmentPartId, EmailAddress, InlinePart, Keyword, Mailbox, MailboxAccess, MailboxRole,
-        Message, MessageAttachment, MessageAttachmentContent, MessageBody, SystemKeyword,
-        ThreadProvenance, ThreadRef,
+        AttachmentPartId, EmailAddress, Importance, InlinePart, Keyword, Mailbox, MailboxAccess,
+        MailboxRole, Message, MessageAttachment, MessageAttachmentContent, MessageBody,
+        SystemKeyword, ThreadProvenance, ThreadRef,
     },
     // The set-of-containers type an `Event`'s `calendars` and a `Message`'s mailbox memberships
     // are expressed in.
@@ -150,11 +150,11 @@ pub use engine_provider::{
     EventWriteReceipt, IdentityControls, InvitationError, Invitee, InviteePatch, InviteeRole,
     JitsiMeetings, JitsiServerError, KeywordName, MailEdit, MailEditReceipt, MailboxEdit,
     MailboxEditReceipt, MailboxWrites, MeetingDraft, MeetingKey, MeetingKeyError, MeetingRequest,
-    MeetingService, MessageReport, MimeWrapOutcome, MimeWrapper, NewConference, Occurrence,
-    OverrideSurvival, PatchTarget, Provider, RecurrenceEdit, ReplyDelivery, ReportControls,
-    ReportEvidence, ReportReceipt, ReportVerdict, ReportVerdicts, RsvpControls, RsvpResponse,
-    SchedulingIdentity, SenderIdentity, SenderIdentityId, SentCopy, SharedAccount, SharedAccounts,
-    SourceStream, StoreDomains, SubmissionReceipt, TextEdit, WriteGuard, WritePrecondition,
+    MeetingService, MessageReport, NewConference, Occurrence, OverrideSurvival, PatchTarget,
+    Provider, RecurrenceEdit, ReplyDelivery, ReportControls, ReportEvidence, ReportReceipt,
+    ReportVerdict, ReportVerdicts, RsvpControls, RsvpResponse, SchedulingIdentity, SenderIdentity,
+    SenderIdentityId, SentCopy, SharedAccount, SharedAccounts, SourceStream, StoreDomains,
+    SubmissionReceipt, TextEdit, WriteGuard, WritePrecondition,
 };
 pub use engine_recurrence::{
     ExpandError, Horizon, available_zones, day_bounds_utc, is_supported_zone, resolve_instant,
@@ -168,13 +168,14 @@ pub use engine_store::{
     TzdataVersion,
 };
 pub use engine_sync::{
-    AccountProgress, CalendarSyncReport, CalendarWriteOutcome, ContactReconcileReport,
-    ContactSourceReport, ContactSyncReport, ContactWriteOutcome, DraftPut, DrainOutcome,
-    DrainReport, DrainedOp, EventScopePass, EventScopeSync, EventSyncReport, FolderSync,
-    HorizonExpansion, IgnoreCommits, MailEditOutcome, MailEditSent, MailSyncReport, MailboxChange,
-    MailboxEditOutcome, MailboxNameError, MailboxPlace, PeopleRebuildReport, ProgressSnapshot,
-    PutDraftOutcome, ReportOutcome, StreamTuning, SubmitOutcome, SyncCommit, SyncError,
-    SyncObserver, SyncTiming, ThreadRebuildReport, UnexpandableEvent, validate_mailbox_name,
+    AccountProgress, CalendarReach, CalendarSyncReport, CalendarWriteOutcome,
+    ContactReconcileReport, ContactSourceReport, ContactSyncReport, ContactWriteOutcome, DraftPut,
+    DrainOutcome, DrainReport, DrainedOp, EventScopePass, EventScopeReach, EventScopeSync,
+    EventSyncReport, FolderSync, HorizonExpansion, IgnoreCommits, MailEditOutcome, MailEditSent,
+    MailSyncReport, MailboxChange, MailboxEditOutcome, MailboxNameError, MailboxPlace,
+    PeopleRebuildReport, ProgressSnapshot, PutDraftOutcome, ReportOutcome, ScopeReach,
+    StreamTuning, SubmitOutcome, SyncCommit, SyncError, SyncObserver, SyncTiming,
+    ThreadRebuildReport, UnexpandableEvent, validate_mailbox_name,
 };
 pub use scheduling::InboundScheduling;
 

@@ -39,11 +39,12 @@ mod capability_calendar;
 mod capability_contacts;
 mod capability_mailbox;
 mod capability_submission;
+mod capability_window;
 mod connect_observer;
 mod connection;
 mod contact;
+mod content_id;
 mod deadline;
-mod draft_attachment;
 mod error;
 mod hand_over;
 mod identity;
@@ -52,7 +53,6 @@ mod mail_edit;
 mod mailbox_edit;
 mod mailbox_write;
 mod meeting;
-mod mime_wrap;
 mod page;
 mod provider;
 #[cfg(feature = "http")]
@@ -95,7 +95,6 @@ pub use mailbox_write::MailboxWrites;
 pub use meeting::{
     JitsiMeetings, JitsiServerError, MeetingKey, MeetingKeyError, MeetingRequest, MeetingService,
 };
-pub use mime_wrap::{MimeWrapOutcome, MimeWrapper};
 pub use page::{PageToken, SyncKind, SyncPage};
 pub use provider::Provider;
 #[cfg(feature = "http")]
@@ -118,5 +117,10 @@ pub use watch::{Watch, WatchEvent};
 /// for a more responsive UI (see `engine-sync`).
 pub(crate) const DEFAULT_DRAIN_PAGE: usize = 500;
 
+#[cfg(test)]
+mod calendar_default_tests;
+#[cfg(test)]
+#[path = "draft_tests.rs"]
+mod draft_tests;
 #[cfg(test)]
 mod tests;

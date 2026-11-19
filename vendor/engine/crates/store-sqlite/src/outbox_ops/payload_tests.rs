@@ -71,7 +71,6 @@ fn failed(class: FailureClass) -> PendingOutcome {
     PendingOutcome::Failed {
         class,
         retry_after: None,
-        detail: String::new(),
     }
 }
 

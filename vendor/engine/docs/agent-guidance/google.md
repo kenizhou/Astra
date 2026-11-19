@@ -152,7 +152,9 @@ part way; `reconcile;h=…` is a backfill finished and not yet reconciled.
 
 - **Backfill** (no cursor, or `backfill;…`): capture the account `historyId` from `profile`
   **before** enumerating, then page `messages.list`, fetching each id full (`format=metadata` with a
-  fixed `metadataHeaders` set for a minimal, deterministic payload). `format=metadata` carries no
+  fixed `metadataHeaders` set for a minimal, deterministic payload, `Importance::HEADERS` among
+  it, since a metadata read returns no header it does not name; it returns every occurrence of one
+  it does, in the message's order, and the importance rule reads the last). `format=metadata` carries no
   parts tree, so these rows arrive with `has_attachment` false; the flag is settled when the
   message's source is read, by an open or the warming pass (`store-and-sync.md`, "The source
   answers the row's paperclip"). Reading the tree here would be `format=full`, three times the
@@ -320,7 +322,9 @@ per user per minute, about 270 messages a minute, and IMAP bills nothing per mes
   consequence a host feels rather than the adapter: **a saved Gmail draft cannot be
   correlated with a local copy by `Message-ID`**, so anything matching the two has to use
   the key `put_draft` returned. `tests/live_drafts.rs` pins the rewrite itself, and
-  identifies drafts by subject for exactly this reason.
+  identifies drafts by subject for exactly this reason. The `Date` header is replaced too,
+  with the moment of the save; every other header comes back as written, each occurrence of a
+  repeated one in order (`tests/fixtures/mail/message_metadata_importance*.json`).
 - ⚠️ **`drafts.create` refuses an empty `To` group.** `To: undisclosed-recipients:;`, the
   header a Bcc-only *send* carries, answers `400 invalidArgument` "Invalid To header", so a
   draft saved before anyone is addressed failed on every autosave (observed through a host).
@@ -398,8 +402,16 @@ read/sync **and** writes guarded by `If-Match` (`WriteGuard::Enforced`).
   data-loss). A per-instance override (`recurringEventId` set) is dropped (deferred —
   `calendar-semantics.md`); a `status:"cancelled"` entry is a tombstone.
 - **Sync** (`cal_fetch`): `events.list` with a per-calendar `nextSyncToken`. The window
-  (`timeMin`/`timeMax`) is **optional** and applies only to the initial snapshot (a
-  `syncToken` request cannot also carry a window). A `410` on a stale `syncToken`
+  (`timeMin`/`timeMax`) applies only to the initial snapshot (a `syncToken` request cannot
+  also carry a window). Google takes it as optional, but the provider advertises
+  `windowed_events` and the engine always names one (the `window` of `sync_events`): the
+  host's horizon at the first sync, or the union a `reach_calendar` reopens over. The provider
+  takes no window of its own. **A `syncToken` taken after a bounded list reports changes past
+  its bounds**: undocumented (`events.list` only forbids `timeMin`/`timeMax` beside a
+  `syncToken`), and measured in `tests/live_calendar_window.rs`, with an event created inside
+  the bounds as the control. Unlike a Graph `deltaLink`, which does not. It still never lists an
+  event that existed past the bounds and did not change, so the engine reopens the cursor over
+  the union rather than relying on the feed. A `410` on a stale `syncToken`
   classifies as `NeedsResync` → snapshot restart (the same mechanism as Gmail's
   history-expiry; here the error classifier maps `410` directly, no special case).
   **A subscribed holiday calendar never syncs incrementally.** Its snapshot carries a

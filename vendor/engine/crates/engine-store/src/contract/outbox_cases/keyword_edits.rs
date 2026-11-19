@@ -61,6 +61,7 @@ async fn stored<S: Store>(
         date_utc: Some("2026-01-03T00:00:00Z".parse::<UtcDateTime>().unwrap()),
         flags: MailFlags::from_keywords(&set(keywords)),
         has_attachment: false,
+        importance: engine_core::mail::Importance::Normal,
         size_octets: None,
         from_name: None,
         from_addr: None,
@@ -150,7 +151,6 @@ fn refused(class: FailureClass) -> PendingOutcome {
     PendingOutcome::Failed {
         class,
         retry_after: None,
-        detail: String::new(),
     }
 }
 

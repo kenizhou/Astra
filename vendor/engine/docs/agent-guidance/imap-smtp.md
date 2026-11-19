@@ -316,9 +316,13 @@ is authoritative for the `provider-caldav` calendar client.
   changes no longer needs `Engine::clear_mail_cursors` against a QRESYNC server — a plain
   delta sync reconciles them.
 - **Normalization.** `UID FETCH (UID FLAGS INTERNALDATE RFC822.SIZE ENVELOPE
-  BODY.PEEK[HEADER.FIELDS (REFERENCES CONTENT-TYPE CONTENT-DISPOSITION)])` (safe metadata — none
-  sets `\Seen`). The `References` header is not an `ENVELOPE` field, so it rides a
-  separate peek-safe body-header item to feed threading (`threading.md`).
+  BODY.PEEK[HEADER.FIELDS (REFERENCES IMPORTANCE X-MSMAIL-PRIORITY X-PRIORITY CONTENT-TYPE
+  CONTENT-DISPOSITION)])` (safe metadata — none sets `\Seen`). The `References` header is not an
+  `ENVELOPE` field, so it rides a separate peek-safe body-header item to feed threading
+  (`threading.md`); the headers that state a message's importance, `Importance::HEADERS`
+  (`modeling.md`), ride the same item, every occurrence of each, and `header_section` hands the
+  rule the last (live-verified, `tests/live_imap_importance.rs`; captured,
+  `tests/fixtures/importance_fetch.txt`).
   `BODYSTRUCTURE` is a **second** command, `UID FETCH <set> (UID BODYSTRUCTURE)`, over only the
   rows whose top-level headers do not show one text body (`engine-mime::is_single_text_body`:
   `text/plain` or `text/html`, or no `Content-Type`, and no `attachment` disposition); such a
@@ -561,7 +565,9 @@ credential.
   `In-Reply-To: <id>` when `Draft.in_reply_to` is set and `References: <id1> <id2> …`
   (space-separated, each angle-bracketed) when `Draft.references` is non-empty — each
   control-char-guarded like the other ids and omitted when its field is empty, so a
-  sent reply threads with its original (`threading.md`). The body is normalized so a
+  sent reply threads with its original (`threading.md`). An importance other than normal is
+  written as `Importance: high|low` and `X-Priority: 1 (Highest)|5 (Lowest)` in every assembly
+  (wire, filed copy, draft); normal writes neither. The body is normalized so a
   bare CR/LF never reaches the wire. Plain drafts emit `text/plain`; drafts with an
   HTML alternative emit `multipart/alternative`; CID-referenced inline attachments
   wrap the body in `multipart/related`; regular attachments wrap the result in
@@ -569,20 +575,6 @@ credential.
   attachment bodies are base64 encoded, and non-ASCII attachment filenames use
   RFC 5987-style `filename*` / `name*` parameters. (Long encoded-words are not yet
   folded into 75-octet runs — a later refinement.)
-- **The MIME-wrap seam (`MimeWrapper`, `wrap.rs`).** A host can install one
-  `engine_provider::MimeWrapper` per account (`ImapConfig::with_mime_wrapper`,
-  the `with_connect_observer` precedent) and ask for it per message with the
-  serde-defaulted `Draft::sign` / `Draft::encrypt` flags. When both line up,
-  submission preparation (`wrap::prepare_submission`, shared by `submit` and
-  `refile`) assembles the **filed** variant — the one with the `Bcc` header — and
-  hands it to the wrapper once; the wrapper returns both variants, the wire one
-  the same ciphertext minus the `Bcc` header. Preparation runs **before any
-  transport dials** and always before `HandOver::commit`, so a refusal — a
-  `ProviderError::permanent`, for a gate the user must resolve — settles the op
-  without a byte reaching the server, and the outbox's retry re-runs the whole
-  wrap. The Sent-copy repair (`refile`) re-wraps through the same helper: an
-  `Unfiled` wrapped send never re-files plaintext. With no wrapper installed, or
-  neither flag set, assembly is byte-for-byte the pre-seam one.
 - **Keywords on the Sent copy.** A draft's `sent_copy_keywords` ride the Sent `APPEND` as
   flags, and only where the folder's `PERMANENTFLAGS` carries `\*` (RFC 9051 §7.1):
   without it the server answers `OK` and keeps no new keyword, the same silent success

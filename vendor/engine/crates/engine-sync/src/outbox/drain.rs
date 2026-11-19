@@ -411,7 +411,6 @@ async fn decode<T: serde::de::DeserializeOwned>(
                 PendingOutcome::Failed {
                     class: FailureClass::Permanent,
                     retry_after: None,
-                    detail: "the queued payload could not be read by this build".to_owned(),
                 },
             )
             .await?;

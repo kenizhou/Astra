@@ -88,6 +88,7 @@ pub(crate) mod filing;
 mod folders;
 mod gmail;
 mod gmail_read;
+mod header_section;
 mod idle;
 mod listing;
 mod mail;
@@ -130,7 +131,6 @@ mod transport_store;
 mod unseen;
 mod utf7;
 mod watch;
-mod wrap;
 
 #[cfg(test)]
 mod integration;
