@@ -18,7 +18,7 @@
 
 use engine_core::{
     ids::{AccountId, MailboxId, MessageIdHeader, ProviderKey},
-    mail::{EmailAddress, Importance},
+    mail::{EmailAddress, Importance, MessageMetadata},
     sync::{SyncState, SyncUpdate},
 };
 use engine_provider::{Draft, Provider};
@@ -125,8 +125,14 @@ async fn live_graph_a_drafts_importance_follows_every_save() {
 
     // Created from MIME: the header is all Exchange is told.
     let key = provider
-        .put_draft(&account(), &draft(Importance::High), None)
+        .put_draft(
+            &account(),
+            &draft(Importance::High),
+            None,
+            &MessageMetadata::default(),
+        )
         .await
+        .map(|stored| stored.key)
         .expect("first save");
     let (first, mut cursor) = snapshot_importance(&provider, &key).await;
     assert_eq!(first, Importance::High);
@@ -136,8 +142,14 @@ async fn live_graph_a_drafts_importance_follows_every_save() {
     let mut current = key;
     for importance in [Importance::Low, Importance::Normal] {
         current = provider
-            .put_draft(&account(), &draft(importance), Some(&current))
+            .put_draft(
+                &account(),
+                &draft(importance),
+                Some(&current),
+                &MessageMetadata::default(),
+            )
             .await
+            .map(|stored| stored.key)
             .expect("re-save");
         let (read, next) = delta_importance(&provider, &current, &cursor).await;
         assert_eq!(read, importance);

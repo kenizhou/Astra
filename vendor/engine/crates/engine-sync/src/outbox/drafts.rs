@@ -20,6 +20,7 @@ use core::time::Duration;
 
 use engine_core::{
     ids::{AccountId, ProviderKey},
+    mail::MessageMetadata,
     write::{IdempotencyKey, PendingOp, PendingOpId, PendingOpKind, PendingOutcome, ResourceKey},
 };
 use engine_provider::{Draft, Provider};
@@ -38,6 +39,11 @@ pub struct DraftPut {
     /// The stored copy this one supersedes, if the draft has been saved before.
     #[serde(default)]
     pub replacing: Option<ProviderKey>,
+    /// The metadata the stored draft carries. Defaulted so a payload serialized before this
+    /// field still deserializes, and read from `keywords`, the keyword list a payload carried
+    /// before [`MessageMetadata`].
+    #[serde(default, alias = "keywords")]
+    pub metadata: MessageMetadata,
 }
 
 /// The result of a successful draft save through the outbox.
@@ -52,14 +58,25 @@ pub struct PutDraftOutcome {
     /// the key moves (`providers.md`). A caller that assumes otherwise stores a second
     /// copy beside the first on the next save.
     pub key: ProviderKey,
+    /// Of the metadata the save asked for, what the stored draft carries; see
+    /// [`DraftReceipt::kept`](engine_provider::DraftReceipt::kept).
+    ///
+    /// Only this outcome carries it: a save the outbox drains later reports nothing, and the
+    /// draft's keywords are then read from the next sync.
+    pub kept: MessageMetadata,
 }
 
-/// Stores `draft` on the server through the outbox, superseding `replacing`.
+/// Stores `draft` on the server through the outbox, superseding `replacing` and carrying
+/// `metadata`, the whole of what the stored draft should carry.
 ///
 /// # Errors
 ///
 /// [`SyncError::Provider`] if the save failed (after recording it), [`SyncError::Store`]
 /// on a store failure, or [`SyncError::Outbox`] if the payload could not be encoded.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "outbox lease parameters plus the draft, the copy it replaces and its metadata"
+)]
 pub async fn put_draft_mail<P, S>(
     provider: &P,
     store: &S,
@@ -68,6 +85,7 @@ pub async fn put_draft_mail<P, S>(
     ttl: Duration,
     draft: &Draft,
     replacing: Option<&ProviderKey>,
+    metadata: &MessageMetadata,
 ) -> Result<PutDraftOutcome, SyncError>
 where
     P: Provider,
@@ -76,6 +94,7 @@ where
     let request = DraftPut {
         draft: draft.clone(),
         replacing: replacing.cloned(),
+        metadata: metadata.clone(),
     };
     let payload = serde_json::to_value(&request)
         .map_err(|e| SyncError::Outbox(format!("encode draft put: {e}")))?;
@@ -98,19 +117,28 @@ where
     .await?;
 
     match provider
-        .put_draft(account, &request.draft, request.replacing.as_ref())
+        .put_draft(
+            account,
+            &request.draft,
+            request.replacing.as_ref(),
+            &request.metadata,
+        )
         .await
     {
-        Ok(key) => {
+        Ok(receipt) => {
             store
                 .mark_pending_op(
                     &leased.lease,
                     PendingOutcome::Succeeded {
-                        provider_key: key.clone(),
+                        provider_key: receipt.key.clone(),
                     },
                 )
                 .await?;
-            Ok(PutDraftOutcome { op: leased.id, key })
+            Ok(PutDraftOutcome {
+                op: leased.id,
+                key: receipt.key,
+                kept: receipt.kept,
+            })
         }
         Err(err) => {
             record_failure(store, &leased, &err).await?;

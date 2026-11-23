@@ -16,7 +16,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use engine_core::{
     ids::{AccountId, MessageIdHeader},
-    mail::{EmailAddress, Importance, Message},
+    mail::{EmailAddress, Importance, Message, MessageMetadata},
     sync::SyncUpdate,
 };
 use engine_provider::{Draft, MailEdit, Provider};
@@ -156,8 +156,10 @@ async fn a_drafts_importance_reads_back() {
                     importance,
                 ),
                 None,
+                &MessageMetadata::default(),
             )
             .await
+            .map(|stored| stored.key)
             .expect("save");
         let stored = find(&carol, &message_id).await.expect("the saved draft");
         assert_eq!(stored.envelope.importance, importance);

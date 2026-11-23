@@ -281,8 +281,8 @@ fn capabilities<S>(connection: &Connection<S>, smtp: bool) -> Capabilities {
         .with_mail()
         .with_mail_writes()
         // All three registered keywords are expressible; whether the *server* stores them is a
-        // per-mailbox fact (`\*` in `PERMANENTFLAGS`) that only a `SELECT` can answer, so the
-        // report path checks it per call and refuses rather than writing a flag the server
+        // per-mailbox fact (`PERMANENTFLAGS`, `crate::permanent`) that only a `SELECT` can answer,
+        // so the report path checks it per call and refuses rather than writing a flag the server
         // discards (`crate::report`). The evidence is `Convention`: IMAP has no way to say
         // whether anything trained on the keyword.
         .with_mail_report(ReportControls {
@@ -293,6 +293,9 @@ fn capabilities<S>(connection: &Connection<S>, smtp: bool) -> Capabilities {
         // Storing a draft is an `APPEND`, so it needs nothing submission needs: an account with
         // no SMTP transport configured can still keep drafts.
         .with_mail_drafts()
+        // On the draft's own `APPEND`; a Drafts folder that allows no new keywords gets the
+        // draft without them, and the receipt says so (`crate::place`).
+        .with_draft_keywords()
         // `CREATE`/`RENAME`/`DELETE` are base protocol on both dialects.
         .with_mailbox_writes();
     if smtp {

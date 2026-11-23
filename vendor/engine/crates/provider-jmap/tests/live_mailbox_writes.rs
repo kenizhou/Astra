@@ -15,7 +15,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use engine_core::{
     error::FailureClass,
     ids::{AccountId, MailboxId, MessageIdHeader, ProviderKey},
-    mail::{EmailAddress, Mailbox, MailboxRole, Message},
+    mail::{EmailAddress, Mailbox, MailboxRole, Message, MessageMetadata},
     sync::SyncUpdate,
 };
 use engine_provider::{Draft, MailEdit, MailboxEdit, MailboxWrites, Provider};
@@ -122,8 +122,9 @@ async fn file_message(provider: &JmapProvider, folder: &MailboxId, label: &str) 
         "Filed by the live folder test.",
     );
     let key = provider
-        .put_draft(&account(), &draft, None)
+        .put_draft(&account(), &draft, None, &MessageMetadata::default())
         .await
+        .map(|stored| stored.key)
         .expect("draft");
     provider
         .edit_mail(&account(), &MailEdit::move_to(key.clone(), folder.clone()))

@@ -9,19 +9,19 @@ use engine_core::{
     calendar::Event,
     contact::{AddressBook, ContactCard, ContactDraft, ContactPatch, ContactResource},
     ids::{AccountId, CalendarId, ContactId, ProviderKey},
-    mail::{Mailbox, Message},
+    mail::{Mailbox, Message, MessageMetadata},
     raw::RawMime,
-    sync::{SyncScope, SyncState, SyncWindow},
+    sync::{MailboxWindows, SyncScope, SyncState, SyncWindow},
     time::Horizon,
 };
 
 use crate::{
-    CalendarListing, CalendarUserAddresses, CalendarWrites, ConnectionInfo, ContactDestination,
-    ContactPhoto, ContactSourceSync, ContactWriteReceipt, ContactsProvider, Draft, EmailStream,
-    EventDeletion, EventDraft, EventEdit, EventRsvp, EventWrite, EventWriteReceipt, HandOver,
-    MailEdit, MailEditReceipt, MailboxEdit, MailboxEditReceipt, MailboxWrites, MessageReport,
-    Provider, ProviderResult, ReportReceipt, ScopeSync, SenderIdentity, SenderIdentityId,
-    SharedAccount, SourceStream, SubmissionReceipt,
+    CalendarListing, CalendarSync, CalendarUserAddresses, CalendarWrites, ConnectionInfo,
+    ContactDestination, ContactPhoto, ContactSourceSync, ContactWriteReceipt, ContactsProvider,
+    Draft, DraftReceipt, EmailStream, EventDeletion, EventDraft, EventEdit, EventRsvp, EventWrite,
+    EventWriteReceipt, HandOver, MailEdit, MailEditReceipt, MailboxEdit, MailboxEditReceipt,
+    MailboxWrites, MessageReport, Provider, ProviderResult, ReportReceipt, ScopeSync,
+    SenderIdentity, SenderIdentityId, SharedAccount, SourceStream, SubmissionReceipt,
 };
 
 /// A boxed provider is itself a [`Provider`], delegating every method to the box's
@@ -67,7 +67,7 @@ impl<P: Provider + ?Sized> Provider for Box<P> {
         &'a self,
         account: &'a AccountId,
         cursor: Option<&'a SyncState>,
-        window: SyncWindow,
+        window: MailboxWindows,
         fetch_batch: usize,
         chunk_size: usize,
     ) -> EmailStream<'a> {
@@ -104,8 +104,11 @@ impl<P: Provider + ?Sized> Provider for Box<P> {
         account: &AccountId,
         draft: &Draft,
         replacing: Option<&ProviderKey>,
-    ) -> ProviderResult<ProviderKey> {
-        (**self).put_draft(account, draft, replacing).await
+        metadata: &MessageMetadata,
+    ) -> ProviderResult<DraftReceipt> {
+        (**self)
+            .put_draft(account, draft, replacing, metadata)
+            .await
     }
 
     async fn delete_draft(&self, account: &AccountId, draft: &ProviderKey) -> ProviderResult<()> {
@@ -165,6 +168,16 @@ impl<P: Provider + ?Sized> Provider for Box<P> {
         (**self).resolve_shared_account(address).await
     }
 
+    #[cfg(feature = "import")]
+    fn mail_importer(&self) -> Option<&dyn crate::import::MailImporter> {
+        (**self).mail_importer()
+    }
+}
+
+/// The calendar-sync half, delegated for the same reason and under the same `?Sized` bound
+/// as the [`Provider`] impl above.
+#[async_trait]
+impl<P: CalendarSync + ?Sized> CalendarSync for Box<P> {
     fn calendar_scope(&self, account: &AccountId) -> SyncScope {
         (**self).calendar_scope(account)
     }

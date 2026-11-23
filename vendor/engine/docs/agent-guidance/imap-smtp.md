@@ -220,7 +220,8 @@ is authoritative for the `provider-caldav` calendar client.
   reset), so fetching a page whole before re-chunking is fine, and previews *are*
   hydrated there.
 - **Sync-depth window (per sync).** The sync-depth floor is now a **per-sync
-  argument** — `stream_email(…, window, …)` takes a `SyncWindow { since }` — so a host
+  argument** — `stream_email(…, window, …)` takes a `MailboxWindows`, of which the bound
+  mailbox fetches under its own `window_for` — so a host
   changes depth without reconnecting the provider; `ImapConfig::with_since(date)`
   survives only as the `default_sync_window` the whole-scope `sync_email` drain fetches
   under. Either way it bounds a **snapshot/backfill** to mail delivered on or after
@@ -354,7 +355,10 @@ is authoritative for the `provider-caldav` calendar client.
   `\Seen`/`\Flagged`/
   `\Answered`/`\Draft` map to their `$`-keywords; `\Deleted`/`\Recent` are
   deliberately not keywords (expunge/session model); custom keywords pass through.
-  `INTERNALDATE` → a UTC instant (offset applied). `ENVELOPE` → subject, flattened
+  `INTERNALDATE` → `received_at`, a UTC instant (offset applied). `ENVELOPE`'s first field, the
+  `Date` header → `sent_at`, through `engine_mime::date` (`mime.md`); an absent or unreadable
+  one is `None` (live-verified, `tests/live_imap_sent_at.rs`; captured,
+  `tests/fixtures/sent_at_fetch.txt`). `ENVELOPE` → subject, flattened
   addresses, and the `Message-ID`/`In-Reply-To` hints (the body-header item adds
   `References`) — the threading inputs; **RFC 2047 encoded-words** in
   the subject and display names are decoded (`B`/`Q`, UTF-8/ISO-8859-1/Windows-1252 —
@@ -575,18 +579,28 @@ credential.
   attachment bodies are base64 encoded, and non-ASCII attachment filenames use
   RFC 5987-style `filename*` / `name*` parameters. (Long encoded-words are not yet
   folded into 75-octet runs — a later refinement.)
-- **Keywords on the Sent copy.** A draft's `sent_copy_keywords` ride the Sent `APPEND` as
-  flags, and only where the folder's `PERMANENTFLAGS` carries `\*` (RFC 9051 §7.1):
-  without it the server answers `OK` and keeps no new keyword, the same silent success
-  `report.rs` refuses. Reading `PERMANENTFLAGS` needs a `SELECT`, which the first attempt
-  issues only when the draft asks for keywords, so an ordinary send costs nothing extra;
-  the retry reads it from the `SELECT` its probe already makes, and gives a copy it finds
-  already placed the keywords with an idempotent `+FLAGS`. A `SELECT` or `STORE` that
-  fails leaves them out rather than failing the placement. The receipt's
-  `sent_copy_keywords` names the ones the copy carries; a `PERMANENTFLAGS` that lists a
-  keyword by name without `\*` counts as not allowing it, since only `\*` is parsed. The
-  repair (`refile`) sets them the same way and returns only the key, so what it kept is
-  read from the next sync (`place.rs`, `tests/live_imap_sent_keywords.rs`).
+- **Which keywords a folder keeps: one rule, `permanent.rs`.** Every write that sets a keyword
+  (the `APPEND` of a Sent copy, a draft or an import; the `STORE` of a report verdict or of a
+  copy already placed) asks the folder's `PERMANENTFLAGS` (RFC 9051 §7.1), because a server that
+  cannot keep a flag answers `OK` and drops it. A keyword is kept when the list names it, or,
+  for anything but the four system flags, when it carries `\*`. With no `PERMANENTFLAGS` at all,
+  RFC 9051 §6.3.2 says every flag can be changed permanently, read as every flag `FLAGS` names;
+  creating a keyword it does not name is stated only by `\*`, so it is not assumed. One routine
+  (`store_message.rs`) applies the rule for every `APPEND`: it opens the folder only when a
+  keyword is asked for, once per folder, and a folder that refuses the `SELECT` gets the message
+  without the keywords. The answer reports what was kept, never the filing's own flags
+  (`\Seen` on a Sent copy, `\Draft \Seen` on a draft). The harness servers all list every
+  system flag and `\*` (`tests/fixtures/select_inbox_*.txt`); a folder that names its keywords
+  instead is pinned offline.
+- **Keywords on the Sent copy.** The keywords of a draft's `sent_copy_metadata` ride the Sent
+  `APPEND` as flags, by the rule above. Reading `PERMANENTFLAGS` needs a `SELECT`, which the
+  first attempt issues only when the draft asks for keywords, so an ordinary send costs nothing
+  extra; the retry reads it from the `SELECT` its probe already makes, and gives a copy it finds
+  already placed the keywords with an idempotent `+FLAGS`. A refused `SELECT` or a failed
+  `STORE` leaves them out rather than failing the placement. The receipt's `sent_copy_kept`
+  names the ones the copy carries. The server stamps the copy's arrival time, so an asked one is
+  neither sent nor kept. The repair (`refile`) sets them the same way and returns only the key,
+  so what it kept is read from the next sync (`place.rs`, `tests/live_imap_sent_keywords.rs`).
 - **Folder resolution.** The sent copy / draft is filed into the account's **real
   folder for the role**, discovered via the `\Sent`/`\Drafts` SPECIAL-USE attribute
   in a `LIST` (so a Gmail `[Gmail]/Sent Mail` or a localized name is honored), and
@@ -733,10 +747,30 @@ credential.
   mailbox or message on the line with it, and one folder nobody can name costs an account its
   entire `LIST`. `tokenize` keeps both bytes verbatim, so the name survives to be split like any
   other; what the escape *means* is the folder-list rule's business, not the tokenizer's.
+- **Import (`MailImporter`, the `import` feature, `import.rs`).** Reached through
+  `Provider::mail_importer`, which `ImapProvider` answers with itself. Each message is stored by
+  the one routine a Sent copy and a draft use (`store_message.rs`), into the mailbox it names:
+  one per message, so `max_mailboxes` is 1 and more is refused before anything is sent. Its
+  keywords ride the `APPEND` by the one rule above (a folder that refuses the `SELECT` takes the
+  message without them), and `ImportedMessage::kept` says which. The arrival time goes as the
+  `INTERNALDATE` (`"dd-Mon-yyyy hh:mm:ss +0000"`, UTC) in the whole seconds one holds, which is
+  the time `kept` reports; a time before year 0 has no `date-year`, so it is left for the server
+  to stamp. The stated size is `APPENDLIMIT=<n>` (a bare `APPENDLIMIT` is per mailbox and states
+  none). A tagged `NO` or `BAD` in place of the continuation is a refusal of that message alone,
+  and `TOOBIG` (RFC 7889) is `item_unavailable`. `APPEND` is not idempotent, so the transport
+  says which side of the point of no return a failure fell on (`AppendFailure`): until the
+  literal's closing CRLF is written nothing is stored; after it, a lost answer is
+  `requires_confirmation`. Either ends the batch, the connection is discarded, and every later
+  message is answered "not sent". `import_cursor` is the folder's sync cursor from the `SELECT` a
+  pass opens it with, so a delta from it through a provider bound to the folder lists what was
+  stored after it (`live_imap_import.rs`, Stalwart and both Dovecot revisions). A server may add
+  keywords of its own: Stalwart files every stored message `$hasattachment` or
+  `$hasnoattachment`.
 - **`put_draft` / `delete_draft` (no SMTP).** A draft is `APPEND`ed into the account's
   Drafts folder (resolved by `\Drafts` SPECIAL-USE, else creating `Drafts`) flagged
   `\Draft \Seen`, so keeping a draft works against any IMAP server even where SMTP
-  submission cannot. Unlike Sent placement an `APPEND` failure surfaces: saving the
+  submission cannot. The keywords of the metadata `put_draft` is given ride the same `APPEND`, by
+  the one rule (`permanent.rs`), reported in `DraftReceipt::kept` either way. Unlike Sent placement an `APPEND` failure surfaces: saving the
   draft is the whole op. `ImapProvider::save_draft` remains as the first-save
   convenience the example and the live suite use, and is the same code path.
 - **A re-save is `APPEND` then `UID STORE +FLAGS (\Deleted)` + `UID EXPUNGE`, in that
@@ -1070,8 +1104,8 @@ label means is `provider-google`'s (`google.md`, "Mail read over IMAP"), which i
   message in one response and one transaction. Per-page streaming of the delta is a later
   refinement. It still fetches `1:*` regardless of the sync-depth window, which is correct:
   `VANISHED` needs `1:*` to report already-expunged UIDs, and the window must restrict only
-  the *upserts*. It does — in the orchestrator, for every adapter's **delta** at once
-  (`SyncWindow::admits`, `store-and-sync.md`), so an out-of-window UID above the cursor
+  the *upserts*. It does — in `EmailChunk::into_update`, for every adapter's **delta** at once
+  (`MailboxWindows::admits`, `store-and-sync.md`), so an out-of-window UID above the cursor
   cannot re-enter the store. The snapshot path is not re-checked there: its bound is the
   `UID SEARCH SINCE` above, in the server's own date semantics. An *unsolicited* flag-only `FETCH` (no `ENVELOPE`) that the server
   interleaves mid-response is dropped, so it can never overwrite a stored message's
@@ -1342,11 +1376,11 @@ keyword — `$Junk`, `$NotJunk`, `$Phishing` — but IMAP keeps the flag and the
 different verbs, so it is two commands rather than one.
 
 **`PERMANENTFLAGS` is read before the write, and it is the only probe IMAP offers here.**
-RFC 9051 §7.1 makes `\*` the server's statement that a client may create new keywords.
-Without it a server answers `UID STORE +FLAGS ($Junk)` with a plain `OK` and stores nothing
-— the report would read as delivered and be absent on the next `FETCH`. `SelectData` now
-carries `permanent_flags_allow_new`, and a mailbox without it makes the report an
-`InvalidState` rather than a silent no-op.
+A server that cannot keep the verdict keyword answers `UID STORE +FLAGS ($Junk)` with a plain
+`OK` and stores nothing — the report would read as delivered and be absent on the next `FETCH`.
+`SelectData::permanent` carries what the mailbox said, and the report asks it by the one rule
+every keyword write follows (`permanent.rs`: named in `PERMANENTFLAGS`, or `\*`). A mailbox that
+keeps neither makes the report an `InvalidState` rather than a silent no-op.
 
 **That refusal branch has no server to exercise it.** Stalwart and both Dovecot dialects
 advertise `\*`, so the live suite can only pin the *premise* (`live_imap_report.rs` →

@@ -4,7 +4,13 @@
 //! shape** as well as the parse: what the server would have received is the only thing
 //! an offline run can get wrong in a way a live run would catch.
 
-use engine_core::{error::FailureClass, ids::ProviderKey};
+use std::collections::BTreeSet;
+
+use engine_core::{
+    error::FailureClass,
+    ids::ProviderKey,
+    mail::{Keyword, MessageMetadata},
+};
 use engine_provider::Provider;
 use serde_json::{Value, json};
 
@@ -39,7 +45,16 @@ async fn saving_again_creates_the_new_message_and_destroys_the_old() {
     ]);
 
     let old = ProviderKey::new("eaaaaaold").unwrap();
-    let key = p.put_draft(&account(), &draft(), Some(&old)).await.unwrap();
+    let key = p
+        .put_draft(
+            &account(),
+            &draft(),
+            Some(&old),
+            &MessageMetadata::default(),
+        )
+        .await
+        .unwrap()
+        .key;
 
     assert_eq!(key.as_str(), "eaaaaanew");
     let requests = executor.requests.lock().unwrap();
@@ -69,7 +84,9 @@ async fn a_first_save_destroys_nothing() {
         }),
     ]);
 
-    p.put_draft(&account(), &draft(), None).await.unwrap();
+    p.put_draft(&account(), &draft(), None, &MessageMetadata::default())
+        .await
+        .unwrap();
 
     let requests = executor.requests.lock().unwrap();
     assert!(set_arguments(&requests[1], 0).get("destroy").is_none());
@@ -86,7 +103,10 @@ async fn a_save_refused_for_quota_is_worth_retrying() {
         }),
     ]);
 
-    let err = p.put_draft(&account(), &draft(), None).await.unwrap_err();
+    let err = p
+        .put_draft(&account(), &draft(), None, &MessageMetadata::default())
+        .await
+        .unwrap_err();
 
     // Not permanent: a mailbox over quota now may be under it later, so the op parks
     // and comes back rather than discarding what the user wrote.
@@ -99,7 +119,10 @@ async fn an_account_with_no_drafts_mailbox_says_so() {
         "methodResponses": [["Mailbox/get", { "list": [] }, "0"]]
     })]);
 
-    let err = p.put_draft(&account(), &draft(), None).await.unwrap_err();
+    let err = p
+        .put_draft(&account(), &draft(), None, &MessageMetadata::default())
+        .await
+        .unwrap_err();
 
     // Permanent rather than retryable: no amount of waiting grows a Drafts mailbox,
     // and the caller has to keep the draft itself.
@@ -147,4 +170,34 @@ async fn a_refused_destroy_that_is_not_absence_is_reported() {
     let err = p.delete_draft(&account(), &key).await.unwrap_err();
 
     assert_eq!(err.class(), FailureClass::Permanent);
+}
+
+#[tokio::test]
+async fn a_draft_s_keywords_are_part_of_its_create_and_reported_kept() {
+    let (p, executor) = recording(vec![
+        fixture("drafts_mailbox_get.json"),
+        json!({
+            "methodResponses": [["Email/set", {
+                "created": { "draft": { "id": "eaaaaanew" } }
+            }, "0"]]
+        }),
+    ]);
+    let keywords = BTreeSet::from([Keyword::new("project-x").unwrap()]);
+
+    let receipt = p
+        .put_draft(
+            &account(),
+            &draft(),
+            None,
+            &MessageMetadata::default().with_keywords(keywords.clone()),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(receipt.kept.keywords, keywords);
+    let requests = executor.requests.lock().unwrap();
+    assert_eq!(
+        set_arguments(&requests[1], 0)["create"]["draft"]["keywords"],
+        json!({ "$draft": true, "$seen": true, "project-x": true })
+    );
 }

@@ -21,7 +21,7 @@
 
 use engine_core::{
     ids::{AccountId, MessageIdHeader},
-    mail::{EmailAddress, MailboxRole, Message, SystemKeyword},
+    mail::{EmailAddress, MailboxRole, Message, MessageMetadata, SystemKeyword},
     sync::SyncUpdate,
 };
 use engine_provider::{Draft, Provider};
@@ -115,8 +115,14 @@ async fn live_gmail_replacing_a_draft_keeps_its_draft_id() {
     let message_id = &format!("live-gmail-draft-{run}@test.local");
 
     let first = p
-        .put_draft(&account(), &draft(message_id, first_subject), None)
+        .put_draft(
+            &account(),
+            &draft(message_id, first_subject),
+            None,
+            &MessageMetadata::default(),
+        )
         .await
+        .map(|stored| stored.key)
         .expect("first save");
     println!("gmail draft id: {}", first.as_str());
     let after_first = snapshot(&p).await;
@@ -137,8 +143,14 @@ async fn live_gmail_replacing_a_draft_keeps_its_draft_id() {
     );
 
     let second = p
-        .put_draft(&account(), &draft(message_id, second_subject), Some(&first))
+        .put_draft(
+            &account(),
+            &draft(message_id, second_subject),
+            Some(&first),
+            &MessageMetadata::default(),
+        )
         .await
+        .map(|stored| stored.key)
         .expect("second save");
 
     // The one adapter here whose key survives a re-save: `drafts.update` replaces the
@@ -186,8 +198,9 @@ async fn live_gmail_a_draft_with_no_recipients_is_stored() {
     );
 
     let key = p
-        .put_draft(&account(), &unaddressed, None)
+        .put_draft(&account(), &unaddressed, None, &MessageMetadata::default())
         .await
+        .map(|stored| stored.key)
         .expect("a draft with no recipients is stored");
     p.delete_draft(&account(), &key).await.expect("discard");
 }
@@ -204,8 +217,14 @@ async fn live_gmail_a_saved_draft_is_labelled_a_draft() {
     let message_id = &format!("live-gmail-draft-label-{run}@test.local");
 
     let key = p
-        .put_draft(&account(), &draft(message_id, subject), None)
+        .put_draft(
+            &account(),
+            &draft(message_id, subject),
+            None,
+            &MessageMetadata::default(),
+        )
         .await
+        .map(|stored| stored.key)
         .expect("save");
 
     // `drafts.create` puts the message under the DRAFT label by Gmail's own behaviour:

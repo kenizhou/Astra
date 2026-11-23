@@ -18,14 +18,15 @@ use std::{
 use async_trait::async_trait;
 use engine_core::{
     ids::{AccountId, MailboxId, ProviderKey, SharedAccountId},
-    mail::{Mailbox, Message},
-    sync::{SyncScope, SyncState, SyncUpdate, SyncWindow},
+    mail::{Mailbox, Message, MessageMetadata},
+    sync::{MailboxWindows, SyncScope, SyncState, SyncUpdate, SyncWindow},
     time::CalendarDate,
 };
 use engine_provider::{
-    CalendarWrites, ConnectionInfo, Draft, EmailStream, MailEdit, MailEditReceipt, MailboxEdit,
-    MailboxEditReceipt, MailboxWrites, MessageReport, Provider, ProviderError, ProviderResult,
-    ReportReceipt, ScopeSync, SharedAccount, SharedAccounts, SourceStream, SubmissionReceipt,
+    CalendarSync, CalendarWrites, ConnectionInfo, Draft, DraftReceipt, EmailStream, MailEdit,
+    MailEditReceipt, MailboxEdit, MailboxEditReceipt, MailboxWrites, MessageReport, Provider,
+    ProviderError, ProviderResult, ReportReceipt, ScopeSync, SharedAccount, SharedAccounts,
+    SourceStream, SubmissionReceipt,
 };
 use futures_util::StreamExt;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -145,6 +146,13 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static> ImapProvider<S> 
 
 #[async_trait]
 impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static> Provider for ImapProvider<S> {
+    /// IMAP imports by `APPEND` (`crate::import`), so a host holding this adapter as a
+    /// `dyn Provider` reaches it here.
+    #[cfg(feature = "import")]
+    fn mail_importer(&self) -> Option<&dyn engine_provider::import::MailImporter> {
+        Some(self)
+    }
+
     /// The negotiated facts, and as many overlapping body fetches as the account has worker
     /// connections for right now: each fetch borrows its own from the pool, so the width is the
     /// pool's, less the connections its watches hold. Read per call, because it moves as
@@ -215,13 +223,14 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static> Provider for Ima
         &'a self,
         _account: &'a AccountId,
         cursor: Option<&'a SyncState>,
-        window: SyncWindow,
+        window: MailboxWindows,
         fetch_batch: usize,
         chunk_size: usize,
     ) -> EmailStream<'a> {
-        // An unbounded caller window falls back to the construction cutoff
-        // (`with_since`), so a provider built with a depth still windows its streamed
-        // backfill; an explicit per-sync window overrides it.
+        // The bound mailbox fetches under its own window. An unbounded one falls back to the
+        // construction cutoff (`with_since`), so a provider built with a depth still windows
+        // its streamed backfill; an explicit per-sync window overrides it.
+        let window = window.window_for(&self.mailbox);
         let window = if window.is_bounded() {
             window
         } else {
@@ -303,8 +312,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static> Provider for Ima
         self.refile(draft).await
     }
 
-    /// Stores a draft in the account's `\\Drafts` folder (`APPEND`), removing the copy it
-    /// supersedes.
+    /// Stores a draft in the account's `\\Drafts` folder (`APPEND`, carrying the keywords the
+    /// folder keeps), removing the copy it supersedes.
     ///
     /// A thin borrow-and-call, like [`Provider::edit_mail`]: the ordering rule that decides
     /// whether a partial failure duplicates a draft or loses one lives in `crate::drafts`,
@@ -314,10 +323,13 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static> Provider for Ima
         _account: &AccountId,
         draft: &Draft,
         replacing: Option<&ProviderKey>,
-    ) -> ProviderResult<ProviderKey> {
+        metadata: &MessageMetadata,
+    ) -> ProviderResult<DraftReceipt> {
         let mut connection = self.session().await?;
         let result = match self.store_on(&mut connection).await {
-            Ok(store) => crate::drafts::put_draft(&mut connection, &store, draft, replacing).await,
+            Ok(store) => {
+                crate::drafts::put_draft(&mut connection, &store, draft, replacing, metadata).await
+            }
             Err(err) => Err(err),
         };
         connection.settle(result)
@@ -412,6 +424,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static> Provider for Ima
         connection.settle(found)
     }
 }
+
+impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static> CalendarSync for ImapProvider<S> {}
 
 /// Changes the folder tree of the store this provider covers (`CREATE`, `RENAME`, `DELETE`)
 /// over a pooled session.
