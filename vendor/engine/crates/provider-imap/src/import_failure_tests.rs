@@ -2,6 +2,8 @@
 //! connection ends the batch, and whether a message may be stored turns on whether its command
 //! was whole when the connection went.
 
+use engine_provider::{TargetRefusal, import::not_sent};
+
 use super::*;
 
 #[tokio::test]
@@ -36,10 +38,13 @@ async fn a_connection_lost_once_the_message_went_out_may_have_stored_it_and_ends
     let answers = provider.import_messages(&account(), &batch).await;
 
     assert_eq!(answers.len(), 2);
-    assert!(answers[0].as_ref().unwrap_err().requires_confirmation());
+    let ending = answers[0].as_ref().unwrap_err();
+    assert!(ending.requires_confirmation());
     let unsent = answers[1].as_ref().unwrap_err();
     assert!(!unsent.requires_confirmation(), "{unsent}");
     assert_eq!(class(&answers[1]), FailureClass::Retryable);
+    // The one rule every importer answers an unsent message by.
+    assert_eq!(unsent.detail(), not_sent(ending).detail());
 }
 
 #[tokio::test]
@@ -136,11 +141,50 @@ async fn a_batch_that_cannot_get_a_connection_is_answered_whole_by_that_failure(
         .await;
 
     assert_eq!(answers.len(), 2);
-    assert!(answers.iter().all(Result::is_err));
+    for answer in &answers {
+        let unsent = answer.as_ref().unwrap_err();
+        assert!(unsent.detail().starts_with("not sent"), "{unsent}");
+        assert!(!unsent.requires_confirmation());
+    }
     assert_eq!(
         written(&recorded).matches("APPEND").count(),
         1,
         "the failed connection was discarded, not reused: {}",
         written(&recorded)
     );
+}
+
+/// The target's state refusing one message (`providers.md`, "Import"): a full mailbox
+/// (`OVERQUOTA`), a folder that does not exist (`TRYCREATE`) and one this credential may not
+/// write (`NOPERM`) each refuse their message alone, named, and the batch goes on.
+#[tokio::test]
+async fn a_refusal_by_the_target_s_state_refuses_its_message_alone_and_names_why() {
+    let (provider, _) = provider(&[
+        "a3 NO [OVERQUOTA] Mailbox is full\r\n",
+        "a4 NO [TRYCREATE] No such mailbox\r\n",
+        "a5 NO [NOPERM] Read-only mailbox\r\n",
+        "+ go\r\n",
+        "a6 OK APPEND done\r\n",
+    ])
+    .await;
+    let batch = [
+        message(b"one", &["INBOX"]),
+        message(b"two", &["INBOX"]),
+        message(b"three", &["INBOX"]),
+        message(b"four", &["INBOX"]),
+    ];
+
+    let answers = provider.import_messages(&account(), &batch).await;
+
+    for (answer, reason) in answers.iter().zip([
+        TargetRefusal::StorageFull,
+        TargetRefusal::NoSuchContainer,
+        TargetRefusal::ReadOnlyContainer,
+    ]) {
+        let refused = answer.as_ref().unwrap_err();
+        assert_eq!(refused.target_refusal(), Some(reason), "{refused}");
+        assert_eq!(refused.class(), FailureClass::InvalidState);
+        assert!(!refused.is_item_unavailable() && !refused.requires_confirmation());
+    }
+    assert!(answers[3].is_ok());
 }

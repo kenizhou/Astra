@@ -26,12 +26,19 @@ bound from the send, connect included, which is only sound while the connect giv
 
 ## Where each transport applies them
 
-- **IMAP and SMTP** (`provider-imap/src/deadline.rs`): `connect` and `handshake` take `dial`;
+- **IMAP and SMTP** (`provider-imap/src/deadline.rs`): asking the account's credential source,
+  and asking it for a replacement after a refusal, each take `dial`, because the ask is part of
+  the dial (`engine_provider::with_credential`); `connect` and `handshake` take `dial`;
   `Connection::read_line` takes `reply`, so the greeting and every command's response are
   bounded without a call site having to remember; a `BODY[]` fetch reads under `stall`; every
   write goes out through `deadline::write`, 8 KiB a piece under `stall`; `smtp::converse`
   waits `submission` for the end of data.
-- **HTTP** (`engine-http/src/deadline.rs`): the client every adapter builds with
+- **HTTP** (`engine-http/src/authenticated.rs`, `deadline.rs`): a request that carries the
+  account's credential asks the credential source for it, and for a replacement after a `401`,
+  each under `reply` (`engine_http::AuthenticatedClient::send`), because the ask is part of the
+  request and nothing has been sent yet, a submission's included. After a `401`, up to 64 KiB
+  of the refusal's body is read before the replacement is asked, for five seconds at most and
+  best effort: a cut-off or trickling body leaves the refusal standing, never a lost answer. The client every adapter builds with
   `engine_http::client(tls, user_agent)` carries `dial` as reqwest's connect timeout, which
   covers the lookup, the connect and the handshake together. `send_retrying` hands reqwest
   the request body in pieces and watches them go: `stall` between pieces, then `reply` (or `submission`,
@@ -71,6 +78,8 @@ that never sends a message twice.
 | Provider | Operation | Bound | A timeout (or lost connection) there is |
 |---|---|---|---|
 | every one | connect, TLS handshake | `dial` | `Retryable`: nothing reached the server |
+| IMAP, SMTP | asking the credential source for a credential, or for a replacement after a refusal | `dial`, each ask | `Retryable`: no session was opened and no message sent (SMTP's `AUTH` precedes `MAIL FROM`) |
+| JMAP (every HTTP adapter on `AuthenticatedClient`) | asking the credential source for a credential, or for a replacement after a `401` | `reply`, each ask | `Retryable`: the request was not sent, a submission included |
 | IMAP | greeting, `LOGIN`, `AUTHENTICATE`, `CAPABILITY`, `ENABLE`, `STARTTLS`, `SELECT`/`EXAMINE`, `LIST`, `SEARCH`, metadata `FETCH`, `STORE`, `MOVE`, `EXPUNGE`, `CREATE`, `APPEND`'s continuation and completion, `IDLE`'s start and `DONE` | `reply` per line | `Retryable` |
 | IMAP | a `BODY[]` literal, single or batched | `stall` per read | `Retryable` |
 | IMAP | every write, an `APPEND` literal included | `stall` per 8 KiB | `Retryable` |

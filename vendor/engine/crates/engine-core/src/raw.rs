@@ -148,6 +148,23 @@ raw_text! {
     RawProviderJson
 }
 
+raw_text! {
+    /// A provider's own form of an out-of-office reply, preserved verbatim: the JMAP
+    /// `VacationResponse` object, or later Graph's `automaticRepliesSetting` and Gmail's
+    /// `VacationSettings` JSON, which carry facts the neutral
+    /// [`VacationResponse`](crate::vacation::VacationResponse) does not (Graph's schedule zone).
+    /// It holds the reply's subject and text, so its `Debug` shows only the length.
+    RawVacation
+}
+
+raw_text! {
+    /// A provider's own form of an account's mail rules, preserved verbatim: the active Sieve
+    /// script, or later the rules' JSON. A write copies from it every rule the caller did not
+    /// change, so a script someone wrote by hand keeps its comments and layout. It holds rule
+    /// values, so its `Debug` shows only the length.
+    RawRules
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

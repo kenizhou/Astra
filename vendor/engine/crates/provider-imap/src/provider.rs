@@ -19,7 +19,7 @@ use async_trait::async_trait;
 use engine_core::{
     ids::{AccountId, MailboxId, ProviderKey, SharedAccountId},
     mail::{Mailbox, Message, MessageMetadata},
-    sync::{MailboxWindows, SyncScope, SyncState, SyncUpdate, SyncWindow},
+    sync::{MailboxWindows, SyncScope, SyncState, SyncUpdate, SyncWindow, Widening},
     time::CalendarDate,
 };
 use engine_provider::{
@@ -28,11 +28,11 @@ use engine_provider::{
     ProviderError, ProviderResult, ReportReceipt, ScopeSync, SharedAccount, SharedAccounts,
     SourceStream, SubmissionReceipt,
 };
-use futures_util::StreamExt;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::{
     filing::SmtpSender,
+    managesieve::Sieve,
     pool::{ImapPool, PooledConnection},
     store::Namespaces,
 };
@@ -48,7 +48,7 @@ pub struct ImapProvider<S> {
     /// `pub(crate)` so the [`crate::filing`] submission/draft helpers (split out to keep this
     /// file under the size limit) can borrow a session.
     pub(crate) pool: Arc<ImapPool<S>>,
-    mailbox: MailboxId,
+    pub(crate) mailbox: MailboxId,
     /// The resolved SMTP transport, or `None` when submission is unconfigured.
     /// `pub(crate)` so [`crate::filing`] (which owns the submission dispatch) reads it.
     pub(crate) smtp: Option<Arc<SmtpSender>>,
@@ -67,6 +67,9 @@ pub struct ImapProvider<S> {
     /// (`crate::folders`) — never at connect, which most providers would pay for nothing —
     /// and shared by every provider of the account, so the login asks once.
     pub(crate) namespaces: Arc<OnceLock<Namespaces>>,
+    /// The account's rules and out-of-office reply over ManageSieve, where the host configured it
+    /// and it answered when the account connected (`crate::managesieve`).
+    sieve: Option<Arc<dyn Sieve>>,
 }
 
 impl<S> core::fmt::Debug for ImapProvider<S> {
@@ -100,7 +103,14 @@ impl<S> ImapProvider<S> {
             connection_info,
             shared_account,
             namespaces,
+            sieve: None,
         }
+    }
+
+    /// Offers the account's rules and reply through `sieve` (builder-style).
+    pub(crate) fn with_sieve(mut self, sieve: Option<Arc<dyn Sieve>>) -> Self {
+        self.sieve = sieve;
+        self
     }
 
     /// Wraps an already-open, logged-in connection bound to `mailbox` (mail only), in an
@@ -151,6 +161,30 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static> Provider for Ima
     #[cfg(feature = "import")]
     fn mail_importer(&self) -> Option<&dyn engine_provider::import::MailImporter> {
         Some(self)
+    }
+
+    /// Over ManageSieve, where the host configured it ([`ImapConfig::with_managesieve`]) and the
+    /// last probe of its greeting succeeded (at connect, or beside a later dial after a failure
+    /// that may pass or `ImapAccount::invalidate`); never for a shared mail store, whose rules are
+    /// its owner's. `Some` says the service answered, not that signing in works: no credential
+    /// was presented, so a credential ManageSieve does not carry, or a token where the server
+    /// offers only `PLAIN`, fails at the first call.
+    ///
+    /// [`ImapConfig::with_managesieve`]: crate::ImapConfig::with_managesieve
+    fn mail_rules(&self) -> Option<&dyn engine_provider::MailRules> {
+        self.sieve
+            .as_deref()
+            .filter(|sieve| sieve.offered().is_some())
+            .map(|sieve| sieve as &dyn engine_provider::MailRules)
+    }
+
+    /// As [`mail_rules`](Self::mail_rules), where the server also listed `vacation`: the reply is
+    /// a rule of the same script, sharing its version. The same caveat on signing in holds.
+    fn vacation(&self) -> Option<&dyn engine_provider::Vacation> {
+        self.sieve
+            .as_deref()
+            .filter(|sieve| sieve.offered() == Some(true))
+            .map(|sieve| sieve as &dyn engine_provider::Vacation)
     }
 
     /// The negotiated facts, and as many overlapping body fetches as the account has worker
@@ -236,49 +270,20 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static> Provider for Ima
         } else {
             self.default_sync_window()
         };
-        Box::pin(async_stream::stream! {
-            let mut connection = match self.session().await {
-                Ok(connection) => connection,
-                Err(err) => {
-                    yield Err(err);
-                    return;
-                }
-            };
-            // A provider scoped to a shared store syncs that store's folders only. Binding any
-            // other folder to it would put that folder's mail in the shared mailbox's account
-            // — refused, not synced.
-            if self.shared_account.is_some()
-                && let Err(refusal) = self.check_in_store(&mut connection, &self.mailbox).await
-            {
-                connection.discard();
-                yield Err(refusal);
-                return;
-            }
-            // The stream holds its connection for as long as it lives, and hands it back
-            // healthy only if every item was: a pass that failed mid-way has left the session
-            // in a state no one should inherit. One abandoned mid-fetch parks normally — the
-            // connection drains the leftover response before its next command.
-            let mut failed = false;
-            {
-                let pass = crate::stream::stream_email(
-                    &mut connection,
-                    Some(&self.pool),
-                    &self.mailbox,
-                    cursor,
-                    window,
-                    fetch_batch,
-                    chunk_size,
-                );
-                futures_util::pin_mut!(pass);
-                while let Some(item) = pass.next().await {
-                    failed = item.is_err();
-                    yield item;
-                }
-            }
-            if failed {
-                connection.discard();
-            }
-        })
+        self.folder_stream(cursor, window, fetch_batch, chunk_size)
+    }
+
+    /// Fetches the bound folder's band of `widening` (`crate::band`): only the older mail the
+    /// wider window adds, keeping the delta cursor, its position checkpointed at each fetch group.
+    fn widen_email<'a>(
+        &'a self,
+        _account: &'a AccountId,
+        cursor: &'a SyncState,
+        widening: &'a Widening,
+        fetch_batch: usize,
+        chunk_size: usize,
+    ) -> EmailStream<'a> {
+        self.band_stream(cursor, widening, fetch_batch, chunk_size)
     }
 
     /// Submits `draft` over the configured SMTP transport and files the sent copy in

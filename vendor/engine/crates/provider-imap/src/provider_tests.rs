@@ -63,6 +63,12 @@ async fn scopes_are_imap_shaped() {
     assert!(!provider.connection_info().capabilities.sent_copy_keywords());
     // A draft is an `APPEND`, so it needs no SMTP, and its keywords ride that `APPEND`.
     assert!(provider.connection_info().capabilities.draft_keywords());
+    assert!(
+        provider
+            .connection_info()
+            .capabilities
+            .widens_mail_by_band()
+    );
     assert!(!provider.connection_info().capabilities.calendars());
     // This provider's connection never ran CAPABILITY negotiation, so push (IDLE) is
     // not advertised — it is gated on the server, like submission is on SMTP.
@@ -434,16 +440,15 @@ async fn submit_email_without_a_transport_is_rejected() {
 }
 
 #[test]
-fn config_debug_redacts_the_password() {
+fn config_debug_redacts_the_password_and_the_username() {
     let config = ImapConfig::new(
         "127.0.0.1:11993",
         "localhost",
-        crate::credentials::Credentials::password("alice@test.local", "super-secret"),
+        engine_provider::Credential::password("alice@test.local", "super-secret"),
     );
     let shown = format!("{config:?}");
-    assert!(shown.contains("alice@test.local"));
-    assert!(
-        !shown.contains("super-secret"),
-        "password must not leak: {shown}"
-    );
+    assert!(shown.contains("127.0.0.1:11993"), "{shown}");
+    for leaked in ["super-secret", "alice"] {
+        assert!(!shown.contains(leaked), "{leaked} leaked: {shown}");
+    }
 }

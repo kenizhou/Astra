@@ -10,7 +10,7 @@
 
 use std::future::Future;
 
-use engine_provider::{ConnectObserver, ConnectStep, TlsVersion};
+use engine_provider::{ConnectObserver, ConnectStep, Credential, CredentialProtocol, TlsVersion};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::TcpStream,
@@ -19,15 +19,15 @@ use tokio_rustls::{TlsConnector, client::TlsStream, rustls::pki_types::ServerNam
 
 use crate::{
     config::{ImapConfig, ImapSecurity},
-    credentials::{Credentials, with_renewal},
+    credentials::{PresentedIdentity, SignIn, another_account, sign_in, with_credential},
     deadline,
     error::{ImapError, ImapResult},
     tls_info,
     transport::Connection,
 };
 
-/// Opens a TCP + TLS connection (implicit or `STARTTLS`), authenticates with the config's
-/// [`Credentials`], and negotiates capabilities (ENABLE QRESYNC + record IDLE): the one
+/// Opens a TCP + TLS connection (implicit or `STARTTLS`), authenticates with a credential from
+/// the config's source, and negotiates capabilities (ENABLE QRESYNC + record IDLE): the one
 /// dial behind [`ImapAccount::connect`](crate::ImapAccount::connect) and every connection
 /// the account's pool opens after it, so the first connection and the hundredth are made
 /// the same way and present the same credential.
@@ -39,12 +39,14 @@ use crate::{
 /// # Errors
 ///
 /// [`ImapError`] on a TCP/TLS/authentication failure or a bad server name, or
-/// [`ImapError::Credential`] when the config's source has no credential to give.
+/// [`ImapError::Credential`] when the config's source does not permit the server, has no
+/// credential to give, or gives none within the dial deadline.
 pub(crate) async fn connect_session(
     config: &ImapConfig,
+    presented: &PresentedIdentity,
     connector: &TlsConnector,
 ) -> Result<(Connection<TlsStream<TcpStream>>, Option<TlsVersion>), ImapError> {
-    dial_with(config, || {
+    dial_with(config, presented, || {
         open_secured(
             &config.addr,
             &config.server_name,
@@ -56,13 +58,21 @@ pub(crate) async fn connect_session(
 }
 
 /// The authenticated half of a dial over whatever `open` connects: asks the config's
-/// [`CredentialSource`](crate::CredentialSource) for a credential, and when the server
-/// refuses it and the source renews it, opens a **fresh** connection and presents the
-/// renewal. One re-dial at most, and none for a password, whose source never renews.
+/// [`CredentialSource`](crate::CredentialSource) for a credential to present over IMAP to the
+/// config's [origin](ImapConfig::origin), and when the server refuses it and the source has a
+/// replacement, opens a **fresh** connection and presents that. One re-dial at most, and none
+/// for a fixed password, whose source never replaces. A credential IMAP cannot present opens
+/// no connection at all.
 ///
 /// A new connection rather than a second `AUTHENTICATE` on the refused one, because a
 /// server may close a connection after a failed sign-in, and one that does not has still
 /// counted the attempt.
+///
+/// Every dial of one account shares `presented`: once a dial has signed in, a credential
+/// naming another account fails before anything is opened ([`PresentedIdentity`]). A
+/// replacement must name the account the refused credential named, whatever is remembered: a
+/// source that answers a refusal with another account's credential is answering for the wrong
+/// subject, on the first dial as on any other.
 ///
 /// Generic over the stream so the offline suite drives it over scripted connections.
 ///
@@ -71,6 +81,7 @@ pub(crate) async fn connect_session(
 /// As [`connect_session`].
 pub(crate) async fn dial_with<S, F, Fut>(
     config: &ImapConfig,
+    presented: &PresentedIdentity,
     mut open: F,
 ) -> ImapResult<(Connection<S>, Option<TlsVersion>)>
 where
@@ -78,11 +89,30 @@ where
     F: FnMut() -> Fut,
     Fut: Future<Output = ImapResult<(Connection<S>, Option<TlsVersion>)>>,
 {
-    with_renewal(config.credentials.as_ref(), |credentials| {
-        let opening = open();
+    let origin = config.origin();
+    let source = config.credentials.as_ref();
+    // The account this dial's first credential named; a replacement must name the same.
+    let mut first: Option<String> = None;
+    with_credential(source, CredentialProtocol::Imap, &origin, |credential| {
+        let opening = sign_in(&credential)
+            .and_then(|_| {
+                // `sign_in` refused every credential without one, so this is never empty.
+                let identity = credential.authorization_identity().unwrap_or_default();
+                match &first {
+                    Some(first) if first != identity => return Err(another_account()),
+                    Some(_) => {}
+                    None => first = Some(identity.to_owned()),
+                }
+                presented.check(identity)?;
+                Ok(identity.to_owned())
+            })
+            .map(|identity| (identity, open()));
         async move {
+            let (identity, opening) = opening?;
             let (connection, tls_version) = opening.await?;
-            let connection = finish_session(connection, tls_version, config, &credentials).await?;
+            let connection = finish_session(connection, tls_version, config, &credential).await?;
+            // Dropping the connection on a mismatch closes it: it never reaches the pool.
+            presented.remember(&identity)?;
             Ok((connection, tls_version))
         }
     })
@@ -136,7 +166,7 @@ pub(crate) async fn open_secured(
     Ok((connection, tls_version))
 }
 
-/// Authenticates with `credentials` and negotiates the dialect over an already-greeted
+/// Authenticates with `credential` and negotiates the dialect over an already-greeted
 /// `connection`, reporting [`ConnectStep::TlsEstablished`] (when the handshake agreed a version),
 /// then [`ConnectStep::Authenticated`], then [`ConnectStep::Negotiated`] to the config's
 /// observer.
@@ -153,28 +183,35 @@ pub(crate) async fn finish_session<S: AsyncRead + AsyncWrite + Unpin + Send>(
     mut connection: Connection<S>,
     tls_version: Option<TlsVersion>,
     config: &ImapConfig,
-    credentials: &Credentials,
+    credential: &Credential,
 ) -> Result<Connection<S>, ImapError> {
     let observer: &dyn ConnectObserver = config.connect_observer();
     if let Some(version) = tls_version {
         observer.step(&ConnectStep::TlsEstablished(version));
     }
     // A password logs in; an access token goes over SASL, with the mechanism chosen
-    // from what this server advertises (`crate::sasl`). Either way the next line is the
-    // same: the observer is told the session is authenticated, not *how*.
-    match credentials {
-        Credentials::Password { username, password } => {
+    // from what this server advertises (`crate::sasl`); an administrator acting as another
+    // account goes over SASL `PLAIN`. Whichever it is, the next line is the same: the observer is
+    // told the session is authenticated, not *how*.
+    match sign_in(credential)? {
+        SignIn::Password { username, password } => {
             connection.login(username, password).await?;
         }
-        Credentials::OAuth2 {
+        SignIn::ActingAs {
             username,
-            access_token,
+            password,
+            acting_as,
         } => {
+            connection
+                .authenticate_acting_as(username, password, acting_as)
+                .await?;
+        }
+        SignIn::Token { username, token } => {
             // `server_name` (not the dial `addr`) is the host an `OAUTHBEARER` response
             // names: it is the server's own name, which is what a loopback-mapped
             // fixture and a real deployment agree on.
             connection
-                .authenticate_oauth2(username, access_token, &config.server_name, config.port())
+                .authenticate_oauth2(username, token, &config.server_name, config.port())
                 .await?;
         }
     }
@@ -198,3 +235,11 @@ mod tests;
 #[cfg(test)]
 #[path = "dial_renewal_tests.rs"]
 mod renewal_tests;
+
+#[cfg(test)]
+#[path = "dial_credential_tests.rs"]
+mod credential_tests;
+
+#[cfg(test)]
+#[path = "dial_identity_tests.rs"]
+mod identity_tests;

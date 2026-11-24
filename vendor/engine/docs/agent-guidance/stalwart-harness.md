@@ -255,8 +255,8 @@ and the cross-compile build.
 | Account | Holds | Used for |
 | --- | --- | --- |
 | `alice@test.local` | **the whole shared seed** (mail, calendar, contacts) | every read/sync/write suite; several assert its exact mailbox and calendar counts |
-| `bob@test.local` | nothing | scratch: the SMTP recipient in the submission tests, the **organizer** in the scheduling suite, the **grantor** of the read-only share below, and the dated mail the mailbox-window suites plant (`Harness::plant_dated_email_as`) and remove again |
-| `carol@test.local` | nothing | scratch: the **attendee** in the scheduling suite |
+| `bob@test.local` | nothing | scratch: the SMTP recipient in the submission tests, the **organizer** in the scheduling suite, the **grantor** of the read-only share below, the home of the calendar import suite's scratch calendar (made and removed by each run), and the dated mail the mailbox-window suites plant (`Harness::plant_dated_email_as`) and remove again |
+| `carol@test.local` | nothing | scratch: the **attendee** in the scheduling suite, the import target of `provider-imap`'s and `provider-jmap`'s live import suites, which delete the folders they make, and the account whose out-of-office reply and Sieve scripts `provider-jmap`'s `live_vacation`, `live_rules` and `live_rules_reply`, and `provider-imap`'s ManageSieve suites (`managesieve::live_tests`, `live_provider_tests`, over port 14190), write and then restore (one test function each, so the binaries, which Cargo runs one after another, never touch her scripts at once; the ManageSieve tests share one binary and take a lock, `ONE_AT_A_TIME`); `live_rules_reply` delivers mail to her from Bob, and Bob receives her replies, both removed afterwards by a run marker |
 | `dave@test.local` | one calendar, `Dave Shared`, with one event | the **calendar-only** grantor: shares that calendar with Alice read-only, and no mail |
 | `support@test.local` | `12-shared.eml` in its INBOX, `support-rota.ics` in its calendar | a **group** principal — a mailbox with no credentials of its own, which Alice belongs to |
 
@@ -391,6 +391,25 @@ five back-to-back `live_caldav` runs, where the fourth used to fail. `rateLimitA
 unauthenticated requests and fails on a harness started before the change, so a stale container
 says so rather than flaking.
 
+That authenticated limit stays because `live_concurrency` measures the server's own refusals, and
+it is per account: 1,000 requests a minute. One run of a suite fits; the same suite in a loop on
+one scratch account does not, and the runs after the first fail on `429`, before any assertion
+about the code. Leave half a minute between repeated runs, and read a `429` in a loop as the
+loop's fault, not the code's.
+
+### The ban on failed sign-ins is not disarmed
+
+`x:Security`'s **`authBanRate`** bans a client IP after **100 failed sign-ins a day** (v1.0.2,
+`authBanPeriod` unset), and every harness test signs in from `127.0.0.1`, so a ban stops every
+live suite at once. The entrypoint leaves it as shipped, because a test that presents a wrong
+password should cost something visible. Such a test counts its wrong attempts against this budget
+and says so in its header: `provider-imap/tests/live_imap_credential.rs` spends three a run.
+Repeated runs of a wrong-password test belong on the Dovecot harness, which bans nobody.
+`x:BlockedIp/get` with `ids: null` lists the addresses banned so far.
+
+When several worktrees share these servers, take a lock (`flock`) around every live run, reseed
+and `docker compose`, so one checkout's reseed cannot land in the middle of another's run.
+
 ## The seed dataset — and the invariant each fixture protects
 
 One shared dataset, loaded into `alice@test.local`. Fixtures carry content the
@@ -501,6 +520,12 @@ run. Non-negotiable:
   Both read like a broken server. Fix a date when the *client* is what interprets it;
   derive it from today when the *server's* behaviour turns on whether it has passed, and
   when you fix one suite's fixture, grep the others for the same shape.
+- **Tests that share a scratch account need markers no other contains.** The tests of one binary
+  run at once, and a suite that plants mail picks out its own by a subject marker. JMAP's
+  `Email/query` `subject` filter matches substrings, so a residue sweep for `jmapband` can destroy
+  `jmapbandkill`'s mail mid-run, and a `starts_with` check counted that mail as its own: a failure
+  seen on CI only, where the two tests overlapped in time (#393). Give each test a marker that is
+  not a prefix or substring of another's, and match it with the space that follows it.
 - **Readiness, not sleeps.** The compose healthcheck gates on a post-seed marker
   *and* HTTP liveness; `Harness::wait_until_ready` polls `/healthz/live`. Never a
   fixed sleep.

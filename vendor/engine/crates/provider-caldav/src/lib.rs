@@ -43,14 +43,22 @@
 
 mod caldav_config;
 mod calendar;
+mod calendar_create;
+#[cfg(feature = "import")]
+mod calendar_import;
 mod carddav;
 mod carddav_config;
 mod carddav_ops;
+mod contact_create;
+#[cfg(feature = "import")]
+mod contact_import;
 mod credential_hosts;
 mod credential_scope;
 mod ctag_sync;
 mod dav;
 mod dav_client;
+#[cfg(feature = "import")]
+mod dav_import;
 mod delete_guard;
 mod discovery;
 mod error;
@@ -58,6 +66,8 @@ mod href;
 pub mod imip;
 mod multiget;
 mod owners;
+#[cfg(feature = "import")]
+mod precondition;
 mod provider;
 mod request;
 mod response;
@@ -74,6 +84,7 @@ mod vcard_escape;
 mod vcard_property;
 mod vcard_write;
 mod write;
+mod write_refusal;
 
 #[cfg(test)]
 mod bound_tests;

@@ -510,6 +510,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bytes",
+ "engine-core",
  "engine-provider",
  "engine-tls",
  "http",
@@ -553,8 +554,10 @@ dependencies = [
  "http",
  "serde",
  "serde_json",
+ "time",
  "tokio",
  "url",
+ "zeroize",
 ]
 
 [[package]]
@@ -586,6 +589,13 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+]
+
+[[package]]
+name = "engine-sieve"
+version = "0.1.0"
+dependencies = [
+ "engine-core",
 ]
 
 [[package]]
@@ -1544,6 +1554,7 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
+ "sha2",
  "stalwart-harness",
  "store-sqlite",
  "thiserror",
@@ -1605,6 +1616,7 @@ dependencies = [
  "engine-provider",
  "engine-rfc5322",
  "engine-search",
+ "engine-sieve",
  "engine-store",
  "engine-sync",
  "engine-tls",
@@ -1612,6 +1624,7 @@ dependencies = [
  "rcgen",
  "serde",
  "serde_json",
+ "sha2",
  "stalwart-harness",
  "store-sqlite",
  "tempfile",
@@ -1619,6 +1632,7 @@ dependencies = [
  "time",
  "tokio",
  "tokio-rustls",
+ "zeroize",
 ]
 
 [[package]]
@@ -1632,7 +1646,9 @@ dependencies = [
  "engine-mime",
  "engine-provider",
  "engine-recurrence",
+ "engine-rfc5322",
  "engine-search",
+ "engine-sieve",
  "engine-store",
  "engine-sync",
  "engine-tls",
@@ -1641,6 +1657,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "sha2",
  "stalwart-harness",
  "store-sqlite",
  "tempfile",

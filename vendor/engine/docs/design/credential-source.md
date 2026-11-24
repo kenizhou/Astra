@@ -1,8 +1,10 @@
 # Design note: one provider-neutral `CredentialSource`
 
-Status: accepted. The direction is principle 7 of `north-star.md`: **credentials are asked for,
-not held.** The owner settled every open question on 2026-11-23 ("Decisions", at the end), and
-the body below states each decision where it applies. One `CredentialSource` is a "Next" step in
+Status: accepted; steps 1 to 3 of "Phasing" have landed (`engine_provider::credential`,
+IMAP/SMTP on it, the IMAP authorization identity, and JMAP on `engine_http::AuthenticatedClient`). The direction is principle 7 of
+`north-star.md`: **credentials are asked for, not held.** The owner settled every open
+question on 2026-11-23 ("Decisions", at the end), and the body below states each decision where
+it applies. One `CredentialSource` is a "Next" step in
 `north-star.md` ("Direction"); the capability-trait split comes after it and the query seam
 (`north-star.md`, "Key Decisions").
 
@@ -97,7 +99,10 @@ pub enum Credential {
 /// Who a source signs in as: stable, not secret, unique within the process. Supplied by
 /// the host (sync: its account id; transfer: the mailbox-pair side; direct: tenant + OIDC `sub`).
 /// Its own type, not `AccountId`: a store-less host may reuse account ids across tenants.
-pub struct CredentialSubject(Box<str>);
+/// `Debug` says named or minted, never the name, which is often personal.
+pub struct CredentialSubject(Subject);
+enum Subject { Named(Box<str>), Unique(u64) } // private: `new(name)`, or minted by
+                                              // `FixedCredential::unique`, never equal to a name
 
 /// Where a credential is about to go: scheme, lowercase host, effective port. For IMAP and SMTP
 /// the host is the TLS server name, not the dial address (a loopback fixture maps them).
@@ -105,7 +110,7 @@ pub struct Origin { /* scheme, host, port */ }
 
 /// The protocol a credential is about to be presented over.
 #[non_exhaustive]
-pub enum CredentialProtocol { Imap, Smtp, Http }
+pub enum CredentialProtocol { Imap, Smtp, ManageSieve, Http }
 
 #[non_exhaustive]
 pub struct CredentialRequest<'a> {
@@ -133,7 +138,12 @@ identity, sent as `AUTHENTICATE PLAIN` with an `authzid` (RFC 4616), which is al
 master user signs in as another user. `Credential` gains one variant for it, carrying the
 administrator's username and secret and the mailbox to act as. It is a new request shape, so it
 ships only after a live Dovecot test with a master user proves it ("Phasing", step 2).
-`#[non_exhaustive]` lets it arrive without breaking anyone.
+`#[non_exhaustive]` lets it arrive without breaking anyone. As built it is
+`Credential::ActingAs { username, password, acting_as }` (`Credential::acting_as`). **The engine
+cannot verify that the server honoured the authorization identity**: IMAP has no way to ask whose
+session opened, and a server that ignores it signs the administrator in to its own mailbox
+without an error (Stalwart does, `spec-deviations.md`, STALWART-9). A host uses the variant
+only against servers it has verified honour it.
 
 `Debug` on `Credential` prints the variant and `username: <present>`, never the username itself.
 Today's IMAP, JMAP and CalDAV types print it. A host serving thousands of tenants must not have
@@ -197,9 +207,12 @@ endpoint or broker cannot hang a sync, a transfer or a user's request.
 ask, attempt, and on a refusal ask `replace` once and attempt again. A second refusal is returned
 as it came. What counts as a refusal is decided by each adapter, and the rule is narrow:
 
-- IMAP: `ImapError::Auth` from `LOGIN`/`AUTHENTICATE` (not `[LIMIT]`, not temporary codes). The
-  retry uses a **new connection**, as today.
-- SMTP: `535` at `AUTH`, before `MAIL FROM`, so a send is never repeated.
+- IMAP: `ImapError::Auth` from `LOGIN`/`AUTHENTICATE` (not `[LIMIT]`, not temporary codes, not a
+  server offering no mechanism the credential can use). The retry uses a **new connection**, as
+  today.
+- SMTP: `535` at `AUTH`, before `MAIL FROM`, so a send is never repeated. Other `AUTH` failures
+  (`504`, `530`, `534`, `538`, `432`) keep the `Authentication` class as
+  `ImapError::AuthUnsupported`, and ask for no replacement.
 - HTTP: a `401` to a request **that carried the credential**, where the challenge offers the
   credential's scheme or no challenge was sent at all (YAHOO-1 in `spec-deviations.md`). JMAP first
   runs its scheme re-framing, which does not change the credential, and asks for a replacement only
@@ -213,7 +226,8 @@ as it came. What counts as a refusal is decided by each adapter, and the rule is
 The HTTP half lives in `engine-http` beside the send funnel, as `send_authenticated(source,
 request, build, is_refusal)`. `build` makes the request from a credential, and `is_refusal` is the
 adapter's predicate. Every adapter goes through this one funnel, so no path can forget to ask, to
-check `permits`, or to replay.
+check `permits`, or to replay. (As built in step 3, the funnel is
+`engine_http::AuthenticatedClient`, which also builds the client it sends on; see "Phasing".)
 
 ### Host binding
 
@@ -229,6 +243,28 @@ There are two layers, and the source can only narrow:
    JMAP session, gets no credential, and the request fails as `Permanent` before anything is sent.
    This is an engine rule rather than a `permits` default, so no host can forget it. Every live
    harness serves on `127.0.0.1`, so none of them is affected.
+
+   **The loopback exception holds only for an account configured on plaintext loopback**
+   (`engine_http::AuthenticatedClient` is built for the configured origin). This narrows decision 5
+   below, which allowed any loopback origin. An account configured over `https` never sends its
+   credential over `http://`, loopback included: a session served over `https` may advertise an
+   `http://127.0.0.1:…` `eventSourceUrl`, `downloadUrl` or `uploadUrl` (kept verbatim where its
+   origin differs from the API's, and always under `TrustAdvertised`), and whatever listens on
+   the worker's own loopback, which a multi-tenant host shares with every other process, would
+   read the credential in cleartext. It is the rule `redirect_target` already applies to a hop
+   off TLS. The exception exists for harnesses and servers on the same machine, and those are
+   configured on loopback themselves.
+
+   **No proxy sees a plaintext credential.** reqwest reads `HTTP_PROXY` and `ALL_PROXY` from the
+   environment when a client is built and applies them to loopback too, unless `NO_PROXY` lists
+   it (reqwest 0.13.5, `async_impl/client.rs`, `auto_sys_proxy`; the matcher is hyper-util
+   0.1.20's `client/proxy/matcher.rs`, whose `intercept` skips only what `NO_PROXY` names). So
+   `engine_http::AuthenticatedClient::new` builds its client with `no_proxy()`
+   when the configured origin is plaintext loopback, the one case where a credential goes in
+   cleartext and a case that never needs a proxy, and keeps the environment's proxies for every
+   other account, so a host behind a corporate proxy still reaches its servers over `https`.
+   `engine_http::client` is unchanged; the authenticated client is built on it (through a private
+   `client_for`, which nothing outside `engine-http` needs).
 2. **`CredentialSource::permits(origin)`, the host's policy.** It is checked for the configured
    origin before anything is sent, and for every origin discovery adds. A refusal fails the
    connect, and nothing is sent. It replaces `provider_caldav::CredentialHosts`, which keeps
@@ -269,10 +305,12 @@ let provider = jmap.bind(Arc::new(SessionSource::from(&oidc_session)));
   users of one JMAP server have different sessions.
 - **IMAP sockets are authenticated**, so the endpoint holds a pool registry keyed by `(origin,
   subject)`. Each pool has the existing per-subject ceiling, and the registry adds a process-wide
-  ceiling. A pool remembers the username its first dial presented (for the authorization-identity
-  variant, the mailbox acted as, not the administrator), and a later credential naming another
-  fails the dial (`InvalidState`). That cheaply catches a host bug that gives one user's subject
-  another user's credential.
+  ceiling. A pool remembers the username its first dial signed in with (for the
+  authorization-identity variant, the mailbox acted as, not the administrator), and a later
+  credential naming another fails the dial (`InvalidState`). That cheaply catches a host bug that
+  gives one user's subject another user's credential. This check landed in step 2, on today's
+  per-account pool (`provider_imap::credentials::PresentedIdentity`); a dial whose credential was
+  refused fixes nothing.
 - **Eviction has engine defaults that the host can override.** The per-subject caches are bounded
   in size and evicted when idle, and the IMAP pool registry has a process-wide ceiling and an idle
   timeout. The engine sets defaults, so a host that sets nothing is still bounded, and a host
@@ -301,9 +339,9 @@ how a provider is built, not how a capability is reached.
 | Adapter | Change | Compatibility |
 |---|---|---|
 | `engine-provider` | New `credential.rs` (types, trait, `FixedCredential`, replacement helper); adds the `zeroize` dependency (already in the tree through rustls; MIT/Apache-2.0) | Additive |
-| `engine-http` | `send_authenticated`, which also enforces the plaintext rule ("Host binding") | Additive API. **Behaviour change:** a credential is no longer sent to an `http://` origin other than loopback |
-| `provider-imap` | `ImapConfig` holds `Arc<dyn engine_provider::CredentialSource>`; `with_renewal` becomes the shared helper; `dial`/`filing`/`smtp_auth` match on `Credential` | **Breaking** for implementers of `provider_imap::CredentialSource` (`credentials`→`credential`, `renew`→`replace`, new `subject`) and for matches on `Credentials::OAuth2`. Callers keep compiling: a deprecated `Credentials` alias with its `password`/`oauth2` constructors, and `ImapConfig::new` taking a fixed credential |
-| `provider-jmap` | `Transport` asks per request through `send_authenticated`; re-framing reads `Credential`; `JmapConfig::from_credential_source`; later `JmapEndpoint` | `JmapConfig::new(base, provider_jmap::Credentials, ua)` kept and converted into a `FixedCredential` with a unique subject. **Behaviour change:** a `401` can now cause one replayed request when the source replaces |
+| `engine-http` | `AuthenticatedClient` (`send_authenticated` in the plan), which also enforces the plaintext rule ("Host binding") | Additive API. **Behaviour change:** a credential is no longer sent to an `http://` origin other than loopback |
+| `provider-imap` | `ImapConfig` holds `Arc<dyn engine_provider::CredentialSource>`; `with_renewal` becomes the shared helper; `dial`/`filing`/`smtp_auth` match on `Credential` | **Breaking**: (1) implementers of `provider_imap::CredentialSource` (`credentials`→`credential(request)`, `renew`→`replace(refused, request)`, new `subject`), and callers of `source.credentials()`/`renew()` too; (2) matches on `Credentials::OAuth2` (now `Credential::Bearer`); (3) `Credentials::username()` returns `Option<&str>`; (4) `Password.password` is a `Secret`, which breaks struct literals and reads of the field as a `String`; (5) a bare `Credentials` is no longer a source (`Arc::new(credentials)`); (6) `Debug` of `ImapConfig` and the credential no longer prints the username; (7) the shims are `#[deprecated]`, so a caller building with `-D warnings` fails until it moves to the new names. Callers otherwise keep compiling: a deprecated `Credentials` alias with its `password`/`oauth2` constructors, and `ImapConfig::new` taking a fixed credential. Not breaking (`ImapError` is `#[non_exhaustive]`): the new `ImapError::AuthUnsupported`, which some failures that were `Auth` now are, with the same class |
+| `provider-jmap` | `Transport` asks per request through an `AuthenticatedClient`; re-framing reads `Credential`; `JmapConfig::from_credential_source`; later `JmapEndpoint` | `JmapConfig::new(base, provider_jmap::Credentials, ua)` kept and converted into a `FixedCredential` with a unique subject. **Behaviour change:** a `401` can now cause one replayed request when the source replaces |
 | `provider-caldav` / CardDAV | `DavClient` asks per request; `CredentialScope` works on `Credential`; `permits` merged with `CredentialHosts` | **Breaking:** `CalDavConfig.credentials` and `CardDavConfig.credentials` are `pub` fields of `provider_caldav::Credentials`. Replacing them with a source breaks struct-literal construction. Constructors stay. `CredentialHosts` and `with_credential_hosts` are deprecated, not removed |
 | `provider-graph` | `HttpTransport` asks per request; `GraphClient::connect_with_source`; `GraphProvider` shares the client (`Arc`) | `connect(token, …)`, `for_mailbox` and `with_base` kept, wrapping a fixed bearer. `GraphProvider::new(GraphClient, …)` can keep its signature if `GraphClient` becomes a cheap clone |
 | `provider-google` | Same as Graph; `with_imap` and the API side bind **one** source, so both transports present the same token | `connect(token, …)` kept |
@@ -353,7 +391,8 @@ These live in `mail-calendar/crates/mailcal-account`, read-only here:
   `UnsupportedAuthentication`. A subject is unique within the process, which an `AccountId` is not:
   a store-less multi-tenant host may reuse account ids.
 - **TLS.** There is one `TlsPolicy` (`tls.md`), unchanged. Credentials never go over a hop that
-  left TLS, and never over plaintext HTTP except to a loopback origin, which the live harnesses
+  left TLS, and never over plaintext HTTP except to a loopback origin from an account configured
+  on loopback, which the live harnesses
   and the offline fakes need. That is an engine rule, not a `permits` default ("Host binding"),
   so a host cannot loosen it and need not remember it. A host can still refuse plaintext on
   loopback through `permits`.
@@ -363,15 +402,70 @@ These live in `mail-calendar/crates/mailcal-account`, read-only here:
 
 ## Phasing
 
-1. **Slice 1: the neutral types, adopted by IMAP/SMTP.** `engine-provider::credential` plus the
-   replacement helper, with `provider-imap` moved onto them. IMAP goes first because it already has
-   exactly these semantics: the slice proves the neutral trait against existing tests and live
-   servers, and changes no request shape. The sync host re-implements `OAuthCredentialSource`.
+1. **Slice 1: the neutral types, adopted by IMAP/SMTP.** *Landed.* `engine-provider::credential`
+   plus the replacement helper, with `provider-imap` moved onto them. IMAP goes first because it
+   already has exactly these semantics: the slice proves the neutral trait against existing tests
+   and live servers, and changes no request shape. The sync host re-implements
+   `OAuthCredentialSource`. As built: the helper is `engine_provider::with_credential(source,
+   request, ask_limit, is_refusal, attempt)`, which also checks `permits` before the first ask
+   (a refusal is `Permanent`, and nothing is attempted); a source's own failure reaches the
+   adapter as a `CredentialFailure`, which the adapter converts into its error with the class
+   kept. A bearer token is built with `Credential::bearer(token)`, or `bearer_for(username,
+   token)` where SASL needs the account. IMAP and SMTP origins use RFC 8314's service names as
+   the scheme: `imaps`/`imap` (`STARTTLS`), `submissions`/`submission` (`STARTTLS`).
 2. **The authorization-identity variant for IMAP** (`AUTHENTICATE PLAIN` with an `authzid`), for
    transfer hosts. It is a new request shape, so the live Dovecot master-user test comes first and
-   the variant ships only once that passes.
+   the variant ships only once that passes. *Landed.* As built: `Credential::ActingAs` (`Debug`
+   shows only that the administrator and the account are present); one RFC 4616 builder,
+   `provider_imap::sasl::plain_response`, which SMTP `AUTH PLAIN` uses too; IMAP signs in with
+   `AUTHENTICATE PLAIN` (`SASL-IR` where advertised, the `+` prompt otherwise), refusals classed
+   as for `LOGIN`, and a plain password keeps `LOGIN`. SMTP refuses the variant before dialling
+   (`Permanent`): submitting as another account is a different grant, and no server has been
+   seen to take it. The pool check from "Direct host" landed with it, per account: the first dial
+   that signs in fixes the account its connections belong to
+   (`Credential::authorization_identity`: for this variant, the one acted as), and a later
+   credential naming another fails its dial as `InvalidState` before anything is opened. A
+   replacement must name the account the credential it replaces named, and the comparison is
+   exact. Proven live on both Dovecot services with a master user
+   (`provider-imap/tests/live_imap_acting_as.rs`); Stalwart was found to ignore the authorization
+   identity (its impersonation takes `target%admin` as the username, which is a `Password`), and
+   that is pinned with its control. See "Types" for the hazard this leaves to the host.
 3. **JMAP**, together with `engine-http::send_authenticated` and the plaintext rule. This is the
-   first per-request HTTP ask, and it deletes `RefreshingJmapProvider`.
+   first per-request HTTP ask, and it deletes `RefreshingJmapProvider`. *Landed.* As built, the
+   funnel is a client rather than a function: `AuthenticatedClient::new(tls, user_agent,
+   configured, source, retry)` builds its own `reqwest` client for the account's configured
+   origin, one that follows no redirect and, for an account on plaintext loopback, sees no
+   proxy; `request`/`get`/`post` build requests, and `send(request, exchange, present, judge)`
+   sends each on that client whatever client built it. So neither rule depends on an adapter
+   building its client right: a function taking any request would have trusted the caller's
+   redirect and proxy settings. The design's `build`
+   is split in two: the client keeps the unauthenticated request and clones it for each
+   presentation, and `present` only adds the credential (and may refuse a kind it cannot send,
+   which ends the request before anything goes out: JMAP refuses `ActingAs`, since HTTP has no
+   authorization identity). The design's `is_refusal` became `judge`, which reads only a `401`
+   and answers `Unauthorized::{Refused, Reframe, Final}`: `Reframe` is JMAP's Basic/Bearer
+   re-framing, which the funnel performs once per credential with the same credential, so
+   re-framing and replacement cannot both answer one `401` and an adapter cannot forget the
+   order. The ask runs under `Deadlines::reply`, the bound on an answer owed (nothing has been
+   sent, so a submission's ask is not ambiguous either). Before `replace` is asked, up to 64 KiB
+   of the refused reply's body is read, for no longer than five seconds, so the connection is
+   free for the replay; the read is best effort, so a body cut off, too large or trickling
+   leaves a refusal and never a failed exchange (a `401` says the request was not processed,
+   so a submission refused is never "may have been sent"). The funnel is built on
+   `engine_provider::with_credential`, so `permits`, the single replacement and the source's
+   classes are the IMAP path's; the plaintext rule fails as `Permanent` through
+   `CredentialFailure::refused_origin`. Every JMAP request goes through it: discovery and each
+   redirect hop, method calls, blob download and upload, and the push stream, so each origin
+   is checked as it is used. `JmapConfig::from_credential_source` is new; `JmapConfig::new`
+   wraps its `Credentials` in `FixedCredential::unique`. Proven live on Stalwart
+   (`provider-jmap/tests/live_credential_source.rs`): a wrong password replaced (Stalwart's
+   `401` offers `Bearer` and `Basic` in two headers, so the password is refused as it stands
+   and not re-framed), and a revoked bearer token replaced by a fresh one, both minted through
+   Stalwart's own OAuth endpoints on the existing harness (RFC 7591 registration and an
+   authorization code with PKCE); no second server was needed for JMAP. The sync host's
+   `RefreshingJmapProvider` can now go; that is its change to make. The Basic header is still built by
+   reqwest's `basic_auth` (marked sensitive, not zeroed), so its `username:password` input is
+   one of the copies "Security review" places out of reach.
 4. **CalDAV/CardDAV**: `permits` absorbs `CredentialHosts`, and the scope is keyed by subject.
 5. **Graph and Google API**: the same bearer funnel. Google's IMAP and API halves share one source.
    This deletes the token halves of the Graph and Gmail wrappers. Graph application permissions
@@ -414,14 +508,23 @@ Live (`AGENTS.md`: any new request shape is run against a real server):
 - **IMAP authorization identity**: Dovecot with a master user configured. The administrator signs
   in as a test user with `AUTHENTICATE PLAIN` and an `authzid`, and the session selects that
   user's mailbox, not the administrator's. A wrong `authzid` is refused. This runs before the
-  variant ships ("Phasing", step 2).
+  variant ships ("Phasing", step 2). As run: the harness's static passdb knows every name, so a
+  "wrong" `authzid` is one the signing-in account may not act as (an account that is not a master
+  user), beside a wrong master password; both are `NO [AUTHENTICATIONFAILED]`. An `authzid`
+  naming no account cannot be shown on this harness.
 - **SMTP**: Stalwart submission on 465 and 587, wrong then right.
 - **JMAP**: Stalwart, wrong Basic then right. This proves the replayed request and that the `401`
-  offered `Basic` (re-framing and replacement must not both fire).
+  offered `Basic` (re-framing and replacement must not both fire). As run: Stalwart's `401`
+  carries two challenges, `Bearer …` and then `Basic realm="Stalwart Server"`, in separate
+  headers; a tool that prints only the first header shows `Bearer` alone.
 - **Bearer replacement on JMAP and CalDAV**: Stalwart's own OAuth endpoint mints the tokens. The
-  mail-calendar app repository already runs a Stalwart OAuth harness (its containers are named
-  `mailcal-core-harness-stalwart-oauth*`); the engine reuses or ports that approach, presents an
-  expired or revoked token first, and succeeds with the token `replace` mints.
+  sync host's repository runs a Stalwart OAuth harness; the engine reuses or ports that approach,
+  presents an expired or revoked token first, and succeeds with the token `replace` mints. As run
+  for JMAP: the engine's existing harness serves the OAuth endpoints on its loopback port, so
+  the live suite registers a public client, signs in through Stalwart's login form with an
+  authorization code and PKCE (`provider-jmap/tests/stalwart_oauth/`), revokes one token and
+  presents it, and succeeds with a second. A second Stalwart is needed only where an issuer must
+  be reachable by discovery, which presenting a token does not need.
 - **CalDAV/CardDAV**: Stalwart, SabreDAV and Nextcloud, wrong then right on an origin already
   authenticated after discovery, plus a full discovery with `permits` limited to the harness host,
   showing nothing regresses.
@@ -447,7 +550,8 @@ record.
    gone: `Authentication`) from "the server refused". No extra variant ("The trait", "Error
    classes").
 5. **The engine refuses credentials over plaintext HTTP except to loopback origins.** It is an
-   engine rule, not left to `permits`. The harnesses all run on loopback, so nothing breaks
+   engine rule, not left to `permits`. Narrowed when step 3 landed: only for an account whose
+   configured origin is itself plaintext loopback ("Host binding"). The harnesses all run on loopback, so nothing breaks
    ("Host binding", "Security review").
 6. **Eviction of the per-subject caches and the IMAP pool registry has engine defaults, which the
    host can override** ("Direct host").

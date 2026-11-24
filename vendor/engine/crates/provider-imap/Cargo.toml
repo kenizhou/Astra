@@ -17,6 +17,9 @@ engine-mime = { workspace = true }
 # The RFC 5322 / MIME message assembler for SMTP submission (shared with the Graph
 # adapter's MIME send), producing the bytes fed to the SMTP `DATA` command.
 engine-rfc5322 = { workspace = true }
+# Mail rules and the out-of-office reply over ManageSieve: the Sieve dialect the engine reads and
+# writes, shared with provider-jmap's JMAP Sieve (`managesieve::rules`, `managesieve::vacation`).
+engine-sieve = { workspace = true }
 # `io-util` for the line-protocol reader/writer over any async stream; `net` for
 # the live TCP connect; `time` for the IDLE watcher's keep-alive timeout (the
 # RFC 2177 re-issue clock). The protocol is generic over `AsyncRead + AsyncWrite`,
@@ -28,7 +31,14 @@ tokio-rustls = { workspace = true }
 async-stream = { workspace = true }
 futures-util = { workspace = true }
 async-trait = { workspace = true }
+# Zeroes the copies of a secret this crate derives to put on the wire: the IMAP `LOGIN` line, a
+# SASL blob and its base64, an `AUTH PLAIN` token, and the `AUTHENTICATE` and SMTP `AUTH` lines
+# that carry them (`secret_line.rs`).
+zeroize = { workspace = true }
 thiserror = { workspace = true }
+# The version a ManageSieve rule set is guarded by: a hash of the script list and the script, since
+# ManageSieve keeps none of its own (`managesieve::state`).
+sha2 = { workspace = true }
 # Parsing IMAP `INTERNALDATE` (`dd-Mon-yyyy hh:mm:ss +zzzz`) into a UTC instant
 # needs offset normalization with calendar rollover; `time` (the same crate
 # engine-core wraps) does it correctly.
@@ -58,6 +68,8 @@ rcgen = "0.13"
 serde = { workspace = true }
 serde_json = { workspace = true }
 stalwart-harness = { path = "../stalwart-harness" }
+# The import claims every adapter's live suite shares (`tests/live_imap_import.rs`).
+engine-provider = { workspace = true, features = ["import-conformance"] }
 # The offline integration + gated live tests drive the full loop through the store.
 engine-store = { workspace = true }
 engine-search = { workspace = true }

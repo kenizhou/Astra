@@ -5,7 +5,7 @@ use engine_core::{
     ids::{AccountId, ProviderKey},
     mail::{Mailbox, Message, MessageMetadata},
     raw::RawMime,
-    sync::{JmapDataType, MailboxWindows, SyncScope, SyncState, SyncWindow},
+    sync::{JmapDataType, MailboxWindows, SyncScope, SyncState, SyncWindow, Widening},
 };
 
 use crate::{
@@ -87,31 +87,11 @@ pub trait Provider: CalendarSync + CalendarWrites + MailboxWrites + Send + Sync 
         SyncWindow::full()
     }
 
-    /// Streams one email sync pass since `cursor`, bounded by `window`, as
-    /// incremental [`EmailChunk`]s — the paged primitive every mail adapter
-    /// implements.
-    ///
-    /// `window` is the account's sync window with any mailbox held further back
-    /// ([`MailboxWindows`]). A snapshot or backfill fetches what the window of any mailbox a
-    /// message is filed in admits, and no more: a folder-bound adapter (IMAP, Graph) fetches
-    /// under its own folder's [`window_for`](MailboxWindows::window_for), and one whose scope is
-    /// the whole account (JMAP, Gmail) fetches the account's window and, beside it, each
-    /// [`deepened`](MailboxWindows::deepened) mailbox's own, never the account's older mail as
-    /// a whole. A delta takes no date filter on any protocol; the orchestrator judges its
-    /// arrivals with [`MailboxWindows::admits`]. A mailbox the server does not have is not
-    /// fetched further back.
-    ///
-    /// The two knobs it separates (`store-and-sync.md`):
-    /// - `fetch_batch` bounds each **network round trip** (an IMAP `UID FETCH` window, a JMAP
-    ///   `Email/get` page, a Graph `$top`); `0` means the adapter's protocol maximum.
-    /// - `chunk_size` bounds how many messages accumulate before a chunk is **yielded** — the
-    ///   streaming granularity a host commits and renders; `0` means one chunk per batch.
-    ///
-    /// A large `fetch_batch` with a small `chunk_size` gives *both* few round trips
-    /// *and* row-as-it-arrives commits. The returned [`EmailStream`] is pulled (backpressure).
-    /// Each chunk carries a [`PassMode`] and an optional [`advance_to`](EmailChunk::advance_to)
-    /// checkpoint telling the orchestrator how to apply and how far to advance the cursor, so a
-    /// killed cold sync resumes (`store-and-sync.md`).
+    /// Streams one email sync pass since `cursor`, bounded by `window` (the account's window
+    /// with any mailbox held further back), as incremental [`EmailChunk`]s — the paged
+    /// primitive every mail adapter implements. [`EmailStream`] states the contract: what the
+    /// window bounds, the `fetch_batch` and `chunk_size` knobs, and how each chunk's
+    /// [`PassMode`] and [`advance_to`](EmailChunk::advance_to) are applied.
     ///
     /// Mail providers ([`Capabilities::mail`]) override this; the default yields a
     /// single classified `Err`, so a capability-checking caller never relies on it.
@@ -127,6 +107,33 @@ pub trait Provider: CalendarSync + CalendarWrites + MailboxWrites + Send + Sync 
         Box::pin(futures_util::stream::once(async {
             Err(unsupported("mail sync"))
         }))
+    }
+
+    /// Streams what `widening` newly admits for this scope, keeping `cursor`: called after a
+    /// delta when the depth the cursor covers ([`Widening::from`]) falls short of the depth asked
+    /// ([`Widening::to`]). [`EmailStream`] states the contract ("Widening").
+    ///
+    /// The default **reopens**: a fresh pass over [`Widening::to`], `stream_email` with no cursor,
+    /// or from `cursor` when the widening [`resumes`](Widening::resumes), the cursor then being
+    /// that fresh pass's own. It is correct for every adapter; one that fetches only the
+    /// [`bands`](Widening::bands) says so with
+    /// [`Capabilities::with_band_widening`](crate::Capabilities::with_band_widening).
+    fn widen_email<'a>(
+        &'a self,
+        account: &'a AccountId,
+        cursor: &'a SyncState,
+        widening: &'a Widening,
+        fetch_batch: usize,
+        chunk_size: usize,
+    ) -> EmailStream<'a> {
+        let from = widening.resumes().then_some(cursor);
+        self.stream_email(
+            account,
+            from,
+            widening.to().clone(),
+            fetch_batch,
+            chunk_size,
+        )
     }
 
     /// Fetches the account's mail objects since `cursor` as a single combined
@@ -218,18 +225,9 @@ pub trait Provider: CalendarSync + CalendarWrites + MailboxWrites + Send + Sync 
     /// `metadata` is the whole of what the stored draft should carry, so a re-save without a
     /// keyword takes it off.
     ///
-    /// **The returned key is the one to keep, and it need not be `replacing`.** A
-    /// transport whose stored messages are immutable writes a new one and removes the
-    /// old, so the key moves (IMAP `APPEND` then delete, JMAP `Email/set` create then
-    /// destroy, Graph `POST` then delete); one with a draft object of its own rewrites
-    /// it and returns the key it was given (Gmail `drafts.update`). A caller stores
-    /// whatever comes back rather than assuming either, which is the whole reason this
-    /// is one verb.
-    ///
-    /// Replacing is not atomic everywhere: where the old message has to be removed
-    /// separately, a failure between the two leaves both, and the next Drafts sync is
-    /// what the user sees. That is a duplicate draft, never a lost one, which is the
-    /// right way round for a message nobody has sent.
+    /// **The returned key is the one to keep, and it need not be `replacing`**: why it moves on
+    /// some transports and not on others, and what a replace that fails halfway leaves, is
+    /// [`DraftReceipt`]'s to say.
     ///
     /// Providers advertising [`Capabilities::mail_drafts`] override this; the default
     /// rejects, so a capability-checking caller never relies on it. The write is
@@ -450,6 +448,46 @@ pub trait Provider: CalendarSync + CalendarWrites + MailboxWrites + Send + Sync 
     /// one value.
     #[cfg(feature = "import")]
     fn mail_importer(&self) -> Option<&dyn crate::import::MailImporter> {
+        None
+    }
+
+    /// This adapter as a [`Vacation`](crate::Vacation), the account's out-of-office reply, or
+    /// `None` where the account has none the adapter can reach (the default).
+    ///
+    /// Reached as [`mail_importer`](Self::mail_importer) is: the answer is the capability, and an
+    /// adapter answers per account, so a read-only share without the setting answers `None`.
+    fn vacation(&self) -> Option<&dyn crate::Vacation> {
+        None
+    }
+
+    /// This adapter as [`MailRules`](crate::MailRules), the account's mail rules, or `None` where
+    /// the account has none the adapter can reach (the default), as for
+    /// [`vacation`](Self::vacation).
+    fn mail_rules(&self) -> Option<&dyn crate::MailRules> {
+        None
+    }
+
+    /// This adapter as a [`CalendarImporter`](crate::import::CalendarImporter), or `None` where
+    /// it cannot import events (the default), as for [`mail_importer`](Self::mail_importer).
+    #[cfg(feature = "import")]
+    fn calendar_importer(&self) -> Option<&dyn crate::import::CalendarImporter> {
+        None
+    }
+
+    /// This adapter as a [`CalendarCollections`](crate::CalendarCollections), or `None` where it
+    /// cannot create calendars (the default).
+    fn calendar_collections(&self) -> Option<&dyn crate::CalendarCollections> {
+        None
+    }
+
+    /// This adapter as a [`ContactImporter`](crate::import::ContactImporter), or `None`.
+    #[cfg(feature = "import")]
+    fn contact_importer(&self) -> Option<&dyn crate::import::ContactImporter> {
+        None
+    }
+
+    /// This adapter as an [`AddressBookCollections`](crate::AddressBookCollections), or `None`.
+    fn address_book_collections(&self) -> Option<&dyn crate::AddressBookCollections> {
         None
     }
 }

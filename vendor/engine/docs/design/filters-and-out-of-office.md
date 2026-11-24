@@ -1,10 +1,19 @@
 # Filters and out-of-office: design note
 
-Status: **design settled, nothing implemented.** Written 2026-11-23, when the owner moved message
-rules and automatic replies into scope; every question it raised was decided the same day
-(section 7). `north-star.md` already records the scope and the accessor pattern (#378). The
-change that lands the first slice updates `modeling.md`, and `providers.md` for the new traits, in
-the same commit, per "Documentation currency".
+Status: **design settled; slice 1 (the reply over JMAP), slice 2 (rules over JMAP Sieve) and
+slice 3 (rules and the reply over ManageSieve) implemented.** Written
+2026-11-23, when the owner moved message rules and automatic replies into scope; every question it
+raised was decided the same day (section 7). `north-star.md` records the scope and the accessor
+pattern (#378). Slice 1 landed `engine_core::vacation`, the `Vacation` trait and
+`Provider::vacation`, and `provider-jmap`'s `VacationResponse` get and set, and answered the
+questions it was to settle live ("Settled by live tests"). Slice 2 has landed `engine-sieve` (the
+segmenter, and the dialect reader, writer and vocabulary), `engine_core::rules` with
+`plan_rules`, the `MailRules` trait and `Provider::mail_rules`, and `provider-jmap`'s rules over
+JMAP Sieve, with the reply kept running beside them, and settled live how the two coexist.
+Slice 3 has landed the reply as a rule of the script (`engine_sieve::dialect::reply`) and a
+`managesieve` module of `provider-imap` with both traits, proven live on Stalwart and Dovecot
+("Settled in slice 3"). Where the code differs from a sketch below, the sketch has been brought up
+to date and says why.
 
 Marks used below: **live** = observed against a harness server on 2026-11-23; **docs** = read from
 the RFC or vendor reference cited; **unverified** = believed, not yet checked, and must be proven
@@ -75,14 +84,14 @@ JMAP account shared read-only lists neither `sieve` nor `vacationresponse` (capt
   `special-use`, `vacation`, `vacation-seconds`, `variables`. The group share `support` advertises the same; bob's and dave's
   read-only shares advertise neither capability. `SieveScript/get` answers an empty list;
   `VacationResponse/get` answers the singleton `{isEnabled: false, fromDate: null, toDate: null,
-  subject: null, textBody: null, htmlBody: null}`. Both answer `state: "n"`: whether the two types
-  share one state counter is **unverified**; slice 1 settles it, and section 4 says what a host
-  sees either way.
-- **Stalwart v1.0.2, ManageSieve.** Listening on 4190 inside the container, **not published** by
-  `docker/stalwart/docker-compose.yml`. Greeting: `VERSION "1.0"`, `STARTTLS`, `SASL ""` before
+  subject: null, textBody: null, htmlBody: null}`. Both answer `state: "n"`, and they are one
+  counter (**live**, slice 1): a write of either moves both ("Settled by live tests").
+- **Stalwart v1.0.2, ManageSieve.** Listening on 4190 inside the container, published on
+  `127.0.0.1:14190` since slice 3. Greeting: `VERSION "1.0"`, `STARTTLS`, `SASL ""` before
   TLS (mechanisms come after `STARTTLS`, RFC 5804 §1.7), `MAXREDIRECTS "1"`, the same extension
   list as JMAP.
-- **Dovecot 2.4.4 + Pigeonhole** (the IMAP harness). ManageSieve on 34190, not published.
+- **Dovecot 2.4.4 + Pigeonhole** (the IMAP harness). ManageSieve on 34190, published from the rev1
+  service on `127.0.0.1:14191` since slice 3; `MAXREDIRECTS "4"` is listed only once signed in.
   Greeting: `SASL "PLAIN"`, `STARTTLS`, `VERSION "1.0"`, and a **smaller** set: `fileinto reject
   envelope encoded-character vacation subaddress comparator-i;ascii-numeric relational regex
   imap4flags copy include body variables enotify environment mailbox date index ihave duplicate
@@ -135,13 +144,97 @@ parser would buy semantics the model does not use. The segmenter is fuzzed besid
 MIME and iCalendar targets.
 
 The recognised dialect is the one the engine writes, and the engine writes Roundcube's: its
-managesieve plugin marks each rule with `# rule:[name]` and a disabled one with `if false # …`
-(the byte detail is **unverified**; slice 2 pins it, section 7). Roundcube is the most widely used
-webmail on Sieve servers, so a user who also uses it reads and edits the same named rules there,
-and rules it wrote read back typed here. When the account has no active script, the engine creates
-one named `rules` and activates it; otherwise it edits the active script in place.
+managesieve plugin marks each rule with `# rule:[name]` and a disabled one with `if false # …`.
+The bytes are pinned from scripts the plugin's own writer produced, run offline, which its own
+parser read back identically (not **live**: no server was involved; `engine-sieve`'s
+`tests/fixtures/roundcube/README.md` says how they were made and what they show). What they
+show: one `require ["a","b"];` first, names sorted; per rule a `# rule:[name]` line (none for an
+unnamed rule), `if <test>`, then `{`, one tab-indented action per line, and `}`, every line ending
+in CRLF; several tests as `allof (a, b)` or `anyof (a, b)`; a rule for every message as `if true`;
+a disabled rule as `if false # <its tests as they would be written>`. The segmenter splits each
+into one segment per rule, the name comment travelling with its `if`. Roundcube is the most
+widely used webmail on Sieve servers, so a user who also uses it reads and edits the same named
+rules there, and rules it wrote read back typed here. The rules live in the script that runs; where
+none of the user's runs, in the engine's own script named `rules`, or the one script besides the
+reply's, and a first write creates `rules` and activates it. On a JMAP server that runs the reply
+as a script of its own, the rules script includes the reply's while the reply is on, so both run
+("Settled by live tests", slice 2).
 
-### Types (sketch, `engine-core::rules`)
+Where the server keeps no reply of its own (ManageSieve), the reply is a rule of that same script,
+as Roundcube's vacation engine writes it: a new one written first and named `Out-of-Office`, its
+window `currentdate :zone … :value "ge"` / `"le" "iso8601"` tests (`allof` for two, `true` for
+none), switched off as any rule is. The plugin takes as the reply the first rule whose first action
+is `vacation`; the engine narrows that to one whose tests are only those the plugin writes for a
+window, so a user's own `if header :contains "from" "boss" { vacation …; }` stays an ordinary rule
+rather than being read, and rewritten, as a reply to everyone. `engine_sieve::dialect::reply`
+reads it into the neutral `VacationResponse` and writes one over a script, in place, keeping the
+`vacation` arguments the model leaves to the script (`:days`, `:seconds`, `:addresses`, `:handle`,
+`:from`) and any action after it, every other rule copied byte for byte. The reply rule is the
+reply's alone: `read_rules` leaves it out of the user's rules, and `write_rules` copies it where it
+was, so a host that hides it and writes the rules back keeps the reply, and a migration does not
+carry the `vacation` twice; `write_rules` puts it after the last written rule that ran before it
+(else before the first that ran after it), so every rule that ran ahead of it, a `discard; stop`
+among them, still does however a host inserts or moves rules. A reply rule
+holding more than the model says (another action, an `elsif` or `else`, a `:mime` body, a date in
+the server's own zone, a `${` the script would expand) is read as a reply the engine cannot show,
+never as a narrower one; it belongs to neither the reply nor the rules, so a host shows it, and
+`UnreadReply::sends_mail` says whether it may send mail, for a preflight. It is written over only
+when the caller names it (`write_reply_over`): that keeps its name, every command after `vacation`
+and any `elsif` or `else`, and `vacation`'s unmodelled arguments where `vacation` could be read,
+and discards the rest. A reply that is on is refused where any enabled rule of the user's runs
+`vacation` in any branch (it may match the same message, RFC 5230 §4.7 makes two an error, and
+Dovecot then sends neither), and beside an `include`, which the dialect does not follow. The
+window is written to the second and never wider than asked; one that holds no whole second is
+refused. Text only for now: a `:mime` body holding HTML is a follow-up. The bytes are pinned from
+the plugin's own output, one script saved through its settings page
+(`tests/fixtures/roundcube/README.md`).
+
+### Types (`engine-core::rules`, implemented in slice 2)
+
+Implemented as sketched, with these differences, each for a reason the code met:
+
+- `RuleMailbox` also has `Path(MailboxPath)`: a Sieve `fileinto` names a folder by path, and a
+  rule read from a script must keep that name until something resolves it. `RuleMailbox::Role
+  (Inbox)` needs no role extension anywhere: every transport has the inbox by name.
+- Marking an importance is a typed `Action::MarkImportance(Importance)`, not `Native`: it crosses
+  kinds (Graph's `markImportance`, Sieve's `addheader "Importance"`, ≈), which `Native` never does.
+- A condition's header is `HeaderField::Subject` or `Named(String)`; addresses are
+  `RuleAddress`, names `RuleName`, folder paths `MailboxPath`, each with a `Debug` that shows only
+  a length. `RuleOrigin::ScriptSegment(index)` is the Sieve span.
+- `RulePart` adds `Rule` (an opaque rule as a whole) and `Mode` (how conditions combine), and
+  `RuleVocabulary` is a map from a `RuleFeature` (the grain where transports differ) to `Support`
+  (`Exact` or `Approximated`), plus the redirect limit and the kinds of opaque and native parts it
+  stores back.
+- The receipt is `RulesReceipt { version, outcomes }`; `RulesPlan.rules` pairs each written rule
+  with its source index (`PlannedRule`).
+- A `RawRule` carries what the reader learned of its text:
+  - the extensions it requires, from one table of command, test and tag, a tag read in the
+    context of its command (`:seconds` is `vacation-seconds` on `vacation` only), and where a
+    token is not in the table, everything the source script required (unknown, for a command a
+    host wrote);
+  - whether it may send mail: unless every command and test in it is known to send none, so
+    `redirect`, `notify`, `include` and anything unknown (`pipe`, `execute`) may;
+  - the name it holds;
+  - whether its strings hold `${`, and whether its source expanded them (`Expansion`).
+
+  The plan carries it only to a target that lists every extension it needs, never renames or
+  disables it (its text holds both), does not carry one that may send mail on an import that arms
+  no forwarding, and does not move one with `${` to another script (it means what its own script
+  made of it, and may use a variable another command there sets). The writer refuses one whose
+  `${` the script it writes over would read the other way, and a typed rule with `${` anywhere
+  over a script that expands it (`DialectErrorKind::Variable`). A `NativeAction` says whether it
+  sends mail too.
+- `RuleOrigin::ScriptSegment { script, index }`: `script` is a fingerprint of the text read, so a
+  rule read from one script is never copied as a segment of another.
+- A `TextTest` always has a value, and `RuleName`, `MailboxPath` and `RuleAddress` are never empty
+  and never hold a CR, LF or NUL: what no transport writes cannot be built. The plan answers
+  `NotExpressible` for what can still be built and not written (a role no transport names, a
+  redirect to nobody, no keyword to add).
+- The action order is not semantic. The writer adds keywords and an importance before it files,
+  redirects or discards, because a flag set after a `fileinto` does not reach the filed copy (RFC
+  5232 §3); a script in another order reads as carried whole.
+
+The sketch as written before the code:
 
 ```rust
 /// The account's rules, in evaluation order, as read.
@@ -219,22 +312,56 @@ an opaque rule until a host asks.
 
 ### Out-of-office
 
+Implemented in slice 1 as `engine_core::vacation`:
+
 ```rust
 #[non_exhaustive]
 pub struct VacationResponse {
     pub enabled: bool,
     pub window: VacationWindow,        // start, end: Option<UtcDateTime>; both None = no window
     pub reply: AutoReply,              // subject: Option<String>, text: Option<String>, html: Option<String>
-    pub audience: ReplyAudience,       // Everyone | Contacts | Organisation | OrganisationAndContacts
-    pub outside_reply: Option<AutoReply>, // a different reply for senders outside the organisation
-    pub raw: RawVacation,
+    pub audience: ReplyAudience,       // Everyone | Contacts | Organization | OrganizationAndContacts
+                                       // | ContactsInOrganization
+    pub outside_reply: Option<AutoReply>, // a different reply for senders outside the organization
+    pub version: Option<VacationVersion>, // as read; what a write built on it names
+    pub raw: Option<RawVacation>,      // the provider's own form, as read
 }
+// replies_at(at): on, and at in [start, end) — RFC 8621 §8's "on or after" / "before".
+
+#[non_exhaustive]                      // private fields, read through accessors
+pub struct VacationVocabulary { window: WindowSupport, subject: bool, bodies: ReplyBodies,
+    audiences: BTreeSet<ReplyAudience>, outside_reply: bool }
+pub enum WindowSupport { None, EitherEnd, BothEnds }   // Graph's `scheduled` needs both ends
+pub enum ReplyBodies { One, TextAndHtml }              // Graph keeps one HTML string per message
+// lost_parts(&reply) -> Vec<VacationPart>  // Window | Subject | Bodies | Audience | OutsideReply
+
+#[must_use]
+pub struct VacationReceipt { pub version: Option<VacationVersion>, pub rules: RulesEffect }
+pub enum RulesEffect { Untouched, Deactivated, StillDeactivated, Unknown }
 ```
+
+The version sits on the reply, so a guarded write names the reply it read
+(`VacationPrecondition::IfUnchanged(&read)`) as `replace_rules` will name its base; `raw` is `None`
+on a reply a host built rather than read. The audiences are spelled `Organization`, as every other
+identifier in the engine is. `lost_parts` is the one rule for what a transport would drop, used by
+the edit (which refuses) and later by import (which reports). The vocabulary's fields are private
+and its window and bodies are enums, so Graph's shape (both ends, one body) and whatever a later
+transport needs are additions, not breaking changes. `RulesEffect` exists because of what slice 1
+found live: turning the reply on can switch the user's own filter script off, and turning it off
+leaves it off ("Settled by live tests"), and a host must be able to say so, and offer to switch the
+rules back on. The engine never does that itself.
 
 `audience` and `outside_reply` exist because Graph and Gmail both have them and a migration from
 either has to say when they are lost. Graph's `externalAudience` maps `all`→`Everyone`,
-`none`→`Organisation`, `contactsOnly`→`OrganisationAndContacts`; Gmail's `restrictToContacts`→
-`Contacts`, `restrictToDomain`→`Organisation` (both set is lossy: contacts inside the domain).
+`none`→`Organization`, `contactsOnly`→`OrganizationAndContacts`; Gmail's `restrictToContacts`→
+`Contacts`, `restrictToDomain`→`Organization`, both→`ContactsInOrganization`. A read never maps
+an audience to a wider one; where a provider's setting has no exact audience, the adapter answers
+the narrowest one that contains it.
+
+Graph is canonicalised on read, so a reply that says the same thing reads the same way: an
+`externalReplyMessage` equal to the `internalReplyMessage`, or `externalAudience: none` (which sends
+no external reply at all), reads as `outside_reply: None`. Only a genuinely different external
+message is an outside reply.
 Graph's zoned schedule is read as instants (a cut-off, not a wall-clock event) and its zone stays in
 `raw`. The Sieve reply interval (`:days`, `:seconds`) is not modelled and is left to the server, as
 three of the four transports leave it; a Sieve source's value is preserved in the raw script.
@@ -278,13 +405,31 @@ pub trait MailRules: Send + Sync {
 }
 
 #[async_trait]
-pub trait Vacation: Send + Sync {
-    fn vocabulary(&self) -> &VacationVocabulary;       // window? subject? audiences? outside reply?
-    async fn vacation(&self, account: &AccountId) -> ProviderResult<VacationResponse>;
-    async fn set_vacation(&self, account: &AccountId, base: &VacationResponse,
+pub trait Vacation: Send + Sync {                       // implemented, slice 1
+    async fn vocabulary(&self, account: &AccountId) -> ProviderResult<VacationVocabulary>;
+    fn vacation_write_guard(&self) -> WriteGuard;      // Enforced on JMAP
+    async fn read_vacation(&self, account: &AccountId) -> ProviderResult<VacationResponse>;
+    async fn set_vacation(&self, account: &AccountId, precondition: VacationPrecondition<'_>,
         new: &VacationResponse) -> ProviderResult<VacationReceipt>;
 }
+
+pub enum VacationPrecondition<'a> { IfUnchanged(&'a VacationResponse), Unconditional }
 ```
+
+The read is `read_vacation`, not `vacation`: an adapter implements both `Provider` and `Vacation`,
+and two methods named `vacation` would make every call on a concrete adapter ambiguous. The
+vocabulary is asked per account, async and fallible, as `mail_import_limits` is: a Gmail account's
+audiences depend on whether it is a Workspace account, a ManageSieve account's window on the
+extensions its server lists. The guard is `vacation_write_guard`, beside `calendar_write_guard` and
+`contact_write_guard`, and `WriteGuard` now lives in a module of its own.
+
+The write's guard is spelled out at the call site and has one source. `IfUnchanged(&read)` guards
+by the read reply's version, and on a transport that enforces one, a reply with no version (built,
+not read) is refused rather than written unguarded. `Unconditional` is the deliberate overwrite (an
+administrator turning a reply off). `new`'s own version and raw form are never read. Refusals made
+before sending are never `InvalidState`, which is also how a write that may have landed reads: a
+part the account cannot hold, or a window that ends at or before its start, is `item_unavailable`
+(`refuse_unheld_vacation`), and a guarded write with no version is `Permanent`.
 
 `Some(..)` is the capability; `vocabulary()` is what it can express. JMAP answers `Some` only for
 an account listing the capability (so not on a read-only share). ManageSieve is a module of
@@ -293,15 +438,65 @@ comes from host configuration, with no SRV discovery (RFC 5804 §1.8) for now. A
 answers `Some` only when the host gave it that endpoint and the greeting succeeded. On ManageSieve,
 rules and vacation are one script, so both traits are one object and share its version.
 
+As built in slice 3 (`provider-imap/src/managesieve/`): `ImapConfig::with_managesieve(addr,
+server_name)` names the endpoint; `STARTTLS`, the protocol's one transport, is required. When the
+account connects it reads the greeting and what the server offers over TLS, with no credential,
+alongside the mail connect (joined, so the outcome never depends on which finishes first), under
+its own 10-second deadline, and leaves without waiting for `LOGOUT`'s answer.
+Where that succeeds the connect observer sees `ConnectStep::Negotiated("ManageSieve", extensions)`
+and `mail_rules()` answers `Some` (`vacation()` too where `vacation` is listed). Where it fails the
+observer sees `ConnectStep::Unavailable { service: ConnectService::ManageSieve, class }`, the class
+alone, and both answer `None`; mail works without them. The accessors answer what the last probe
+found: a failure that may pass (`Retryable`, a timeout) is probed again beside a later dial, and
+`invalidate()` asks for a probe whatever the last one found, so a blip at connect does not hide the
+rules for the account's lifetime. One that will not pass (no `STARTTLS`, not ManageSieve) waits for
+`invalidate()`. After any failure no dial probes for five minutes, so a blackholed endpoint costs a
+dial at most one probe deadline in that time, and a probe whose dial is dropped is wanted again.
+`Some` says the service answers, not that signing in works: nothing is signed in at connect. Each call opens a session of its own in a
+slot of the account's connection budget (closing a parked IMAP socket when the shelf is full),
+with two minutes for the dial and the work, and then sends `LOGOUT` without waiting for its
+answer, so a slow `LOGOUT` never puts a finished write in doubt. The credential is asked as `CredentialProtocol::ManageSieve` for the origin
+`sieve://<server name>:<port>` (RFC 5804 §3); a password goes as `AUTHENTICATE "PLAIN"`, a token as
+`OAUTHBEARER` or `XOAUTH2`. The version is a SHA-256 of the script list (names and the active flag)
+and the rules script's text; ManageSieve has no conditional `PUTSCRIPT`, so the guard is
+`WriteGuard::Absent`, but a write lists and reads again in its own session and refuses a stale base
+as `Conflict`, which narrows the race to one round trip and does not close it. The script is chosen
+as JMAP chooses it, by one function (`engine_sieve::dialect::scripts::rules_script`: the active
+one, else `rules`, else the only one, never a server's own reply script); a new one is `rules`,
+stored with `PUTSCRIPT` and switched on with `SETACTIVE`. JMAP knows the server's reply script by
+its name (`vacation`), ManageSieve by its text, in exactly the shape Stalwart writes
+(`scripts::plainly_server_reply`, pinned by live captures of every window shape in
+`engine-sieve/tests/fixtures/stalwart/`): a `require` of exactly `vacation`, `relational` and
+`date`, then up to two nested `if currentdate :value "ge"|"le" "iso8601"` around one unnamed
+`vacation :mime`, and nothing else. `:mime` and that `require` are what a user's own script does
+not write. Any other script with an unnamed `vacation` (SOGo's, or a user's plain
+`vacation :days 7 "Away";`) is someone's rules, refused rather than rewritten or routed around.
+ManageSieve reads only the scripts the choice asks about: the active one, `rules`, every
+candidate left where several are (so a server's inactive reply beside one user script leaves
+that script, as JMAP chooses), and one the chosen script includes. One removed in between is a
+`Conflict`, and a script whose name RFC 5804 forbids still counts but is never read. So the two
+can choose differently only for a user's script named `vacation` or a server's reply script under
+another name; on Stalwart they agree, which the live suite pins (the reply's script active, and
+inactive beside a user's `myrules`). Where a
+server's reply script runs, as the active one or through the rules' `include`, ManageSieve writes
+the rules as JMAP does: the include is kept first, and a new `rules` script includes the running
+reply's and is made the active one, so the reply runs on; a server that lists no `include` is
+refused before anything is sent. The include is no rule of the user's on either protocol
+(`engine_sieve::dialect::include`). `PUTSCRIPT` checks the script itself, so neither
+`CHECKSCRIPT` nor `HAVESPACE` is sent first. The vocabulary is what the server lists once signed in.
+The reply is on where its rule is on and the script runs; turning it on where the script is stored
+but off switches the script on only where that switches on no enabled rule of the user's, and is
+refused otherwise. Text replies only: an HTML body is refused before sending.
+
 Rules and the reply are account settings, edited online in every client surveyed, so every host
 kind writes them directly, guarded by the version it read; they never go through the outbox and
 have no store tables. A sync host reads them on demand, as a direct host does.
 
-On JMAP the guard is `Enforced` whether or not Stalwart moves the `SieveScript` state when the
-vacation reply changes (slice 1 answers it). If it does, a rules write built on a read taken
-before a reply change is refused once with `stateMismatch`, though no rule moved; the host re-reads
-and writes again, as after any stale read. Nothing is lost, and the refusal is the guard working
-at the grain the server keeps.
+On JMAP the guard is `Enforced`. Stalwart moves the `SieveScript` state when the vacation reply
+changes, and the reply's state when a script changes (slice 1, live), so a rules write built on a
+read taken before a reply change is refused once with `stateMismatch`, though no rule moved, and
+the other way round; the host re-reads and writes again, as after any stale read. Nothing is lost,
+and the refusal is the guard working at the grain the server keeps.
 
 `replace_rules` is whole-set because order is a property of the set and two transports store the
 set as one script. Graph and Gmail adapters diff `base` against `rules` and issue per-rule calls;
@@ -412,14 +607,16 @@ rule 0  Reduced  Action(1) NotExpressible        # markImportance: no editheader
 rule 1  NotKept  Exception(0) NotExpressible     # dropping it would also move auto-replies
 ```
 
-Written script, in the Roundcube dialect (section 3; layout as slice 2 pins it):
+Written script, in the Roundcube dialect, as `engine_sieve::dialect::write_rules` writes it (every
+line ends in CRLF; the action is indented by a tab):
 
 ```sieve
-require ["fileinto", "mailbox"];
+require ["fileinto"];
 # rule:[Invoices]
-if header :contains "subject" "Invoice" {
-    fileinto "Finance";
-    stop;
+if header :contains "subject" "Invoice"
+{
+	fileinto "Finance";
+	stop;
 }
 ```
 
@@ -436,19 +633,19 @@ On Stalwart the same plan keeps rule 0 `Whole` (it has `editheader`, rendered as
 | Neutral | Sieve | Graph | Gmail |
 |---|---|---|---|
 | `Match` All / Any | ✓ `allof` / `anyof` | All ✓ (predicates ANDed; values in one predicate ORed, **unverified**); Any ✗ | All ✓; Any ≈ (`query` with `OR`) |
-| `except` | ✓ `not anyof(…)` | ✓ `exceptions` (same predicates only) | ≈ `negatedQuery` |
+| `except` | ✓ `not e`, or `allof (c1, …, not e1, …)`; with any-of conditions `allof (anyof (c1, …), not e1, …)`; an `anyof` holding a `not`, or nested lists, read as carried whole | ✓ `exceptions` (same predicates only) | ≈ `negatedQuery` |
 | Subject contains | ✓ `header :contains "subject"` | ✓ `subjectContains` | ≈ `subject` (word match, not substring) |
 | Subject is / glob / regex | ✓ `:is` / `:matches` / `:regex` (ext `regex`) | ✗ | ✗ |
 | Named header contains | ✓ `header :contains "X-…"` | ≈ `headerContains` (any header) | ✗ |
 | From is / contains | ✓ `address :is` / `:contains "from"` | ✓ `fromAddresses` / `senderContains` | ≈ `from` (search semantics) |
 | From domain | ✓ `address :domain` | ≈ `senderContains "@example.com"` | ≈ `from:(@example.com)` |
 | To / Cc / to-or-cc | ✓ `address ["to","cc"]` | ✓ `recipientContains`, `sentToAddresses` | ≈ `to` (also matches Bcc) |
-| Sent to me (to, cc, only, not) | ≈ address tests over the account's addresses | ✓ `sentToMe`, `sentCcMe`, `sentOnlyToMe`, `notSentToMe`, `sentToOrCcMe` | ≈ `to:me` in `query` (only `to`) |
+| Sent to me (to, cc, only, not) | ✗ for now (≈ address tests over the account's addresses, which the writer does not have) | ✓ `sentToMe`, `sentCcMe`, `sentOnlyToMe`, `notSentToMe`, `sentToOrCcMe` | ≈ `to:me` in `query` (only `to`) |
 | Body contains | ✓ `body :text :contains` (ext `body`) | ✓ `bodyContains` | ≈ `query` |
 | Subject or body | ✓ `anyof(header…, body…)` | ✓ `bodyOrSubjectContains` | ≈ `query` |
 | Size over / under | ✓ `size :over` / `:under` | ≈ `withinSizeRange` (KB, a range) | ✓ `size` + `sizeComparison` |
-| Has attachment | ≈ `exists :mime :anychild` heuristics (ext `mime`) | ✓ `hasAttachments` | ✓ `hasAttachment` |
-| Importance | ≈ header tests over `Importance::HEADERS` | ✓ `importance` | ✗ (Gmail's `important` is its own classifier) |
+| Has attachment | ≈ `header :mime :anychild :contains "Content-Disposition" "attachment"` (ext `mime`) | ✓ `hasAttachments` | ✓ `hasAttachment` |
+| Importance | ✗ for now (≈ header tests over `Importance::HEADERS`, not yet written) | ✓ `importance` | ✗ (Gmail's `important` is its own classifier) |
 | `Native`: Exchange class (`isMeetingRequest`, `isAutomaticReply`, `sensitivity`, `categories`, `messageActionFlag`, …) | ✗ (a few ≈ through headers, not attempted) | ✓ | ✗ |
 | `Native`: unparsed Gmail `query` | ✗ | ✗ | ✓ |
 
@@ -458,17 +655,17 @@ On Stalwart the same plan keeps rule 0 `Whole` (it has `editheader`, rendered as
 |---|---|---|---|
 | `FileInto` (move) | ✓ `fileinto`; by name, or `:mailboxid` (RFC 9042, survives a rename) where listed | ✓ `moveToFolder` | ✓ add label + remove `INBOX` (one user label per filter) |
 | `FileInto { copy }` | ✓ `fileinto :copy` (ext `copy`, RFC 3894) | ✓ `copyToFolder` | ✓ add label, keep `INBOX` |
-| `FileInto { Role(Trash / Junk) }` | ✓ `:specialuse` (RFC 8579) where listed, else by the folder's name | ✓ `delete` / move to Junk | ✓ `TRASH` / `SPAM` |
+| `FileInto { Role(Trash / Junk) }` | ✓ `:specialuse "\\Trash" "Trash"` (RFC 8579), the attribute's name as the fallback folder, for every role but the inbox (`"INBOX"`); ✗ where `special-use` is not listed (no fallback to a name alone) | ✓ `delete` / move to Junk | ✓ `TRASH` / `SPAM` |
 | `Discard` | ✓ `discard` | ✓ `permanentDelete` | ≈ `TRASH` (recoverable) |
-| `Redirect` | ✓ `redirect` (`:copy` keeps it), bounded by `maxNumberRedirects` | ✓ `redirectTo` (keeps a copy) | ≈ `forward`: one verified address, original sender kept |
+| `Redirect` | ✓ `redirect` (`:copy` keeps it), one per address; a rule's addresses together bounded by `maxNumberRedirects` (two rules that each fit can exceed it for one message; the server enforces that on delivery) | ✓ `redirectTo` (keeps a copy) | ≈ `forward`: one verified address, original sender kept |
 | `Forward` (as the account) | ≈ `redirect :copy` (From differs) | ✓ `forwardTo` | ≈ `forward` |
 | `AddKeywords` `$seen` / `$flagged` | ✓ `addflag "\\Seen"` / `"\\Flagged"` (ext `imap4flags`, RFC 5232) | ✓ `markAsRead` / ✗ (no flag action) | ✓ remove `UNREAD` / add `STARRED` |
 | `AddKeywords` named | ✓ `addflag "name"` | ≈ `assignCategories` | ≈ hidden named label (counts as the one user label) |
-| `Native`: mark importance | ≈ `addheader` (ext `editheader`) | ✓ `markImportance` | ≈ `IMPORTANT` |
+| Mark importance (`Action::MarkImportance`) | ≈ `addheader "Importance"` (ext `editheader`) | ✓ `markImportance` | ≈ `IMPORTANT` |
 | `Native`: forward as attachment | ✗ | ✓ `forwardAsAttachmentTo` | ✗ |
 | `stop` | ✓ `stop` | ✓ `stopProcessingRules` | ✗ (every filter applies) |
-| `enabled: false` | ≈ dialect: `if allof(false, …)` | ✓ `isEnabled` | ✗ |
-| `name` | ≈ dialect comment | ✓ `displayName` | ✗ |
+| `enabled: false` | ✓ in the dialect, `if false # <test>` (a client that does not know it sees a rule that never runs); ✗ where a value of the test spans lines (`RuleFeature::DisabledMultiLine`): no comment holds it, and Roundcube reads `allof (false, …)` as a rule that runs (observed, the fixture README) | ✓ `isEnabled` | ✗ |
+| `name` | ✓ in the dialect, `# rule:[name]` (a comment to any other client) | ✓ `displayName` | ✗ |
 | Order | ✓ script order | ✓ `sequence` | ✗ |
 
 ### Out-of-office
@@ -476,12 +673,15 @@ On Stalwart the same plan keeps rule 0 `Whole` (it has `editheader`, rendered as
 | Neutral | JMAP | Sieve | Graph | Gmail |
 |---|---|---|---|---|
 | `enabled` | ✓ | ✓ | ✓ `status` | ✓ |
-| `window` | ✓ | ✓ `currentdate` (ext `date`) | ✓ `scheduled` (zoned) | ✓ |
+| `window` | ✓ either end | ✓ `currentdate` (ext `date`) | ✓ `scheduled`, both ends (zoned) | ✓ |
 | `reply.subject` | ✓ | ✓ `:subject` | ✗ | ≈ prefix |
 | `reply.text` / `html` | ✓ / ✓ | ✓ / ≈ `:mime` | ≈ / ✓ (one HTML string) | ✓ / ✓ |
+| text **and** HTML kept apart | ✓ | ≈ `:mime` multipart | ✗ (`ReplyBodies::One`) | ✓ |
 | `audience` Everyone | ✓ | ✓ | ✓ external `all` | ✓ |
-| `audience` Organisation | ✗ | ≈ sender-domain test (needs the domains) | ✓ external `none` | ✓ `restrictToDomain` (Workspace) |
+| `audience` Organization | ✗ | ≈ sender-domain test (needs the domains) | ✓ external `none` | ✓ `restrictToDomain` (Workspace) |
 | `audience` Contacts | ✗ | ✗ | ≈ `contactsOnly` (external only) | ✓ `restrictToContacts` |
+| `audience` OrganizationAndContacts | ✗ | ✗ | ✓ external `contactsOnly` | ✗ |
+| `audience` ContactsInOrganization | ✗ | ✗ | ✗ | ✓ `restrictToContacts` and `restrictToDomain` |
 | `outside_reply` | ✗ | ≈ sender-domain branch | ✓ `externalReplyMessage` | ✗ |
 
 ## 6. Phasing and tests
@@ -490,16 +690,20 @@ On Stalwart the same plan keeps rule 0 `Whole` (it has `editheader`, rendered as
 
 Each slice is proven live before the next starts (`AGENTS.md`).
 
-1. **Vacation over JMAP.** `VacationResponse` in `engine-core`, the `Vacation` trait and accessor,
-   `provider-jmap` get/set with `ifInState`. Live on Stalwart, which also settles the RFC 9661 §4
-   question: does setting a reply create a `SieveScript`, does it move the `SieveScript` state, and
-   does activating it deactivate a user's script? The answer shapes slice 2.
+1. **Vacation over JMAP. Implemented.** `VacationResponse` in `engine-core`, the `Vacation` trait
+   and accessor, `provider-jmap` get/set with `ifInState`. Live on Stalwart, which also settled the
+   RFC 9661 §4 question: setting a reply creates a `SieveScript`, it moves the `SieveScript` state,
+   and turning it on deactivates a user's script. The answer shapes slice 2 ("Settled by live
+   tests").
 2. **Rules over JMAP Sieve.** The pure `engine-sieve` crate (segmenter, Roundcube dialect reader,
    renderer, fuzzed beside the existing MIME/iCalendar targets), `plan_rules`, `MailRules` on
-   `provider-jmap` (upload, `SieveScript/set` with `ifInState` and `onSuccessActivateScript`,
-   `SieveScript/validate` before storing; a new script is named `rules`). Live on Stalwart.
-3. **ManageSieve.** The harness publishes 4190 (Stalwart) and 34190 (Dovecot); a `managesieve`
-   module of `provider-imap` over the adapter's TLS, SASL and connection budget, at a
+   `provider-jmap` (upload, `SieveScript/set` with `ifInState` and `onSuccessActivateScript`; a new
+   script is named `rules`). **Implemented.** `SieveScript/validate` is not sent before storing:
+   `SieveScript/set` refuses an invalid script whole (proven live both ways), so validating first
+   adds a round trip and no safety, and Stalwart's validate cannot see a blob uploaded in the
+   same request. Live on Stalwart, which also settled how the rules and the reply coexist.
+3. **ManageSieve. Implemented.** The harness publishes 4190 (Stalwart) and 34190 (Dovecot); a
+   `managesieve` module of `provider-imap` over the adapter's TLS, SASL and connection budget, at a
    host-configured endpoint; vacation and rules in one script. Live on both, which exercises two
    vocabularies.
 4. **Import from Graph.** Read `messageRules` and `automaticRepliesSetting` into the model;
@@ -561,14 +765,155 @@ The owner approved each of these; the body of the note is written to match.
 
 These are facts to observe, not choices; the design holds whichever way each falls.
 
-- **Whether Stalwart moves the `SieveScript` state when the vacation reply changes** (slice 1).
-  The guard is `Enforced` either way; if it does, a host sees one `stateMismatch` on the next rules
-  write and re-reads (section 4).
-- **RFC 9661 §4 on Stalwart** (slice 1): whether setting a reply creates a `SieveScript`, and
-  whether activating it deactivates the user's script. The answer decides how slice 2 places the
-  vacation segment.
-- **The byte layout of Roundcube's dialect** (slice 2), including `if false # …` for a disabled
-  rule, pinned from scripts the plugin wrote, scrubbed as fixtures.
+**Settled in slice 1**, live against Stalwart v1.0.2 as the scratch account `carol@`, by hand and
+then by `provider-jmap/tests/live_vacation.rs` (2026-11-23). Captured, scrubbed, as
+`provider-jmap/tests/fixtures/vacation_*.json`.
+
+- **Setting a reply creates a `SieveScript`** (RFC 9661 §4). The first `VacationResponse/set`
+  made a script named `vacation`, active, in an account that had none. Its bytes are Stalwart's
+  own rendering: `require ["vacation", "relational", "date"];`, the window as two nested
+  `currentdate :value "ge"` / `"le" "iso8601"` tests, and `vacation :mime :subject "…"` with a
+  `multipart/alternative` body of the text and HTML parts. The `"le"` makes `toDate` inclusive to
+  the second, where RFC 8621 §8 says "before" (`docs/spec-deviations.md`, STALWART-4); the neutral
+  window keeps RFC 8621's exclusive end. Stalwart's `currentdate` runs in UTC: a probe script
+  filing by `currentdate :matches "zone"` filed a delivered message under `+0000`, with an
+  `iso8601` value ending in `Z`, so its comparisons with the `Z` dates it writes are sound. A reply
+  with only a start, no subject and only a text body renders as one `currentdate "ge"` test and
+  `vacation :mime` with a single `text/plain` part. The script stays, inactive, when the reply is
+  turned off.
+- **A part left out is cleared.** Writing a reply with no subject, only a start and no HTML over a
+  fully populated one (every property sent, the absent ones `null`) reads back without the
+  subject, the end and the HTML (`vacation_set_clears_response.json`,
+  `vacation_get_cleared_response.json`).
+- **It moves the `SieveScript` state, and the two types share one state.** Every
+  `VacationResponse/set` moved the `SieveScript` state to the reply's new state, and a
+  `SieveScript/set` moved the `VacationResponse` state; `get` on both answers the same string
+  throughout. Pinned both ways: a reply write guarded by a state read before a script was created
+  is refused with `stateMismatch`.
+- **Turning the reply on deactivates the user's own script, and turning it off does not switch it
+  back.** With a script of the user's active, `VacationResponse/set {isEnabled: true}` left the
+  `vacation` script active and the user's inactive (RFC 9661 §2.1: at most one active script).
+  Turning the reply off left both inactive: the user's filters stay off until something
+  reactivates them. Activating the user's script with `onSuccessActivateScript` while the reply
+  was on deactivated the `vacation` script, and `VacationResponse/get` then answered
+  `isEnabled: false`: Stalwart reads `isEnabled` from whether that script is the active one.
+  Slice 1 does not hide this: the receipt reports `RulesEffect::Deactivated` when the reply goes on
+  and `RulesEffect::StillDeactivated` when it goes off with the user's script still off, observed
+  from the script list read before and after the write in the same request, so a host can tell the
+  user and offer to switch their rules back on. The engine never reactivates a script itself. An
+  effect is claimed only where the two listings' states are exactly the write's `oldState` and
+  `newState` (the one counter above), so nothing else changed between them; otherwise it is
+  `Unknown`.
+- **The reply's script is the reply's alone, mostly.** `SieveScript/set` updating its content is
+  refused `forbidden` ("use VacationResponse/set instead"), as RFC 9661 §4 requires; destroying it
+  while active is refused (`scriptIsActive`). Destroying it once inactive **succeeds**, which RFC
+  9661 §4 forbids (`docs/spec-deviations.md`, STALWART-3). The next `VacationResponse/set` makes a
+  new one.
+
+**Settled in slice 2**, live against Stalwart v1.0.2 as `carol@`, by hand with delivered mail
+(Bob sending, Bob's inbox checked for the auto-reply) and then by
+`provider-jmap/tests/live_rules.rs` and `live_rules_reply.rs`. Captured, scrubbed, as
+`provider-jmap/tests/fixtures/sieve_*.json` and `vacation_set_kept_off_response.json`.
+
+- **Rules and the reply both run through `include`.** On a JMAP account whose server runs the
+  reply as its own script, rules in a separate active script and the reply cannot both run. Of
+  the two ways out, the engine takes the first: its rules script starts with
+  `include :personal :optional "vacation";` while the reply is on. Delivery showed the included
+  `vacation` action fires, and the rules run beside it. The include is first, so a matched rule's
+  `stop`, or a `discard`, still leaves the message answered (delivered and seen). `:optional` keeps
+  a reply script someone destroyed (STALWART-3) from failing delivery.
+- **The server's flag is not the off switch under the include.** The reply's script keeps its
+  `vacation` action when `VacationResponse/set` turns it off; only the script stops being active.
+  A rules script that includes it runs the reply all the same: a delivery after
+  `isEnabled: false` was answered. So the engine turns the reply on and off by adding and removing
+  the include, and writes its words with `isEnabled: false`, which stores them and activates
+  nothing. A first such write creates the reply's script too (observed).
+- **What another JMAP client sees.** On such an account `VacationResponse/get` answers
+  `isEnabled: false` while the reply runs, and switching it off there does nothing. Switching it on
+  there switches the user's rules off, as before. Rendering the reply into the rules script would
+  show another client exactly the same, so it did not decide between the two. The include keeps
+  the reply's words in the one object every JMAP client reads, and gives the reply one home rather
+  than two. The engine's own read answers on where the reply's script is active, or the running
+  rules script includes it: one function (`sieve_scripts::reply_runs`) for the reply and the rules.
+- **The reply's script is called `vacation`.** RFC 9661 names none; Stalwart's first
+  `VacationResponse/set` creates it under that name. `live_rules_reply` pins it, so a server that
+  renames it turns the suite red instead of silently losing replies.
+- **The two writes cannot share one request.** Stalwart ignores a result reference for `ifInState`
+  (STALWART-7), so the include toggle goes in a second request, guarded by the `newState` the
+  reply's write answered. If the first lands and the second does not, the words are stored and
+  whether the reply runs is as it was: `requires_confirmation`, read before writing again.
+- **`SieveScript/set` is atomic, so nothing validates first.** An invalid create asking to be
+  activated stored and activated nothing and left the state; an invalid update of the running
+  script left its bytes and its flag (and Stalwart's validate cannot see a blob uploaded in the
+  same request, STALWART-6). Stalwart answers `invalidScript` where RFC 9661 says
+  `invalidSieve` (STALWART-5); both are `item_unavailable`. Stalwart accepts unknown names in
+  `require` silently (STALWART-8), so the proof that it enforces its list uses `imapsieve`,
+  which it knows and refuses.
+- **A flag after `fileinto` misses the filed copy** (RFC 5232 §3, delivered): the writer puts marks
+  first, and reads only that order typed.
+
+**Settled in slice 3**, live against Stalwart v1.0.2 (as `carol@`) and Dovecot 2.4.4 with
+Pigeonhole (as `alice@`), by hand and then by `provider-imap/src/managesieve/live_tests.rs` and
+`live_provider_tests.rs`. Captured, scrubbed, as `provider-imap/tests/fixtures/managesieve/`.
+
+- **Mechanisms come with TLS.** Both greet with `SASL ""` and offer mechanisms only once `STARTTLS`
+  is done: Stalwart `PLAIN OAUTHBEARER XOAUTH2`, Dovecot `PLAIN`. Both take `AUTHENTICATE "PLAIN"`
+  with the initial response inline.
+- **Dovecot lists `MAXREDIRECTS` only once signed in**, so the vocabulary is read after signing in.
+- **A rule written is read back typed, and a stale version is refused**, on both; a reply written is
+  read back with its window, subject and text, and a write of the rules keeps it. Reverting the
+  version check turned the live suite red.
+- **Each refuses an extension it does not list**: Dovecot refuses `editheader` at `CHECKSCRIPT`,
+  and the plan keeps no rule that needs it; Stalwart, which lists it, takes it. Stalwart refuses
+  `imapsieve` and, as over JMAP, takes an unknown name in `require` (STALWART-8).
+- **Refusals carry prose, sometimes a code.** Dovecot answers an invalid script with a literal
+  naming its own temporary file and the script's lines; Stalwart with a quoted line and column.
+  Neither gives a code there; `NONEXISTENT`, `ACTIVE` and `QUOTA/MAXSIZE` were seen elsewhere. The
+  engine keeps the code alone.
+- **Stalwart answers `HAVESPACE` yes for any size, and refuses the store**: a 175 KB `PUTSCRIPT`
+  is `NO (QUOTA/MAXSIZE)` (STALWART-10). Dovecot answers `HAVESPACE` with the code.
+- **A reply rule written over an unread one keeps its blocks and `else`** in a form both servers'
+  `CHECKSCRIPT` accept; the bytes Roundcube's settings page stores were captured from the Dovecot
+  harness (`engine-sieve/tests/fixtures/roundcube/reply_vacation_post.sieve`).
+- **An endpoint that does not answer leaves mail working**: `127.0.0.1:1` as the endpoint connects
+  the account, reports `Unavailable` with `Retryable`, and offers neither trait.
+- **An account a JMAP client also manages may reply from elsewhere.** On Stalwart, a reply switched
+  on over JMAP is Stalwart's own `vacation` script (a `currentdate` test around `vacation :mime`,
+  nested for two ends), active; the JMAP adapter's rules script instead runs it through `include`.
+  ManageSieve may not write that script: `PUTSCRIPT "vacation"` is refused with no code. Over
+  ManageSieve the engine neither reads nor writes the reply where the script it would use runs
+  `include`, or holds a `vacation` outside the reply rule
+  (`managesieve::vacation::reply_elsewhere`): it cannot read that reply as the account's, and one
+  written beside it would make two. Proven on
+  Stalwart with the reply set over JMAP, in both shapes, nothing written; the guard reverted, the
+  `include` shape read as off and took a write. The rules stay readable and writable: Stalwart's reply
+  script is never the rules' script, so they go in a `rules` script that includes it first and
+  runs, and JMAP reads them back from there (live). A script that is chosen and still holds a
+  `vacation` no `# rule:[…]` name marks, one written by hand, is refused rather than rewritten
+  (`engine_sieve::dialect::reply::unnamed_vacation`). Stalwart refuses `PUTSCRIPT "vacation"`
+  itself.
+
+**Follow-ups from slice 3.**
+
+- **An HTML reply over Sieve**, as `vacation :mime` with a `multipart/alternative` body (what
+  Stalwart's own JMAP rendering writes); Roundcube reads such a reply as raw MIME, so it is not
+  written yet, and a `:mime` reply reads as one the engine cannot show.
+- **SRV discovery of the endpoint** (RFC 5804 §1.8).
+- **An authorization identity over ManageSieve** (`Credential::ActingAs`, a Dovecot master user),
+  proven live: refused before sending for now, as SMTP refuses it.
+
+**Follow-ups from slice 2.**
+
+- **Switching stored rules on.** A write keeps rules where they are, running or not
+  (`RuleSet::activation`); the engine never activates a script the user left off, as it never
+  reactivates one the reply switched off. A host that wants to offer "switch your rules on" needs
+  a deliberate verb for it, not yet designed.
+- **The reply's script name.** The include names `vacation`, Stalwart's; RFC 9661 names none.
+  Another JMAP server with a reply script of another name leaves the include naming nothing
+  (`:optional`) until its name is known; the condition the adapter checks is in `jmap.md`.
+
+**Still to settle:**
+
 - **The Graph and Gmail items marked unverified** (slices 4 and 5): `@odata.etag` with `If-Match`
   on `messageRule`, the Exchange rules quota, OR within one predicate, rules on a shared mailbox,
   and Gmail's verified-forwarding-address requirement.

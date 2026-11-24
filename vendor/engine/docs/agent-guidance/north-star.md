@@ -121,6 +121,7 @@ email-calendar-sync-engine/
 │   ├── engine-rfc5322/       # Outbound message assembly.
 │   ├── engine-ical/          # iCalendar parse, serialize, patch.
 │   ├── engine-html/          # Mail HTML made safe to render.
+│   ├── engine-sieve/         # Sieve scripts split at their commands.
 │   ├── engine-recurrence/    # Recurrence expansion (bundled tzdb).
 │   ├── engine-search/        # Query AST and DSL, rank fusion, coverage.
 │   ├── engine-store/         # Store trait and contract tests.
@@ -270,7 +271,8 @@ What comes next, in order. Each step passes the three-host test (principle 9).
 2. **Next.** JMAP import (`Email/import`). CalDAV and CardDAV import. The JMAP client's
    primitives (session, request building, blob transfer) made public, so no host rebuilds them.
    One `CredentialSource`. The window vocabulary, with widening that does not re-read what is
-   already held. The filters and out-of-office model.
+   already held. The filters and out-of-office model: the reply over JMAP has landed
+   (`Provider::vacation`); rules over JMAP Sieve are next.
 3. **Then.** Sort and paging on `MailQuery`, answered by the local store and by the server alike.
    `engine-direct` over it. The capability-trait split, as one migration with a guide per host
    kind.

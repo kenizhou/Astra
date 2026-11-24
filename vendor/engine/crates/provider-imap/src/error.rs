@@ -11,7 +11,7 @@
 //! `cannotCalculateChanges` — see [`crate::sync`].
 
 use engine_core::error::FailureClass;
-use engine_provider::ProviderError;
+use engine_provider::{ProviderError, TargetRefusal};
 
 /// An IMAP (or SMTP) protocol or transport failure.
 #[derive(Debug, thiserror::Error)]
@@ -21,10 +21,19 @@ pub enum ImapError {
     #[error("IMAP transport error: {0}")]
     Io(#[from] std::io::Error),
 
-    /// Authentication was rejected (`LOGIN`/`AUTHENTICATE` returned `NO`, or SMTP
-    /// `AUTH` failed). The host must re-auth before the call can succeed.
+    /// The server refused the credential presented: `LOGIN`/`AUTHENTICATE` returned `NO`, or
+    /// SMTP `AUTH` answered `535`. The host must re-auth before the call can succeed, and the
+    /// account's credential source is asked once for a replacement.
     #[error("IMAP authentication failed: {0}")]
     Auth(String),
+
+    /// Sign-in failed without the server judging the credential: it offers no mechanism this
+    /// credential can use (no OAuth mechanism advertised; SMTP `504`, `534`, `538`), or it
+    /// answers with something only the user can resolve (SMTP `432`, a password transition).
+    /// Classed as authentication like [`Auth`](Self::Auth), but no replacement is asked for:
+    /// another credential of the same kind would meet the same answer.
+    #[error("IMAP authentication not possible: {0}")]
+    AuthUnsupported(String),
 
     /// The server refused a sign-in for now rather than judging the credential: `LOGIN`
     /// answered `NO [LIMIT]` (RFC 5530), too many connections or logins, or SMTP `AUTH`
@@ -33,8 +42,9 @@ pub enum ImapError {
     #[error("server is limiting sign-ins for this account: {0}")]
     RateLimited(String),
 
-    /// The account's [`CredentialSource`](crate::CredentialSource) could not produce a
-    /// credential, so nothing was dialled. Classified as the source classified it.
+    /// The account's [`CredentialSource`](crate::CredentialSource) did not permit the server,
+    /// had no credential to give, or did not answer within the dial deadline, so nothing was
+    /// dialled. Classified as the source classified it; an unanswered ask is retryable.
     #[error("no credential to sign in with: {0}")]
     Credential(ProviderError),
 
@@ -66,6 +76,11 @@ impl ImapError {
     /// Builds an [`ImapError::Auth`].
     pub(crate) fn auth(detail: impl Into<String>) -> Self {
         Self::Auth(detail.into())
+    }
+
+    /// Builds an [`ImapError::AuthUnsupported`].
+    pub(crate) fn auth_unsupported(detail: impl Into<String>) -> Self {
+        Self::AuthUnsupported(detail.into())
     }
 
     /// Builds an [`ImapError::RateLimited`].
@@ -120,7 +135,7 @@ impl ImapError {
         match self {
             // Connection/read/write/handshake failures are transient.
             Self::Io(_) | Self::Bye(_) => FailureClass::Retryable,
-            Self::Auth(_) => FailureClass::Authentication,
+            Self::Auth(_) | Self::AuthUnsupported(_) => FailureClass::Authentication,
             Self::RateLimited(_) => FailureClass::RateLimited,
             Self::Credential(source) => source.class(),
             Self::No(detail) if opens_with_temporary_code(detail) => FailureClass::Retryable,
@@ -135,9 +150,34 @@ impl ImapError {
 
 impl From<ImapError> for ProviderError {
     fn from(err: ImapError) -> Self {
+        if let Some(reason) = err.target_refusal() {
+            return ProviderError::refused_by_target(reason).with_source(err);
+        }
         let class = err.failure_class();
         let detail = err.to_string();
         ProviderError::new(class, detail).with_source(err)
+    }
+}
+
+impl ImapError {
+    /// The neutral reason a `NO` names by its response code, where the target's own state
+    /// refused (`providers.md`, "Import"): `OVERQUOTA` (RFC 9208), a folder that does not exist
+    /// (`TRYCREATE`, RFC 3501; `NONEXISTENT`, RFC 5530), and a folder this credential may not
+    /// write (`NOPERM`, RFC 5530). Each is already `InvalidState`; this names which.
+    fn target_refusal(&self) -> Option<TargetRefusal> {
+        let Self::No(detail) = self else {
+            return None;
+        };
+        let named = |code: &str| opens_with_code(detail, code);
+        if named("OVERQUOTA") {
+            Some(TargetRefusal::StorageFull)
+        } else if named("TRYCREATE") || named("NONEXISTENT") {
+            Some(TargetRefusal::NoSuchContainer)
+        } else if named("NOPERM") {
+            Some(TargetRefusal::ReadOnlyContainer)
+        } else {
+            None
+        }
     }
 }
 
@@ -179,6 +219,10 @@ mod tests {
         );
         assert_eq!(
             ImapError::auth("LOGIN NO").failure_class(),
+            FailureClass::Authentication
+        );
+        assert_eq!(
+            ImapError::auth_unsupported("no OAuth mechanism").failure_class(),
             FailureClass::Authentication
         );
         assert_eq!(
@@ -226,5 +270,50 @@ mod tests {
         let err: ImapError = io.into();
         assert!(matches!(err, ImapError::Io(_)));
         assert_eq!(err.failure_class(), FailureClass::Retryable);
+    }
+
+    /// The response codes that say the target's state refused (RFC 5530 `OVERQUOTA` and
+    /// `NOPERM`, RFC 3501 `TRYCREATE`, RFC 5530 `NONEXISTENT`) become the neutral reason, under
+    /// the engine's own words rather than the server's text.
+    #[test]
+    fn a_refusal_by_the_target_s_state_is_named() {
+        for (text, reason) in [
+            (
+                "[OVERQUOTA] Mailbox of Secret Person is full",
+                TargetRefusal::StorageFull,
+            ),
+            (
+                "[TRYCREATE] No folder Secret",
+                TargetRefusal::NoSuchContainer,
+            ),
+            (
+                "[NONEXISTENT] No folder Secret",
+                TargetRefusal::NoSuchContainer,
+            ),
+            (
+                "[NOPERM] Secret is read-only",
+                TargetRefusal::ReadOnlyContainer,
+            ),
+            (
+                "[noperm] Secret is read-only",
+                TargetRefusal::ReadOnlyContainer,
+            ),
+        ] {
+            let refused = ProviderError::from(ImapError::no(text));
+            assert_eq!(refused.target_refusal(), Some(reason), "{text}");
+            assert_eq!(refused.class(), FailureClass::InvalidState, "{text}");
+            assert!(!refused.detail().contains("Secret"), "{refused}");
+        }
+        for other in ["SELECT failed", "[INUSE] busy", "Secret [OVERQUOTA] later"] {
+            assert_eq!(
+                ProviderError::from(ImapError::no(other)).target_refusal(),
+                None
+            );
+        }
+        assert_eq!(
+            ProviderError::from(ImapError::bad("[NOPERM] x")).target_refusal(),
+            None,
+            "a BAD is the request's fault, whatever it says"
+        );
     }
 }

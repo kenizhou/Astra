@@ -11,7 +11,7 @@ use engine_core::{
     ids::{AccountId, CalendarId, ContactId, ProviderKey},
     mail::{Mailbox, Message, MessageMetadata},
     raw::RawMime,
-    sync::{MailboxWindows, SyncScope, SyncState, SyncWindow},
+    sync::{MailboxWindows, SyncScope, SyncState, SyncWindow, Widening},
     time::Horizon,
 };
 
@@ -72,6 +72,17 @@ impl<P: Provider + ?Sized> Provider for Box<P> {
         chunk_size: usize,
     ) -> EmailStream<'a> {
         (**self).stream_email(account, cursor, window, fetch_batch, chunk_size)
+    }
+
+    fn widen_email<'a>(
+        &'a self,
+        account: &'a AccountId,
+        cursor: &'a SyncState,
+        widening: &'a Widening,
+        fetch_batch: usize,
+        chunk_size: usize,
+    ) -> EmailStream<'a> {
+        (**self).widen_email(account, cursor, widening, fetch_batch, chunk_size)
     }
 
     async fn sync_email(
@@ -171,6 +182,32 @@ impl<P: Provider + ?Sized> Provider for Box<P> {
     #[cfg(feature = "import")]
     fn mail_importer(&self) -> Option<&dyn crate::import::MailImporter> {
         (**self).mail_importer()
+    }
+
+    fn vacation(&self) -> Option<&dyn crate::Vacation> {
+        (**self).vacation()
+    }
+
+    fn mail_rules(&self) -> Option<&dyn crate::MailRules> {
+        (**self).mail_rules()
+    }
+
+    #[cfg(feature = "import")]
+    fn calendar_importer(&self) -> Option<&dyn crate::import::CalendarImporter> {
+        (**self).calendar_importer()
+    }
+
+    fn calendar_collections(&self) -> Option<&dyn crate::CalendarCollections> {
+        (**self).calendar_collections()
+    }
+
+    #[cfg(feature = "import")]
+    fn contact_importer(&self) -> Option<&dyn crate::import::ContactImporter> {
+        (**self).contact_importer()
+    }
+
+    fn address_book_collections(&self) -> Option<&dyn crate::AddressBookCollections> {
+        (**self).address_book_collections()
     }
 }
 

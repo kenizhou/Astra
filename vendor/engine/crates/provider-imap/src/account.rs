@@ -31,11 +31,13 @@ use tokio_rustls::{TlsConnector, client::TlsStream};
 use crate::{
     capability::Extension,
     config::ImapConfig,
+    credentials::PresentedIdentity,
     dial::connect_session,
     error::ImapError,
     filing::{SmtpSender, resolve_smtp},
     gmail::GmailMail,
-    pool::{DEFAULT_MAX_CONNECTIONS, Dial, ImapPool, VALIDATE_AFTER_REST},
+    managesieve::Sieve,
+    pool::{DEFAULT_MAX_CONNECTIONS, Dial, ImapPool, VALIDATE_AFTER_REST, other::Budget},
     provider::ImapProvider,
     store::Namespaces,
     transport::Connection,
@@ -66,6 +68,9 @@ pub struct ImapAccount<S> {
     namespaces: Arc<OnceLock<Namespaces>>,
     /// Whether the session advertised Gmail's `X-GM-EXT-1` (`crate::gmail`).
     gmail: bool,
+    /// The account's rules and reply over ManageSieve, where configured and answering
+    /// (`crate::managesieve::reach`).
+    sieve: Option<Arc<dyn Sieve>>,
 }
 
 impl<S> core::fmt::Debug for ImapAccount<S> {
@@ -81,9 +86,12 @@ impl<S> core::fmt::Debug for ImapAccount<S> {
 
 impl ImapAccount<TlsStream<TcpStream>> {
     /// Connects over TLS (implicit or STARTTLS, per the config) and authenticates with the
-    /// [`Credentials`](crate::Credentials) the config's source gives, a password or an OAuth
-    /// 2.0 access token, proving them and reading the server's capabilities. The connection is kept
-    /// for the first folder that needs one.
+    /// [`Credential`](engine_provider::Credential) the config's source gives: a password, an
+    /// OAuth 2.0 access token, or an administrator's password acting as another account
+    /// ([`Credential::ActingAs`](engine_provider::Credential::ActingAs), read its warning
+    /// first). This proves the credential and reads the server's capabilities, and the
+    /// connection is kept for the first folder that needs one. Every later connection the
+    /// account opens must sign in as the same account, the one whose mailbox this one opened.
     ///
     /// The `connector` carries the host's trust policy — the library never bakes in a root
     /// store, so a mobile host (or the self-signed test fixture) injects its own
@@ -99,34 +107,77 @@ impl ImapAccount<TlsStream<TcpStream>> {
             .smtp
             .as_ref()
             .map(|settings| resolve_smtp(settings, &connector, config));
-        let (connection, tls_version) = connect_session(config, &connector).await?;
-        let dial = dial_tls(config.clone(), connector);
-        Ok(Self::build(
-            connection,
-            dial,
-            smtp,
-            config.since,
-            tls_version,
-        ))
+        // One identity for every connection the account opens, the first included.
+        let presented = Arc::new(PresentedIdentity::default());
+        // ManageSieve is probed alongside the mail, under its own deadline, so it adds at most
+        // that to the connect (`crate::managesieve::reach`).
+        let (mail, probed) = match &config.managesieve {
+            None => (connect_session(config, &presented, &connector).await, None),
+            Some(endpoint) => {
+                // Boxed, so the two side by side do not make every caller's future large.
+                let (mail, probed) = tokio::join!(
+                    Box::pin(connect_session(config, &presented, &connector)),
+                    Box::pin(crate::managesieve::probe(endpoint, &connector))
+                );
+                (mail, Some(probed))
+            }
+        };
+        let (connection, tls_version) = mail?;
+        let sieve_slot = Arc::new(OnceLock::new());
+        let dial = dial_tls(
+            config.clone(),
+            presented,
+            connector.clone(),
+            Arc::clone(&sieve_slot),
+        );
+        let mut account = Self::build(connection, dial, smtp, config.since, tls_version);
+        let budget = Arc::clone(&account.pool) as Arc<dyn Budget>;
+        if let Some(sieve) =
+            probed.and_then(|probed| crate::managesieve::reach(config, &connector, budget, probed))
+        {
+            let _ = sieve_slot.set(Arc::clone(&sieve));
+            account.sieve = Some(sieve);
+        }
+        Ok(account)
     }
 }
 
 /// The pool's dial for a live account: the same TCP, TLS and authentication sequence as the
 /// first connection, from the same config. Each dial asks the config's
 /// [`CredentialSource`](crate::CredentialSource) afresh, so a connection opened an hour after
-/// [`ImapAccount::connect`] presents a token that is valid then.
-fn dial_tls(config: ImapConfig, connector: TlsConnector) -> Dial<TlsStream<TcpStream>> {
+/// [`ImapAccount::connect`] presents a token that is valid then, and every one signs in as the
+/// account the first connection signed in as (`presented`). Where the account's ManageSieve
+/// service wants another probe (after a failure that may pass, or [`ImapAccount::invalidate`]),
+/// the dial runs it alongside (`crate::managesieve::reprobe`).
+fn dial_tls(
+    config: ImapConfig,
+    presented: Arc<PresentedIdentity>,
+    connector: TlsConnector,
+    sieve: SieveSlot,
+) -> Dial<TlsStream<TcpStream>> {
     let config = Arc::new(config);
     Arc::new(move || {
         let config = Arc::clone(&config);
+        let presented = Arc::clone(&presented);
         let connector = connector.clone();
+        let sieve = Arc::clone(&sieve);
         Box::pin(async move {
-            connect_session(&config, &connector)
-                .await
-                .map(|(connection, _tls_version)| connection)
+            let dial = connect_session(&config, &presented, &connector);
+            Box::pin(crate::managesieve::reprobe(
+                sieve.get().map(Arc::as_ref),
+                &config,
+                &connector,
+                dial,
+            ))
+            .await
+            .map(|(connection, _tls_version)| connection)
         })
     })
 }
+
+/// The account's ManageSieve service, set once the account's first connection is up, for the
+/// dials after it to probe again where it wants that.
+type SieveSlot = Arc<OnceLock<Arc<crate::managesieve::service::ManageSieve<TlsStream<TcpStream>>>>>;
 
 impl<S> ImapAccount<S> {
     /// Builds an account around its first `connection`, advertising submission iff SMTP is
@@ -154,6 +205,7 @@ impl<S> ImapAccount<S> {
             shared_account: None,
             namespaces: Arc::new(OnceLock::new()),
             gmail,
+            sieve: None,
         }
     }
 
@@ -200,6 +252,7 @@ impl<S> ImapAccount<S> {
             shared_account: Some(handle),
             namespaces: Arc::clone(&self.namespaces),
             gmail: self.gmail,
+            sieve: self.sieve.clone(),
         }
     }
 
@@ -225,6 +278,8 @@ impl<S> ImapAccount<S> {
             self.shared_account.clone(),
             Arc::clone(&self.namespaces),
         )
+        // A shared mail store's rules are its owner's, not this login's.
+        .with_sieve(self.sieve.clone().filter(|_| self.shared_account.is_none()))
     }
 
     /// How many more folders this account can watch before a watch would take the last
@@ -241,6 +296,10 @@ impl<S> ImapAccount<S> {
     /// watches are untouched, and fail on their own when their socket does.
     pub fn invalidate(&self) {
         self.pool.invalidate();
+        // A new network may reach a ManageSieve service the old one did not, or not reach it.
+        if let Some(sieve) = &self.sieve {
+            sieve.want_probe();
+        }
     }
 }
 
@@ -297,7 +356,10 @@ fn capabilities<S>(connection: &Connection<S>, smtp: bool) -> Capabilities {
         // draft without them, and the receipt says so (`crate::place`).
         .with_draft_keywords()
         // `CREATE`/`RENAME`/`DELETE` are base protocol on both dialects.
-        .with_mailbox_writes();
+        .with_mailbox_writes()
+        // `UID SEARCH UID 1:n SINCE … BEFORE …` is base protocol, so a widening fetches only the
+        // folder's older mail and keeps its cursor (`crate::band`).
+        .with_band_widening();
     if smtp {
         // Both submission capabilities ride the same SMTP transport: the assembler
         // (`engine-rfc5322`) builds the whole message, so this adapter owns every

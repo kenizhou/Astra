@@ -1,13 +1,14 @@
-//! The two SASL mechanisms that carry an OAuth 2.0 access token: `OAUTHBEARER`
-//! (RFC 7628) and `XOAUTH2` (Google's earlier, still-dominant vendor mechanism).
+//! The SASL responses this crate presents: `PLAIN` (RFC 4616) for a password, and the two
+//! mechanisms that carry an OAuth 2.0 access token, `OAUTHBEARER` (RFC 7628) and `XOAUTH2`
+//! (Google's earlier, still-dominant vendor mechanism).
 //!
-//! Pure string and base64 work, no I/O. Both protocols this crate speaks carry the
+//! Pure string and base64 work, no I/O. Every protocol this crate speaks carries the
 //! *same* bytes — IMAP as `AUTHENTICATE <mech> <base64>` (RFC 4959) and SMTP as
 //! `AUTH <mech> <base64>` (RFC 4954) — so the initial client response is built once
 //! here and the framing belongs to the caller ([`crate::transport_auth`] and
 //! [`crate::smtp_auth`]).
 //!
-//! **Which mechanism to use is a fact about the server, never about the provider.** A
+//! **Which OAuth mechanism to use is a fact about the server, never about the provider.** A
 //! host hands the engine a username and an access token and nothing else; the adapter
 //! reads the offered mechanisms off `CAPABILITY`/`EHLO` and picks one. Nothing above
 //! this crate has to know that Microsoft's IMAP offers only `XOAUTH2` while Gmail and
@@ -15,7 +16,50 @@
 //! engine leaking its job outward
 //! (`docs/agent-guidance/imap-smtp.md`).
 
-use crate::error::{ImapError, ImapResult};
+use zeroize::Zeroizing;
+
+use crate::{
+    error::{ImapError, ImapResult},
+    secret_line::{Part, secret_line},
+};
+
+/// The `PLAIN` initial client response (RFC 4616), base64: `authzid NUL authcid NUL passwd`.
+///
+/// `authzid` is the account to act as, for an administrator signing in on another account's
+/// behalf (a Dovecot master user); `None` sends it empty, which signs in as `username` itself.
+/// SMTP `AUTH PLAIN` and IMAP `AUTHENTICATE PLAIN` carry these same bytes. The plain blob and
+/// its encoding both hold the password, so both are allocated at their final length and zeroed
+/// when dropped (`crate::secret_line`).
+///
+/// # Errors
+///
+/// [`ImapError::Bad`] if any component holds a NUL, `PLAIN`'s field separator: it would move
+/// the field boundaries, so that part of one identity is read as another. That is the host's
+/// mistake, so nothing is sent. Every other byte is the server's to judge.
+pub(crate) fn plain_response(
+    authzid: Option<&str>,
+    username: &str,
+    password: &str,
+) -> ImapResult<Zeroizing<String>> {
+    let authzid = authzid.unwrap_or_default();
+    if [authzid, username, password]
+        .iter()
+        .any(|component| component.contains('\0'))
+    {
+        return Err(ImapError::bad(
+            "a SASL PLAIN credential contains a NUL, which would forge its field boundaries",
+        ));
+    }
+    let blob = secret_line(&[
+        Part::Text(authzid),
+        Part::Text("\0"),
+        Part::Text(username),
+        Part::Text("\0"),
+        Part::Text(password),
+    ]);
+    // `encode` allocates its output at its final length too.
+    Ok(Zeroizing::new(crate::base64::encode(blob.as_bytes())))
+}
 
 /// A SASL mechanism that presents an OAuth 2.0 bearer token.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,7 +110,8 @@ impl Mechanism {
     }
 
     /// The base64 **initial client response** — the credential blob both protocols
-    /// send.
+    /// send. It and the plain blob it encodes carry the token, so both are zeroed when
+    /// dropped.
     ///
     /// `OAUTHBEARER` (RFC 7628 §3.1) is a GS2 header naming the authorization identity
     /// followed by `%x01`-separated key/value pairs, of which only `auth` is required;
@@ -85,24 +130,40 @@ impl Mechanism {
         access_token: &str,
         host: &str,
         port: Option<u16>,
-    ) -> ImapResult<String> {
+    ) -> ImapResult<Zeroizing<String>> {
         let username = clean("username", username)?;
         let access_token = clean("access token", access_token)?;
         let host = clean("host", host)?;
+        // Built at its final length, so no grown buffer leaves a copy of the token behind
+        // (`crate::secret_line`).
         let blob = match self {
             Self::OAuthBearer => {
-                // `port` is a `u16`, so its rendering needs no screening.
+                // `port` is a `u16`, so its rendering needs no screening, and it is no secret.
                 let port = port
                     .map(|port| format!("port={port}\x01"))
                     .unwrap_or_default();
-                format!(
-                    "n,a={username},\x01host={host}\x01{port}\
-                     auth=Bearer {access_token}\x01\x01"
-                )
+                secret_line(&[
+                    Part::Text("n,a="),
+                    Part::Text(username),
+                    Part::Text(",\x01host="),
+                    Part::Text(host),
+                    Part::Text("\x01"),
+                    Part::Text(&port),
+                    Part::Text("auth=Bearer "),
+                    Part::Text(access_token),
+                    Part::Text("\x01\x01"),
+                ])
             }
-            Self::XOAuth2 => format!("user={username}\x01auth=Bearer {access_token}\x01\x01"),
+            Self::XOAuth2 => secret_line(&[
+                Part::Text("user="),
+                Part::Text(username),
+                Part::Text("\x01auth=Bearer "),
+                Part::Text(access_token),
+                Part::Text("\x01\x01"),
+            ]),
         };
-        Ok(crate::base64::encode(blob.as_bytes()))
+        // `encode` allocates its output at its final length too.
+        Ok(Zeroizing::new(crate::base64::encode(blob.as_bytes())))
     }
 
     /// What the client sends when the server answers the credential with an **error

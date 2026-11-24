@@ -8,30 +8,32 @@
 //! it is not a sync verb: the sync [`Provider`](crate::Provider) contract does not change, and a
 //! host that never imports never compiles it.
 //!
-//! [`MailImporter`] is the mail half. An adapter that can import implements it; one that cannot
+//! [`MailImporter`] is the mail half, [`CalendarImporter`] the calendar half and
+//! [`ContactImporter`] the contact half (the `calendar` and `contact` modules say where they
+//! differ from mail). An adapter that can import implements it; one that cannot
 //! does not, so there is no capability flag to check. A host that picks its adapter at runtime
 //! holds it as a `Box<dyn MailImporter>` or an `Arc<dyn MailImporter>` beside its
 //! `dyn Provider`, and both are importers themselves, so a function generic over
 //! `I: MailImporter` takes either.
 
+mod calendar;
+#[cfg(feature = "import-conformance")]
+pub mod conformance;
+mod contact;
 mod message;
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
+pub use calendar::{CalendarImportLimits, CalendarImporter, EventImport, ImportedEvent};
+pub use contact::{ContactImport, ContactImportLimits, ContactImporter, ImportedContact};
 use engine_core::{
     ids::{AccountId, MailboxId},
     sync::SyncState,
 };
 pub use message::{ImportedMessage, MailImportLimits, MessageImport};
 
-// Named only by the doc links below, which rustdoc resolves against this module's scope.
-#[allow(
-    unused_imports,
-    reason = "named by intra-doc links on the trait's methods"
-)]
-use crate::ProviderError;
-use crate::ProviderResult;
+use crate::{ProviderError, ProviderResult};
 
 /// Imports messages into a target account.
 #[async_trait]
@@ -83,6 +85,45 @@ pub trait MailImporter: Send + Sync {
         account: &AccountId,
         batch: &[MessageImport],
     ) -> Vec<ProviderResult<ImportedMessage>>;
+}
+
+/// The answer for a message a batch never sent, because `ending` ended the batch first: an
+/// importer answers every message after the failure that ended its batch with this, so the
+/// count of answers still matches.
+///
+/// Two endings reach every message of the account, and carry over: a throttle, with the wait
+/// it named, and a refused credential. A host then schedules the message with the rest of the
+/// batch, after the wait or after a new credential. Any other ending was about the exchange or
+/// another message (a connection lost, an answer that could not be read, a message that may
+/// be stored), so this one, never sent, is plainly retryable: it neither
+/// [may be stored](ProviderError::requires_confirmation) nor is
+/// [unavailable](ProviderError::item_unavailable). Its detail never repeats the ending's text.
+///
+/// # Examples
+///
+/// ```
+/// use std::time::Duration;
+///
+/// use engine_provider::{ProviderError, import::not_sent};
+///
+/// let throttled = ProviderError::rate_limited("429", Some(Duration::from_secs(30).into()));
+/// let unsent = not_sent(&throttled);
+/// assert_eq!(unsent.class(), throttled.class());
+/// assert_eq!(unsent.retry_after(), throttled.retry_after());
+/// ```
+#[must_use]
+pub fn not_sent(ending: &ProviderError) -> ProviderError {
+    use engine_core::error::FailureClass;
+    match ending.class() {
+        FailureClass::RateLimited => ProviderError::rate_limited(
+            "not sent: the target throttled the batch",
+            ending.retry_after(),
+        ),
+        FailureClass::Authentication => {
+            ProviderError::authentication("not sent: the target refused the credential")
+        }
+        _ => ProviderError::retryable("not sent: an earlier failure ended the batch"),
+    }
 }
 
 /// A boxed importer is an importer, delegating every method to the box's contents, so a host
