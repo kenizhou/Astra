@@ -437,7 +437,7 @@ is authoritative for the `provider-caldav` calendar client.
 `Password` (IMAP `LOGIN`, SMTP `AUTH PLAIN`), `Bearer` (an access token over SASL, with the
 account's username, which both SASL mechanisms carry: `Credential::bearer_for`), or `ActingAs`
 (an administrator's password signing in as another account, IMAP only: below). It is the
-engine's one credential type, which every adapter is moving onto
+engine's one credential type, which every adapter now asks for through a source
 (`docs/design/credential-source.md`). The posture is the same as Graph and Google: **the engine
 stays OAuth-agnostic**: acquiring, storing and refreshing the token is the host's job
 (`north-star.md`). `provider_imap::Credentials` remains as a deprecated alias, and its
@@ -480,7 +480,12 @@ outlives the token that opened it, so nothing replaces an open one.
   `ImapError::Credential`, classified as the source classified it: a revoked grant is
   `Authentication`, an unreachable token endpoint is retryable. It is not a session refusal, so
   the pool's ceiling does not move. A bearer credential without a username dials nothing either
-  (`Permanent`): both SASL mechanisms name the account.
+  (`Permanent`): both SASL mechanisms name the account. As a `ProviderError` it is the source's
+  error as it came, its wait included, and `is_credential_failure()` says no credential could be
+  had; so does every credential the protocol cannot carry (a missing username, a kind or a byte
+  SASL cannot frame, an administrator acting as another account over SMTP or ManageSieve) and one
+  for another account than the pool's. A fetch does not dial again after one: a new connection
+  would ask the same source at once.
 - **Copies of the secret this crate makes are zeroed.** Every buffer the crate builds around a
   password or token is `Zeroizing` and allocated once at its final length (`secret_line.rs`),
   because a `String` that grows frees its old buffer unzeroed: the IMAP `LOGIN` line (built and
@@ -528,7 +533,9 @@ boundaries.
   the wrong subject cannot put another mailbox's session in the pool. Within one dial, a
   replacement must name the account the refused credential named, so a refusal cannot switch
   accounts even on the first dial; a dial whose credentials were all refused fixes nothing. A
-  second identity reaching `remember` (two first dials racing) fails that dial too. The
+  second identity reaching `remember` (two first dials racing) fails that dial too, as
+  `ImapError::SignedInAsAnotherAccount` (`InvalidState`, and no credential failure: the server
+  took the credential). The
   comparison is exact, byte for byte: `Alice@example.com` and `alice@example.com` are two
   accounts to it, even on a server that folds case. Proof: `dial_identity_tests.rs`.
 
@@ -597,7 +604,17 @@ would exercise it rested on a documentation claim the server disproves.
 - **Credential components are screened before encoding.** `%x01` is the key/value
   separator itself, so a token carrying one could append its own `auth=` pair; CR/LF/NUL
   would break out of the command line the base64 rides on. Rejected up front — the same
-  guard `smtp.rs` applies to envelope addresses and `engine-rfc5322` to header values.
+  guard `smtp.rs` applies to envelope addresses and `engine-rfc5322` to header values. `LOGIN`
+  is screened too: its username and password go as quoted strings, which cannot carry CR, LF or
+  NUL (RFC 3501 §9), and a CRLF in a password would end the line and send the rest as a command
+  of its own. Each is a credential that cannot be presented (`Permanent`, a credential failure),
+  refused before anything is written. `OAUTHBEARER`'s GS2 header names the account as a
+  `saslname` (RFC 7628 §3.1, RFC 5801 §4), where `,` would end the field and `=` starts an escape:
+  both are legal in a username, so they go escaped as `=2C` and `=3D`. `XOAUTH2` frames the name
+  with `^A`, which the screen refuses, and `PLAIN` with NUL, likewise refused, so neither splits.
+  Stalwart takes the escaped header (`live_imap_oauthbearer_name.rs`), but reads no
+  authorization identity from it (STALWART-9), so the escaping is checked offline only; a server
+  that reads the field is still needed to prove it live.
 - **The pre-auth `CAPABILITY` is a third call, not a duplicate of the other two.** The
   session already asks before `STARTTLS` (is the upgrade offered?) and again after
   authenticating (what does *this* session get — servers advertise a different set once
@@ -928,10 +945,10 @@ connection budget (`docs/design/filters-and-out-of-office.md`, decision 7, and "
   session dials, signs in (`AUTHENTICATE "PLAIN"` with `sasl::plain_response`, or
   `OAUTHBEARER`/`XOAUTH2`) and works, within `SESSION_DEADLINE` (2 min); past it, after a write
   went out, the call answers needs-confirmation. `LOGOUT` then goes out outside the deadline,
-  unawaited, so a slow answer to it never puts a finished write in doubt. The credential is asked as
-  `CredentialProtocol::ManageSieve` for `sieve://<server name>:<port>`. A `Credential::ActingAs` is refused
-  before sending (`ImapError::Bad`), as SMTP refuses it: `PLAIN` with an authorization identity
-  over ManageSieve has not been proven on a harness server yet.
+  unawaited, so a slow answer to it never puts a finished write in doubt. The credential is asked
+  as `CredentialProtocol::ManageSieve` for `sieve://<server name>:<port>`. A `Credential::ActingAs`
+  is refused before sending (`ImapError::Credential`, `Permanent`), as SMTP refuses it: `PLAIN`
+  with an authorization identity over ManageSieve has not been proven on a harness server yet.
 - **The wire.** No tags: one command at a time, its response ends at `OK`, `NO` or `BYE`. Strings
   are quoted where they can be, else sent as `{n+}` literals (a script always is). A refusal keeps
   its response code (`NONEXISTENT`, `ACTIVE`, `QUOTA/…`, `TRYLATER`) and never the prose, which
@@ -941,9 +958,24 @@ connection budget (`docs/design/filters-and-out-of-office.md`, decision 7, and "
 - **Rules and reply.** `managesieve::state` picks the script (as JMAP does) and hashes the list and
   the script into the version; `rules` and `vacation` implement the traits over
   `engine_sieve::dialect`, the reply as Roundcube's reply rule (`dialect::reply`). The guard is
-  `Absent`; a stale base is refused in the write's own session.
+  `Absent`; a stale base is refused in the write's own session. The receipt says whether the
+  rules written run (`RulesReceipt::activation`): a write never switches the script on or off.
+  **No rule files by id here**: `fileinto :mailboxid` names an RFC 8474 `MAILBOXID`, and this
+  adapter knows a folder by its name, so the vocabulary leaves `FileIntoId` out
+  (`RuleVocabulary::without`), and a rule another client wrote with `:mailboxid` is read carried
+  whole (`engine_sieve::dialect::folder_ids_carried`) and copied back as it was, never handed to a
+  host as one of its folder ids.
+- **Import** (`managesieve/import.rs`, the `import` feature): `RulesImporter` through
+  `engine_provider::import::append_rules` and `import_reply` over the same service
+  (`providers.md`, "Importing rules and the reply"), answered by `Provider::rules_importer`
+  wherever `mail_rules` is. No rule files by id here (above), so a rule filing by id loses that
+  action: `MissingMailbox` where the host's `FolderMap` does not hold the folder, `NotExpressible`
+  where it does; a host names an IMAP target's folders by path. A rules import never stops a
+  running reply here either: the write refuses where the server's reply script runs and it lists
+  no `include`, as an edit does, and the reply's own write refuses to switch stored rules on.
 - **Proven live** on both harness servers (`managesieve/live_tests.rs`,
-  `live_provider_tests.rs`); offline over the captured responses in
+  `live_provider_tests.rs`, and `live_import_tests.rs` for the import, which CI's Dovecot job runs
+  with `--features import`); offline over the captured responses in
   `tests/fixtures/managesieve/`. Stalwart's `HAVESPACE` says yes to any size (STALWART-10), so
   nothing asks it before storing.
 
@@ -1209,6 +1241,11 @@ object. `ImapAccount::gmail` (offered only on a session advertising `X-GM-EXT-1`
 `GmailMail` instead: a reader of All Mail (`\All`), Spam (`\Junk`) and Trash (`\Trash`), the
 three folders that between them hold every message once. It reads and never writes; what a
 label means is `provider-google`'s (`google.md`, "Mail read over IMAP"), which is the only user.
+`GmailMail::credential_subject` says who it signs in as (the subject of its config's source,
+recorded by `ImapAccount::connect`), so the Gmail adapter can refuse a reader that does not sign
+in as the same credential subject as its API half. `test_server::gmail` (the `test-server`
+feature, which only dev-dependencies turn on) serves an in-process Gmail over TLS, so another
+crate's suite can connect a real `ImapAccount` offline.
 
 - **Gmail's items.** `X-GM-MSGID`, `X-GM-THRID` and `X-GM-LABELS` (`parse_gmail`) are the same
   for a message in every folder; a message moving between the three keeps its Gmail id under a

@@ -1,8 +1,12 @@
 //! What a target keeps of a rule set, decided before anything is sent.
 
 use super::{
-    Action, MailRule, MatchMode, RuleBody, RuleFeature, RuleVocabulary, Support, TypedRule,
-    plan_support::{action_support, both, condition_support, sends_out, spans_lines},
+    Action, Condition, Kept, Loss, LossReason, MailRule, MatchMode, RuleBody, RuleFeature,
+    RuleLimit, RuleMailbox, RuleOutcome, RulePart, RuleVocabulary, Support, TypedRule,
+    plan_support::{
+        action_kind, action_support, both, condition_support, folders_named, sends_out,
+        spans_lines, test_kind,
+    },
 };
 
 /// Why rules are being planned.
@@ -66,88 +70,6 @@ impl RulesPlan {
     }
 }
 
-/// What became of one rule.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct RuleOutcome {
-    /// The rule's index in the rules handed in.
-    pub source: usize,
-    /// How much of it the target keeps.
-    pub kept: Kept,
-    /// Each part lost or changed, and why.
-    pub losses: Vec<Loss>,
-}
-
-/// How much of a rule a target keeps.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub enum Kept {
-    /// All of it, some parts perhaps [`Approximated`](LossReason::Approximated).
-    Whole,
-    /// Without an action, its stop, its name or its order: it does less, never more.
-    Reduced,
-    /// Stored disabled for review: an imported rule that sends mail out of the account. What
-    /// else it lost is in its [`losses`](RuleOutcome::losses), as for any rule.
-    Disabled,
-    /// None of it: what was lost would have widened what it matches, or left it nothing to do.
-    NotKept,
-}
-
-/// One part of a rule lost or changed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub struct Loss {
-    /// Which part.
-    pub part: RulePart,
-    /// Why.
-    pub reason: LossReason,
-}
-
-/// A part of a rule, by position: never its value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub enum RulePart {
-    /// The whole rule.
-    Rule,
-    /// How its conditions combine.
-    Mode,
-    /// Its condition at this index.
-    Condition(usize),
-    /// Its exception at this index.
-    Exception(usize),
-    /// Its action at this index.
-    Action(usize),
-    /// Its stop.
-    Stop,
-    /// Whether it runs.
-    Enabled,
-    /// Its name.
-    Name,
-    /// Its place in the order.
-    Order,
-}
-
-/// Why a part was lost or changed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub enum LossReason {
-    /// The target's language has no equivalent.
-    NotExpressible,
-    /// Carried with a stated difference.
-    Approximated,
-    /// The folder it names has no counterpart on the target.
-    MissingMailbox,
-    /// The target refuses to send mail on there: too many addresses, an address it has not
-    /// verified, or a forwarding rule an import arms only on request.
-    ForwardNotAllowed,
-    /// Over a limit of the target: the rule count, the script size.
-    LimitExceeded,
-    /// The source itself marks the rule as in error (Graph `hasError`).
-    SourceInError,
-    /// A rule the engine could not read, going to another kind of transport.
-    OpaqueSource,
-}
-
 /// Decides what `target` keeps of `rules`, and how each rule is to be written.
 ///
 /// One function for every caller, so the receipt's classes come from one place: a settings
@@ -164,6 +86,14 @@ pub enum LossReason {
 ///   ([`Kept::Disabled`]) unless the import says [`ForwardingRules::Enabled`], and not kept where
 ///   the target cannot store a disabled rule. A user's own edit ([`PlanMode::Edit`]) is written as
 ///   given.
+///
+/// What a target holds part by part it may still not hold together ([`RuleLimit`]): a second
+/// test of one kind is a lost condition or exception, and a second action of one kind a lost
+/// action, judged as any other.
+///
+/// A rule its source marks in error ([`MailRule::in_error`]) says so
+/// ([`LossReason::SourceInError`]); an import stores it disabled as well, since what it does on
+/// its source is not known, and an edit writes it as given.
 ///
 /// A rule carried whole keeps its text, so it keeps the name its text holds and stays enabled:
 /// renaming it is a lost name, and disabling it is not expressible. It goes only to a target that
@@ -199,7 +129,8 @@ pub fn plan_rules(rules: &[MailRule], target: &RuleVocabulary, mode: PlanMode) -
 struct Planned {
     losses: Vec<Loss>,
     fatal: bool,
-    disabled_for_review: bool,
+    /// Why an import stores the rule disabled for review, where it does.
+    review: Option<LossReason>,
 }
 
 impl Planned {
@@ -261,11 +192,8 @@ impl Planned {
                     self.lose(RulePart::Enabled, LossReason::NotExpressible);
                     self.fatal = true;
                 }
-                // Its `${` means what its own script made of it, and may name a variable another
-                // of that script's commands sets: it does not move to another script.
-                if raw.expansion().is_some() && matches!(mode, PlanMode::Import { .. }) {
-                    self.lose(RulePart::Rule, LossReason::NotExpressible);
-                    self.fatal = true;
+                if matches!(mode, PlanMode::Import { .. }) {
+                    self.imported_whole(raw);
                 }
             }
             RuleBody::Typed(typed) => self.typed(typed, target),
@@ -280,6 +208,13 @@ impl Planned {
         }
         if !written.enabled && matches!(written.body, RuleBody::Typed(_)) {
             self.require(RulePart::Enabled, target.support(RuleFeature::Disabled));
+        }
+        if rule.in_error {
+            // What a rule in error does on its source is unknown; an import does not arm it.
+            self.lose(RulePart::Rule, LossReason::SourceInError);
+            if written.enabled && matches!(mode, PlanMode::Import { .. }) {
+                self.disable_for_review(&mut written, target, LossReason::SourceInError);
+            }
         }
         let arming = mode
             == (PlanMode::Import {
@@ -297,42 +232,101 @@ impl Planned {
         let forwards =
             matches!(&written.body, RuleBody::Typed(typed) if typed.actions.iter().any(sends_out));
         if written.enabled && forwards && arming {
-            if target.support(RuleFeature::Disabled).is_some() {
-                written.enabled = false;
-                self.disabled_for_review = true;
-            } else {
-                self.lose(RulePart::Enabled, LossReason::ForwardNotAllowed);
-                self.fatal = true;
-            }
+            self.disable_for_review(&mut written, target, LossReason::ForwardNotAllowed);
         }
         if !written.enabled
             && matches!(&written.body, RuleBody::Typed(typed) if spans_lines(&typed.when))
             && target.support(RuleFeature::DisabledMultiLine).is_none()
         {
-            let reason = if self.disabled_for_review {
-                LossReason::ForwardNotAllowed
-            } else {
-                LossReason::NotExpressible
-            };
+            let reason = self.review.unwrap_or(LossReason::NotExpressible);
             self.lose(RulePart::Enabled, reason);
             self.fatal = true;
         }
         written
     }
 
+    /// What a rule carried whole cannot take to another account: its `${`, which means what its
+    /// own script made of it and may name a variable another of that script's commands sets; a
+    /// folder it names by id, which is the source's; and another script it runs, which is the
+    /// source's too.
+    fn imported_whole(&mut self, raw: &super::RawRule) {
+        if raw.expansion().is_some() || raw.includes_scripts() {
+            self.lose(RulePart::Rule, LossReason::NotExpressible);
+            self.fatal = true;
+        }
+        if raw.names_folders_by_id() {
+            self.lose(RulePart::Rule, LossReason::MissingMailbox);
+            self.fatal = true;
+        }
+    }
+
+    /// Stores `written` disabled for review, for `reason`; where the target cannot store a
+    /// disabled rule, or the rule is carried whole (its text runs it), it is not kept.
+    fn disable_for_review(
+        &mut self,
+        written: &mut MailRule,
+        target: &RuleVocabulary,
+        reason: LossReason,
+    ) {
+        let typed = matches!(written.body, RuleBody::Typed(_));
+        if typed && target.support(RuleFeature::Disabled).is_some() {
+            written.enabled = false;
+            self.review = Some(reason);
+        } else {
+            self.lose(RulePart::Enabled, reason);
+            self.fatal = true;
+        }
+    }
+
     fn typed(&mut self, rule: &mut TypedRule, target: &RuleVocabulary) {
         let when = &rule.when;
+        if target.has_limit(RuleLimit::SomeTest)
+            && when.conditions.is_empty()
+            && when.except.is_empty()
+        {
+            // A rule that matches every message, where the target holds none.
+            self.require(RulePart::Rule, None);
+        }
         if when.mode == MatchMode::Any && when.conditions.len() > 1 {
             self.require(RulePart::Mode, target.support(RuleFeature::MatchAny));
         }
+        let one_per_kind = target.has_limit(RuleLimit::OneTestPerKind);
+        // A second test of a kind already tested, where the target keeps one per kind.
+        // Among exceptions, only a kind with a single value: the others merge into one any-of.
+        let repeated = |tests: &[Condition], i: usize, except: bool| {
+            one_per_kind
+                && test_kind(&tests[i]).is_some_and(|kind| {
+                    (!except || kind.single_valued())
+                        && tests[..i]
+                            .iter()
+                            .any(|t| test_kind(t).as_ref() == Some(&kind))
+                })
+        };
+        // A provider's own condition where the target holds it only among all-of conditions.
+        let native_alone = |condition: &Condition, outside: bool| {
+            outside
+                && target.has_limit(RuleLimit::NativeConditionsAllOf)
+                && matches!(condition, Condition::Native(_))
+        };
+        let any_of = when.mode == MatchMode::Any && when.conditions.len() > 1;
         for (i, condition) in when.conditions.iter().enumerate() {
-            self.require(RulePart::Condition(i), condition_support(condition, target));
+            let support = condition_support(condition, target).filter(|_| {
+                !repeated(&when.conditions, i, false) && !native_alone(condition, any_of)
+            });
+            self.require(RulePart::Condition(i), support);
         }
         for (i, exception) in when.except.iter().enumerate() {
             let support = both(
                 target.support(RuleFeature::Except),
                 condition_support(exception, target),
-            );
+            )
+            .filter(|support| {
+                !repeated(&when.except, i, true)
+                    && !native_alone(exception, true)
+                    // A narrower exception vetoes less: the rule would do more.
+                    && (!target.has_limit(RuleLimit::ExactExceptions)
+                        || *support != Support::Approximated)
+            });
             self.require(RulePart::Exception(i), support);
         }
         let had_actions = !rule.actions.is_empty();
@@ -343,14 +337,56 @@ impl Planned {
         for (i, action) in rule.actions.iter().enumerate() {
             let addresses = match action {
                 Action::Redirect { to, .. } | Action::Forward { to } => to.len(),
+                // A provider's own action that sends mail sends it somewhere: one address at least.
+                Action::Native(native)
+                    if native.sends_mail && target.stores_native(native.kind) =>
+                {
+                    1
+                }
                 _ => 0,
+            };
+            // An import files into the target's counterpart of a source folder, or nowhere.
+            let mapped;
+            let action = match (action, target.folders()) {
+                (
+                    Action::FileInto {
+                        mailbox: RuleMailbox::Id(id),
+                        copy,
+                    },
+                    Some(folders),
+                ) => {
+                    let Some(to) = folders.target(id) else {
+                        self.lose(RulePart::Action(i), LossReason::MissingMailbox);
+                        continue;
+                    };
+                    mapped = Action::FileInto {
+                        mailbox: RuleMailbox::Id(to.clone()),
+                        copy: *copy,
+                    };
+                    &mapped
+                }
+                _ => action,
             };
             if target
                 .max_redirects()
                 .is_some_and(|max| redirects + addresses > max)
             {
                 self.lose(RulePart::Action(i), LossReason::ForwardNotAllowed);
-            } else if self.optional(RulePart::Action(i), action_support(action, target)) {
+            } else if self.optional(RulePart::Action(i), {
+                // A second action of a kind kept already, where the target keeps one per kind.
+                let repeated = target.has_limit(RuleLimit::OneActionPerKind)
+                    && action_kind(action).is_some_and(|kind| {
+                        kept.iter().any(|k| action_kind(k).as_ref() == Some(&kind))
+                    })
+                    || target.has_limit(RuleLimit::OneFolderPerRule)
+                        && kept
+                            .iter()
+                            .chain([action])
+                            .map(folders_named)
+                            .sum::<usize>()
+                            > 1;
+                action_support(action, target).filter(|_| !repeated)
+            }) {
                 redirects += addresses;
                 kept.push(action.clone());
             }
@@ -371,13 +407,15 @@ impl Planned {
     fn outcome(self, source: usize) -> RuleOutcome {
         let kept = if self.fatal {
             Kept::NotKept
-        } else if self.disabled_for_review {
+        } else if self.review.is_some() {
             Kept::Disabled
-        } else if self
-            .losses
-            .iter()
-            .any(|loss| loss.reason != LossReason::Approximated)
-        {
+        } else if self.losses.iter().any(|loss| {
+            // Neither an approximation nor the source's own error is something the target lost.
+            !matches!(
+                loss.reason,
+                LossReason::Approximated | LossReason::SourceInError
+            )
+        }) {
             Kept::Reduced
         } else {
             Kept::Whole

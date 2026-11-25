@@ -66,8 +66,10 @@ If product pressure changes the order, the domain model tests still need JMAP an
   `Some(self)`, one that cannot implements nothing and answers `None`, and the answer is
   both the capability check and the means to act on it, so no flag in `Capabilities` has to
   agree with a method that rejects. `Provider::vacation() -> Option<&dyn Vacation>` (below,
-  "Out-of-office") is the second, and `Provider::mail_rules() -> Option<&dyn MailRules>` (below,
-  "Mail rules") the third. `Box<dyn Provider>` delegates every accessor, so a host
+  "Out-of-office") is the second, `Provider::mail_rules() -> Option<&dyn MailRules>` (below,
+  "Mail rules") the third, and `Provider::rules_importer() -> Option<&dyn RulesImporter>`
+  (behind `import`; below, "Importing rules and the reply") the fourth. `Box<dyn Provider>`
+  delegates every accessor, so a host
   holding the box reaches the capability without knowing the adapter.
 
   The accessor is what makes a sub-trait affordable. A bare sub-trait costs a host what a
@@ -255,7 +257,8 @@ it. An adapter that can import implements the trait; there is no capability flag
   `Box<dyn MailImporter>` and `Arc<dyn MailImporter>` are importers too, for code generic over
   `I: MailImporter`.
 - **Who implements it:** IMAP (`APPEND`, `imap-smtp.md` → "Import") and JMAP (`Email/import`,
-  `jmap.md` → "Import"); Graph and Gmail are sources only.
+  `jmap.md` → "Import"); Graph and Gmail are sources only. Rules and the reply import through a
+  sibling, `RulesImporter` (below, "Importing rules and the reply").
 - **What every importer must do is checked once**: `engine_provider::import::conformance` (the
   `import-conformance` feature, for live suites) imports a dated message with keywords and an
   undated control, and reads both back through the sync seam: bytes, the mailbox asked for, a
@@ -320,12 +323,15 @@ it. An adapter that can import implements the trait; there is no capability flag
   | The target's own state (above) | `refused_by_target`, `InvalidState` |
   | Throttled, an upload quota included | `RateLimited`, with the server's wait |
   | A refused credential | `Authentication` |
+  | No credential could be had (the source failed, or the credential may not go there) | the source's class, and `is_credential_failure` |
   | Sent, and the answer lost | `requires_confirmation`: find it from the import cursor before sending again |
-  | Not sent, because an earlier failure ended the batch | `import::not_sent(ending)`: a throttle (with its wait) or a refused credential carries over, anything else is `Retryable` |
+  | Not sent, because an earlier failure ended the batch | `import::not_sent(ending)`: a throttle (with its wait) or a refused credential carries over, and an ending where no credential could be had carries over whole (its class, its wait, `is_credential_failure`), so a credential that may never go there stays `Permanent`; anything else is `Retryable` |
   | A transient fault | `Retryable` |
 
-  A throttle or a refused credential ends the batch on every adapter, since it reaches every
-  message after it; a refusal of one message never does.
+  A throttle, a refused credential, or no credential at all ends the batch on every adapter,
+  since it reaches every message after it; a refusal of one message never does. The rule is one
+  function, `ProviderError::ends_batch`, so a source that is down or hung is asked once per batch,
+  not once per message at a deadline each.
 
 ## Out-of-office (`Vacation`)
 
@@ -362,8 +368,8 @@ adapter can reach.
 |---|---|---|---|---|
 | JMAP (`VacationResponse`, RFC 8621 §8) | **Implemented** (`jmap.md` → "Out-of-office") | `Enforced` (`ifInState`) | either end, subject, text and HTML; everyone; one reply | observed through JMAP Sieve, else `Unknown` |
 | IMAP + ManageSieve | **Implemented** (`imap-smtp.md` → "Rules and the reply over ManageSieve"): Roundcube's reply rule in the rules' script | `Absent`, with a stale read refused in the write's session | either end where `date` and `relational` are listed, subject, text only; everyone; one reply | `Untouched`: one script holds both |
-| Graph (`automaticRepliesSetting`) | Planned (slices 4, 5) | `Absent` | both ends, no subject, one body; organization, organization and contacts; outside reply | `Untouched` |
-| Gmail (`VacationSettings`) | Planned (slice 5) | `Absent` | either end, subject, text and HTML; contacts, organization, contacts in organization (Workspace) | `Untouched` |
+| Graph (`automaticRepliesSetting`) | **Implemented** (`graph.md` → "Mail rules and the out-of-office reply"): read canonically, the zoned schedule as instants; written with a `PATCH` of `mailboxSettings`, applied by Graph after it answers, so the receipt names no version | `Absent` (no ETag), with a stale read refused after reading again | both ends, no subject, one (HTML) body; organization, organization and contacts; outside reply | `Untouched` |
+| Gmail (`VacationSettings`) | **Implemented** (`google.md` → "Filters and the vacation reply"): written with a `PUT` of the whole setting, the window rounded to the millisecond and never wider | `Absent` (no ETag), with a stale read refused after reading again | either end, subject (a prefix), one body (Gmail drops the text where HTML is set); contacts, and on a Workspace account organization and contacts in organization | `Untouched` |
 | CalDAV / CardDAV | n/a | | | |
 
 On a JMAP server that runs the reply as a script of its own, the JMAP adapter keeps the user's
@@ -386,9 +392,25 @@ An account's rules are a setting too, written whole and directly, guarded by the
   `rule_vocabulary(account)`, and the `RulesReceipt` carries each rule's `RuleOutcome`; adapters
   add only what the server alone refuses: a script over its size limit or one it calls invalid
   (`item_unavailable`), an account with no room for it (`refused_by_target(StorageFull)`). A stale
-  base is a `Conflict`; a lost answer is `requires_confirmation`.
+  base is a `Conflict`; a lost answer is `requires_confirmation`. A transport that stores rules
+  one by one (Graph, Gmail) goes on past a rule the server refuses, but not past a throttle, a
+  refused credential or no credential at all, which reach every later rule as they reach every
+  later message of an import (`ProviderError::ends_batch`, kept by `RuleWriteEnding`): each rule
+  after it is answered unsent, with that class. It lists each rule not written in the
+  receipt's `failures` (`RuleWriteFailure`: which rule, its class, whether it may have landed, and
+  whether no credential could be had for it, `credential_failure`, and a throttle's wait,
+  `retry_after`);
+  one that stores the set at once fails whole. A rule listed there says so on its outcome too
+  (`LossReason::NotWritten`). What a target holds part by part but not together is a `RuleLimit`
+  of its vocabulary, so the plan, not the writer, decides it.
+- **An edit that is not kept does not apply.** On a transport that stores rules one by one
+  (Graph, Gmail), a rule not kept, by the plan or because its write failed, leaves the rule it was
+  read as where it is, and the receipt names it (`RulesReceipt::left_as_read`): one answer,
+  `RuleListing::left_as_read`. The Sieve targets still leave such a rule out of the script they
+  write; the same treatment there is a follow-up.
 - **A write never switches stored rules on or off** (`RuleSet::activation`, `RulesStored`), and
-  says what it did to a running reply (`ReplyEffect`).
+  says on the receipt whether the rules it wrote run (`RulesReceipt::activation`) and what it did
+  to a running reply (`ReplyEffect`).
 - **Rule values are content**: names, addresses, folders, test values. Errors and `Debug` carry
   kinds, positions and counts only.
 
@@ -396,9 +418,54 @@ An account's rules are a setting too, written whole and directly, guarded by the
 |---|---|---|---|
 | JMAP (Sieve, RFC 9661) | **Implemented** (`jmap.md` → "Mail rules") | `Enforced` (`ifInState` on `SieveScript`) | the dialect's, from the account's `sieveExtensions` and `maxNumberRedirects` |
 | IMAP + ManageSieve | **Implemented** (`imap-smtp.md` → "Rules and the reply over ManageSieve"): the same dialect, one script with the reply | `Absent`; a stale read (a SHA-256 of the script list and the script) is refused in the write's own session | the dialect's, from the `SIEVE` and `MAXREDIRECTS` the server lists once signed in |
-| Graph (`messageRule`) | Planned (slices 4, 5) | **unverified** (`@odata.etag`) | fixed |
-| Gmail (filters) | Planned (slice 5) | `Absent` | fixed: no stop, no order, no disabled rule |
+| Graph (`messageRule`) | **Implemented** (`graph.md` → "Mail rules and the out-of-office reply"): read typed or native per predicate; written rule by rule by position, a change that drops a part as a new rule in its place, each failure in the receipt's `failures` and on the rule's outcome | `Absent`: no `@odata.etag` and a stale `If-Match` ignored (observed); a stale read (a SHA-256 of the listing) is refused after reading again, though the listing can lag a write | fixed (`provider-graph`'s `rules::vocabulary`), with `RuleLimit`s |
+| Gmail (filters) | **Implemented** (`google.md` → "Filters and the vacation reply"): criteria read typed (a word match of Gmail's own, `TextOp::Words`) from a small search subset or kept whole; written filter by filter, a change as a new filter before the old is deleted, a filter Gmail already holds kept rather than sent again, a rule not written leaving the filter it was read as | `Absent`: a filter has no ETag and no update; a stale read (a SHA-256 of the listing) is refused after reading again | fixed (`provider-google`'s `rules::vocabulary`): no stop, order, name or disabled rule; one forward, one user label and at least one criterion per filter; exact exceptions; values as phrases; the order approximated |
 | CalDAV / CardDAV | n/a | | |
+
+### Importing rules and the reply (`RulesImporter`, the `import` feature)
+
+A transfer host carries a source's rules and reply to a target through
+`engine_provider::import::RulesImporter`, reached through `Provider::rules_importer()` wherever the
+target offers its rules (`filters-and-out-of-office.md`, "Import").
+
+The contract: **never change what the target already had, and be safe to run again.**
+
+- **One import for every target.** An adapter implements the trait with `import::append_rules` and
+  `import::import_reply` over its own `MailRules` and `Vacation`; it adds only what it alone knows,
+  which of the target's folders exist. So the import writes through `replace_rules` and
+  `set_vacation`, and script choice, the guard, the reply's include and activation are decided
+  where an edit decides them. Where an edit would stop what runs and say so (a reply stopped by
+  new rules, rules switched off by a reply), the import refuses instead (`item_unavailable`); JMAP
+  hands the engine's import a view whose writes refuse there.
+- **Rules are appended after the target's own, never replacing or reordering them**, planned in
+  `Import` mode: a rule that sends mail out of the account is stored disabled unless the host arms
+  forwarding. Folder ids go through the host's `FolderMap` (source id to target id), which the
+  importer takes: a mapped id is written as the target's, and one the map does not hold, or whose
+  target folder is gone, loses its action as `MissingMailbox`. A rule carried whole that names a
+  folder by id, runs another script or holds `${` is not imported. Where the target's own edit
+  would not write its rules back as they are, nothing is imported (`item_unavailable`). An
+  imported rule is written as a rule of no script (its origin cleared).
+- **Safe to run again**: a planned rule the target already holds an equal typed rule for is not
+  written again, one held rule for each handed in, and the receipt lists it (`already_held`). It
+  is compared as the target will read it back once written, and a rule carried whole is planned
+  with the facts its own text gives: both through the `ImportDialect` the adapter passes (for a
+  Sieve target, `engine_sieve::dialect::read_back` and `facts_from_text`).
+- **The answer** is a `RulesReceipt` whose outcomes are indexed by the rules handed in; it also
+  says where the rules went (`Unwritten` where nothing was left to add), whether they run, and
+  which were already held.
+- **The preflight list** of decision 2 is `engine_core::rules::held_forwarding(rules, target)`:
+  the rules the import holds back because they send mail out, decided by `plan_rules` alone.
+- **A reply is imported only where the target holds none** (off, with nothing to say), answered
+  without a write where it already says the same as the target holds it (line ends and the
+  window's fraction of a second aside), and refused (`item_unavailable`) over any other: a host
+  that means to replace a target's reply calls `set_vacation` itself. A part the target cannot
+  hold refuses the reply whole (`refuse_unheld_vacation`).
+
+| Target | Rules import | Folders by id |
+|---|---|---|
+| JMAP (Sieve) | **Implemented** (`jmap.md` → "Mail rules") | through the host's map, the mapped target ids asked of the server (`Mailbox/get`, chunked by `maxObjectsInGet`) |
+| IMAP + ManageSieve | **Implemented** (`imap-smtp.md` → "Rules and the reply over ManageSieve") | none: folder ids are names, not RFC 8474 `MAILBOXID`s, so the vocabulary offers no filing by id and such a rule loses that action; a host names an IMAP target's folders by path |
+| Graph, Gmail | Sources only, for now | |
 
 ## Stalwart Test Spine
 
@@ -548,6 +615,34 @@ taken over TLS instead: a server behind a TLS-terminating proxy builds its redir
 were served in plaintext, and the host has just answered over TLS. Resolving a redirect against the *configured base* instead
 is what one of these adapters shipped: it turned a provider whose apex redirects to its
 mail host into an unconnectable account.
+
+**When no credential could be had, the error says so, on every adapter and every operation.**
+`ProviderError::is_credential_failure()` is `true` when the credential source failed or did not
+answer within its deadline, did not permit the origin, or the engine refused to present the
+credential (plaintext off loopback, an origin discovery would move to that the credential may not
+go to, a kind or a byte the protocol cannot carry, another account than the connection pool's).
+Every HTTP adapter checks its credential before it goes on a header, in one place:
+`engine_http::present_token` takes a token of visible ASCII only (RFC 6750's `b64token` and the
+wider tokens real issuers mint), and `present_basic` refuses a username holding a colon (RFC 7617
+§2) or a control character in either part. Without the check a token holding CR, LF or a byte
+past ASCII failed every send as a `Retryable` transport error. IMAP's `LOGIN` checks its quoted
+strings the same way (`imap-smtp.md`).
+The class stays the source's. A host tells a source's `Retryable` (a token endpoint or broker
+that cannot be reached) from a transport's this way, and does not drop a sound connection for
+it. It is set once, by `CredentialFailure` (`engine-provider`, `credential/ask.rs`), never by an
+adapter; the adapters only pass it through (`docs/design/credential-source.md`, "Where the
+failure lies"):
+
+| Adapter | Where it reaches `ProviderError` | Paths that reword and keep it |
+|---|---|---|
+| IMAP, SMTP, ManageSieve | `ImapError::Credential`, passed through as the source gave it | a fetch batch's copy for each message (`fetch_batch.rs`); a fetch is not repeated on a new connection after one |
+| JMAP | `JmapError::Credential` | an import's failure for each message and the batch's `not_sent`; a held-back `Blob/get`'s answer for each message |
+| CalDAV, CardDAV, Talk | `CalDavError::Credential`, discovery's refused origins included | `content_free` on the import and collection paths |
+| Graph | `GraphError::Credential`, a submission's and a write's included | none |
+| Google | `GoogleError::Credential`; the Gmail IMAP half as IMAP | the IMAP bodies' copy for each message not yet answered |
+
+A server refusing a credential, or offering no way to present one, is not this fact: it is the
+server's answer, and a host reads its class.
 
 Placeholder substitution into a URL **template** (RFC 8620 §6.2 `downloadUrl`) has the
 same shape of hazard: percent-encode every substituted value (RFC 6570 level-1 simple

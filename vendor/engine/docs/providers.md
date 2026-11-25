@@ -338,6 +338,12 @@ let contacts = provider_caldav::CardDavProvider::connect(
 
 One `CalDavProvider` serves every calendar under the home its discovery found. `sync_calendars` lists them, each with its collection tag; `Engine::sync_calendar` syncs the list and then every calendar's events; a write names its calendar on the draft.
 
+`new` takes a fixed credential. A host whose credential changes (an OAuth token, a broker's grant)
+builds the config with `CalDavConfig::from_credential_source(base_url, source, agent)` (the same on
+`CardDavConfig`, and `TalkMeetings::from_credential_source`): the source is asked on every request
+that carries the credential, and a `401` it can answer is replaced once and the request sent again
+(`docs/design/credential-source.md`). Its `permits` replaces the deprecated `CredentialHosts`.
+
 ### Notes
 
 - A `CalDavProvider` binds no calendar. Each calendar's events sync under a scope of their own, and a calendar whose listing tag has not moved since its last sync is skipped without a request.
@@ -395,7 +401,15 @@ let provider = GraphProvider::new(
 );
 ```
 
-Shared mailboxes can be accessed with `GraphClient::for_mailbox(token, MailboxPrincipal::user("shared@example.com"), &tls, &retry, &agent)`. Token acquisition and refresh are the host's responsibility.
+Shared mailboxes can be accessed with `GraphClient::for_mailbox(token, MailboxPrincipal::user("shared@example.com"), &tls, &retry, &agent)`.
+
+`connect` takes a fixed token. A host whose token is refreshed, or a broker minting one with
+application permissions, builds the client with `GraphClient::connect_with_source(source, &tls,
+&retry, &agent)` (`with_base_and_source` for another base) and roots it at another mailbox with
+`with_principal`: the source is asked on every request, and a `401` whose challenge offers
+`Bearer` is replaced once and the request sent again (`docs/design/credential-source.md`). The
+client is cheap to clone and its clones share one transport, so a host builds one per account
+and hands each folder's `GraphProvider` a clone.
 
 ### Notes
 
@@ -419,6 +433,13 @@ Only owned connections are writable, and People ETags enforce updates.
 Expired People sync tokens restart only their source as a snapshot; contact
 groups are always paginated snapshots because their list API has no sync token.
 See `docs/agent-guidance/google.md` and `contacts.md` for scopes and mappings.
+
+`GoogleClient::connect` takes a fixed token; `GoogleClient::connect_with_source` asks the
+account's source on every request and replaces a token Google refuses once, as on Graph, and the
+client is a cheap clone in the same way. An account that reads its mail over IMAP
+(`GmailProvider::with_imap`) gives the IMAP config the same source, answering the token with the
+account's address (`Credential::bearer_for`), so both transports present the same token;
+`with_imap` refuses a reader that signs in as another credential subject (`InvalidState`).
 
 `MeetMeetings` makes a Meet meeting for an event on any calendar, through the Meet REST API
 (`POST meet.googleapis.com/v2/spaces`). It needs `meetings.space.created`.

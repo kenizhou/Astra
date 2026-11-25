@@ -49,9 +49,13 @@
 //! (and builds that account a client no proxy sees), follows no redirect, sends nothing to an
 //! origin the source does not permit, and on a `401` the adapter reads as a refusal asks for one
 //! replacement and sends the request once more (`docs/design/credential-source.md`). See
-//! `authenticated.rs`.
+//! `authenticated.rs`. How a password or a token goes on the request, and what a `401`'s
+//! challenge says about it, is shared too ([`present_credential`], [`present_bearer`],
+//! [`judge_by_scheme`]), so every adapter that takes the credential as it stands reads a refusal
+//! the same way.
 
 mod authenticated;
+mod challenge;
 mod classify;
 mod deadline;
 mod error;
@@ -61,12 +65,14 @@ mod observed;
 mod observer;
 mod pace;
 mod policy;
+mod presentation;
 mod send;
 #[cfg(any(test, feature = "test-server"))]
 pub mod test_server;
 mod user_agent;
 
 pub use authenticated::{AuthenticatedClient, Unauthorized};
+pub use challenge::{asks_for, challenge_schemes, credential_scheme, offered_schemes};
 pub use classify::{StatusAlone, Throttle, ThrottleClassifier};
 pub use deadline::{Exchange, chunk_within, client};
 pub use error::{SendError, gateway_without_answer};
@@ -74,6 +80,9 @@ pub use gate::{GatePermit, RequestGate};
 pub use observed::ObservedConnection;
 pub use observer::{IgnoreThrottles, ThrottleEvent, ThrottleObserver};
 pub use policy::RetryPolicy;
+pub use presentation::{
+    judge_by_scheme, present_basic, present_bearer, present_credential, present_token,
+};
 pub use send::{RetryConfig, Sent, send_retrying};
 pub use user_agent::{InvalidUserAgent, UserAgent};
 

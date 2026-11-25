@@ -165,6 +165,22 @@ fn a_receipt_carries_its_version_and_outcomes() {
 }
 
 #[test]
+fn a_receipt_lists_each_rule_a_rule_by_rule_write_did_not_store() {
+    use crate::error::FailureClass;
+
+    let receipt = RulesReceipt::new(None, Vec::new());
+    assert_eq!(receipt.failures.len(), 0);
+    let failed = receipt.with_failures(vec![
+        RuleWriteFailure::new(FailedRule::Written(2), FailureClass::Permanent),
+        RuleWriteFailure::new(FailedRule::Removed(0), FailureClass::Retryable).outcome_unknown(),
+    ]);
+    assert_eq!(failed.failures[0].rule, FailedRule::Written(2));
+    assert!(!failed.failures[0].outcome_unknown);
+    assert_eq!(failed.failures[1].class, FailureClass::Retryable);
+    assert!(failed.failures[1].outcome_unknown);
+}
+
+#[test]
 fn debug_of_each_action_names_it_and_counts_its_values() {
     let shown = format!(
         "{:?}",
@@ -211,4 +227,24 @@ fn a_named_header_shows_its_length_not_its_name() {
         RawRule::new(RuleSyntax::Sieve, "secret").named(RuleName::new("secret").unwrap())
     );
     assert!(!raw.contains("secret"), "{raw}");
+}
+
+#[test]
+fn a_receipt_says_whether_the_rules_it_wrote_run() {
+    let receipt = RulesReceipt::new(None, Vec::new());
+    assert_eq!(receipt.activation, RulesActivation::Running);
+    let receipt = receipt.with_activation(RulesActivation::Inactive);
+    assert_eq!(receipt.activation, RulesActivation::Inactive);
+    assert!(receipt.already_held.is_empty(), "nothing for an edit");
+    let receipt = receipt.with_already_held(vec![2]);
+    assert_eq!(receipt.already_held, [2]);
+}
+
+#[test]
+fn a_feature_taken_out_is_held_no_longer() {
+    let vocabulary = RuleVocabulary::new()
+        .with_exact([RuleFeature::FileIntoId, RuleFeature::Stop])
+        .without(RuleFeature::FileIntoId);
+    assert_eq!(vocabulary.support(RuleFeature::FileIntoId), None);
+    assert_eq!(vocabulary.support(RuleFeature::Stop), Some(Support::Exact));
 }

@@ -1,7 +1,9 @@
 # Design note: one provider-neutral `CredentialSource`
 
-Status: accepted; steps 1 to 3 of "Phasing" have landed (`engine_provider::credential`,
-IMAP/SMTP on it, the IMAP authorization identity, and JMAP on `engine_http::AuthenticatedClient`). The direction is principle 7 of
+Status: accepted; steps 1 to 5 of "Phasing" have landed (`engine_provider::credential`,
+IMAP/SMTP on it, the IMAP authorization identity, JMAP on `engine_http::AuthenticatedClient`,
+CalDAV, CardDAV and Talk on the same client, and Microsoft Graph and the Google APIs on it too,
+with Google's IMAP and API halves bound to one credential subject). Every protocol path now asks. The direction is principle 7 of
 `north-star.md`: **credentials are asked for, not held.** The owner settled every open
 question on 2026-11-23 ("Decisions", at the end), and the body below states each decision where
 it applies. One `CredentialSource` is a "Next" step in
@@ -192,10 +194,42 @@ says "no consent for this mailbox", is `Authentication`. An unreachable token en
 `Retryable`. A `429` from the token endpoint is `RateLimited`. "No credential for this origin" is
 `Permanent`. The adapter passes the source's error through with its class unchanged (IMAP already
 does, through `ImapError::Credential`). A server refusing a credential that was just replaced is
-`Authentication`. The class is all a host needs to tell "the source failed" from "the server
-refused": a broker that is down is `Retryable`, and consent that is gone is `Authentication`,
-which is also what a server's refusal is and needs the same answer (sign in or consent again). No
-separate variant or flag is added for it.
+`Authentication`. The class is all a host needs to decide *what to do*: a broker that is down is
+`Retryable`, and consent that is gone is `Authentication`, which is also what a server's refusal
+is and needs the same answer (sign in or consent again). No new class is added.
+
+**Where the failure lies is a fact beside the class.** The class cannot say it: a token endpoint
+that cannot be reached and a keep-alive socket that died while the machine slept are both
+`Retryable`, and only the second is repaired by dropping the connection. A host whose reconnect
+rule drops its client and repeats a read after a `Retryable` transport failure would drop a sound
+client for the first and repeat a request certain to fail again. So
+`ProviderError::is_credential_failure()` says that no credential could be had: the source
+failed or did not answer within its deadline, it did not `permits` the origin, or the engine
+refused to present the credential (to that origin, in that form, or for another account than
+the connection's). Nothing went out with a credential, except one the server had just refused
+(an HTTP `401`, an IMAP `NO` to the sign-in, an SMTP `535`), when the source then failed to
+replace it. It is set in one place: every
+failure of this kind is a `CredentialFailure`, whose one constructor marks the error it carries,
+and each adapter passes that error through as the source gave it (IMAP, SMTP and ManageSieve
+through `ImapError::Credential`; JMAP, CalDAV, CardDAV, Talk, Graph and Google through their
+`Credential` variants). A path that rewords an error, to keep a server's text out or to answer
+several items with one failure, uses `ProviderError::reworded`, which keeps every fact. A server
+refusing a credential, or offering no way to present one (a `Digest`-only challenge, no SASL
+mechanism for a token), is the server's answer and is not this fact; neither is a `401` CalDAV's
+anonymous first request draws from an origin the credential may not go to, which no source was
+asked about. A refusal through `permits` is the same fact as a source answering "no credential
+for this origin": in both, the credential side decided, nothing was sent, and the connection is
+sound. The engine's own reconnect rules follow it: IMAP's fetches, which ask once more on a new
+connection after a `Retryable` failure, do not for this one. An import ends its batch on it, as
+on a throttle (`ProviderError::ends_batch`), and answers the items it never sent with the
+failure whole, its class kept (`import::not_sent`), so a credential that may never go there
+stays `Permanent`. A rule-by-rule write of the rules records it per rule
+(`RuleWriteFailure::credential_failure`). A source's error carries over only its class, words,
+wait and source chain: the facts about a
+request that went out (`requires_confirmation`, `is_item_unavailable`, `target_refusal`) are
+dropped, since none went out. Two first IMAP dials racing, where the server took a credential for
+another account than the first, is not this fact: that credential went out, and the dial fails
+as `ImapError::SignedInAsAnotherAccount`, so `ImapError::Credential` always carries the fact.
 
 **Each ask has a deadline.** An ask to the source (`credential` or `replace`) runs under the
 deadline of the step it belongs to: the dial deadline on IMAP and SMTP, where the ask is part of
@@ -268,7 +302,10 @@ There are two layers, and the source can only narrow:
 2. **`CredentialSource::permits(origin)`, the host's policy.** It is checked for the configured
    origin before anything is sent, and for every origin discovery adds. A refusal fails the
    connect, and nothing is sent. It replaces `provider_caldav::CredentialHosts`, which keeps
-   working as a deprecated shim combined with `permits` (both must agree). The origin includes the
+   working as a deprecated shim combined with `permits` (both must agree). An adapter that must
+   decide before it sends whether an origin may ever receive the credential (CalDAV discovery,
+   before it moves to an origin) asks `AuthenticatedClient::admits`, which gives the plaintext
+   rule and `permits` as one answer, and asks the source for no credential. The origin includes the
    scheme and port, not only the host, so a host can refuse a nonstandard port, or plaintext even
    on loopback.
 
@@ -342,9 +379,9 @@ how a provider is built, not how a capability is reached.
 | `engine-http` | `AuthenticatedClient` (`send_authenticated` in the plan), which also enforces the plaintext rule ("Host binding") | Additive API. **Behaviour change:** a credential is no longer sent to an `http://` origin other than loopback |
 | `provider-imap` | `ImapConfig` holds `Arc<dyn engine_provider::CredentialSource>`; `with_renewal` becomes the shared helper; `dial`/`filing`/`smtp_auth` match on `Credential` | **Breaking**: (1) implementers of `provider_imap::CredentialSource` (`credentials`→`credential(request)`, `renew`→`replace(refused, request)`, new `subject`), and callers of `source.credentials()`/`renew()` too; (2) matches on `Credentials::OAuth2` (now `Credential::Bearer`); (3) `Credentials::username()` returns `Option<&str>`; (4) `Password.password` is a `Secret`, which breaks struct literals and reads of the field as a `String`; (5) a bare `Credentials` is no longer a source (`Arc::new(credentials)`); (6) `Debug` of `ImapConfig` and the credential no longer prints the username; (7) the shims are `#[deprecated]`, so a caller building with `-D warnings` fails until it moves to the new names. Callers otherwise keep compiling: a deprecated `Credentials` alias with its `password`/`oauth2` constructors, and `ImapConfig::new` taking a fixed credential. Not breaking (`ImapError` is `#[non_exhaustive]`): the new `ImapError::AuthUnsupported`, which some failures that were `Auth` now are, with the same class |
 | `provider-jmap` | `Transport` asks per request through an `AuthenticatedClient`; re-framing reads `Credential`; `JmapConfig::from_credential_source`; later `JmapEndpoint` | `JmapConfig::new(base, provider_jmap::Credentials, ua)` kept and converted into a `FixedCredential` with a unique subject. **Behaviour change:** a `401` can now cause one replayed request when the source replaces |
-| `provider-caldav` / CardDAV | `DavClient` asks per request; `CredentialScope` works on `Credential`; `permits` merged with `CredentialHosts` | **Breaking:** `CalDavConfig.credentials` and `CardDavConfig.credentials` are `pub` fields of `provider_caldav::Credentials`. Replacing them with a source breaks struct-literal construction. Constructors stay. `CredentialHosts` and `with_credential_hosts` are deprecated, not removed |
-| `provider-graph` | `HttpTransport` asks per request; `GraphClient::connect_with_source`; `GraphProvider` shares the client (`Arc`) | `connect(token, …)`, `for_mailbox` and `with_base` kept, wrapping a fixed bearer. `GraphProvider::new(GraphClient, …)` can keep its signature if `GraphClient` becomes a cheap clone |
-| `provider-google` | Same as Graph; `with_imap` and the API side bind **one** source, so both transports present the same token | `connect(token, …)` kept |
+| `provider-caldav` / CardDAV / Talk | `DavClient` and `TalkMeetings` send on an `AuthenticatedClient`; `CredentialScope` reads the credential's scheme; `permits` merged with `CredentialHosts`; `from_credential_source` on `CalDavConfig`, `CardDavConfig` and `TalkMeetings` | **Breaking:** the `pub credentials` field of `CalDavConfig` and `CardDavConfig` is gone (the source is private, as JMAP's is), so code reading or assigning it breaks; neither struct could be built as a literal before (private fields). `new` and `TalkMeetings::new` keep taking `provider_caldav::Credentials`, as a fixed credential under a unique subject. `CredentialHosts` and `with_credential_hosts` are deprecated, not removed, so a caller building with `-D warnings` fails until it moves to `permits`. **Behaviour changes:** no credential over plaintext except loopback-from-loopback (a plaintext server elsewhere fails the connect as `Permanent` before anything is sent); one replacement and replay on a `401` the source can answer; the configs' `Debug` no longer prints the username |
+| `provider-graph` | `HttpTransport` sends on an `AuthenticatedClient`; `GraphClient::connect_with_source` and `with_base_and_source`; `with_principal` public; `GraphClient` a cheap clone sharing one transport (`Arc`), so `GraphProvider` shares the client | Additive: `connect(token, …)`, `for_mailbox` and `with_base` kept, wrapping a fixed bearer under a unique subject; `GraphProvider::new(GraphClient, …)` keeps its signature. `GraphError::Credential` is new (`#[non_exhaustive]`). **Behaviour changes:** one replacement and replay on a `401` with a `Bearer` challenge; no redirect followed on an authenticated request (a `3xx` is returned as it came); no token over plaintext except loopback-from-loopback (`with_base` to an `http://` base off loopback now fails each request as `Permanent`); `with_base` refuses a base that is not an absolute URL at construction |
+| `provider-google` | Same as Graph (`GoogleClient::connect_with_source`, `with_base_and_source`, cheap clone); `GmailProvider::with_imap` checks that the IMAP reader signs in as the client's subject (`GmailMail::credential_subject`, new in `provider-imap`) | **Breaking:** `with_imap` returns `ProviderResult<Self>`, and refuses (`InvalidState`) a reader that signs in as another credential subject, which includes every pairing of `GoogleClient::connect(token)` with `ImapConfig::new(credential)`: each is a fixed credential under a subject of its own. `connect(token, …)` and `with_base` are kept. `GoogleError::Credential` is new. **Behaviour changes:** as Graph's |
 
 ### What the sync host's wrappers become
 
@@ -467,9 +504,81 @@ These live in `mail-calendar/crates/mailcal-account`, read-only here:
    reqwest's `basic_auth` (marked sensitive, not zeroed), so its `username:password` input is
    one of the copies "Security review" places out of reach.
 4. **CalDAV/CardDAV**: `permits` absorbs `CredentialHosts`, and the scope is keyed by subject.
+   *Landed.* As built: `DavClient` holds an `AuthenticatedClient` built for the configured
+   origin, and every request goes out on its client. CalDAV keeps its challenge-first rule
+   (`CredentialScope`): a request to an origin that has not asked goes without the credential,
+   and a `401` from a trusted origin is answered through `AuthenticatedClient::send`, whose
+   `present` reads the credential's scheme against the challenge already received; an origin
+   that has asked gets every later request through `send` directly. A challenge no credential
+   HTTP carries can answer (only `Digest`, `Negotiate` and the like) is
+   `UnsupportedAuthentication` before the source is asked, so a broker that is down cannot turn
+   it into a retry; one only for the other kind's scheme (Basic, to a token) is the same verdict
+   once the source has answered, with nothing sent. The configured server itself is trusted only
+   once admitted, like every other origin. Either way a `401` to a request that
+   carried the credential, offering its scheme or none (YAHOO-1), is `Refused`, and anything else
+   `Final`. Discovery trusts an origin only when `AuthenticatedClient::admits` and the deprecated
+   `CredentialHosts` both let it through, and it asks that of its start before anything is sent,
+   so a configured server the credential may not reach is never dialled; the old "no plaintext
+   after TLS" rule is the plaintext rule's special case. The scope belongs to one connection and
+   the connection to one source for its life, so it serves one subject; the endpoints of step 6
+   will key it by subject explicitly. Nextcloud Talk (`TalkMeetings`) sends on the same
+   client, so no HTTP path in the crate holds a credential. `CalDavConfig`, `CardDavConfig` and
+   `TalkMeetings` gain `from_credential_source`; their `new` wraps `provider_caldav::Credentials`
+   in `FixedCredential::unique`. An administrator acting as another account is refused before
+   it is sent (`Permanent`), as on JMAP. The `WWW-Authenticate` reading JMAP and CalDAV each
+   had is now shared in `engine_http`: `challenge_schemes` and `offered_schemes` read the
+   headers (lossily, so a realm that is not ASCII no longer hides a scheme from JMAP),
+   `asks_for` is the rule for "this `401` asks for that scheme, or names none", and
+   `credential_scheme` is the scheme each kind of credential goes under. Proven live
+   (`provider-caldav/tests/live_credential_source.rs`) on Stalwart, SabreDAV and Nextcloud: a
+   wrong password at connect replaced; a password that stops working after connect, on an origin
+   that already answered, refused as `Authentication` without a replacement and replaced with
+   one; CardDAV likewise on Stalwart and Nextcloud (the SabreDAV harness serves no address
+   books); `permits` limited to the harness host discovering in full, and permitting nothing
+   failing the connect as `Permanent` without an ask; a Stalwart OAuth token, revoked, refused
+   and replaced by a fresh one (minted with Stalwart's `calendars` scope: a `mail` token passes
+   discovery and is refused `403` at the calendar home); and Talk on Nextcloud replacing a wrong
+   password. With the replacement disabled, every one of those but the `permits` test fails.
 5. **Graph and Google API**: the same bearer funnel. Google's IMAP and API halves share one source.
    This deletes the token halves of the Graph and Gmail wrappers. Graph application permissions
-   and Google domain-wide delegation need nothing beyond this slice.
+   and Google domain-wide delegation need nothing beyond this slice. *Landed.* As built: both
+   transports send every authenticated request on an `AuthenticatedClient` built for the
+   client's base (`connect_with_source`, `with_base_and_source`; `connect`, `for_mailbox` and
+   `with_base` wrap a fixed bearer under a unique subject), and keep a plain client for content
+   URLs, which never ask. The presentation and the reading of a `401` CalDAV had are now
+   `engine_http`'s, shared: `present_credential` (Basic for a password, Bearer for a token),
+   `present_bearer` (for an API that signs in with a token alone: a password is refused as
+   `Permanent` before anything is sent, through `CredentialFailure::unpresentable`) and
+   `judge_by_scheme`. Graph's judge departs in one case: a `401` with no challenge to the
+   directory's delta (`/users/delta`) is final, because Graph answers the directory of a
+   personal account that way with a good token (MICROSOFT-2 in `spec-deviations.md`); without
+   it every pass over that source would cost a token refresh. Only that read was observed, so
+   every other Graph request keeps the shared rule, and a token refused without a challenge
+   elsewhere would still be replaced. Google's refusal carries a
+   `Bearer` challenge, so the shared rule stands. `GraphClient` and `GoogleClient` are cheap
+   clones over one shared transport, so `GraphProvider::new` keeps its signature and a host
+   builds one client per account rather than one per folder; `GraphClient::with_principal` is
+   public, for a token with application permissions to reach any mailbox. The Google binding
+   is checked rather than documented: `GmailProvider::with_imap` compares the IMAP reader's
+   subject (`GmailMail::credential_subject`, which `ImapAccount` records from its config's
+   source) with the client's, and refuses a mismatch as `InvalidState`, so an account cannot
+   end up with another account's reader, or with two fixed credentials under subjects of their
+   own. It proves one subject, not one source object: two sources naming the same subject are
+   the same account's by the subject contract, and a host passes one source to both so that a
+   replacement serves both. The source
+   answers the token with the account's address (`Credential::bearer_for`), which IMAP's SASL
+   needs and HTTP ignores. Proven live, read-only (`provider-graph/tests/live_credential_source.rs`,
+   `provider-google/tests/live_credential_source.rs`): on a personal Microsoft account and a
+   work account, a garbage token refused with Graph's `Bearer` challenge, replaced, and the
+   folders listed, with a control whose replacement is garbage too ending `Authentication`
+   after one replacement; on the personal account the directory's challenge-less `401` asking
+   for no replacement, and the same request with a garbage token asking for one; on the Google
+   test account the labels listed after a replacement, the same control, and the shared
+   source in both orders, the IMAP half's XOAUTH2 refusal replacing the token the API half
+   then presents without a refusal and the reverse, and an IMAP half signing in as another
+   subject refused. With the replacement disabled, each of those but the challenge-less `401` and the
+   binding fails; with Graph's departure removed, the challenge-less test fails; with the
+   subject check removed, the binding test fails.
 6. **Endpoints and `bind` for the direct host**: shared HTTP clients, per-subject caches, the IMAP
    pool registry with a process ceiling, and the eviction defaults with their host overrides.
 
@@ -527,13 +636,15 @@ Live (`AGENTS.md`: any new request shape is run against a real server):
   be reachable by discovery, which presenting a token does not need.
 - **CalDAV/CardDAV**: Stalwart, SabreDAV and Nextcloud, wrong then right on an origin already
   authenticated after discovery, plus a full discovery with `permits` limited to the harness host,
-  showing nothing regresses.
+  showing nothing regresses. As run: see "Phasing", step 4.
 - **Graph and Google**: these cannot run in a local harness. They are verified with the test
   Microsoft account and the throwaway Google account, with tokens from the `tools/*-oauth` token
   tools (`tools/graph-oauth`, `tools/google-oauth`): present a garbage or revoked token first,
   observe the `401`, and succeed through `replace`. Each `401` envelope is captured and scrubbed
   (the existing `UNAUTHORIZED` fixtures already have the right shape). If the owner cannot run
-  them, the PR names them as unverified.
+  them, the PR names them as unverified. As run: see "Phasing", step 5; the challenges are
+  `error/unauthorized_challenge.txt` in each crate's fixtures. A token with Graph application
+  permissions was not run: it is a bearer token like any other, on the same path.
 
 ## Decisions (2026-11-23)
 
@@ -548,7 +659,10 @@ record.
    is `Retryable`** ("The trait", "Each ask has a deadline").
 4. **The failure class is enough** to tell "the source failed" (broker down: `Retryable`; consent
    gone: `Authentication`) from "the server refused". No extra variant ("The trait", "Error
-   classes").
+   classes"). Refined 2026-11-25: the class still decides what to do and no class was added, but
+   it cannot say whether a `Retryable` failure lies with the source or with the connection, which
+   a host's reconnect rule needs; `ProviderError::is_credential_failure()` says that, additively
+   ("Where the failure lies").
 5. **The engine refuses credentials over plaintext HTTP except to loopback origins.** It is an
    engine rule, not left to `permits`. Narrowed when step 3 landed: only for an account whose
    configured origin is itself plaintext loopback ("Host binding"). The harnesses all run on loopback, so nothing breaks

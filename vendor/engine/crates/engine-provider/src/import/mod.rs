@@ -10,10 +10,12 @@
 //!
 //! [`MailImporter`] is the mail half, [`CalendarImporter`] the calendar half and
 //! [`ContactImporter`] the contact half (the `calendar` and `contact` modules say where they
-//! differ from mail). An adapter that can import implements it; one that cannot
-//! does not, so there is no capability flag to check. A host that picks its adapter at runtime
-//! holds it as a `Box<dyn MailImporter>` or an `Arc<dyn MailImporter>` beside its
-//! `dyn Provider`, and both are importers themselves, so a function generic over
+//! differ from mail). [`RulesImporter`] carries an account's mail rules and its out-of-office
+//! reply, which are settings rather than objects: it appends rules after the target's own and
+//! never replaces a reply the target holds (the `rules` module). An adapter that can import
+//! implements it; one that cannot does not, so there is no capability flag to check. A host that
+//! picks its adapter at runtime holds it as a `Box<dyn MailImporter>` or an `Arc<dyn MailImporter>`
+//! beside its `dyn Provider`, and both are importers themselves, so a function generic over
 //! `I: MailImporter` takes either.
 
 mod calendar;
@@ -21,6 +23,8 @@ mod calendar;
 pub mod conformance;
 mod contact;
 mod message;
+mod reply;
+mod rules;
 
 use std::sync::Arc;
 
@@ -32,6 +36,8 @@ use engine_core::{
     sync::SyncState,
 };
 pub use message::{ImportedMessage, MailImportLimits, MessageImport};
+pub use reply::import_reply;
+pub use rules::{ImportDialect, RulesImporter, append_rules};
 
 use crate::{ProviderError, ProviderResult};
 
@@ -93,9 +99,13 @@ pub trait MailImporter: Send + Sync {
 ///
 /// Two endings reach every message of the account, and carry over: a throttle, with the wait
 /// it named, and a refused credential. A host then schedules the message with the rest of the
-/// batch, after the wait or after a new credential. Any other ending was about the exchange or
-/// another message (a connection lost, an answer that could not be read, a message that may
-/// be stored), so this one, never sent, is plainly retryable: it neither
+/// batch, after the wait or after a new credential. An ending where no credential could be had
+/// ([`is_credential_failure`](ProviderError::is_credential_failure)) reaches every message too,
+/// and carries over whole, with its class and wait: a source that is down is `Retryable`, and a
+/// credential that may not go there or cannot be presented stays `Permanent` (or
+/// `InvalidState`), so a host does not retry it for ever. Any other ending was about
+/// the exchange or another message (a connection lost, an answer that could not be read, a message
+/// that may be stored), so this one, never sent, is plainly retryable: it neither
 /// [may be stored](ProviderError::requires_confirmation) nor is
 /// [unavailable](ProviderError::item_unavailable). Its detail never repeats the ending's text.
 ///
@@ -114,6 +124,9 @@ pub trait MailImporter: Send + Sync {
 #[must_use]
 pub fn not_sent(ending: &ProviderError) -> ProviderError {
     use engine_core::error::FailureClass;
+    if ending.is_credential_failure() {
+        return ending.reworded("not sent: no credential could be had for the batch");
+    }
     match ending.class() {
         FailureClass::RateLimited => ProviderError::rate_limited(
             "not sent: the target throttled the batch",

@@ -19,15 +19,17 @@
 //!   mailbox.
 //! - **Mailboxes are not created here.** A host creates a folder with
 //!   `MailboxWrites::edit_mailbox`, the one `Mailbox/set` path, and imports into its id.
+//! - **Mail rules and the reply** (`rules`): `RulesImporter`, through the engine's one import over
+//!   this adapter's own `MailRules` and `Vacation`, the folders the rules name asked of the server.
 
 mod plan;
+mod rules;
 mod wire;
 
 use std::num::{NonZeroU64, NonZeroUsize};
 
 use async_trait::async_trait;
 use engine_core::{
-    error::FailureClass,
     ids::{AccountId, BlobId, MailboxId},
     sync::SyncState,
 };
@@ -286,12 +288,7 @@ async fn upload_all(
         .buffered(width);
     let mut answered = Uploads::new();
     while let Some((index, uploaded)) = uploads.next().await {
-        let ending = uploaded.as_ref().err().filter(|failed| {
-            matches!(
-                failed.class(),
-                FailureClass::RateLimited | FailureClass::Authentication
-            )
-        });
+        let ending = uploaded.as_ref().err().filter(|failed| failed.ends_batch());
         let ending = ending.map(copy);
         answered.insert(index, uploaded);
         if ending.is_some() {
@@ -326,7 +323,7 @@ fn failure(err: JmapError, stored: Stored) -> ProviderError {
     if classified.requires_confirmation() {
         ProviderError::needs_confirmation(format!("{code}: the message may be stored"))
     } else {
-        with_detail(&classified, format!("not stored: {code}"))
+        classified.reworded(format!("not stored: {code}"))
     }
 }
 
@@ -334,16 +331,7 @@ fn failure(err: JmapError, stored: Stored) -> ProviderError {
 /// adapter classifies it, its detail its code.
 fn coded(err: JmapError) -> ProviderError {
     let code = code(&err);
-    with_detail(&ProviderError::from(err), code)
-}
-
-/// `classified`'s class and wait, under `detail`.
-fn with_detail(classified: &ProviderError, detail: String) -> ProviderError {
-    if classified.class() == FailureClass::RateLimited {
-        ProviderError::rate_limited(detail, classified.retry_after())
-    } else {
-        ProviderError::new(classified.class(), detail)
-    }
+    ProviderError::from(err).reworded(code)
 }
 
 /// The code of an exchange's failure: its status or its class, never the server's prose. (A
@@ -360,13 +348,7 @@ fn code(err: &JmapError) -> String {
 /// `err` again, for another message it answers: the failure of a whole request or of the
 /// session, which is never about one message.
 fn copy(err: &ProviderError) -> ProviderError {
-    if err.requires_confirmation() {
-        ProviderError::needs_confirmation(err.detail())
-    } else if err.class() == FailureClass::RateLimited {
-        ProviderError::rate_limited(err.detail(), err.retry_after())
-    } else {
-        ProviderError::new(err.class(), err.detail())
-    }
+    err.reworded(err.detail())
 }
 
 #[cfg(test)]
