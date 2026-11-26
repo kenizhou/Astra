@@ -60,6 +60,8 @@ Capture any provider-specific assumption in tests or fixtures. If a provider beh
   which is how a stored `ETag` gets blanked and the next conditional write goes out unguarded.
 - Keywords (user-settable state such as read/flagged) and membership (collection placement) are distinct axes. A provider's flag/label namespace partitions across both, plus role: JMAP keywords and IMAP flags are keywords; mailboxes/folders and most labels are membership; some Gmail system labels are keywords (`UNREAD`, `STARRED`, `IMPORTANT`), not membership, and so is a Gmail label a host named after a keyword (`KeywordName`).
 - Collections carry a normalized role (inbox, sent, drafts, trash, junk, archive, all) mapped from provider roles — JMAP `role`, IMAP SPECIAL-USE, Gmail system labels, Graph well-known names — distinct from id and display name.
+  - Two roles name folders the service keeps for itself, which hold no mail the user filed. `MailboxRole::ServerRecords` (`server-records`) is its bookkeeping: Exchange's Sync Issues, and Conflicts, Local Failures and Server Failures under it. `MailboxRole::ChatHistory` (`chat-history`) is chat transcripts it stored as messages: Exchange's Conversation History, which mainly holds Skype for Business conversations (Microsoft 365 keeps its copies of Teams chats in a hidden folder under it that the folder list does not reach). Gmail's chats (`CHAT`) are the same thing, but the providers do not behave alike: the Gmail adapter treats `CHAT` as a label that files nothing, so a chat appears only in the synthetic All Mail (`All`) and nothing marks it; a host that leaves `ChatHistory` out still copies Gmail's chats. They are two because a host may keep stored chats and not bookkeeping, and the names are localized. No registry names either, so neither has an IMAP attribute or a JMAP role; the names are the engine's own. Only Graph reports them today (`graph.md`): Exchange over IMAP lists the same folders with no attribute, so they get no role there. A rule cannot file into either (`plan_rules` drops the action).
+  - `MailboxRole` is not `#[non_exhaustive]`, on purpose: hosts match it exhaustively, so a new role breaks their build until each decides where it goes.
 - A mail collection carries the **server's** unread count (`Mailbox::unread_count`), not a derived one: the store holds only the synced window, so counting stored rows answers a different question than a folder badge asks. It is a first-class field rather than an extended property because all four mail transports report it — JMAP `unreadEmails`, IMAP `STATUS (UNSEEN)`, Gmail `messagesUnread`, Graph `unreadItemCount`. It counts **messages**; only JMAP offers the conversation form, so that one cannot be modelled portably. `None` means unreported and must never be read as zero.
 - A mail collection carries the **caller's access rights** (`Mailbox::access: MailboxAccess`), as a calendar does. They are a first-class field because both mail protocols that share mailboxes standardise them (JMAP `MailboxRights`, RFC 8621 §2; IMAP ACL, RFC 4314) and because there is **no usable answer above the collection**: live against Stalwart v1.0.2, a JMAP account shared with one writable and one read-only folder reports `accounts.<id>.isReadOnly: false`, so "may I write here?" asked of the account gets the wrong answer for the second folder. (v0.16 was worse: it reported `false` even for a share whose only mailbox grants `lr`. v1 reports `true` for that one, so the flag now says "nothing here is writable" correctly and still cannot say *which* folders are.)
   - The rights are kept separate rather than collapsed to read/write, because servers hand out arbitrary subsets: a shared mailbox commonly lets each reader keep their own `$seen` without changing other keywords, and IMAP separates adding (`i`) from removing (`t`+`e`) from creating a child (`k`) from deleting the mailbox (`x`).
@@ -111,6 +113,31 @@ Capture any provider-specific assumption in tests or fixtures. If a provider beh
   `Keyword::from_flag` and `Keyword::to_flag`, which `provider-imap` and the Sieve dialect both
   call.
 - Raw provider payloads are preserved for lossless re-derivation: MIME, iCalendar, JSCalendar, vCard.
+- Ids and cursors are opaque, not empty of meaning: an IMAP mailbox key holds the folder's path,
+  a shared-store handle, a send-as identity handle or a JMAP account id can be an address or a
+  login, a `UID`, `Message-ID` or `Content-ID` often names the sender's host, and a Graph
+  `SyncState` or `PageToken` is a URL whose path names the mailbox. So each such type's **own**
+  `Debug` prints the value only where `engine_core::redact::SHOWS_VALUES` holds, and otherwise the
+  type and the length alone (`ProviderKey(<redacted, 5 bytes>)`). `SHOWS_VALUES` is `true` where
+  engine-core is compiled with debug assertions and `false` without them. Cargo builds engine-core
+  under the host's profile, so the **host's** `debug-assertions` setting decides: Cargo's `dev`
+  and `test` profiles show values, `release` does not, and a host that ships with
+  `debug-assertions = true`, or turns them on for engine-core, prints values.
+  - Covered: `ProviderKey` and so every object id, `Uid`, `MessageIdHeader`, `SyncState`;
+    `engine-provider`'s `PageToken`, `ContentIdHeader`, `SenderIdentityId`; `provider-graph`'s
+    `MailboxAddress`; `provider-jmap`'s `JmapAccountId`. Each writes its value through
+    `engine_core::redact::Content` inside its own `debug_tuple`, and a new such type does too.
+  - **Not covered yet:** types and struct fields that hold content still print it through a
+    derived `Debug` (`Mailbox.name`, `SharedAccount`'s name and address, the email of
+    `CanonicalEmail`, `EmailAddress` and `Participant`, `Keyword`, `ConferenceUri`), and so does
+    an error whose text quotes a value. A `{:?}` of those is not yet safe to log; covering them
+    (with `redact::Content` in a `debug_struct`) is the follow-up.
+  - `Display` and `as_str()` stay the deliberate way to the value. Code and tests never read an
+    id's `Debug` as data: compare the values, or their `as_str()`. A test that states what a
+    `Debug` prints asks `SHOWS_VALUES`, not `cfg!(debug_assertions)` of its own crate. The gate
+    runs these crates' unit tests once more without debug assertions, so the redacted form is
+    tested, not only the shown one. Payloads, bodies and rule values redact in every build
+    instead.
 - Provider-defined extended properties and extensions (Microsoft Graph extended properties and open extensions, Google Calendar `extendedProperties`) are preserved as normalized, namespaced key-value data — distinct from raw payloads and from first-class fields.
 - Provider object keys are stable across moves; where a provider's natural id is not (Graph default ids), the adapter uses its immutable-id form, with a version token (ETag, `changeKey`, MODSEQ) tracking revisions.
 - Attachments span kinds — file (bytes), item (an embedded message/event), reference (an external/cloud link with no bytes), and inline (CID); quota and host-open policy apply to byte content only.

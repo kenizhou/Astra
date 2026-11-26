@@ -274,7 +274,9 @@ Step 6 lands in small, tested slices. Order and status:
    - **`put_calendar_document` can create, not only replace.** `EventWrite::creating(…)`
      asks the server to store the document **only if nothing is there** (`WritePrecondition::IfAbsent`),
      so putting an invitation that arrived as mail onto the calendar is a guarded create: a
-     resource that appeared in the meantime is a `Conflict`, never a silent overwrite. This
+     resource that appeared in the meantime is a `Conflict`, never a silent overwrite. The
+     address comes from `provider.new_event_id(calendar, uid)` (`CalendarWrites`), the
+     adapter's own naming rule, never a host's copy of it. This
      is the path for an inbound invitation because only the received raw document preserves
      its organiser, participant response states, sequence and extensions. `EventDraft::meeting`
      is instead the organiser-authored path for creating a new invitation.
@@ -418,11 +420,13 @@ facade"*).
   `ApiError::item_unavailable()`: `true` only for a `ProviderError::item_unavailable`, an item
   the provider stored but can never serve, so a host may stop asking for it. Any other
   permanent failure may be about the account or the request, and says nothing about the item.
-  Whether no credential could be had (`ProviderError::is_credential_failure`: the source failed
-  or did not answer, or the credential may not go there) is a provider fact a host that drives
-  adapters reads directly, for its reconnect rule; through the facade it is reachable on the
-  `ProviderError` inside `ApiError::Sync`, and the facade adds no accessor for it until a host
-  needs one.
+  Whether no credential could be had, and why (`ProviderError::is_credential_failure` and
+  `credential_failure`, a `CredentialFailureKind`: the source failed or did not answer, the
+  credential would leave TLS on the configured address or where the server led it, the host's policy
+  refuses the origin, it cannot be presented in its form, or it names another account) is a provider
+  fact a host that drives adapters reads directly, for its reconnect rule and its wording; through
+  the facade it is reachable on the `ProviderError` inside `ApiError::Sync`, and the facade adds no
+  accessor for it until a host needs one.
   The one deliberate exception is `ScopeHeld`,
   which `map_sync_error` classifies as `ApiError::Busy` (a retryable race, not a
   failure) — classification, not restringing. Add similar classifications there if

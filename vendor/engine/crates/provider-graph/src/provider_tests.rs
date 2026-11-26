@@ -52,6 +52,7 @@ async fn advertises_per_folder_scopes_and_mail_capability() {
     // Mutating writes and submission are advertised alongside read/sync.
     assert!(info.capabilities.mail_writes());
     assert!(info.capabilities.submission());
+    assert!(info.capabilities.message_source());
     // No keyword reaches the filed copy until one has a category name to go by.
     assert!(!info.capabilities.sent_copy_keywords());
     let named = engine_provider::KeywordName::new(
@@ -107,8 +108,8 @@ async fn edit_mail_flows_through_the_provider_to_the_write() {
 async fn syncs_the_folder_list_and_a_message_snapshot_page() {
     let folder = MailboxId::try_from("folder-inbox").unwrap();
     let mut routes = folder_routes();
-    routes.push(("messages/delta", json(SNAPSHOT)));
-    let provider = GraphProvider::new(fake_client(routes), folder);
+    routes.push(("messages/delta", Ok(json(SNAPSHOT))));
+    let provider = GraphProvider::new(fake_client_fallible(routes), folder);
 
     let folders = provider.sync_mailboxes(&account(), None).await.unwrap();
     assert!(folders.is_snapshot());
@@ -369,7 +370,7 @@ fn replay_routes() -> Vec<(&'static str, serde_json::Value)> {
         ),
         ("messages/delta", json(SNAPSHOT)),
     ];
-    routes.extend(folder_routes());
+    routes.extend(crate::test_support::answered_folder_routes());
     routes
 }
 

@@ -100,7 +100,11 @@ async fn a_source_that_fails_is_a_credential_failure_with_its_class() {
         let (base, seen) = mock_server_capturing(vec![CHALLENGE.to_owned()]);
         let err = propfind(&base, Arc::new(Failing(subject(), class))).await;
         let err = ProviderError::from(err);
-        assert!(err.is_credential_failure(), "{err:?}");
+        assert_eq!(
+            err.credential_failure(),
+            Some(engine_provider::CredentialFailureKind::Source),
+            "{err:?}"
+        );
         assert_eq!(err.class(), class);
         assert_eq!(seen.lock().unwrap().len(), 1, "only the anonymous request");
 
@@ -108,7 +112,11 @@ async fn a_source_that_fails_is_a_credential_failure_with_its_class() {
         let (base, _) = mock_server_capturing(vec![CHALLENGE.to_owned()]);
         let err = propfind(&base, Arc::new(Failing(subject(), class))).await;
         let content_free = err.content_free("looking up a UID");
-        assert!(content_free.is_credential_failure(), "{content_free:?}");
+        assert_eq!(
+            content_free.credential_failure(),
+            Some(engine_provider::CredentialFailureKind::Source),
+            "{content_free:?}"
+        );
         assert_eq!(content_free.class(), class);
     }
 }
@@ -152,7 +160,11 @@ async fn a_source_that_never_answers_is_a_credential_failure_at_the_deadline() {
     // wire to wait for.
     tokio::time::pause();
     let err = ProviderError::from(propfind().await.expect_err("no answer"));
-    assert!(err.is_credential_failure(), "{err:?}");
+    assert_eq!(
+        err.credential_failure(),
+        Some(engine_provider::CredentialFailureKind::Source),
+        "{err:?}"
+    );
     assert_eq!(err.class(), FailureClass::Retryable);
 }
 
@@ -162,12 +174,18 @@ async fn an_origin_or_a_kind_the_credential_may_not_go_to_is_a_credential_failur
     // (TEST-NET-1, never reached).
     let (base, seen) = mock_server_capturing(vec![multistatus(EMPTY); 4]);
     let refused = [
-        caldav(&base, Arc::new(Only(subject(), "localhost"))),
-        caldav("http://192.0.2.1:9/", password()),
+        (
+            caldav(&base, Arc::new(Only(subject(), "localhost"))),
+            engine_provider::CredentialFailureKind::NotPermitted,
+        ),
+        (
+            caldav("http://192.0.2.1:9/", password()),
+            engine_provider::CredentialFailureKind::Insecure,
+        ),
     ];
-    for config in refused {
+    for (config, kind) in refused {
         let err = ProviderError::from(CalDavProvider::connect(config).await.expect_err("refused"));
-        assert!(err.is_credential_failure(), "{err:?}");
+        assert_eq!(err.credential_failure(), Some(kind), "{err:?}");
         assert_eq!(err.class(), FailureClass::Permanent);
     }
     assert!(seen.lock().unwrap().is_empty());
@@ -180,7 +198,10 @@ async fn an_origin_or_a_kind_the_credential_may_not_go_to_is_a_credential_failur
     let err = CalDavProvider::connect(caldav(&base, only_loopback()))
         .await
         .expect_err("refused");
-    assert!(ProviderError::from(err).is_credential_failure());
+    assert_eq!(
+        ProviderError::from(err).credential_failure(),
+        Some(engine_provider::CredentialFailureKind::NotPermitted)
+    );
     let (base, _) = mock_server_capturing(vec![redirect(&moved)]);
     let config = CardDavConfig::from_credential_source(
         base,
@@ -188,14 +209,52 @@ async fn an_origin_or_a_kind_the_credential_may_not_go_to_is_a_credential_failur
         engine_http::test_server::user_agent(),
     );
     let err = CardDavProvider::connect(config).await.expect_err("refused");
-    assert!(ProviderError::from(err).is_credential_failure());
+    assert_eq!(
+        ProviderError::from(err).credential_failure(),
+        Some(engine_provider::CredentialFailureKind::NotPermitted)
+    );
     assert!(moved_seen.lock().unwrap().is_empty());
 
     // A kind HTTP cannot carry.
     let (base, _) = mock_server_capturing(vec![CHALLENGE.to_owned()]);
     let acting_as = Credential::acting_as("admin", "pw", "alice");
     let err = propfind(&base, Arc::new(FixedCredential::unique(acting_as))).await;
-    assert!(ProviderError::from(err).is_credential_failure());
+    assert_eq!(
+        ProviderError::from(err).credential_failure(),
+        Some(engine_provider::CredentialFailureKind::Form)
+    );
+}
+
+/// Plaintext off loopback the server led to, from an account configured where the rule accepts
+/// it (here loopback): not the account's address, so not the account's to fix.
+#[tokio::test]
+async fn plaintext_the_server_leads_to_is_led_to_insecure_not_insecure() {
+    let led = Some(engine_provider::CredentialFailureKind::LedToInsecure);
+    // TEST-NET-1, never reached.
+    let off_loopback = "http://192.0.2.1:9/dav/";
+
+    // A redirect, on CalDAV and on CardDAV.
+    let (base, _) = mock_server_capturing(vec![redirect(off_loopback)]);
+    let err = CalDavProvider::connect(caldav(&base, password()))
+        .await
+        .expect_err("refused");
+    assert_eq!(ProviderError::from(err).credential_failure(), led);
+    let (base, _) = mock_server_capturing(vec![redirect(off_loopback)]);
+    let config = CardDavConfig::from_credential_source(
+        base,
+        password(),
+        engine_http::test_server::user_agent(),
+    );
+    let err = CardDavProvider::connect(config).await.expect_err("refused");
+    assert_eq!(ProviderError::from(err).credential_failure(), led);
+
+    // A calendar home a discovery answer names.
+    let home = r#"<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:response><d:href>/u/</d:href><d:propstat><d:prop><c:calendar-home-set><d:href>http://192.0.2.1:9/u/calendars/</d:href></c:calendar-home-set></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>"#;
+    let (base, _) = mock_server_capturing(vec![multistatus(home)]);
+    let err = CalDavProvider::connect(caldav(&base, password()))
+        .await
+        .expect_err("refused");
+    assert_eq!(ProviderError::from(err).credential_failure(), led);
 }
 
 #[tokio::test]
@@ -245,7 +304,11 @@ async fn a_username_basic_cannot_carry_is_a_credential_failure_and_is_never_sent
     let (base, seen) = mock_server_capturing(vec![CHALLENGE.to_owned()]);
     let colon = Credential::password("al:ice", "secret");
     let err = ProviderError::from(propfind(&base, Arc::new(FixedCredential::unique(colon))).await);
-    assert!(err.is_credential_failure(), "{err:?}");
+    assert_eq!(
+        err.credential_failure(),
+        Some(engine_provider::CredentialFailureKind::Form),
+        "{err:?}"
+    );
     assert_eq!(err.class(), FailureClass::Permanent);
     assert!(!format!("{err:?}").contains("secret"), "{err:?}");
     assert_eq!(seen.lock().unwrap().len(), 1, "only the anonymous request");
