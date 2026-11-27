@@ -46,7 +46,8 @@ mod scheduling;
 
 pub use engine::{
     CalendarDelete, CalendarWrite, ContactDelete, ContactReconciled, ContactWrite, Engine,
-    MailboxWrite, PeoplePage, PeopleQuery, RecipientSuggestions, Reconciled, queued_draft,
+    MailboxSpan, MailboxWrite, PeoplePage, PeopleQuery, RecipientSuggestions, Reconciled,
+    queued_draft,
 };
 // Re-exports of the types this facade's signatures mention, so hosts depend on
 // `engine-api` alone (the providers themselves still come from the adapter crates).
@@ -93,9 +94,9 @@ pub use engine_core::{
         OrganizationId, PersonId, ProviderKey, SharedAccountId, ThreadId, Uid,
     },
     mail::{
-        AttachmentPartId, EmailAddress, InlinePart, Keyword, Mailbox, MailboxAccess, MailboxRole,
-        Message, MessageAttachment, MessageAttachmentContent, MessageBody, SystemKeyword,
-        ThreadProvenance, ThreadRef,
+        AttachmentPartId, EmailAddress, Importance, InlinePart, Keyword, Mailbox, MailboxAccess,
+        MailboxRole, Message, MessageAttachment, MessageAttachmentContent, MessageBody,
+        MessageMetadata, SystemKeyword, ThreadProvenance, ThreadRef,
     },
     // The set-of-containers type an `Event`'s `calendars` and a `Message`'s mailbox memberships
     // are expressed in.
@@ -107,11 +108,14 @@ pub use engine_core::{
     people::{CanonicalEmail, PeopleSnapshot, Person, PersonSource, PersonSourceId, SourcedValue},
     // The event's verbatim iCalendar, preserved beside the lossy projection. An RSVP is
     // applied *to the raw* by targeted patch, so a host that inspects or round-trips a
-    // scheduling payload needs to be able to name it.
-    raw::RawIcal,
+    // scheduling payload needs to be able to name it. `RawMime` is what
+    // `Engine::message_source` hands over.
+    raw::{RawIcal, RawMime},
     recipient::{RecipientCoverage, RecipientInteraction, RecipientSuggestion},
-    // `SearchDomain` names what `Engine::forget_account_domain` forgets.
-    sync::{SearchDomain, SyncScope, SyncWindow},
+    // `MailboxWindows` is what `StreamTuning::within` and the local prune take when a mailbox
+    // is held further back than its account; `SearchDomain` names what
+    // `Engine::forget_account_domain` forgets.
+    sync::{MailboxWindows, SearchDomain, SyncScope, SyncWindow},
     // `CalendarDateTime` is the type of `Event::start` and `Event::recurrence_id`, and `Duration`
     // the type of `Event::duration` — both public fields on a type this facade returns.
     time::{
@@ -143,18 +147,19 @@ pub use engine_http::{
 /// it is. The engine adds no product of its own.
 pub use engine_http::{InvalidUserAgent, UserAgent};
 pub use engine_provider::{
-    AttachedConference, CalendarAddress, CalendarUserAddresses, CalendarWrites, Capabilities,
-    ConferenceEdit, ContactDestination, ContactPhoto, ContactsProvider, ContentIdHeader,
-    DeleteTarget, Draft, DraftAttachment, DraftAttachmentDisposition, DraftCalendar,
-    DraftRecurrence, EventDeletion, EventDraft, EventEdit, EventPatch, EventRsvp, EventWrite,
-    EventWriteReceipt, IdentityControls, InvitationError, Invitee, InviteePatch, InviteeRole,
-    JitsiMeetings, JitsiServerError, KeywordName, MailEdit, MailEditReceipt, MailboxEdit,
-    MailboxEditReceipt, MailboxWrites, MeetingDraft, MeetingKey, MeetingKeyError, MeetingRequest,
-    MeetingService, MessageReport, MimeWrapOutcome, MimeWrapper, NewConference, Occurrence,
-    OverrideSurvival, PatchTarget, Provider, RecurrenceEdit, ReplyDelivery, ReportControls,
-    ReportEvidence, ReportReceipt, ReportVerdict, ReportVerdicts, RsvpControls, RsvpResponse,
-    SchedulingIdentity, SenderIdentity, SenderIdentityId, SentCopy, SharedAccount, SharedAccounts,
-    SourceStream, StoreDomains, SubmissionReceipt, TextEdit, WriteGuard, WritePrecondition,
+    AttachedConference, CalendarAddress, CalendarSync, CalendarUserAddresses, CalendarWrites,
+    Capabilities, ConferenceEdit, ContactDestination, ContactPhoto, ContactsProvider,
+    ContentIdHeader, CreateRoleError, DeleteTarget, Draft, DraftAttachment,
+    DraftAttachmentDisposition, DraftCalendar, DraftReceipt, DraftRecurrence, EventDeletion,
+    EventDraft, EventEdit, EventPatch, EventRsvp, EventWrite, EventWriteReceipt, IdentityControls,
+    InvitationError, Invitee, InviteePatch, InviteeRole, JitsiMeetings, JitsiServerError,
+    KeywordName, MailEdit, MailEditReceipt, MailboxEdit, MailboxEditReceipt, MailboxWrites,
+    MeetingDraft, MeetingKey, MeetingKeyError, MeetingRequest, MeetingService, MessageReport,
+    NewConference, Occurrence, OverrideSurvival, PatchTarget, Provider, RecurrenceEdit,
+    ReplyDelivery, ReportControls, ReportEvidence, ReportReceipt, ReportVerdict, ReportVerdicts,
+    RsvpControls, RsvpResponse, SchedulingIdentity, SenderIdentity, SenderIdentityId, SentCopy,
+    SharedAccount, SharedAccounts, SourceStream, StoreDomains, SubmissionReceipt, TextEdit,
+    WriteGuard, WritePrecondition,
 };
 pub use engine_recurrence::{
     ExpandError, Horizon, available_zones, day_bounds_utc, is_supported_zone, resolve_instant,
@@ -168,13 +173,14 @@ pub use engine_store::{
     TzdataVersion,
 };
 pub use engine_sync::{
-    AccountProgress, CalendarSyncReport, CalendarWriteOutcome, ContactReconcileReport,
-    ContactSourceReport, ContactSyncReport, ContactWriteOutcome, DraftPut, DrainOutcome,
-    DrainReport, DrainedOp, EventScopePass, EventScopeSync, EventSyncReport, FolderSync,
-    HorizonExpansion, IgnoreCommits, MailEditOutcome, MailEditSent, MailSyncReport, MailboxChange,
-    MailboxEditOutcome, MailboxNameError, MailboxPlace, PeopleRebuildReport, ProgressSnapshot,
-    PutDraftOutcome, ReportOutcome, StreamTuning, SubmitOutcome, SyncCommit, SyncError,
-    SyncObserver, SyncTiming, ThreadRebuildReport, UnexpandableEvent, validate_mailbox_name,
+    AccountProgress, CalendarReach, CalendarSyncReport, CalendarWriteOutcome,
+    ContactReconcileReport, ContactSourceReport, ContactSyncReport, ContactWriteOutcome, DraftPut,
+    DrainOutcome, DrainReport, DrainedOp, EventScopePass, EventScopeReach, EventScopeSync,
+    EventSyncReport, FolderSync, HorizonExpansion, IgnoreCommits, MailEditOutcome, MailEditSent,
+    MailSyncReport, MailboxChange, MailboxEditOutcome, MailboxNameError, MailboxPlace,
+    PeopleRebuildReport, ProgressSnapshot, PutDraftOutcome, ReportOutcome, ScopeReach,
+    StreamTuning, SubmitOutcome, SyncCommit, SyncError, SyncObserver, SyncTiming,
+    ThreadRebuildReport, UnexpandableEvent, validate_mailbox_name,
 };
 pub use scheduling::InboundScheduling;
 

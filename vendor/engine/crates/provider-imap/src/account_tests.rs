@@ -185,7 +185,7 @@ async fn a_pass_that_fails_mid_stream_does_not_park_its_connection() {
     let inbox = account.provider(mailbox("INBOX"));
 
     let items: Vec<_> = inbox
-        .stream_email(&account_id(), None, SyncWindow::full(), 50, 0)
+        .stream_email(&account_id(), None, SyncWindow::full().into(), 50, 0)
         .collect()
         .await;
     assert!(
@@ -229,16 +229,11 @@ async fn a_send_with_no_connection_to_file_on_still_delivers_and_says_so() {
         "221 bye\r\n",
     ]));
 
-    let draft = sent_draft();
-    let sub = crate::wrap::prepare_submission(&draft, None)
-        .await
-        .expect("the draft prepares");
     let receipt = account
         .provider(mailbox("INBOX"))
         .submit_over(
             smtp,
-            &sub,
-            &draft,
+            &sent_draft(),
             None,
             &engine_provider::HandOver::new(&engine_provider::Unrecorded),
         )
@@ -276,5 +271,10 @@ async fn an_account_and_its_folders_can_be_logged() {
     let logged = format!("{account:?} {:?}", account.provider(mailbox("Archive")));
 
     assert!(logged.contains("ImapAccount") && logged.contains("max_connections"));
-    assert!(logged.contains("ImapProvider") && logged.contains("Archive"));
+    // The folder as its id's own `Debug` shows it, which names it only in a debug build.
+    assert!(logged.contains("ImapProvider"));
+    assert!(
+        logged.contains(&format!("{:?}", mailbox("Archive"))),
+        "{logged}"
+    );
 }

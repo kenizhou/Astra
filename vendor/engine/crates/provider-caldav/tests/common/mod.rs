@@ -20,6 +20,8 @@
 pub(crate) mod conference_write;
 pub(crate) mod conferences;
 pub(crate) mod imip;
+#[cfg(feature = "import")]
+pub(crate) mod import;
 pub(crate) mod many_calendars;
 pub(crate) mod reconcile;
 pub(crate) mod recurrence;
@@ -33,7 +35,7 @@ use engine_core::{
     sync::{SyncScope, SyncState, SyncUpdate},
     version::ETag,
 };
-use engine_provider::{CalendarWrites, EventDeletion, Provider, ProviderResult, ScopeSync};
+use engine_provider::{CalendarSync, CalendarWrites, EventDeletion, ProviderResult, ScopeSync};
 use provider_caldav::{CalDavError, CalDavProvider};
 use tokio::sync::{Mutex, MutexGuard};
 
@@ -91,7 +93,7 @@ impl OnCalendar {
         cursor: Option<&SyncState>,
     ) -> ProviderResult<ScopeSync<Event>> {
         self.provider
-            .sync_events(account, &self.calendar, cursor)
+            .sync_events(account, &self.calendar, cursor, whole())
             .await
     }
 }
@@ -214,4 +216,14 @@ pub(crate) fn lines_without(ical: &str, struck: &[&str]) -> Vec<String> {
             .any(|target| name.eq_ignore_ascii_case(target))
     });
     logical
+}
+
+/// The window an event fetch names. This transport reads a calendar whole and ignores it; it is
+/// wide so that it would not narrow one that did not.
+pub(crate) fn whole() -> engine_core::time::Horizon {
+    engine_core::time::Horizon::new(
+        "2000-01-01T00:00:00Z".parse().unwrap(),
+        "2100-01-01T00:00:00Z".parse().unwrap(),
+    )
+    .unwrap()
 }

@@ -12,11 +12,11 @@ use std::time::Duration as StdDuration;
 
 use engine_core::{
     ids::{AccountId, MailboxId, MessageIdHeader},
-    mail::{EmailAddress, MailboxRole},
+    mail::{EmailAddress, MailboxRole, MessageMetadata},
     sync::SyncUpdate,
 };
-use engine_provider::{Draft, Provider};
-use provider_imap::{Credentials, ImapAccount, ImapConfig, ImapProvider};
+use engine_provider::{Credential, Draft, Provider};
+use provider_imap::{ImapAccount, ImapConfig, ImapProvider};
 use stalwart_harness::Harness;
 use tokio_rustls::{TlsConnector, client::TlsStream};
 
@@ -36,7 +36,7 @@ async fn connect(
     let config = ImapConfig::new(
         harness.imap_addr.as_str(),
         host,
-        Credentials::password(harness.account.as_str(), harness.password.as_str()),
+        Credential::password(harness.account.as_str(), harness.password.as_str()),
     );
     ImapAccount::connect(&config, no_verify_connector())
         .await
@@ -125,8 +125,10 @@ async fn live_imap_replacing_a_draft_leaves_exactly_one() {
             &account,
             &draft(message_id, "First version", &harness.account),
             None,
+            &MessageMetadata::default(),
         )
         .await
+        .map(|stored| stored.key)
         .expect("first save");
     assert_eq!(
         copies_of(&harness, &folder, message_id).await,
@@ -140,8 +142,10 @@ async fn live_imap_replacing_a_draft_leaves_exactly_one() {
             &account,
             &draft(message_id, "Second version", &harness.account),
             Some(&first),
+            &MessageMetadata::default(),
         )
         .await
+        .map(|stored| stored.key)
         .expect("second save");
     assert_ne!(first, second, "a replaced IMAP draft is a new message");
 

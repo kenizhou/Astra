@@ -6,9 +6,9 @@
 
 use async_trait::async_trait;
 use engine_core::{
-    ids::{AccountId, ProviderKey},
+    ids::{AccountId, MailboxId, ProviderKey},
     sync::SyncScope,
-    time::{ExpansionWindow, Horizon},
+    time::{ExpansionWindow, Horizon, UtcDateTime},
     version::CollectionTag,
     write::PendingOpId,
 };
@@ -43,6 +43,12 @@ impl<C: Clock> StoreRead for SqliteStore<C> {
     async fn collection_tag(&self, scope: &SyncScope) -> Result<Option<CollectionTag>> {
         let key = scope_key(scope);
         self.read(move |conn| crate::window_ops::collection_tag(conn, &key))
+            .await
+    }
+
+    async fn fetch_window(&self, scope: &SyncScope) -> Result<Option<Horizon>> {
+        let key = scope_key(scope);
+        self.read(move |conn| crate::window_ops::fetch_window(conn, &key))
             .await
     }
 
@@ -84,6 +90,17 @@ impl<C: Clock> StoreRead for SqliteStore<C> {
         };
         let accounts = accounts.to_vec();
         self.read(move |conn| mail_ops::list_mail(conn, &accounts, &select, limit))
+            .await
+    }
+
+    async fn oldest_in_mailbox(
+        &self,
+        account: &AccountId,
+        mailbox: &MailboxId,
+    ) -> Result<Option<UtcDateTime>> {
+        let account = account.clone();
+        let mailbox = mailbox.clone();
+        self.read(move |conn| mail_ops::mailbox::oldest_in_mailbox(conn, &account, &mailbox))
             .await
     }
 

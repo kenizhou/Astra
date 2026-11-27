@@ -120,6 +120,15 @@ jobs:
       - name: Test
         run: cargo test --workspace --all-features
 
+      # An id's or a cursor's own `Debug` prints its value only where engine-core has debug
+      # assertions (`engine_core::redact`), so the run above sees only the shown form. This one
+      # builds engine-core without them and runs the unit tests of the crates whose types use
+      # `redact::Content`, so an impl reverted to `#[derive(Debug)]` fails. Mirrors AGENTS.md's gate.
+      - name: Test the redacted Debug (engine-core without debug assertions)
+        run: >-
+          cargo test --config 'profile.dev.package.engine-core.debug-assertions=false'
+          --all-features --lib -p engine-core -p engine-provider -p provider-graph -p provider-jmap
+
       - name: Docs
         run: cargo doc --workspace --all-features --no-deps
 
@@ -313,7 +322,7 @@ jobs:
       - name: Run the gated SabreDAV CalDAV integration test (live)
         env:
           SABREDAV_HTTP_ADDR: 127.0.0.1:18081
-        run: cargo test -p provider-caldav --test live_sabredav --test live_sabredav_delegation --test live_shared_calendars --test live_challenges -- --nocapture
+        run: cargo test -p provider-caldav --features import --test live_sabredav --test live_sabredav_delegation --test live_shared_calendars --test live_challenges --test live_credential_source -- --nocapture
 
       - name: Dump SabreDAV logs on failure
         if: failure()
@@ -357,7 +366,7 @@ jobs:
       - name: Run the gated Nextcloud CalDAV, CardDAV and Talk integration tests (live)
         env:
           NEXTCLOUD_HTTP_ADDR: 127.0.0.1:18082
-        run: cargo test -p provider-caldav --test live_nextcloud --test live_nextcloud_contacts --test live_talk -- --nocapture
+        run: cargo test -p provider-caldav --features import --test live_nextcloud --test live_nextcloud_contacts --test live_talk --test live_credential_source -- --nocapture
 
       - name: Dump Nextcloud logs on failure
         if: failure()
@@ -409,12 +418,16 @@ jobs:
         env:
           DOVECOT_REV1_IMAP_ADDR: 127.0.0.1:11994
           DOVECOT_REV2_IMAP_ADDR: 127.0.0.1:11995
+          DOVECOT_MANAGESIEVE_ADDR: 127.0.0.1:14191
         run: |
           cargo test -p provider-imap --test live_imap_contract -- --nocapture
           cargo test -p provider-imap --test live_imap_rev1 -- --nocapture
           cargo test -p provider-imap --test live_imap_rev2 -- --nocapture
           cargo test -p provider-imap --test live_imap_report -- --nocapture
           cargo test -p provider-imap --test live_imap_shared_contract -- --nocapture
+          cargo test -p provider-imap --features import --test live_imap_import -- --nocapture
+          cargo test -p provider-imap --test live_imap_acting_as -- --nocapture
+          cargo test -p provider-imap --features import --lib managesieve::live -- --nocapture
 
       - name: Dump Dovecot logs on failure
         if: failure()

@@ -5,8 +5,8 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 use engine_api::{
-    AccountId, ApiError, CalendarWrites, Capabilities, Engine, MailboxChange, MailboxEdit,
-    MailboxEditReceipt, MailboxPlace, MailboxWrites, Provider,
+    AccountId, ApiError, CalendarSync, CalendarWrites, Capabilities, Engine, MailboxChange,
+    MailboxEdit, MailboxEditReceipt, MailboxPlace, MailboxWrites, Provider,
 };
 use engine_core::{
     ids::MailboxId,
@@ -60,6 +60,8 @@ impl Provider for Tree {
     }
 }
 
+impl CalendarSync for Tree {}
+
 impl CalendarWrites for Tree {}
 
 #[async_trait]
@@ -69,7 +71,7 @@ impl MailboxWrites for Tree {
         _account: &AccountId,
         edit: &MailboxEdit,
     ) -> ProviderResult<MailboxEditReceipt> {
-        let MailboxEdit::Create { name, parent } = edit else {
+        let MailboxEdit::Create { name, parent, .. } = edit else {
             panic!("only creates are asked of this fake");
         };
         let mut made = Mailbox::new(id("made"), name.clone());

@@ -4,7 +4,7 @@
 //! two knobs a single page size used to conflate** (`store-and-sync.md`):
 //!
 //! - **fetch batching** — how many objects the adapter pulls per network round trip (an IMAP `UID
-//!   FETCH` window, a JMAP `Email/get` page, a Graph `$top`);
+//!   FETCH` window, a JMAP `Email/get` page, a Graph delta page's `odata.maxpagesize`);
 //! - **streaming granularity** — how many objects it emits per [`EmailChunk`], the unit the
 //!   orchestrator commits and reports.
 //!
@@ -21,13 +21,15 @@
 use std::collections::BTreeSet;
 
 use engine_core::{
-    ids::ProviderKey,
+    ids::{AccountId, ProviderKey},
     mail::{MailStateChange, Message},
-    sync::{SyncState, SyncUpdate},
+    sync::{SyncState, SyncUpdate, Widening},
 };
 use futures_core::stream::Stream;
 
-use crate::{ProviderError, ProviderResult, ScopeSync};
+use crate::{
+    DEFAULT_DRAIN_PAGE, Provider, ProviderError, ProviderResult, ScopeSync, error::unsupported,
+};
 
 /// How the orchestrator must apply a pass's chunks — set by the adapter, constant
 /// across every chunk of one pass.
@@ -274,7 +276,48 @@ pub fn split_page(
 }
 
 /// A boxed pull stream of one email pass's chunks — what
-/// [`Provider::stream_email`](crate::Provider::stream_email) returns.
+/// [`Provider::stream_email`](crate::Provider::stream_email) and
+/// [`Provider::widen_email`](crate::Provider::widen_email) return.
+///
+/// # The window
+///
+/// `stream_email`'s window is the account's sync window with any mailbox held further back
+/// ([`MailboxWindows`](engine_core::sync::MailboxWindows)). A snapshot or backfill fetches what
+/// the window of any mailbox a message is filed in admits, and no more: a folder-bound adapter
+/// (IMAP, Graph) fetches under its own folder's `window_for`, and one whose scope is the whole
+/// account (JMAP, Gmail) fetches the account's window and, beside it, each `deepened` mailbox's
+/// own, never the account's older mail as a whole. A delta takes no date filter on any protocol;
+/// the caller judges its arrivals with `MailboxWindows::admits`. A mailbox the server does not
+/// have is not fetched further back.
+///
+/// # The two knobs (`store-and-sync.md`)
+///
+/// - `fetch_batch` bounds each **network round trip** (an IMAP `UID FETCH` window, a JMAP
+///   `Email/get` page, a Graph delta page's `odata.maxpagesize`); `0` means the adapter's protocol
+///   maximum.
+/// - `chunk_size` bounds how many messages accumulate before a chunk is **yielded** — the streaming
+///   granularity a host commits and renders; `0` means one chunk per batch.
+///
+/// A large `fetch_batch` with a small `chunk_size` gives *both* few round trips *and*
+/// row-as-it-arrives commits. Each chunk carries a [`PassMode`] and an optional
+/// [`advance_to`](EmailChunk::advance_to) checkpoint telling the caller how to apply it and how
+/// far to advance the cursor, so a killed cold sync resumes.
+///
+/// # Widening
+///
+/// An adapter that can list a date range without giving up its delta cursor answers
+/// `widen_email` with only the widening's `bands` (or, bound to one folder, its `band_for`), as
+/// [`PassMode::Additive`] chunks that carry no `present` set and tombstone nothing, each
+/// checkpointing the cursor it was handed with its position in the band. The last chunk advances
+/// to that cursor with no band position left in it, so a band leaves the delta where it found it
+/// and every change to a band message after it was read is replayed by the next delta. A position
+/// rides through the deltas a caller runs before the band.
+///
+/// **Whether to continue a recorded position is the caller's to say** (`Widening::resumes`),
+/// never the adapter's: only the caller knows whether a pass under a narrower window ran on the
+/// scope since, which may have dropped mail the band had not reached. When it does not resume,
+/// the adapter ignores any position and starts the band afresh. A caller applies band chunks and
+/// a reopen's alike ([`EmailChunk::into_update`] under `Widening::to`) and never asks which it got.
 ///
 /// Pull-based, so the adapter's fetch advances only when the orchestrator polls for
 /// the next chunk (after committing the previous one): natural backpressure, no
@@ -327,6 +370,53 @@ pub(crate) async fn drain_email(mut stream: EmailStream<'_>) -> ProviderResult<S
         PassMode::Additive => SyncUpdate::delta(changed, removed).with_patched(patched),
     };
     Ok(ScopeSync::new(update, next_cursor))
+}
+
+/// What [`Provider::stream_email`](crate::Provider::stream_email) answers on an adapter that
+/// syncs no mail: one classified `Err`, so a capability-checking caller never relies on it.
+pub(crate) fn unsupported_stream<'a>() -> EmailStream<'a> {
+    Box::pin(futures_util::stream::once(async {
+        Err(unsupported("mail sync"))
+    }))
+}
+
+/// [`Provider::widen_email`](crate::Provider::widen_email)'s default, which **reopens**: a fresh
+/// pass of `provider`'s own `stream_email` over [`Widening::to`], with no cursor, or from `cursor`
+/// when the widening [`resumes`](Widening::resumes).
+pub(crate) fn reopen<'a, P: Provider + ?Sized>(
+    provider: &'a P,
+    account: &'a AccountId,
+    cursor: &'a SyncState,
+    widening: &'a Widening,
+    fetch_batch: usize,
+    chunk_size: usize,
+) -> EmailStream<'a> {
+    let from = widening.resumes().then_some(cursor);
+    provider.stream_email(
+        account,
+        from,
+        widening.to().clone(),
+        fetch_batch,
+        chunk_size,
+    )
+}
+
+/// [`Provider::sync_email`](crate::Provider::sync_email)'s default: `provider`'s own
+/// `stream_email` under its [default window](crate::Provider::default_sync_window), drained
+/// ([`drain_email`]) into one combined [`ScopeSync`].
+pub(crate) async fn drain_whole<P: Provider + ?Sized>(
+    provider: &P,
+    account: &AccountId,
+    cursor: Option<&SyncState>,
+) -> ProviderResult<ScopeSync<Message>> {
+    drain_email(provider.stream_email(
+        account,
+        cursor,
+        provider.default_sync_window().into(),
+        DEFAULT_DRAIN_PAGE,
+        0,
+    ))
+    .await
 }
 
 #[cfg(test)]

@@ -9,6 +9,7 @@
 
 use std::time::Duration;
 
+use engine_provider::CredentialFailure;
 use tokio::io::{AsyncRead, AsyncWrite, BufReader};
 
 use crate::{
@@ -16,7 +17,8 @@ use crate::{
     deadline::{self, BOUNDS},
     error::{ImapError, ImapResult},
     parse::{self, FetchRow, ListRow},
-    transport_command::{ListReturn, list_command, quote},
+    secret_line::{Part, secret_line},
+    transport_command::{ListReturn, list_command},
 };
 
 /// A connected IMAP session over a generic async byte stream.
@@ -174,9 +176,40 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send> Connection<S> {
 
     /// `LOGIN user password`. A `NO` here is classed as a sign-in refusal
     /// ([`ImapError::refused_sign_in`]), not as a generic invalid-state error.
+    ///
+    /// Not sent through [`command`](Self::command), whose `format!` would copy the password:
+    /// the line is built once, at its final length, and zeroed when dropped
+    /// ([`crate::secret_line`]).
+    ///
+    /// # Errors
+    ///
+    /// [`ImapError::Credential`] (`Permanent`, [`CredentialFailure::unpresentable`]) before
+    /// anything is written, for a username or password holding CR, LF or NUL: a quoted string
+    /// cannot carry them (RFC 3501 §9, RFC 9051 §9), and a CRLF would end the line early and
+    /// send the rest as a command of its own.
     pub(crate) async fn login(&mut self, user: &str, password: &str) -> ImapResult<()> {
-        let command = format!("LOGIN {} {}", quote(user), quote(password));
-        match self.command(&command).await {
+        if [user, password]
+            .iter()
+            .any(|part| part.contains(['\r', '\n', '\0']))
+        {
+            return Err(CredentialFailure::unpresentable(
+                "a LOGIN credential holds CR, LF or NUL, which a quoted string cannot carry",
+            )
+            .into());
+        }
+        self.drain_pending().await?;
+        let tag = self.next_tag();
+        let line = secret_line(&[
+            Part::Text(&tag),
+            Part::Text(" LOGIN "),
+            Part::Quoted(user),
+            Part::Text(" "),
+            Part::Quoted(password),
+            Part::Text("\r\n"),
+        ]);
+        self.send_raw(line.as_bytes()).await?;
+        drop(line);
+        match self.read_response(&tag).await {
             Ok(_) => Ok(()),
             Err(ImapError::No(detail)) => Err(ImapError::refused_sign_in(detail)),
             Err(other) => Err(other),
@@ -272,7 +305,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send> Connection<S> {
     /// `UID SEARCH <criteria>` in the selected mailbox — the matched UIDs (empty if none
     /// match), tolerating both the classic `* SEARCH` and the extended `* ESEARCH` reply.
     /// `criteria` is already-formed search syntax; a caller composing in a non-literal value
-    /// quotes it ([`quote`]) first.
+    /// quotes it ([`quote`](crate::transport_command::quote)) first.
     pub(crate) async fn uid_search(&mut self, criteria: &str) -> ImapResult<Vec<u32>> {
         let response = self.command(&format!("UID SEARCH {criteria}")).await?;
         Ok(parse::parse_search(&response.untagged))

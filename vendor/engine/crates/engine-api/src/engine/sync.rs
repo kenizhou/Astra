@@ -1,19 +1,19 @@
 //! Provider-driven sync, cache-reset/vacuum maintenance, and the streaming and
-//! per-folder sync methods on `Engine`.
+//! per-folder sync methods on `Engine`. How much mail the store keeps is `mail_depth`.
 
 use engine_core::{
     ids::{AccountId, CalendarId},
-    sync::{SearchDomain, SyncWindow},
     time::TimeZoneId,
 };
 use engine_provider::{ContactsProvider, Provider};
 use engine_recurrence::Horizon;
-use engine_store::{MessageSourceCache, PruneReport, SourcesDropped, Store, SweepReport};
+use engine_store::Store;
 use engine_sync::{
-    CalendarSyncReport, ContactSourceReport, ContactSyncReport, EventSyncReport, HorizonExpansion,
-    MailSyncReport, PeopleRebuildReport, StreamTuning, SyncObserver, ThreadRebuildReport,
-    expand_calendar_horizon, rebuild_thread_index, reconcile_calendar_events, refresh_folders,
-    sync_address_books, sync_calendar, sync_contact_cards, sync_contacts, sync_mail,
+    CalendarReach, CalendarSyncReport, ContactSourceReport, ContactSyncReport, EventSyncReport,
+    HorizonExpansion, MailSyncReport, PeopleRebuildReport, StreamTuning, SyncObserver,
+    ThreadRebuildReport, expand_calendar_horizon, reach_calendar, rebuild_thread_index,
+    reconcile_calendar_events, refresh_folders, sync_address_books, sync_calendar,
+    sync_contact_cards, sync_contacts, sync_mail,
 };
 
 use super::{LEASE_TTL, map_sync_error, worker};
@@ -221,107 +221,6 @@ impl Engine {
         Ok(())
     }
 
-    /// Clears just the **mail** scopes' sync cursors, so the next [`Engine::sync_mail`]
-    /// re-snapshots them. The targeted counterpart of [`Engine::reset`]: it reconciles
-    /// mail with the server without clearing the calendar or re-fetching the whole
-    /// account. A plain `sync_mail` delta already reconciles flag, move and expunge changes
-    /// on every IMAP server: incrementally with QRESYNC, and without it by reading every
-    /// held message's flags and the set still present (`imap-smtp.md`). This is for a host
-    /// that wants to force a full mail re-snapshot, or to fetch under a new sync window; a
-    /// plain `sync_mail` after it reconciles, since the cleared scopes snapshot. A mail
-    /// sync running meanwhile is stopped at its next commit rather than writing its
-    /// cursor back, and the scope can be claimed at once.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ApiError::Store`] on a backend failure.
-    pub async fn clear_mail_cursors(&self, account: &AccountId) -> Result<(), ApiError> {
-        for scope in self.scopes_in(account, SearchDomain::Mail).await? {
-            self.store.clear_scope_cursor(&scope).await?;
-        }
-        Ok(())
-    }
-
-    /// Prunes `account`'s locally-stored mail dated **before** `window`'s floor, so a
-    /// reduced sync depth holds even **offline** — with no provider round trip. When the
-    /// account is reachable, a host narrows depth by clearing the mail cursors and
-    /// re-syncing: the provider snapshot under the narrower `window` tombstones the
-    /// out-of-window rows. This is the counterpart for a disconnected account: it drops
-    /// the same mail locally, producing the state that re-snapshot would, so the app can
-    /// enforce the new depth immediately and wait to reconcile until the next sync.
-    ///
-    /// It keeps in-window and undated mail (an undated message is not provably out of
-    /// window), non-mail data, account metadata, and every other account; each removed
-    /// message takes its derived search/thread/occurrence rows with it (the same
-    /// tombstone a sync applies) **and its cached body and raw source**, which are the bulk
-    /// of what the mail occupied. An unbounded `window` is a no-op. It advances no cursor,
-    /// so a later network sync resumes normally; follow it with
-    /// [`sweep_unreferenced_blobs`](Self::sweep_unreferenced_blobs) and
-    /// [`vacuum`](Self::vacuum) to reclaim the freed files and pages. Returns a
-    /// [`PruneReport`](engine_store::PruneReport) with the count removed.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ApiError::Store`] on a backend failure.
-    pub async fn prune_account_mail_outside_window(
-        &self,
-        account: &AccountId,
-        window: SyncWindow,
-    ) -> Result<PruneReport, ApiError> {
-        Ok(self
-            .store
-            .prune_account_mail_outside_window(account, window)
-            .await?)
-    }
-
-    /// Forgets `account`'s cached raw sources over `octets`, for a host lowering a message-size
-    /// cap — the counterpart of the cap the same host applies when deciding what to pre-fetch.
-    ///
-    /// It removes **bytes, not mail**: the message rows and their extracted body text stay, so
-    /// the list, the threads and body search are all unchanged and only the offline copy of the
-    /// heaviest messages goes. Opening one re-fetches and re-caches it, exactly as it would have
-    /// before it was ever warmed. Follow with
-    /// [`sweep_unreferenced_blobs`](Self::sweep_unreferenced_blobs) and [`vacuum`](Self::vacuum)
-    /// to turn it into free disk — this drops the rows that *name* the files, and the sweep is
-    /// the only place that knows whether another row still names the same content.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ApiError::Store`] on a backend failure.
-    pub async fn drop_message_sources_over(
-        &self,
-        account: &AccountId,
-        octets: u64,
-    ) -> Result<SourcesDropped, ApiError> {
-        Ok(self
-            .store
-            .drop_message_sources_over(account, octets)
-            .await?)
-    }
-
-    /// Deletes every content-addressed blob no store row names any more — the raw
-    /// message sources (and contact photos) left behind when the mail that cached them
-    /// was removed.
-    ///
-    /// Blobs are named by the hash of their bytes so two copies of one message share one
-    /// file, which means no row owns a file and the delete that drops the last row naming
-    /// a hash cannot free it. A host therefore runs this after anything that drops mail in
-    /// quantity — [`prune_account_mail_outside_window`](Self::prune_account_mail_outside_window),
-    /// a narrower-window re-snapshot, or [`forget_account`](Self::forget_account) — and
-    /// pairs it with [`vacuum`](Self::vacuum), which reclaims the database half of the same
-    /// space. Raw sources run 1–15 MB apiece, so this is the larger half.
-    ///
-    /// Safe to run at any time: it takes no lease, and a blob removed a moment early reads
-    /// back as a cache miss the caller re-fetches, never as wrong bytes. Returns a
-    /// [`SweepReport`](engine_store::SweepReport) with the count and bytes freed.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ApiError::Store`] on a filesystem or backend failure.
-    pub async fn sweep_unreferenced_blobs(&self) -> Result<SweepReport, ApiError> {
-        Ok(self.store.sweep_unreferenced_blobs().await?)
-    }
-
     /// Syncs one account's calendars from `provider`, which serves every one of them: the
     /// calendar list first, then each calendar's events, concurrently, expanding each event's
     /// occurrences before the commit (`calendar-semantics.md`). `horizon` and `host_zone` seed
@@ -418,10 +317,15 @@ impl Engine {
     /// It re-expands every stored event on every call, so widen in coarse chunks
     /// against a persisted watermark rather than calling it per page.
     ///
+    /// A calendar another pass holds is **waited for**, not reported busy: that pass expands
+    /// only what it changes, over the window it found, so nothing else would widen it. The wait
+    /// ends when the pass does (or its lease lapses, if it died); drop the future to stop
+    /// waiting. Expanding only what the store holds, it shows no event a windowed transport
+    /// never fetched: [`reach_calendar`](Engine::reach_calendar) fetches those.
+    ///
     /// # Errors
     ///
-    /// Returns [`ApiError::Busy`] if another sync holds a calendar scope, or
-    /// [`ApiError::Sync`] if the store rejects the apply. An event whose recurrence the
+    /// Returns [`ApiError::Sync`] if the store rejects the apply. An event whose recurrence the
     /// expander cannot handle is **not** an error — it is reported in
     /// [`HorizonExpansion::unexpandable`], so one unsupported rule never stops the rest
     /// of the calendar from materializing.
@@ -441,5 +345,45 @@ impl Engine {
         )
         .await
         .map_err(map_sync_error)
+    }
+
+    /// Makes the store hold every event of `account`'s calendars that falls in `range`, and keeps
+    /// them current from then on.
+    ///
+    /// Most transports fetch a calendar whole, and for them this asks the server nothing. A
+    /// **windowed** one
+    /// ([`Capabilities::windowed_events`](engine_provider::Capabilities::windowed_events):
+    /// Graph, Google) fetches only inside the window its cursor was opened over, the host's
+    /// horizon at the first sync, and the store records that window. A range inside it is
+    /// answered without a request; a range past it reopens the calendar's cursor over the union
+    /// of the two, as a fresh snapshot, so the events it brings are kept current by every sync
+    /// after. A range is never fetched twice: a second call for the same range waits for the
+    /// first, then finds it covered. A calendar another pass holds is waited for, not reported
+    /// busy.
+    ///
+    /// It fetches; it does not widen what is **shown**. A host paging its grid past the horizon
+    /// calls this with the range it is about to show and [`expand_horizon`](Engine::expand_horizon)
+    /// with its new horizon, in either order: each fetched event is expanded over the window the
+    /// store holds. Each reopen re-reads the whole union, so ask in coarse steps, as for
+    /// `expand_horizon`.
+    ///
+    /// While it runs, reads answer from the store as it was; the fetched events land in one
+    /// commit per calendar. A calendar that fails is reported in
+    /// [`CalendarReach::failures`] and records nothing, so asking again fetches it again.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ApiError::Sync`] if the stored calendar list cannot be read. Everything after
+    /// that is reported per calendar, one no [`sync_calendar`](Engine::sync_calendar) has
+    /// reached as [`SyncError::NoExpansionWindow`](engine_sync::SyncError::NoExpansionWindow).
+    pub async fn reach_calendar<P: Provider>(
+        &self,
+        provider: &P,
+        account: &AccountId,
+        range: Horizon,
+    ) -> Result<CalendarReach, ApiError> {
+        reach_calendar(provider, &self.store, account, worker(), LEASE_TTL, range)
+            .await
+            .map_err(map_sync_error)
     }
 }

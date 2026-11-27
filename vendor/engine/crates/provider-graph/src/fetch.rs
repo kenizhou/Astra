@@ -25,11 +25,12 @@ use serde_json::Value;
 use crate::{
     error::GraphError,
     json::{req_str, wrap_id},
+    mailbox_write::is_not_found,
     normalize::{
-        MESSAGE_EXPAND, MESSAGE_SELECT, WELL_KNOWN_ROLES, apply_roles, folder_from_json,
-        message_from_json, well_known_folder_id,
+        MESSAGE_EXPAND, MESSAGE_SELECT, RECORD_ROLES, WELL_KNOWN_ROLES, apply_roles,
+        folder_from_json, message_from_json, well_known_folder_id,
     },
-    normalize_state::{MESSAGE_STATE_SELECT, state_from_json},
+    normalize_state::{MESSAGE_STATE_SELECT, names_only_state, state_from_json},
     transport::GraphClient,
 };
 
@@ -42,11 +43,19 @@ const PENDING_CURSOR: &str = "graph-pending";
 /// them).
 pub(crate) async fn folders(client: &GraphClient) -> Result<Vec<Mailbox>, GraphError> {
     let root = well_known_id(client, "msgfolderroot").await?;
-    let mut resolved = Vec::with_capacity(WELL_KNOWN_ROLES.len());
-    for (alias, role) in WELL_KNOWN_ROLES {
-        // A well-known folder the account never provisioned 404s; skip its role
-        // rather than failing the whole folder list.
-        if let Some(id) = optional_well_known_id(client, alias).await? {
+    let mut resolved = Vec::with_capacity(WELL_KNOWN_ROLES.len() + RECORD_ROLES.len());
+    // A well-known folder the account never provisioned 404s; skip its role rather than
+    // failing the whole folder list. A records folder may also be refused to the caller.
+    let lookups = (WELL_KNOWN_ROLES
+        .iter()
+        .map(|known| (known, is_not_found as Absent)))
+    .chain(
+        RECORD_ROLES
+            .iter()
+            .map(|known| (known, absent_or_withheld as Absent)),
+    );
+    for ((alias, role), absent) in lookups {
+        if let Some(id) = optional_well_known_id(client, alias, absent).await? {
             resolved.push((id, role.clone()));
         }
     }
@@ -109,15 +118,28 @@ pub(crate) async fn well_known_id(
     well_known_folder_id(&doc)
 }
 
-/// Resolves a well-known alias to its folder id, returning `None` when the account
-/// has no such folder (`404`) and propagating any other failure.
+/// Whether a well-known alias's failure means only that the folder is not there for the caller.
+type Absent = fn(&GraphError) -> bool;
+
+/// Absent, or there and not the caller's to see (`403 ErrorAccessDenied`). Only for the
+/// [`RECORD_ROLES`]: a standard role's `403` is the caller's grant falling short of the
+/// mailbox, which the listing reports rather than hides.
+fn absent_or_withheld(err: &GraphError) -> bool {
+    is_not_found(err)
+        || matches!(err, GraphError::Status { status: 403, .. })
+        || matches!(err, GraphError::Status { code: Some(code), .. } if code == "ErrorAccessDenied")
+}
+
+/// Resolves a well-known alias to its folder id, returning `None` when `absent` says the
+/// account has no such folder for the caller and propagating any other failure.
 async fn optional_well_known_id(
     client: &GraphClient,
     alias: &str,
+    absent: Absent,
 ) -> Result<Option<MailboxId>, GraphError> {
     match well_known_id(client, alias).await {
         Ok(id) => Ok(Some(id)),
-        Err(GraphError::Status { status: 404, .. }) => Ok(None),
+        Err(err) if absent(&err) => Ok(None),
         Err(other) => Err(other),
     }
 }
@@ -168,7 +190,8 @@ async fn message_state(
 /// Fetches one page of the bound folder's messages (see the module docs). `floor`
 /// (the per-sync window's date floor) windows the **initial** snapshot to messages
 /// received on or after that date; later pages follow the server's links, which
-/// carry the window.
+/// carry the window. `fetch_batch` is the most messages the page is asked for
+/// ([`page_size_prefer`]).
 pub(crate) async fn messages_page(
     client: &GraphClient,
     folder: &MailboxId,
@@ -176,6 +199,7 @@ pub(crate) async fn messages_page(
     page: Option<&PageToken>,
     floor: Option<CalendarDate>,
     names: &[KeywordName],
+    fetch_batch: usize,
 ) -> Result<SyncPage<Message>, GraphError> {
     let kind = if cursor.is_none() {
         SyncKind::Snapshot
@@ -183,7 +207,10 @@ pub(crate) async fn messages_page(
         SyncKind::Delta
     };
     let doc = client
-        .get(&page_url(client, folder, cursor, page, floor))
+        .get_with_prefer(
+            &page_url(client, folder, cursor, page, floor),
+            Some(&page_size_prefer(fetch_batch)),
+        )
         .await?;
 
     let mut changed = Vec::new();
@@ -200,11 +227,14 @@ pub(crate) async fn messages_page(
         // exception is a *lightweight* property change (notably `isRead` on consumer
         // mailboxes), which returns only the changed property + id and no etag.
         //
-        // In a delta that is a state change, and resolving it costs the narrow
-        // `$select` rather than the whole message. A **snapshot** never takes this
-        // branch: its entries are always full, and a state change carries no key into
-        // `present`, so one here would be tombstoned at the end of the pass.
-        if kind == SyncKind::Delta && entry.get("@odata.etag").is_none() {
+        // One that names nothing but state is a state change, and resolving it costs the
+        // narrow `$select` rather than the whole message. One that names anything else
+        // (importance, a draft's subject) changed content, and is read whole below
+        // (`names_only_state`). A **snapshot** never takes this branch: its entries are
+        // always full, and a state change carries no key into `present`, so one here would
+        // be tombstoned at the end of the pass.
+        if kind == SyncKind::Delta && entry.get("@odata.etag").is_none() && names_only_state(entry)
+        {
             let key = entry_key(entry)?;
             match message_state(client, &key, names).await {
                 Ok(state) => patched.push(MailStateChange::new(key, state)),
@@ -248,6 +278,28 @@ pub(crate) async fn messages_page(
         next_cursor,
         total: None,
     })
+}
+
+/// The most messages one delta page is asked for, and what a `fetch_batch` of `0` asks for.
+///
+/// Exchange Online's own ceiling, measured: asked for 1,000 it answers 512 a page and says
+/// nothing, so a larger value would only claim a size the server never serves (`graph.md`).
+pub(crate) const MAX_DELTA_PAGE: usize = 512;
+
+/// The `Prefer` value bounding a delta page at `fetch_batch` messages (`0` is
+/// [`MAX_DELTA_PAGE`]).
+///
+/// Without it Graph answers ten messages a page, on a personal account and on Exchange Online
+/// alike, so a folder's first sync is one
+/// sequential round trip per ten messages. `$top` is no substitute: consumer delta does not
+/// paginate on it (`graph.md`). The value is sent on **every** page, continuations and
+/// deltaLinks included, because a header is not carried in the link the server hands back.
+fn page_size_prefer(fetch_batch: usize) -> String {
+    let size = match fetch_batch {
+        0 => MAX_DELTA_PAGE,
+        n => n.min(MAX_DELTA_PAGE),
+    };
+    format!("odata.maxpagesize={size}")
 }
 
 /// The URL for the next page: a continuation `@odata.nextLink`, else the delta
@@ -307,3 +359,15 @@ fn odata_link(doc: &Value, key: &str) -> Option<String> {
 #[cfg(test)]
 #[path = "fetch_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "fetch_roles_tests.rs"]
+mod roles_tests;
+
+#[cfg(test)]
+#[path = "fetch_content_tests.rs"]
+mod content_tests;
+
+#[cfg(test)]
+#[path = "fetch_page_size_tests.rs"]
+mod page_size_tests;

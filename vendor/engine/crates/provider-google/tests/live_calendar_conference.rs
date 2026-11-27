@@ -22,7 +22,7 @@ use engine_core::{
     },
     sync::SyncUpdate,
 };
-use engine_provider::Provider;
+use engine_provider::CalendarSync;
 
 const EVENTS: &str = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
 
@@ -182,10 +182,7 @@ async fn live_a_meeting_only_in_the_description_and_location_is_detected() {
 }
 
 /// The conferences of the event titled `title`, as the adapter's sync reads them.
-async fn read_back(
-    provider: &provider_google::GoogleCalendarProvider,
-    title: &str,
-) -> Vec<Conference> {
+async fn read_back(provider: &Windowed, title: &str) -> Vec<Conference> {
     let events = provider
         .sync_events(&account(), &primary(provider).await, None)
         .await

@@ -3,7 +3,7 @@
 //! driven offline by the shared `provider_test_support` harness.
 
 use engine_core::sync::{SyncUpdate, SyncWindow};
-use engine_provider::{EmailChunk, EmailStream};
+use engine_provider::{CalendarSync, EmailChunk, EmailStream};
 use futures_util::StreamExt;
 use serde_json::{Value, json};
 
@@ -135,7 +135,7 @@ async fn email_snapshot_pages_chain_until_exhausted() {
         email_listing_page(&["e3"], 2, Some(3)),
     ]);
 
-    let chunks = drain(p.stream_email(&account(), None, SyncWindow::full(), 2, 0)).await;
+    let chunks = drain(p.stream_email(&account(), None, SyncWindow::full().into(), 2, 0)).await;
     assert_eq!(upserted(&chunks), 3);
     let present: usize = chunks.iter().map(|c| c.present.len()).sum();
     assert_eq!(present, 3, "every snapshot id rides the reconcile chunks");
@@ -167,7 +167,7 @@ async fn email_snapshot_without_total_pages_until_a_short_page() {
         email_listing_page(&["e3"], 0, None),
     ]);
 
-    let chunks = drain(p.stream_email(&account(), None, SyncWindow::full(), 2, 0)).await;
+    let chunks = drain(p.stream_email(&account(), None, SyncWindow::full().into(), 2, 0)).await;
     assert_eq!(chunks[0].total, None, "no total advertised");
     assert_eq!(upserted(&chunks), 3, "both pages drained despite no total");
 }
@@ -195,7 +195,7 @@ async fn email_delta_pages_follow_has_more_changes() {
     let chunks = drain(p.stream_email(
         &account(),
         Some(&SyncState::new("s1")),
-        SyncWindow::full(),
+        SyncWindow::full().into(),
         1,
         0,
     ))
@@ -262,7 +262,7 @@ async fn calendar_first_sync_snapshots_collections_and_events() {
     assert_eq!(present.len(), 1);
 
     let events = provider(vec![fixture("event_snapshot_response.json")])
-        .sync_events(&account(), &any_calendar(), None)
+        .sync_events(&account(), &any_calendar(), None, whole())
         .await
         .unwrap();
     assert!(events.is_snapshot());
@@ -327,7 +327,7 @@ async fn permanent_fetch_errors_propagate() {
     assert!(p.sync_email(&account(), None).await.is_err());
     assert!(p.sync_calendars(&account(), None).await.is_err());
     assert!(
-        p.sync_events(&account(), &any_calendar(), None)
+        p.sync_events(&account(), &any_calendar(), None, whole())
             .await
             .is_err()
     );
@@ -363,7 +363,7 @@ async fn missing_account_ids_surface_as_errors() {
     assert!(bare.sync_email(&account(), None).await.is_err());
     assert!(bare.sync_calendars(&account(), None).await.is_err());
     assert!(
-        bare.sync_events(&account(), &any_calendar(), None)
+        bare.sync_events(&account(), &any_calendar(), None, whole())
             .await
             .is_err()
     );
@@ -424,4 +424,47 @@ fn a_batch_carries_many_sources_only_where_the_account_answers_blob_get() {
 /// JMAP's event state is account-wide, so which calendar asks for it does not matter.
 fn any_calendar() -> engine_core::ids::CalendarId {
     engine_core::ids::CalendarId::try_from("any").unwrap()
+}
+
+#[tokio::test]
+async fn a_snapshot_asks_for_a_deepened_mailbox_back_to_its_own_floor() {
+    use engine_core::{ids::MailboxId, sync::MailboxWindows, time::CalendarDate};
+    let (p, exec) = recording(vec![fixture("email_snapshot_response.json")]);
+    let since = |year| SyncWindow::since(CalendarDate::new(year, 4, 1).unwrap());
+    let window =
+        MailboxWindows::new(since(2026)).deepen(MailboxId::try_from("sent").unwrap(), since(2020));
+
+    drain(p.stream_email(&account(), None, window, 0, 0)).await;
+
+    let requests = exec.requests.lock().unwrap();
+    let query = requests[0]["methodCalls"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|call| call[0] == "Email/query")
+        .expect("a snapshot queries");
+    assert_eq!(
+        query[1]["filter"],
+        json!({
+            "operator": "OR",
+            "conditions": [
+                { "after": "2026-04-01T00:00:00Z" },
+                // Sent's older mail only: what is newer is the account's condition.
+                {
+                    "inMailbox": "sent",
+                    "after": "2020-04-01T00:00:00Z",
+                    "before": "2026-04-01T00:00:00Z",
+                },
+            ],
+        })
+    );
+}
+
+/// The window an event fetch names: JMAP reads the account whole and ignores it.
+fn whole() -> engine_core::time::Horizon {
+    engine_core::time::Horizon::new(
+        "2000-01-01T00:00:00Z".parse().unwrap(),
+        "2100-01-01T00:00:00Z".parse().unwrap(),
+    )
+    .unwrap()
 }

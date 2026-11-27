@@ -7,7 +7,7 @@ use rustls::{
     ClientConfig, RootCertStore,
     client::{WebPkiServerVerifier, danger::ServerCertVerifier},
     crypto::CryptoProvider,
-    pki_types::CertificateDer,
+    pki_types::{CertificateDer, TrustAnchor},
 };
 use tokio_rustls::TlsConnector;
 
@@ -158,11 +158,12 @@ impl TlsClientConfig {
     /// settings such as the redirect policy.
     ///
     /// Advertises ALPN `h2` then `http/1.1`, so the connection negotiates HTTP/2
-    /// where the server offers it (Google does; `graph.microsoft.com` answers HTTP/1.1
-    /// even when `h2` is offered — measured, see `docs/agent-guidance/tls.md`) and falls
-    /// back to HTTP/1.1 otherwise. ALPN is set here rather than inherited: the shared
-    /// config carries none (correct for the IMAP/SMTP connector), and reqwest's
-    /// preconfigured-TLS path keeps the config's ALPN instead of deriving its own.
+    /// where the server offers it (Google does, and `graph.microsoft.com` has since
+    /// November 2026, after answering HTTP/1.1 to the same offer before — measured, see
+    /// `docs/agent-guidance/tls.md`) and falls back to HTTP/1.1 otherwise. ALPN is set here rather
+    /// than inherited: the shared config carries none (correct for the IMAP/SMTP connector),
+    /// and reqwest's preconfigured-TLS path keeps the config's ALPN instead of deriving its
+    /// own.
     ///
     /// Also asks reqwest to attach its `TlsInfo` extension to every response, which
     /// is how an HTTP adapter learns the **negotiated TLS version** — the fact
@@ -202,22 +203,30 @@ pub(crate) fn build_root_store(
     system: bool,
     custom: &[CertificateDer<'static>],
 ) -> Result<RootCertStore, TlsError> {
+    if !system {
+        return assemble(bundled, &[], custom);
+    }
+    // Best-effort: add whatever the OS store yields and let the final `is_empty` check be
+    // the single gate, so a flaky OS store never fails a `bundled`/`custom` union (the
+    // recommended client default).
+    #[cfg(feature = "tls-native-certs")]
+    return assemble(bundled, &crate::system_roots::system_roots(), custom);
+    #[cfg(not(feature = "tls-native-certs"))]
+    Err(TlsError::Unsupported("system trust (tls-native-certs)"))
+}
+
+/// The root store of the bundled roots (where `bundled`), then the OS store's `system`
+/// anchors, then the `custom` roots, in that order and with any duplicate kept.
+pub(crate) fn assemble(
+    bundled: bool,
+    system: &[TrustAnchor<'static>],
+    custom: &[CertificateDer<'static>],
+) -> Result<RootCertStore, TlsError> {
     let mut store = RootCertStore::empty();
     if bundled {
         store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
     }
-    if system {
-        #[cfg(feature = "tls-native-certs")]
-        {
-            // Best-effort: add whatever the OS store yields and let the final
-            // `is_empty` check be the single gate, so a flaky OS store never fails a
-            // `bundled`/`custom` union (the recommended client default).
-            let result = rustls_native_certs::load_native_certs();
-            let _ = store.add_parsable_certificates(result.certs);
-        }
-        #[cfg(not(feature = "tls-native-certs"))]
-        return Err(TlsError::Unsupported("system trust (tls-native-certs)"));
-    }
+    store.extend(system.iter().cloned());
     for der in custom {
         store
             .add(der.clone())

@@ -9,16 +9,16 @@
 //! state axis. `internetMessageId` is preserved (bracket-stripped) as a threading
 //! hint, never identity.
 //!
-//! Two Graph realities (captured — see `tests/fixtures/README.md`): a personal
-//! `mailFolder` carries **no** `wellKnownName` and a **localized** `displayName`,
-//! so [`MailboxRole`] is resolved by matching folder ids against the well-known
-//! aliases ([`apply_roles`]), never by name; and an incremental `delta` returns
+//! Two Graph realities (captured — see `tests/fixtures/README.md`): a `mailFolder`'s
+//! `wellKnownName` is not in v1.0's schema (selecting it `400`s) and its `displayName`
+//! is **localized**, so [`MailboxRole`] is resolved by matching folder ids against the
+//! well-known aliases ([`apply_roles`]), never by name; and an incremental `delta` returns
 //! **partial** message objects, so [`message_from_json`] is only ever fed a *full*
 //! object (a snapshot entry or a re-fetched changed message), never a delta partial.
 
 use engine_core::{
     ids::{MailboxId, MessageId, MessageIdHeader, ThreadId},
-    mail::{EmailAddress, Mailbox, MailboxRole, Message, ThreadRef},
+    mail::{EmailAddress, Importance, Mailbox, MailboxRole, Message, ThreadRef},
     membership::Memberships,
 };
 use engine_provider::KeywordName;
@@ -113,6 +113,7 @@ pub(crate) const MESSAGE_SELECT: &[&str] = &[
     "categories",
     "bodyPreview",
     "changeKey",
+    "importance",
 ];
 
 /// The well-known mail-folder aliases that map to a normalized [`MailboxRole`].
@@ -127,6 +128,19 @@ pub(crate) const WELL_KNOWN_ROLES: &[(&str, MailboxRole)] = &[
     ("sentitems", MailboxRole::Sent),
     ("deleteditems", MailboxRole::Trash),
     ("junkemail", MailboxRole::Junk),
+];
+
+/// The well-known folders Exchange keeps for itself, which hold no mail the user filed: Sync
+/// Issues and the three folders under it (its bookkeeping), and Conversation History (the chats
+/// it stored as messages). Resolved like [`WELL_KNOWN_ROLES`], except that an alias answering
+/// that the folder is absent *or not the caller's to see* only leaves the role unassigned: the
+/// roles are information about a folder, and a folder list never fails for want of one.
+pub(crate) const RECORD_ROLES: &[(&str, MailboxRole)] = &[
+    ("syncissues", MailboxRole::ServerRecords),
+    ("conflicts", MailboxRole::ServerRecords),
+    ("localfailures", MailboxRole::ServerRecords),
+    ("serverfailures", MailboxRole::ServerRecords),
+    ("conversationhistory", MailboxRole::ChatHistory),
 ];
 
 /// Normalizes one Graph `mailFolder` into a **roleless** [`Mailbox`].
@@ -224,6 +238,10 @@ pub(crate) fn message_from_json(
     envelope.to = recipients(value, "toRecipients");
     envelope.cc = recipients(value, "ccRecipients");
     envelope.bcc = recipients(value, "bccRecipients");
+    // Exchange folds a received message's `Importance` and `X-Priority` into this one property.
+    envelope.importance = opt_str(value, "importance")
+        .and_then(Importance::parse)
+        .unwrap_or_default();
     if let Some(header) = message_id_header(value)? {
         envelope.message_id = vec![header];
     }
@@ -280,3 +298,7 @@ fn message_id_header(value: &Value) -> Result<Option<MessageIdHeader>, GraphErro
 #[cfg(test)]
 #[path = "normalize_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "importance_shapes_tests.rs"]
+mod importance_shapes_tests;

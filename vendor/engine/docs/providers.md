@@ -108,19 +108,39 @@ The organiser identity has a different authority on each transport:
   object a scheduling message (RFC 6047 §2.4). The three that assemble RFC 5322 bytes themselves
   can; JMAP, which hands the server a body structure, cannot — see
   [`jmap.md`](agent-guidance/jmap.md).
+- **One vocabulary for what a stored message carries.** `engine_core::mail::MessageMetadata`
+  (keywords and arrival time today) is what every write that stores a message asks for: a draft's
+  `put_draft` metadata, the Sent copy's `Draft::sent_copy_metadata`, an import's. Every receipt
+  answers in the same type with what the target kept (`DraftReceipt::kept`,
+  `SubmissionReceipt::sent_copy_kept`), so a field added to it reaches every write path at once.
+  `Message::metadata` is the one mapping from a message read at a source to what a write asks
+  for. A target stamps a draft's and a Sent copy's arrival time itself, so an asked `received_at`
+  is never kept there. It serializes as a map, and reads a bare keyword list too: the form an
+  outbox persisted draft and Sent-copy keywords in before it existed.
 - **Keywords on the Sent copy** (`sent_copy_keywords`) is a request, answered per send. A draft
-  names keywords for the sender's filed copy (`Draft::sent_copy_keywords`), and the receipt says
-  which the copy carries (`SubmissionReceipt::sent_copy_keywords`, surfaced as
-  `SubmitOutcome::sent_copy_keywords`). IMAP puts them on the `APPEND`, but only where the Sent
-  folder's `PERMANENTFLAGS` carries `\*`: elsewhere the server would answer `OK` and keep nothing,
-  so the copy is filed without them. JMAP sets them with an `Email/set` after the send. Graph keeps
+  names keywords for the sender's filed copy (`Draft::sent_copy_metadata`), and the receipt says
+  which the copy carries (`SubmissionReceipt::sent_copy_kept`, surfaced as
+  `SubmitOutcome::sent_copy_kept`). IMAP puts them on the `APPEND`, those the Sent
+  folder's `PERMANENTFLAGS` keeps (named there, or any under `\*`): a server answers `OK` to a flag
+  it cannot keep and drops it, so the copy is filed without those. JMAP sets them with an `Email/set` after the send. Graph keeps
   no free-form keyword, only named categories the person sees, so it keeps a keyword only when the
   host registered a `KeywordName` for it (`GraphProvider::with_keyword_names`): the name to create
   it under and every name it may already exist under, which sync also reads back as the keyword
-  ([`graph.md`](agent-guidance/graph.md)). Gmail keeps it the same way, as a label hidden from its
-  label list, which sync reads as the keyword rather than as a folder
+  ([`graph.md`](agent-guidance/graph.md)). Graph files the copy on its own a moment after the send,
+  so it keeps them **after** it (`sent_copy_keywords_deferred`): the receipt reports none, the
+  outbox records a `MailEdit::SetKeywords` on the copy's key that the drainer applies, retrying
+  until the copy is there, and what the copy carries is read from sync. Gmail also needs a
+  `KeywordName`, and keeps the keyword within the send as a label hidden from its label list,
+  which sync reads as the keyword rather than as a folder
   (`GmailProvider::with_keyword_names`, [`google.md`](agent-guidance/google.md)). A keyword never
   fails a send.
+- **Keywords on a stored draft** (`draft_keywords`) is the same request, answered per save.
+  `put_draft` takes the whole of the metadata the draft should carry and `DraftReceipt::kept` (surfaced as
+  `PutDraftOutcome::kept`) says which it carries. IMAP puts them on the draft's `APPEND`, those
+  Drafts keeps, JMAP in the `Email/set` create; Graph and Gmail keep only those with
+  a `KeywordName`, as a category set after the save and as a label put on the message under the
+  draft after each save. A synced draft reads them back on every transport. A keyword never fails
+  a save.
 - **Server-side scheduling** (`calendar_scheduling`) means the *server* emits the iTIP, so the
   caller must not also send one. CalDAV **discovers** it (RFC 6638 §2 gives a probeable answer, and
   SabreDAV without its scheduling plugin is a real `false`). JMAP advertises it because the adapter
@@ -318,6 +338,12 @@ let contacts = provider_caldav::CardDavProvider::connect(
 
 One `CalDavProvider` serves every calendar under the home its discovery found. `sync_calendars` lists them, each with its collection tag; `Engine::sync_calendar` syncs the list and then every calendar's events; a write names its calendar on the draft.
 
+`new` takes a fixed credential. A host whose credential changes (an OAuth token, a broker's grant)
+builds the config with `CalDavConfig::from_credential_source(base_url, source, agent)` (the same on
+`CardDavConfig`, and `TalkMeetings::from_credential_source`): the source is asked on every request
+that carries the credential, and a `401` it can answer is replaced once and the request sent again
+(`docs/design/credential-source.md`). Its `permits` replaces the deprecated `CredentialHosts`.
+
 ### Notes
 
 - A `CalDavProvider` binds no calendar. Each calendar's events sync under a scope of their own, and a calendar whose listing tag has not moved since its last sync is skipped without a request.
@@ -375,7 +401,15 @@ let provider = GraphProvider::new(
 );
 ```
 
-Shared mailboxes can be accessed with `GraphClient::for_mailbox(token, MailboxPrincipal::user("shared@example.com"), &tls, &retry, &agent)`. Token acquisition and refresh are the host's responsibility.
+Shared mailboxes can be accessed with `GraphClient::for_mailbox(token, MailboxPrincipal::user("shared@example.com"), &tls, &retry, &agent)`.
+
+`connect` takes a fixed token. A host whose token is refreshed, or a broker minting one with
+application permissions, builds the client with `GraphClient::connect_with_source(source, &tls,
+&retry, &agent)` (`with_base_and_source` for another base) and roots it at another mailbox with
+`with_principal`: the source is asked on every request, and a `401` whose challenge offers
+`Bearer` is replaced once and the request sent again (`docs/design/credential-source.md`). The
+client is cheap to clone and its clones share one transport, so a host builds one per account
+and hands each folder's `GraphProvider` a clone.
 
 ### Notes
 
@@ -399,6 +433,13 @@ Only owned connections are writable, and People ETags enforce updates.
 Expired People sync tokens restart only their source as a snapshot; contact
 groups are always paginated snapshots because their list API has no sync token.
 See `docs/agent-guidance/google.md` and `contacts.md` for scopes and mappings.
+
+`GoogleClient::connect` takes a fixed token; `GoogleClient::connect_with_source` asks the
+account's source on every request and replaces a token Google refuses once, as on Graph, and the
+client is a cheap clone in the same way. An account that reads its mail over IMAP
+(`GmailProvider::with_imap`) gives the IMAP config the same source, answering the token with the
+account's address (`Credential::bearer_for`), so both transports present the same token;
+`with_imap` refuses a reader that signs in as another credential subject (`InvalidState`).
 
 `MeetMeetings` makes a Meet meeting for an event on any calendar, through the Meet REST API
 (`POST meet.googleapis.com/v2/spaces`). It needs `meetings.space.created`.
@@ -434,7 +475,9 @@ The `engine_provider::Capabilities` bitset tells the engine what a connected acc
 | `message_source` | The account can fetch a message's raw RFC 5322 source on demand. |
 | `submission` | The account can submit/send new mail. |
 | `scheduling_submission` | Submission can carry an iTIP object as an iMIP scheduling part (RFC 6047), rather than as a plain calendar attachment. |
-| `sent_copy_keywords` | The adapter sets a draft's `sent_copy_keywords` on the filed Sent copy; the server may still decline, so the receipt says which were kept. |
+| `sent_copy_keywords` | The adapter sets the keywords of a draft's `sent_copy_metadata` on the filed Sent copy; the server may still decline, so the receipt says which were kept. |
+| `draft_keywords` | The adapter keeps `put_draft`'s keywords on the stored draft; the server may still decline, so the receipt says which were kept. |
+| `sent_copy_keywords_deferred` | The adapter keeps them after the send rather than within it: the receipt reports none, and the outbox records a `MailEdit::SetKeywords` for the drainer to apply. |
 | `idle` | The provider can watch for push notifications and emit `WatchEvent`s. |
 | `calendars` | The account can read/sync calendars and events. |
 | `calendar_writes` | The account can create/update/delete calendar events; query its guard strength. |

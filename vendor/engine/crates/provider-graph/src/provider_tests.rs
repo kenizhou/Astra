@@ -16,9 +16,11 @@ fn account() -> AccountId {
     AccountId::try_from("acct-1").unwrap()
 }
 
-/// Drains an email chunk stream into its chunks, so a test asserts the pass's
-/// aggregate shape (the intra-pass paging is the adapter's internal detail).
-async fn drain(mut stream: EmailStream<'_>) -> Vec<EmailChunk> {
+/// Drains one pass over the whole history from `cursor` into its chunks, so a test asserts
+/// the pass's aggregate shape (the intra-pass paging is the adapter's internal detail).
+async fn drain(of: &GraphProvider, cursor: Option<&SyncState>, chunk: usize) -> Vec<EmailChunk> {
+    let account = account();
+    let mut stream = of.stream_email(&account, cursor, MailboxWindows::default(), 0, chunk);
     let mut chunks = Vec::new();
     while let Some(item) = stream.next().await {
         chunks.push(item.unwrap());
@@ -50,6 +52,7 @@ async fn advertises_per_folder_scopes_and_mail_capability() {
     // Mutating writes and submission are advertised alongside read/sync.
     assert!(info.capabilities.mail_writes());
     assert!(info.capabilities.submission());
+    assert!(info.capabilities.message_source());
     // No keyword reaches the filed copy until one has a category name to go by.
     assert!(!info.capabilities.sent_copy_keywords());
     let named = engine_provider::KeywordName::new(
@@ -59,12 +62,10 @@ async fn advertises_per_folder_scopes_and_mail_capability() {
     .unwrap();
     let with_names =
         GraphProvider::new(fake_client(vec![]), folder.clone()).with_keyword_names(vec![named]);
-    assert!(
-        with_names
-            .connection_info()
-            .capabilities
-            .sent_copy_keywords()
-    );
+    let caps = with_names.connection_info().capabilities;
+    assert!(caps.sent_copy_keywords());
+    // `sendMail` files the copy a moment after it answers, so they are kept after the send.
+    assert!(caps.sent_copy_keywords_deferred());
     // A fixture-fed fake transport speaks neither HTTP nor TLS, so it observes
     // neither version.
     assert_eq!(info.http_version, None);
@@ -107,8 +108,8 @@ async fn edit_mail_flows_through_the_provider_to_the_write() {
 async fn syncs_the_folder_list_and_a_message_snapshot_page() {
     let folder = MailboxId::try_from("folder-inbox").unwrap();
     let mut routes = folder_routes();
-    routes.push(("messages/delta", json(SNAPSHOT)));
-    let provider = GraphProvider::new(fake_client(routes), folder);
+    routes.push(("messages/delta", Ok(json(SNAPSHOT))));
+    let provider = GraphProvider::new(fake_client_fallible(routes), folder);
 
     let folders = provider.sync_mailboxes(&account(), None).await.unwrap();
     assert!(folders.is_snapshot());
@@ -128,7 +129,7 @@ async fn snapshot_stream_reconciles_and_chunks_a_single_page() {
         MailboxId::try_from("folder-inbox").unwrap(),
     );
 
-    let chunks = drain(provider.stream_email(&account(), None, SyncWindow::full(), 0, 2)).await;
+    let chunks = drain(&provider, None, 2).await;
     assert_eq!(upserted(&chunks), 3);
     let present: usize = chunks.iter().map(|c| c.present.len()).sum();
     assert_eq!(present, 3, "every snapshot id rides the reconcile chunks");
@@ -170,7 +171,7 @@ async fn snapshot_stream_drains_multiple_pages() {
         MailboxId::try_from("folder-inbox").unwrap(),
     );
 
-    let chunks = drain(provider.stream_email(&account(), None, SyncWindow::full(), 0, 0)).await;
+    let chunks = drain(&provider, None, 0).await;
     assert_eq!(upserted(&chunks), 2, "both pages drained");
     let present: usize = chunks.iter().map(|c| c.present.len()).sum();
     assert_eq!(present, 2);
@@ -196,8 +197,7 @@ async fn delta_stream_is_additive_and_advances_to_the_delta_link() {
         MailboxId::try_from("folder-inbox").unwrap(),
     );
 
-    let chunks =
-        drain(provider.stream_email(&account(), Some(&cursor), SyncWindow::full(), 0, 0)).await;
+    let chunks = drain(&provider, Some(&cursor), 0).await;
     assert_eq!(upserted(&chunks), 1);
     assert_eq!(chunks.iter().map(|c| c.present.len()).sum::<usize>(), 0);
     let last = chunks.last().unwrap();
@@ -238,8 +238,7 @@ async fn an_aged_out_delta_link_restarts_the_pass_as_a_full_snapshot() {
         MailboxId::try_from("folder-inbox").unwrap(),
     );
 
-    let chunks =
-        drain(provider.stream_email(&account(), Some(&cursor), SyncWindow::full(), 0, 0)).await;
+    let chunks = drain(&provider, Some(&cursor), 0).await;
 
     assert_eq!(
         upserted(&chunks),
@@ -293,8 +292,7 @@ async fn the_resync_restarts_the_whole_pass_so_every_page_feeds_the_present_set(
         MailboxId::try_from("folder-inbox").unwrap(),
     );
 
-    let chunks =
-        drain(provider.stream_email(&account(), Some(&cursor), SyncWindow::full(), 0, 0)).await;
+    let chunks = drain(&provider, Some(&cursor), 0).await;
 
     assert_eq!(
         upserted(&chunks),
@@ -372,7 +370,7 @@ fn replay_routes() -> Vec<(&'static str, serde_json::Value)> {
         ),
         ("messages/delta", json(SNAPSHOT)),
     ];
-    routes.extend(folder_routes());
+    routes.extend(crate::test_support::answered_folder_routes());
     routes
 }
 

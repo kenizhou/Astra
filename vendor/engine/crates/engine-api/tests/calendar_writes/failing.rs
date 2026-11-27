@@ -32,12 +32,16 @@ impl Provider for BlockingSync {
     fn email_scope(&self, account: &AccountId) -> SyncScope {
         self.inner.email_scope(account)
     }
+}
 
+#[async_trait::async_trait]
+impl CalendarSync for BlockingSync {
     async fn sync_events(
         &self,
         account: &AccountId,
         calendar: &CalendarId,
         cursor: Option<&SyncState>,
+        window: engine_core::time::Horizon,
     ) -> ProviderResult<ScopeSync<Event>> {
         if let Some(started) = self.started.lock().unwrap().take() {
             started.send(()).unwrap();
@@ -48,7 +52,9 @@ impl Provider for BlockingSync {
             // sync leaves open.
             let _ = release.await;
         }
-        self.inner.sync_events(account, calendar, cursor).await
+        self.inner
+            .sync_events(account, calendar, cursor, window)
+            .await
     }
 }
 
@@ -72,12 +78,16 @@ impl Provider for UnreadableEvents {
     fn email_scope(&self, account: &AccountId) -> SyncScope {
         self.0.email_scope(account)
     }
+}
 
+#[async_trait::async_trait]
+impl CalendarSync for UnreadableEvents {
     async fn sync_events(
         &self,
         _account: &AccountId,
         _calendar: &CalendarId,
         _cursor: Option<&SyncState>,
+        _window: engine_core::time::Horizon,
     ) -> ProviderResult<ScopeSync<Event>> {
         Err(ProviderError::retryable("the event fetch is down"))
     }

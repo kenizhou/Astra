@@ -14,17 +14,17 @@
 //!   cargo test -p provider-google --test live_imap_parity -- --nocapture
 //! ```
 
-use std::{collections::BTreeMap, time::Instant};
+use std::{collections::BTreeMap, sync::Arc, time::Instant};
 
 use engine_core::{
     ids::AccountId,
     mail::{Message, ThreadRef},
     sync::SyncWindow,
 };
-use engine_provider::Provider;
+use engine_provider::{Credential, CredentialSource, CredentialSubject, FixedCredential, Provider};
 use futures_util::StreamExt;
 use provider_google::{GmailProvider, GoogleClient};
-use provider_imap::{Credentials, ImapAccount, ImapConfig};
+use provider_imap::{ImapAccount, ImapConfig};
 
 fn token() -> Option<String> {
     std::env::var("GOOGLE_ACCESS_TOKEN")
@@ -35,6 +35,16 @@ fn token() -> Option<String> {
 fn client(token: &str) -> GoogleClient {
     GoogleClient::connect(
         token.to_owned(),
+        &engine_tls::TlsClientConfig::bundled(),
+        &engine_http::RetryConfig::default(),
+        &engine_http::test_server::user_agent(),
+    )
+    .expect("client")
+}
+
+fn sourced(source: Arc<dyn CredentialSource>) -> GoogleClient {
+    GoogleClient::connect_with_source(
+        source,
         &engine_tls::TlsClientConfig::bundled(),
         &engine_http::RetryConfig::default(),
         &engine_http::test_server::user_agent(),
@@ -73,7 +83,7 @@ async fn sync_messages(provider: &GmailProvider) -> (Written, Vec<Message>) {
     let account = AccountId::try_from("live").unwrap();
     let mut written = Written::new();
     let mut messages = Vec::new();
-    let mut chunks = provider.stream_email(&account, None, SyncWindow::full(), 0, 0);
+    let mut chunks = provider.stream_email(&account, None, SyncWindow::full().into(), 0, 0);
     while let Some(chunk) = chunks.next().await {
         for message in chunk.expect("a pass that completes").changed {
             written.insert(message.id.key().as_str().to_owned(), facts(&message));
@@ -101,10 +111,15 @@ async fn an_imap_sync_writes_what_the_api_sync_writes() {
         eprintln!("skipping: GOOGLE_ACCESS_TOKEN unset");
         return;
     };
-    let config = ImapConfig::new(
+    // One source for both halves, as `with_imap` requires.
+    let source: Arc<dyn CredentialSource> = Arc::new(FixedCredential::new(
+        CredentialSubject::new("live"),
+        Credential::bearer_for(address(&token).await, token.clone()),
+    ));
+    let config = ImapConfig::from_credential_source(
         "imap.gmail.com:993".to_owned(),
         "imap.gmail.com".to_owned(),
-        Credentials::oauth2(address(&token).await, token.clone()),
+        Arc::clone(&source),
     );
     let account = ImapAccount::connect(&config, engine_tls::TlsClientConfig::bundled().connector())
         .await
@@ -113,7 +128,9 @@ async fn an_imap_sync_writes_what_the_api_sync_writes() {
         .gmail()
         .expect("imap.gmail.com advertises X-GM-EXT-1");
 
-    let imap = GmailProvider::new(client(&token)).with_imap(gmail);
+    let imap = GmailProvider::new(sourced(source))
+        .with_imap(gmail)
+        .unwrap_or_else(|err| panic!("one credential subject: {:?}", err.class()));
     let started = Instant::now();
     let (over_imap, messages) = sync_messages(&imap).await;
     let imap_took = started.elapsed();

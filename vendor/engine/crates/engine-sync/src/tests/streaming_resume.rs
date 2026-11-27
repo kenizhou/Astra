@@ -3,7 +3,7 @@
 //! from `streaming.rs` to keep each file within the size limit; shares the parent
 //! module's fakes and helpers via `use super::*`.
 
-use engine_provider::{CalendarWrites, EmailChunk};
+use engine_provider::{CalendarSync, CalendarWrites, EmailChunk};
 
 use super::*;
 
@@ -76,7 +76,7 @@ impl Provider for BackfillMail {
         &'a self,
         _account: &'a AccountId,
         cursor: Option<&'a SyncState>,
-        _window: SyncWindow,
+        _window: engine_core::sync::MailboxWindows,
         _fetch_batch: usize,
         _chunk_size: usize,
     ) -> EmailStream<'a> {
@@ -106,6 +106,8 @@ impl Provider for BackfillMail {
         })
     }
 }
+
+impl CalendarSync for BackfillMail {}
 
 impl engine_provider::MailboxWrites for BackfillMail {}
 impl CalendarWrites for BackfillMail {}
@@ -174,6 +176,7 @@ async fn account_progress_aggregates_two_folders() {
         upserted: &[],
         removed: &[],
         tombstoned: 0,
+        widening: false,
     });
     assert_eq!(progress.snapshot().total, None);
     progress.committed(&SyncCommit {
@@ -183,6 +186,7 @@ async fn account_progress_aggregates_two_folders() {
         upserted: &[],
         removed: &[],
         tombstoned: 0,
+        widening: false,
     });
     let snap = progress.snapshot();
     assert_eq!(snap.fetched, 7);

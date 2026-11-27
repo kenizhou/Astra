@@ -213,7 +213,7 @@ impl Executor for Overlapping {
     async fn execute(
         &self,
         request: &crate::request::Request,
-    ) -> Result<crate::request::Response, crate::error::JmapError> {
+    ) -> Result<crate::response::Response, crate::error::JmapError> {
         self.inner.execute(request).await
     }
 
@@ -232,7 +232,7 @@ impl Executor for Overlapping {
         url: &str,
         media_type: &str,
         bytes: &[u8],
-    ) -> Result<String, crate::error::JmapError> {
+    ) -> Result<engine_core::ids::BlobId, crate::error::JmapError> {
         self.inner.upload(url, media_type, bytes).await
     }
 
@@ -263,4 +263,51 @@ async fn a_batch_of_large_messages_downloads_them_side_by_side() {
         peak <= 4,
         "more in flight ({peak}) than the session's width allows"
     );
+}
+
+/// A `Blob/get` without a credential answers every message it carried with that failure, which
+/// still says no credential could be had.
+#[tokio::test]
+async fn a_blob_get_without_a_credential_says_so_for_every_message() {
+    struct NoCredential(FakeExecutor);
+
+    #[async_trait::async_trait]
+    impl Executor for NoCredential {
+        async fn execute(
+            &self,
+            _request: &crate::request::Request,
+        ) -> Result<crate::response::Response, crate::error::JmapError> {
+            Err(crate::credential_test_support::no_credential(FailureClass::Retryable).await)
+        }
+
+        async fn download(&self, url: &str) -> Result<Vec<u8>, crate::error::JmapError> {
+            self.0.download(url).await
+        }
+
+        async fn upload(
+            &self,
+            url: &str,
+            media_type: &str,
+            bytes: &[u8],
+        ) -> Result<engine_core::ids::BlobId, crate::error::JmapError> {
+            self.0.upload(url, media_type, bytes).await
+        }
+
+        fn session(&self) -> &crate::session::Session {
+            self.0.session()
+        }
+    }
+
+    let executor = NoCredential(FakeExecutor::from_session(&session(), vec![]));
+    let messages = [message("M1", "B1", Some(5)), message("M2", "B2", Some(5))];
+
+    let outcomes: Vec<_> = fetch_batch(&executor, &messages).collect().await;
+
+    assert_eq!(outcomes.len(), 2);
+    for (_, outcome) in outcomes {
+        let err = outcome.expect_err("no credential");
+        assert_eq!(err.class(), FailureClass::Retryable);
+        assert!(err.is_credential_failure(), "{err:?}");
+    }
+    assert!(executor.0.download_urls.lock().unwrap().is_empty());
 }

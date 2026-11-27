@@ -11,6 +11,8 @@ use engine_core::error::FailureClass;
 use engine_provider::ProviderError;
 use serde_json::Value;
 
+use crate::{request::CallId, server_text::ServerText};
+
 /// A JMAP protocol or transport failure.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -20,15 +22,16 @@ pub enum JmapError {
     #[error("JMAP transport error: {0}")]
     Transport(#[from] engine_http::SendError),
 
-    /// The server returned a non-success HTTP status. The body is captured for
-    /// diagnostics (a JMAP "problem details" document for request-level errors,
-    /// RFC 8620 §3.6.1).
-    #[error("JMAP HTTP {status}: {body}")]
+    /// The server returned a non-success HTTP status. It shows as its code: the status, and
+    /// the problem-details `type` (RFC 8620 §3.6.1) where the body is one. The body is kept,
+    /// but shown nowhere ([`ServerText`]).
+    #[error("JMAP HTTP {status}{}", problem_suffix(body))]
     Status {
         /// The HTTP status code.
         status: u16,
-        /// The response body (possibly a JSON problem-details document).
-        body: String,
+        /// The response body, possibly a JSON problem-details document, and possibly echoing
+        /// what the request carried.
+        body: ServerText,
         /// When the server said to come back, from [`engine_http::Sent::stated_wait`].
         ///
         /// Usually `None`, and honestly so: RFC 8620 §3.6.1 names *which* limit was hit
@@ -47,8 +50,8 @@ pub enum JmapError {
     /// RFC 8620 §3.6.2) instead of its result.
     #[error("JMAP method error '{error_type}' for call '{call_id}'")]
     Method {
-        /// The call id of the failed invocation.
-        call_id: String,
+        /// The call the server answered with the error.
+        call_id: CallId,
         /// The JMAP error `type` string.
         error_type: String,
     },
@@ -71,9 +74,9 @@ pub enum JmapError {
         properties: Vec<String>,
     },
 
-    /// The batched response carried no entry for a call id that was sent.
+    /// The batched response carried no answer to a call that was sent.
     #[error("no method response for call '{0}'")]
-    MissingResponse(String),
+    MissingResponse(CallId),
 
     /// A response was structurally not a valid JMAP envelope (e.g. `methodResponses`
     /// absent or not an array of triples).
@@ -83,6 +86,19 @@ pub enum JmapError {
     /// The session resource was missing a required field.
     #[error("invalid JMAP session: {0}")]
     Session(String),
+
+    /// The credential could not be presented, or not replaced: the account's
+    /// [`CredentialSource`](engine_provider::CredentialSource) did not permit the origin, had no
+    /// credential to give, or did not answer within the request's deadline; the engine refused
+    /// the origin (plaintext HTTP, except to loopback from an account configured there); or the
+    /// credential is of a kind JMAP cannot present. In each of those nothing was sent. When the
+    /// source fails as it is asked to replace a credential the server refused with a `401`, a
+    /// request was sent and refused, and this takes the `401`'s place. Classified as the source
+    /// classified it, and `Permanent` for a refusal.
+    /// As a [`ProviderError`] it is the source's own, which says that no credential could be had
+    /// ([`ProviderError::is_credential_failure`]).
+    #[error("no credential to present: {0}")]
+    Credential(ProviderError),
 
     /// The adapter refused a request before sending it, because the protocol says the
     /// client must not: a draft whose `From` no identity on the account may send as.
@@ -100,12 +116,19 @@ pub enum JmapError {
     Unconfirmed(Box<JmapError>),
 }
 
+/// ` (<type>)` where `body` names a problem type, else nothing.
+fn problem_suffix(body: &ServerText) -> String {
+    body.problem_type()
+        .map(|kind| format!(" ({kind})"))
+        .unwrap_or_default()
+}
+
 impl JmapError {
     /// Builds a [`JmapError::Status`].
     pub(crate) fn status(status: u16, body: impl Into<String>) -> Self {
         Self::Status {
             status,
-            body: body.into(),
+            body: ServerText::from(body.into()),
             retry_after: None,
         }
     }
@@ -219,6 +242,7 @@ impl JmapError {
             Self::Method { error_type, .. } => error_type == "serverPartialFail",
             Self::Set { .. }
             | Self::Session(_)
+            | Self::Credential(_)
             | Self::Refused(_)
             | Self::Unsettled(_)
             | Self::Unconfirmed(_) => false,
@@ -243,7 +267,7 @@ impl JmapError {
     pub fn failure_class(&self) -> FailureClass {
         match self {
             Self::Transport(e) => transport_class(e),
-            Self::Status { status, body, .. } => status_class(*status, body),
+            Self::Status { status, body, .. } => status_class(*status, body.as_str()),
             // A malformed response/session is a protocol-level incompatibility:
             // retrying the same request will not fix it.
             Self::Json(_)
@@ -252,6 +276,7 @@ impl JmapError {
             | Self::MissingResponse(_)
             | Self::Refused(_) => FailureClass::Permanent,
             Self::Method { error_type, .. } => method_class(error_type),
+            Self::Credential(source) => source.class(),
             Self::Set { error_type, .. } => set_error_class(error_type),
             Self::Unsettled(_) => FailureClass::Retryable,
             // Never retried as it stands: the first attempt may have landed.
@@ -368,6 +393,12 @@ fn transport_class(err: &engine_http::SendError) -> FailureClass {
     }
 }
 
+impl From<engine_provider::CredentialFailure> for JmapError {
+    fn from(failure: engine_provider::CredentialFailure) -> Self {
+        Self::Credential(failure.into_error())
+    }
+}
+
 /// A client error outside any exchange, such as a client that could not be built.
 impl From<reqwest::Error> for JmapError {
     fn from(err: reqwest::Error) -> Self {
@@ -377,6 +408,11 @@ impl From<reqwest::Error> for JmapError {
 
 impl From<JmapError> for ProviderError {
     fn from(err: JmapError) -> Self {
+        // The source's own error, passed through as it gave it: its class, and a rate limit's
+        // instant with it.
+        if let JmapError::Credential(source) = err {
+            return source;
+        }
         if matches!(err, JmapError::Unconfirmed(_)) {
             return ProviderError::needs_confirmation(err.to_string()).with_source(err);
         }

@@ -206,7 +206,9 @@ mod tests {
         membership::Memberships,
         raw::RawMime,
     };
-    use engine_provider::{CalendarWrites, Capabilities, ConnectionInfo, Provider, ProviderResult};
+    use engine_provider::{
+        CalendarSync, CalendarWrites, Capabilities, ConnectionInfo, Provider, ProviderResult,
+    };
 
     use crate::Engine;
 
@@ -230,6 +232,8 @@ mod tests {
             ))
         }
     }
+
+    impl CalendarSync for BodyProvider {}
 
     impl engine_provider::MailboxWrites for BodyProvider {}
     impl CalendarWrites for BodyProvider {}
@@ -274,6 +278,8 @@ mod tests {
             Ok(RawMime::new(self.raw.clone()))
         }
     }
+
+    impl CalendarSync for RelatedProvider {}
 
     impl engine_provider::MailboxWrites for RelatedProvider {}
     impl CalendarWrites for RelatedProvider {}
@@ -361,7 +367,8 @@ mod tests {
             Memberships::of_one(MailboxId::try_from("INBOX").expect("mailbox")),
         );
 
-        let source = engine
+        // Named through the facade: a host holding the export names it without `engine-core`.
+        let source: crate::RawMime = engine
             .message_source(&provider, &account, &message)
             .await
             .expect("source");

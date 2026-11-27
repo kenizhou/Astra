@@ -2,18 +2,17 @@
 
 use async_trait::async_trait;
 use engine_core::{
-    calendar::Event,
-    ids::{AccountId, CalendarId, ProviderKey},
-    mail::{Mailbox, Message},
+    ids::{AccountId, ProviderKey},
+    mail::{Mailbox, Message, MessageMetadata},
     raw::RawMime,
-    sync::{JmapDataType, SyncScope, SyncState, SyncWindow},
+    sync::{JmapDataType, MailboxWindows, SyncScope, SyncState, SyncWindow, Widening},
 };
 
 use crate::{
-    CalendarListing, CalendarWrites, ConnectionInfo, DEFAULT_DRAIN_PAGE, Draft, EmailStream,
-    HandOver, MailEdit, MailEditReceipt, MailboxWrites, MessageReport, ProviderError,
-    ProviderResult, ReportReceipt, ScopeSync, SenderIdentity, SenderIdentityId, SharedAccount,
-    SourceStream, SubmissionReceipt, error::unsupported,
+    CalendarSync, CalendarWrites, ConnectionInfo, Draft, DraftReceipt, EmailStream, HandOver,
+    MailEdit, MailEditReceipt, MailboxWrites, MessageReport, ProviderError, ProviderResult,
+    ReportReceipt, ScopeSync, SenderIdentity, SenderIdentityId, SharedAccount, SourceStream,
+    SubmissionReceipt, error::unsupported, sync::jmap_scope,
 };
 // Named only by intra-doc links, which rustdoc resolves against this module's scope.
 #[allow(unused_imports, reason = "named by intra-doc links only")]
@@ -31,7 +30,7 @@ use crate::{
 /// scope granularity. Adapters own protocol pagination, batching, retries, and
 /// quirks; the store owns atomic application.
 #[async_trait]
-pub trait Provider: CalendarWrites + MailboxWrites + Send + Sync {
+pub trait Provider: CalendarSync + CalendarWrites + MailboxWrites + Send + Sync {
     /// Everything this adapter learned about its connection once it was established:
     /// the data domains it can serve ([`ConnectionInfo::capabilities`]) and the
     /// transport versions the server negotiated.
@@ -46,19 +45,13 @@ pub trait Provider: CalendarWrites + MailboxWrites + Send + Sync {
     /// a different granularity (IMAP) override it. A calendar-only provider never
     /// has this consulted (its [`Capabilities::mail`] is false).
     fn mailbox_scope(&self, account: &AccountId) -> SyncScope {
-        SyncScope::JmapType {
-            account: account.clone(),
-            data_type: JmapDataType::Mailbox,
-        }
+        jmap_scope(account, JmapDataType::Mailbox)
     }
 
     /// The scope the account's mail objects sync under. Defaults to the JMAP
     /// `(account, Email)` scope; non-JMAP mail providers override.
     fn email_scope(&self, account: &AccountId) -> SyncScope {
-        SyncScope::JmapType {
-            account: account.clone(),
-            data_type: JmapDataType::Email,
-        }
+        jmap_scope(account, JmapDataType::Email)
     }
 
     /// Fetches the account's mail collections since `cursor` (a full snapshot when
@@ -94,23 +87,11 @@ pub trait Provider: CalendarWrites + MailboxWrites + Send + Sync {
         SyncWindow::full()
     }
 
-    /// Streams one email sync pass since `cursor`, bounded by `window`, as
-    /// incremental [`EmailChunk`]s — the paged primitive every mail adapter
-    /// implements.
-    ///
-    /// The two knobs it separates (`store-and-sync.md`):
-    /// - `fetch_batch` bounds each **network round trip** (an IMAP `UID FETCH` window, a JMAP
-    ///   `Email/get` page, a Graph `$top`); `0` means the adapter's protocol maximum.
-    /// - `chunk_size` bounds how many messages accumulate before a chunk is **yielded** — the
-    ///   streaming granularity a host commits and renders; `0` means one chunk per batch.
-    ///
-    /// A large `fetch_batch` with a small `chunk_size` gives *both* few round trips
-    /// *and* row-as-it-arrives commits. The returned [`EmailStream`] borrows `self`
-    /// and the arguments; the adapter's fetch advances only as the stream is polled
-    /// (backpressure). Each chunk carries a [`PassMode`] and an optional
-    /// [`advance_to`](EmailChunk::advance_to) checkpoint telling the orchestrator
-    /// how to apply and how far to advance the cursor, so a killed cold sync resumes
-    /// (`store-and-sync.md`).
+    /// Streams one email sync pass since `cursor`, bounded by `window` (the account's window
+    /// with any mailbox held further back), as incremental [`EmailChunk`]s — the paged
+    /// primitive every mail adapter implements. [`EmailStream`] states the contract: what the
+    /// window bounds, the `fetch_batch` and `chunk_size` knobs, and how each chunk's
+    /// [`PassMode`] and [`advance_to`](EmailChunk::advance_to) are applied.
     ///
     /// Mail providers ([`Capabilities::mail`]) override this; the default yields a
     /// single classified `Err`, so a capability-checking caller never relies on it.
@@ -118,14 +99,32 @@ pub trait Provider: CalendarWrites + MailboxWrites + Send + Sync {
         &'a self,
         account: &'a AccountId,
         cursor: Option<&'a SyncState>,
-        window: SyncWindow,
+        window: MailboxWindows,
         fetch_batch: usize,
         chunk_size: usize,
     ) -> EmailStream<'a> {
         let _ = (account, cursor, window, fetch_batch, chunk_size);
-        Box::pin(futures_util::stream::once(async {
-            Err(unsupported("mail sync"))
-        }))
+        crate::stream::unsupported_stream()
+    }
+
+    /// Streams what `widening` newly admits for this scope, keeping `cursor`: called after a
+    /// delta when the depth the cursor covers ([`Widening::from`]) falls short of the depth asked
+    /// ([`Widening::to`]). [`EmailStream`] states the contract ("Widening").
+    ///
+    /// The default **reopens**: a fresh pass over [`Widening::to`], `stream_email` with no cursor,
+    /// or from `cursor` when the widening [`resumes`](Widening::resumes), the cursor then being
+    /// that fresh pass's own. It is correct for every adapter; one that fetches only the
+    /// [`bands`](Widening::bands) says so with
+    /// [`Capabilities::with_band_widening`](crate::Capabilities::with_band_widening).
+    fn widen_email<'a>(
+        &'a self,
+        account: &'a AccountId,
+        cursor: &'a SyncState,
+        widening: &'a Widening,
+        fetch_batch: usize,
+        chunk_size: usize,
+    ) -> EmailStream<'a> {
+        crate::stream::reopen(self, account, cursor, widening, fetch_batch, chunk_size)
     }
 
     /// Fetches the account's mail objects since `cursor` as a single combined
@@ -147,14 +146,7 @@ pub trait Provider: CalendarWrites + MailboxWrites + Send + Sync {
         account: &AccountId,
         cursor: Option<&SyncState>,
     ) -> ProviderResult<ScopeSync<Message>> {
-        crate::stream::drain_email(self.stream_email(
-            account,
-            cursor,
-            self.default_sync_window(),
-            DEFAULT_DRAIN_PAGE,
-            0,
-        ))
-        .await
+        crate::stream::drain_whole(self, account, cursor).await
     }
 
     /// Sends `draft`: creates the message and submits it, filing the sent copy.
@@ -211,22 +203,15 @@ pub trait Provider: CalendarWrites + MailboxWrites + Send + Sync {
         ))
     }
 
-    /// Stores `draft` in the account's Drafts folder, returning the key of the stored
-    /// message. `replacing` names the draft this one supersedes: the same composition,
-    /// saved again.
+    /// Stores `draft` in the account's Drafts folder, carrying `metadata`, and answers with
+    /// the key of the stored message and what of `metadata` it carries ([`DraftReceipt`]).
+    /// `replacing` names the draft this one supersedes: the same composition, saved again.
+    /// `metadata` is the whole of what the stored draft should carry, so a re-save without a
+    /// keyword takes it off.
     ///
-    /// **The returned key is the one to keep, and it need not be `replacing`.** A
-    /// transport whose stored messages are immutable writes a new one and removes the
-    /// old, so the key moves (IMAP `APPEND` then delete, JMAP `Email/set` create then
-    /// destroy, Graph `POST` then delete); one with a draft object of its own rewrites
-    /// it and returns the key it was given (Gmail `drafts.update`). A caller stores
-    /// whatever comes back rather than assuming either, which is the whole reason this
-    /// is one verb.
-    ///
-    /// Replacing is not atomic everywhere: where the old message has to be removed
-    /// separately, a failure between the two leaves both, and the next Drafts sync is
-    /// what the user sees. That is a duplicate draft, never a lost one, which is the
-    /// right way round for a message nobody has sent.
+    /// **The returned key is the one to keep, and it need not be `replacing`**: why it moves on
+    /// some transports and not on others, and what a replace that fails halfway leaves, is
+    /// [`DraftReceipt`]'s to say.
     ///
     /// Providers advertising [`Capabilities::mail_drafts`] override this; the default
     /// rejects, so a capability-checking caller never relies on it. The write is
@@ -242,8 +227,9 @@ pub trait Provider: CalendarWrites + MailboxWrites + Send + Sync {
         account: &AccountId,
         draft: &Draft,
         replacing: Option<&ProviderKey>,
-    ) -> ProviderResult<ProviderKey> {
-        let _ = (account, draft, replacing);
+        metadata: &MessageMetadata,
+    ) -> ProviderResult<DraftReceipt> {
+        let _ = (account, draft, replacing, metadata);
         Err(unsupported("mail drafts"))
     }
 
@@ -299,8 +285,8 @@ pub trait Provider: CalendarWrites + MailboxWrites + Send + Sync {
     /// default rejects, so a capability-checking caller never relies on it.
     /// `message` carries everything an adapter needs to address the fetch: its
     /// [`id`](engine_core::mail::Message::id) key (the IMAP `(mailbox, UIDVALIDITY,
-    /// UID)`) and its [`blob_id`](engine_core::mail::Message::blob_id) (a JMAP/Graph
-    /// download handle).
+    /// UID)`; Graph's and Gmail's message id) and its
+    /// [`blob_id`](engine_core::mail::Message::blob_id) (a JMAP download handle).
     ///
     /// # Errors
     ///
@@ -436,65 +422,70 @@ pub trait Provider: CalendarWrites + MailboxWrites + Send + Sync {
         crate::shared::resolve_by_listing(self, address).await
     }
 
-    /// The scope the account's calendars sync under. Defaults to the JMAP
-    /// `(account, Calendar)` scope; non-JMAP providers override.
-    fn calendar_scope(&self, account: &AccountId) -> SyncScope {
-        SyncScope::JmapType {
-            account: account.clone(),
-            data_type: JmapDataType::Calendar,
-        }
+    /// This adapter as a [`MailImporter`](crate::import::MailImporter), or `None` where it
+    /// cannot import (the default).
+    ///
+    /// An adapter that implements `MailImporter` answers `Some(self)`, so a host holding a
+    /// `Box<dyn Provider>` reaches import through it without knowing the concrete adapter. A
+    /// capability is reached this way, through an accessor that defaults to `None`, rather than
+    /// through a flag beside a method that rejects: the answer and the means to act on it are
+    /// one value.
+    #[cfg(feature = "import")]
+    fn mail_importer(&self) -> Option<&dyn crate::import::MailImporter> {
+        None
     }
 
-    /// The scope `calendar`'s events sync under.
+    /// This adapter as a [`Vacation`](crate::Vacation), the account's out-of-office reply, or
+    /// `None` where the account has none the adapter can reach (the default).
     ///
-    /// One provider serves every calendar of the account it signed in to, so this is asked per
-    /// calendar. Where the protocol's event delta is per calendar (CalDAV, Graph, Google) each
-    /// calendar has a scope of its own; where it is account-wide (JMAP's `CalendarEvent` state)
-    /// every calendar answers the **same** scope, and the account's events sync once under it.
-    /// Defaults to that JMAP scope; non-JMAP providers override.
-    fn event_scope(&self, account: &AccountId, calendar: &CalendarId) -> SyncScope {
-        let _ = calendar;
-        SyncScope::JmapType {
-            account: account.clone(),
-            data_type: JmapDataType::CalendarEvent,
-        }
+    /// Reached as [`mail_importer`](Self::mail_importer) is: the answer is the capability, and an
+    /// adapter answers per account, so a read-only share without the setting answers `None`.
+    ///
+    /// `Some` says the transport has the setting, not that the credential may use it. Where an
+    /// adapter can learn that only by asking (Graph, whose permission is a token scope), it
+    /// answers `Some`, and a credential without the permission shows as a `Permanent` refusal of
+    /// the first read: the host asks the user to grant it, as for any refused scope.
+    fn vacation(&self) -> Option<&dyn crate::Vacation> {
+        None
     }
 
-    /// Fetches the account's calendar collections since `cursor`. Providers
-    /// advertising [`Capabilities::calendars`] override this.
-    ///
-    /// # Errors
-    ///
-    /// Returns a classified [`ProviderError`]; the default returns
-    /// [`FailureClass::InvalidState`](engine_core::error::FailureClass::InvalidState).
-    async fn sync_calendars(
-        &self,
-        account: &AccountId,
-        cursor: Option<&SyncState>,
-    ) -> ProviderResult<CalendarListing> {
-        let _ = (account, cursor);
-        Err(unsupported("calendar sync"))
+    /// This adapter as [`MailRules`](crate::MailRules), the account's mail rules, or `None` where
+    /// the account has none the adapter can reach (the default), as for
+    /// [`vacation`](Self::vacation): on Graph `Some`, a missing permission showing as a
+    /// `Permanent` refusal of the first read.
+    fn mail_rules(&self) -> Option<&dyn crate::MailRules> {
+        None
     }
 
-    /// Fetches the events of the scope [`event_scope`](Self::event_scope) names for `calendar`,
-    /// since `cursor`. Where several calendars share one scope, any of them answers for all.
-    /// Providers advertising [`Capabilities::calendars`] override this.
-    ///
-    /// # Errors
-    ///
-    /// Returns a classified [`ProviderError`]; the default returns
-    /// [`FailureClass::InvalidState`](engine_core::error::FailureClass::InvalidState).
-    async fn sync_events(
-        &self,
-        account: &AccountId,
-        calendar: &CalendarId,
-        cursor: Option<&SyncState>,
-    ) -> ProviderResult<ScopeSync<Event>> {
-        let _ = (account, calendar, cursor);
-        Err(unsupported("calendar sync"))
+    /// This adapter as a [`RulesImporter`](crate::import::RulesImporter), importing mail rules and
+    /// the out-of-office reply, or `None` where the account has no rules it can write (the
+    /// default), as for [`mail_rules`](Self::mail_rules).
+    #[cfg(feature = "import")]
+    fn rules_importer(&self) -> Option<&dyn crate::import::RulesImporter> {
+        None
+    }
+
+    /// This adapter as a [`CalendarImporter`](crate::import::CalendarImporter), or `None` where
+    /// it cannot import events (the default), as for [`mail_importer`](Self::mail_importer).
+    #[cfg(feature = "import")]
+    fn calendar_importer(&self) -> Option<&dyn crate::import::CalendarImporter> {
+        None
+    }
+
+    /// This adapter as a [`CalendarCollections`](crate::CalendarCollections), or `None` where it
+    /// cannot create calendars (the default).
+    fn calendar_collections(&self) -> Option<&dyn crate::CalendarCollections> {
+        None
+    }
+
+    /// This adapter as a [`ContactImporter`](crate::import::ContactImporter), or `None`.
+    #[cfg(feature = "import")]
+    fn contact_importer(&self) -> Option<&dyn crate::import::ContactImporter> {
+        None
+    }
+
+    /// This adapter as an [`AddressBookCollections`](crate::AddressBookCollections), or `None`.
+    fn address_book_collections(&self) -> Option<&dyn crate::AddressBookCollections> {
+        None
     }
 }
-
-#[cfg(test)]
-#[path = "draft_tests.rs"]
-mod draft_tests;

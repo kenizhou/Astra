@@ -19,14 +19,23 @@ use engine_core::{
     time::{CalendarDateTime, TimeZoneId, UtcDateTime},
 };
 use engine_provider::{
-    CalendarAddress, CalendarUserAddresses, CalendarWrites, EventDeletion, EventDraft, Invitee,
-    MeetingDraft, Provider, SchedulingIdentity, SharedAccount,
+    CalendarAddress, CalendarSync, CalendarUserAddresses, CalendarWrites, EventDeletion,
+    EventDraft, Invitee, MeetingDraft, Provider, SchedulingIdentity, SharedAccount,
 };
 use provider_jmap::{Credentials, JmapConfig, JmapProvider};
 use stalwart_harness::{
     CALENDAR_SHARE_OWNER, GROUP_CALENDAR_EVENT_UID, Harness, SHARED_CALENDAR_EVENT_UID,
     SHARED_CALENDAR_NAME, SHARED_GROUP_ACCOUNT,
 };
+
+/// The window an event fetch names: JMAP reads the account whole and ignores it.
+fn whole() -> engine_core::time::Horizon {
+    engine_core::time::Horizon::new(
+        "2000-01-01T00:00:00Z".parse().unwrap(),
+        "2100-01-01T00:00:00Z".parse().unwrap(),
+    )
+    .unwrap()
+}
 
 fn account() -> AccountId {
     AccountId::try_from("live-shared-calendars").unwrap()
@@ -85,7 +94,7 @@ async fn calendars(provider: &JmapProvider) -> Vec<Calendar> {
 
 async fn events(provider: &JmapProvider, calendar: &Calendar) -> Vec<Event> {
     let SyncUpdate::Snapshot { objects, .. } = provider
-        .sync_events(&account(), &calendar.id, None)
+        .sync_events(&account(), &calendar.id, None, whole())
         .await
         .expect("sync events")
         .update

@@ -38,6 +38,16 @@ pub(crate) fn redirect_href(current: &str, location: &str) -> Option<String> {
     Some(location.to_owned())
 }
 
+/// Why [`redirect_href`] refused `location`: a hop off TLS, as the insecure credential failure it
+/// is (every discovery request carries the credential), or else a `Location` that does not
+/// resolve.
+pub(crate) fn redirect_refusal(current: &str, location: &str) -> crate::CalDavError {
+    match engine_provider::redirect_off_tls(current, location) {
+        Some(insecure) => insecure.into(),
+        None => crate::CalDavError::protocol(engine_provider::redirect_refused(location)),
+    }
+}
+
 /// Resolves `reference`, an href a response carried, against `at`, the URL of the request
 /// that returned it (RFC 4918 §8.3; RFC 3986 §5).
 ///
@@ -88,14 +98,60 @@ fn with_trailing_slash(href: &str) -> String {
     }
 }
 
-/// Percent-encodes one URL path segment to its **canonical** form: only RFC 3986
-/// `unreserved` bytes (`ALPHA` / `DIGIT` / `-` / `.` / `_` / `~`) are kept verbatim;
-/// every other byte — including `@`, sub-delims, and path-unsafe bytes — is
-/// `%`-encoded. Encoding everything outside `unreserved` matches how CalDAV servers
-/// store and report resource hrefs (Stalwart returns `@` as `%40`, verified live),
-/// so a minted create href round-trips to the same href the server canonicalizes to
-/// — otherwise a later `If-Match`/`DELETE` against the minted href would miss the
-/// server's differently-encoded resource.
+/// The longest encoded `UID` a resource name carries verbatim, in bytes: with `.ics` or `.vcf`
+/// that is 255, the longest name Nextcloud 35 (on PostgreSQL) stored. Measured live: a 255-byte
+/// name was stored and a 260-byte one answered `500`; Stalwart and the SabreDAV fixture (SQLite)
+/// took 1,004. An Outlook meeting `UID`, about 112 characters, is far inside it.
+const MAX_VERBATIM_NAME: usize = 251;
+
+/// The resource name (without `.ics`) a new object with `uid` is stored under: the `UID`
+/// percent-encoded as one segment with its `@` left as it is, or `sha256-` and the hex SHA-256
+/// of the `UID` when that would exceed [`MAX_VERBATIM_NAME`], so a server with a 255-byte name
+/// column refuses nothing for its length (and does not answer `500`, which reads as retryable).
+///
+/// One rule for every write that creates an object, so a create and an import of the same `UID`
+/// name the same resource, and a retried one meets its own earlier write (`If-None-Match`).
+///
+/// The `@` is a `pchar` (RFC 3986 §3.3) and is left unencoded because that is how the servers
+/// list the object afterwards: Stalwart, SabreDAV and Nextcloud each answer a `PUT` to
+/// `uid%40example.com.ics` by listing `uid@example.com.ics` in `sync-collection`, `PROPFIND` and
+/// `calendar-query` alike (observed live). Named the way it is listed, the object's id from the
+/// write is the id every later read reports. (Stalwart does encode the `@` of an account in the
+/// home's own segment, which the listing supplies.)
+pub(crate) fn resource_name(uid: &str) -> String {
+    let encoded = encode_path_segment(uid).replace("%40", "@");
+    if encoded.len() <= MAX_VERBATIM_NAME {
+        return encoded;
+    }
+    hashed_name(uid.as_bytes())
+}
+
+/// `sha256-` and the hex SHA-256 of `bytes`: a resource name every schema takes, the same for the
+/// same bytes.
+pub(crate) fn hashed_name(bytes: &[u8]) -> String {
+    digest_name(&<sha2::Sha256 as sha2::Digest>::digest(bytes).into())
+}
+
+/// `sha256-` and the hex of `digest`, a SHA-256 already taken: [`hashed_name`]'s form.
+pub(crate) fn digest_name(digest: &[u8; 32]) -> String {
+    let mut name = String::from("sha256-");
+    for byte in digest {
+        name.push(hex_lower(byte >> 4));
+        name.push(hex_lower(byte & 0x0f));
+    }
+    name
+}
+
+/// The lower-case hex digit for a 0–15 nibble.
+fn hex_lower(nibble: u8) -> char {
+    char::from_digit(u32::from(nibble), 16).unwrap_or('0')
+}
+
+/// Percent-encodes one URL path segment: only RFC 3986 `unreserved` bytes (`ALPHA` / `DIGIT` /
+/// `-` / `.` / `_` / `~`) are kept verbatim, and every other byte (`@`, sub-delims, path-unsafe
+/// bytes) is `%`-encoded. A resource name then puts its `@` back ([`resource_name`]), because
+/// that is how the servers list an object; Stalwart encodes the `@` of an account in a home's
+/// own segment, which a listing supplies rather than this.
 pub(crate) fn encode_path_segment(segment: &str) -> String {
     let mut out = String::with_capacity(segment.len());
     for &byte in segment.as_bytes() {

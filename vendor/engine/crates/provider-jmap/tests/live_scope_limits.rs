@@ -8,7 +8,7 @@
 //! through the adapter as a snapshot and then as a delta, and removes the collection again.
 
 use engine_core::sync::{SyncState, SyncUpdate};
-use engine_provider::{ContactSourceSync, ContactsProvider, Provider};
+use engine_provider::{CalendarSync, ContactSourceSync, ContactsProvider};
 use provider_jmap::{Credentials, JmapConfig, JmapProvider};
 use serde_json::{Value, json};
 use stalwart_harness::Harness;
@@ -235,7 +235,7 @@ async fn an_event_scope_larger_than_one_get_syncs_whole() {
     );
 
     let snapshot = provider
-        .sync_events(&account(), &any_calendar(), None)
+        .sync_events(&account(), &any_calendar(), None, whole())
         .await
         .expect("snapshot");
     let SyncUpdate::Snapshot { objects, .. } = &snapshot.update else {
@@ -249,7 +249,12 @@ async fn an_event_scope_larger_than_one_get_syncs_whole() {
         &events(&calendar, "scope-delta", count),
     );
     let delta = provider
-        .sync_events(&account(), &any_calendar(), Some(&snapshot.next_cursor))
+        .sync_events(
+            &account(),
+            &any_calendar(),
+            Some(&snapshot.next_cursor),
+            whole(),
+        )
         .await
         .expect("delta");
     let SyncUpdate::Delta { changed, .. } = &delta.update else {
@@ -284,7 +289,11 @@ async fn a_contact_scope_larger_than_one_get_syncs_whole() {
     let in_scope = |cards: &[engine_core::contact::ContactCard], prefix: &str| {
         cards
             .iter()
-            .filter(|card| card.uid.as_deref().is_some_and(|uid| uid.contains(prefix)))
+            .filter(|card| {
+                card.uid
+                    .as_ref()
+                    .is_some_and(|uid| uid.as_str().contains(prefix))
+            })
             .count()
     };
     scope.create(CONTACTS, "ContactCard", &cards("scope-snap"));
@@ -317,6 +326,15 @@ async fn a_contact_scope_larger_than_one_get_syncs_whole() {
 }
 
 /// JMAP's event state is account-wide, so which calendar asks for it does not matter.
+/// The window an event fetch names: JMAP reads the account whole and ignores it.
+fn whole() -> engine_core::time::Horizon {
+    engine_core::time::Horizon::new(
+        "2000-01-01T00:00:00Z".parse().unwrap(),
+        "2100-01-01T00:00:00Z".parse().unwrap(),
+    )
+    .unwrap()
+}
+
 fn any_calendar() -> engine_core::ids::CalendarId {
     engine_core::ids::CalendarId::try_from("any").unwrap()
 }

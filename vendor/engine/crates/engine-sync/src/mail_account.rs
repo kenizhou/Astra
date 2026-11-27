@@ -28,7 +28,7 @@ use crate::{
     MailboxScope, StreamTuning, SyncError, SyncObserver,
     mail_report::{FolderSync, MailSyncReport, SyncTiming},
     recipients, run_scope,
-    stream::{FolderPass, stream_email},
+    stream::{FolderPass, folder_of, stream_email},
     threading::repair_thread_index_if_damaged,
     vanished,
 };
@@ -127,9 +127,19 @@ where
         return fail_early(observer, account, repaired, mailboxes, err, started);
     }
 
-    let folders = run_folders(providers, store, account, &req, tuning, observer, &sent).await;
+    let folders = run_folders(providers, store, account, &req, &tuning, observer, &sent).await;
 
-    let coverage = recipients::record_coverage(store, account, tuning.window, !sent.is_empty());
+    // The account's window, not a deepened mailbox's: coverage says how far back *every*
+    // mailbox's recipients have been observed, so it reaches further back only once every
+    // folder's widening has ended.
+    let reached = folders.iter().all(|folder| folder.reached_window);
+    let coverage = recipients::record_coverage(
+        store,
+        account,
+        tuning.window.account(),
+        reached,
+        !sent.is_empty(),
+    );
     let account_steps = repaired.and(forgotten).and(coverage.await);
     observer.account_sync_finished(account);
 
@@ -195,7 +205,7 @@ where
             };
         }
     };
-    let folders = run_folders(providers, store, account, &req, tuning, observer, &sent).await;
+    let folders = run_folders(providers, store, account, &req, &tuning, observer, &sent).await;
     observer.account_sync_finished(account);
 
     MailSyncReport {
@@ -219,7 +229,7 @@ async fn run_folders<P, S, O>(
     store: &S,
     account: &AccountId,
     req: &LeaseRequest,
-    tuning: StreamTuning,
+    tuning: &StreamTuning,
     observer: &O,
     sent: &BTreeSet<MailboxId>,
 ) -> Vec<FolderSync>
@@ -247,12 +257,14 @@ where
             let mut timing = SyncTiming::default();
             // Filled through even on the paths that return early, so a folder that failed still
             // says where it got to.
-            let result = stream_email(provider, account, pass, &mut timing).await;
+            let outcome = stream_email(provider, account, pass, &mut timing).await;
             let scope = provider.email_scope(account);
-            observer.folder_sync_finished(account, &scope, result.is_ok());
+            observer.folder_sync_finished(account, &scope, outcome.is_ok());
+            let reached_window = outcome.as_ref().is_ok_and(|outcome| outcome.reached);
             FolderSync {
                 scope,
-                result,
+                result: outcome.map(|outcome| outcome.applied),
+                reached_window,
                 elapsed: started.elapsed(),
                 timing,
             }
@@ -324,11 +336,7 @@ async fn stored_inbox<S: StoreRead>(store: &S, account: &AccountId) -> Option<Ma
 
 /// Whether a mail scope is the one for `mailbox`.
 fn names_mailbox(scope: &SyncScope, mailbox: &MailboxId) -> bool {
-    match scope {
-        SyncScope::ImapMailbox { mailbox: named, .. }
-        | SyncScope::GraphFolder { folder: named, .. } => named == mailbox,
-        _ => false,
-    }
+    folder_of(scope) == Some(mailbox)
 }
 
 #[cfg(test)]

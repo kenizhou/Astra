@@ -1,7 +1,7 @@
 //! Offline tests for the JMAP send request: the draft create, the submission, and the
 //! receipt parse.
 
-use engine_core::error::FailureClass;
+use engine_core::{error::FailureClass, mail::Importance};
 
 use super::*;
 
@@ -23,6 +23,16 @@ async fn proof() -> engine_provider::HandedOver {
         .unwrap()
 }
 
+/// The two answers, as calls `0` and `1` of the request.
+fn answered<'a>(email: &'a Value, submission: &'a Value) -> Answered<'a> {
+    Answered {
+        email,
+        email_set: CallId::from_wire("0"),
+        submission,
+        submission_set: CallId::from_wire("1"),
+    }
+}
+
 fn message_id() -> MessageIdHeader {
     MessageIdHeader::new("step4-send-probe-0002@test.local").unwrap()
 }
@@ -32,7 +42,7 @@ async fn parses_the_sent_email_key_and_echoes_message_id() {
     let proof = proof().await;
     let doc = send_response();
     let (email, submission) = results(&doc);
-    let receipt = parse_receipt(&email, &submission, &message_id(), &proof).unwrap();
+    let receipt = parse_receipt(&answered(&email, &submission), &message_id(), &proof).unwrap();
     // The created email id (kept across the Drafts→Sent move) is the resolved key.
     assert_eq!(receipt.email_key.as_str(), "bmaaaaal");
     assert_eq!(receipt.message_id, message_id());
@@ -45,7 +55,7 @@ async fn email_set_error_classifies_and_aborts() {
         "notCreated": { "draft": { "type": "invalidProperties", "properties": ["from"] } }
     });
     let submission = json!({ "created": { "sub": { "id": "x" } } });
-    let err = parse_receipt(&email, &submission, &message_id(), &proof).unwrap_err();
+    let err = parse_receipt(&answered(&email, &submission), &message_id(), &proof).unwrap_err();
     assert_eq!(err.failure_class(), FailureClass::Permanent);
 }
 
@@ -57,7 +67,7 @@ async fn submission_error_classifies_after_email_created() {
     let submission = json!({
         "notCreated": { "sub": { "type": "invalidProperties", "properties": ["identityId"] } }
     });
-    let err = parse_receipt(&email, &submission, &message_id(), &proof).unwrap_err();
+    let err = parse_receipt(&answered(&email, &submission), &message_id(), &proof).unwrap_err();
     assert_eq!(err.failure_class(), FailureClass::Permanent);
 }
 
@@ -66,7 +76,7 @@ async fn rate_limited_submission_is_retryable() {
     let proof = proof().await;
     let email = json!({ "created": { "draft": { "id": "e1" } } });
     let submission = json!({ "notCreated": { "sub": { "type": "rateLimit" } } });
-    let err = parse_receipt(&email, &submission, &message_id(), &proof).unwrap_err();
+    let err = parse_receipt(&answered(&email, &submission), &message_id(), &proof).unwrap_err();
     assert!(err.failure_class().is_retryable());
 }
 
@@ -162,9 +172,25 @@ fn build_draft_omits_the_headers_a_draft_does_not_have() {
         "Body",
     );
     let create = build_draft("d", &draft, &[]);
-    for absent in ["cc", "bcc", "inReplyTo", "references"] {
+    for absent in [
+        "cc",
+        "bcc",
+        "inReplyTo",
+        "references",
+        IMPORTANCE_HEADER,
+        X_PRIORITY_HEADER,
+    ] {
         assert!(create.get(absent).is_none(), "{absent}: {create}");
     }
+}
+
+/// JMAP has no importance property, so the created Email names the headers themselves.
+#[test]
+fn build_draft_writes_an_importance_other_than_normal_as_headers() {
+    let draft = addressed_draft().with_importance(Importance::High);
+    let create = build_draft("d", &draft, &[]);
+    assert_eq!(create[IMPORTANCE_HEADER], json!("high"));
+    assert_eq!(create[X_PRIORITY_HEADER], json!("1 (Highest)"));
 }
 
 /// Every recipient is in the envelope, To + Cc + Bcc, deduplicated case-insensitively

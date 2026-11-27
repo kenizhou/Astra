@@ -18,13 +18,16 @@ use std::{
 
 use engine_core::{
     ids::{MailboxId, MessageId, MessageIdHeader, ProviderKey},
-    mail::{EmailAddress, Envelope, Keyword, Mailbox, MailboxRole, Message, SystemKeyword},
+    mail::{EmailAddress, Envelope, Importance, Keyword, Mailbox, MailboxRole, Message},
     membership::Memberships,
     time::UtcDateTime,
 };
 use time::{Date, Month, PrimitiveDateTime, Time, UtcOffset};
 
-use crate::parse::{Address, FetchRow, ListRow};
+use crate::{
+    header_section::{self, header_field},
+    parse::{Address, FetchRow, ListRow},
+};
 
 /// Synthesizes the stable [`MessageId`] key for an IMAP message from its identity
 /// triple `(mailbox, UIDVALIDITY, UID)` (RFC 9051 §2.3.1.1).
@@ -69,12 +72,13 @@ pub(crate) fn message_from_fetch(
     let mut message = Message::new(id, Memberships::of_one(mailbox.clone()));
     message.keywords = flags_to_keywords(&row.flags);
     message.size = row.size;
+    // INTERNALDATE is when this server stored the copy (RFC 9051 §2.3.3); the `Date` header,
+    // ENVELOPE's first field, is when the message says it was sent. A Sent copy filed or
+    // imported after the fact carries two different instants.
     message.received_at = row.internal_date.as_deref().and_then(parse_internaldate);
     if let Some(env) = &row.envelope {
         message.envelope = to_envelope(env);
-        // The `Date` header instant is not in ENVELOPE as a parsed value; the
-        // string form is, but normalizing it is a later refinement. INTERNALDATE
-        // (delivery time) is the reliable instant here.
+        message.sent_at = env.date.as_deref().and_then(engine_mime::date::parse);
     }
     message.has_attachment = row.has_attachment.unwrap_or(false);
     // `References` is not an ENVELOPE field; it rides the fetched header section (the
@@ -85,6 +89,9 @@ pub(crate) fn message_from_fetch(
         .and_then(|fields| header_field(fields, "References"))
     {
         message.envelope.references = extract_message_ids(&references);
+    }
+    if let Some(fields) = row.header_fields.as_deref() {
+        message.envelope.importance = header_section::importance(fields);
     }
     message
 }
@@ -172,45 +179,21 @@ pub(crate) fn is_hierarchy_level(attributes: &[String]) -> bool {
     has_attribute(attributes, "Noselect") || has_attribute(attributes, "NonExistent")
 }
 
-/// Maps IMAP flags to engine [`Keyword`]s. The four standard system flags map to
-/// their `$`-keywords; `\Deleted` and `\Recent` are deliberately **not** keywords
-/// (they belong to IMAP's expunge/session model, per `engine_core::mail::keyword`);
-/// other backslash flags are unmapped; a custom keyword passes through if valid.
+/// Maps IMAP flags to engine [`Keyword`]s, each by [`Keyword::from_flag`], the one rule Sieve's
+/// `imap4flags` reads by too: the four standard system flags are their `$`-keywords, `\Deleted`
+/// and `\Recent` are deliberately **not** keywords, other backslash flags are unmapped, and a
+/// custom keyword passes through if valid.
 pub(crate) fn flags_to_keywords(flags: &[String]) -> BTreeSet<Keyword> {
-    let mut set = BTreeSet::new();
-    for flag in flags {
-        if let Some(name) = flag.strip_prefix('\\') {
-            let system = match name.to_ascii_lowercase().as_str() {
-                "seen" => Some(SystemKeyword::Seen),
-                "flagged" => Some(SystemKeyword::Flagged),
-                "answered" => Some(SystemKeyword::Answered),
-                "draft" => Some(SystemKeyword::Draft),
-                _ => None,
-            };
-            if let Some(system) = system {
-                set.insert(Keyword::system(system));
-            }
-        } else if let Ok(keyword) = Keyword::new(flag.as_str()) {
-            set.insert(keyword);
-        }
-    }
-    set
+    flags
+        .iter()
+        .filter_map(|flag| Keyword::from_flag(flag))
+        .collect()
 }
 
-/// The inverse of [`flags_to_keywords`]: maps one engine [`Keyword`] to the IMAP
-/// flag a `UID STORE` sets. The four standard system keywords (`$seen`/`$flagged`/
-/// `$answered`/`$draft`) map back to their backslash system flags; every other
-/// keyword — another system keyword (`$forwarded`, …) or a custom one — is emitted
-/// as a bare IMAP keyword atom (`Keyword::as_str`, already a valid IMAP atom since
-/// the keyword grammar forbids the flag-illegal characters).
+/// The inverse of [`flags_to_keywords`]: the IMAP flag a `UID STORE` sets for one engine
+/// [`Keyword`] ([`Keyword::to_flag`]).
 pub(crate) fn keyword_to_flag(kw: &Keyword) -> String {
-    match kw.as_system() {
-        Some(SystemKeyword::Seen) => "\\Seen".to_owned(),
-        Some(SystemKeyword::Flagged) => "\\Flagged".to_owned(),
-        Some(SystemKeyword::Answered) => "\\Answered".to_owned(),
-        Some(SystemKeyword::Draft) => "\\Draft".to_owned(),
-        _ => kw.as_str().to_owned(),
-    }
+    kw.to_flag()
 }
 
 /// Parses an IMAP `INTERNALDATE` (`"dd-Mon-yyyy hh:mm:ss +zzzz"`, RFC 9051
@@ -302,6 +285,8 @@ fn to_envelope(env: &crate::parse::Envelope) -> Envelope {
             .map(extract_message_ids)
             .unwrap_or_default(),
         references: Vec::new(),
+        // Not an ENVELOPE field either; `message_from_fetch` reads it off the header section.
+        importance: Importance::Normal,
         message_id: env
             .message_id
             .as_deref()
@@ -349,32 +334,6 @@ fn extract_message_ids(raw: &str) -> Vec<MessageIdHeader> {
         ids.extend(MessageIdHeader::new(raw.trim()).ok());
     }
     ids
-}
-
-/// The unfolded value of the field `name` in a raw header section, or `None` when the
-/// section has no such field. A line that starts with whitespace continues the field
-/// before it (RFC 5322 §2.2.3).
-fn header_field(section: &str, name: &str) -> Option<String> {
-    let mut value: Option<String> = None;
-    for line in section.lines() {
-        if line.starts_with([' ', '\t']) {
-            if let Some(value) = value.as_mut() {
-                value.push(' ');
-                value.push_str(line.trim());
-            }
-            continue;
-        }
-        if value.is_some() {
-            break;
-        }
-        let Some((field, rest)) = line.split_once(':') else {
-            continue;
-        };
-        if field.trim().eq_ignore_ascii_case(name) {
-            value = Some(rest.trim().to_owned());
-        }
-    }
-    value
 }
 
 /// Whether the attribute list carries `\<attr>` (case-insensitively).
@@ -467,3 +426,11 @@ fn split_at(name: &str, delimiter: Option<&str>) -> Option<Range<usize>> {
 #[cfg(test)]
 #[path = "mail_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "mail_importance_tests.rs"]
+mod importance_tests;
+
+#[cfg(test)]
+#[path = "mail_dates_tests.rs"]
+mod date_tests;

@@ -23,7 +23,7 @@ use engine_core::{
     sync::{SyncScope, SyncUpdate},
     time::TimeZoneId,
 };
-use engine_provider::Provider;
+use engine_provider::CalendarSync;
 use engine_recurrence::Horizon;
 use engine_store::{ManualClock, StoreRead, WorkerId};
 use engine_sync::sync_calendar;
@@ -271,6 +271,7 @@ async fn caldav_storing_an_invitation_is_a_guarded_create() {
     };
     let _serial = common::serial_guard().await;
     common::imip::storing_an_invitation_is_a_guarded_create(&provider, &account).await;
+    common::imip::a_long_uid_is_stored_under_the_id_minted_for_it(&provider, &account).await;
 }
 
 /// Stalwart reports `DAV:current-user-privilege-set` on Alice's own calendar, and it

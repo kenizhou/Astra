@@ -255,8 +255,8 @@ and the cross-compile build.
 | Account | Holds | Used for |
 | --- | --- | --- |
 | `alice@test.local` | **the whole shared seed** (mail, calendar, contacts) | every read/sync/write suite; several assert its exact mailbox and calendar counts |
-| `bob@test.local` | nothing | scratch: the SMTP recipient in the submission tests, the **organizer** in the scheduling suite, and the **grantor** of the read-only share below |
-| `carol@test.local` | nothing | scratch: the **attendee** in the scheduling suite |
+| `bob@test.local` | nothing | scratch: the SMTP recipient in the submission tests, the **organizer** in the scheduling suite, the **grantor** of the read-only share below, the home of the calendar import suite's scratch calendar (made and removed by each run), and the dated mail the mailbox-window suites plant (`Harness::plant_dated_email_as`) and remove again |
+| `carol@test.local` | nothing | scratch: the **attendee** in the scheduling suite, the import target of `provider-imap`'s and `provider-jmap`'s live import suites, which delete the folders they make, and the account whose out-of-office reply and Sieve scripts `provider-jmap`'s `live_vacation`, `live_rules` and `live_rules_reply`, and `provider-imap`'s ManageSieve suites (`managesieve::live_tests`, `live_provider_tests`, over port 14190), write and then restore (one test function each, so the binaries, which Cargo runs one after another, never touch her scripts at once; the ManageSieve tests share one binary and take a lock, `ONE_AT_A_TIME`); `live_rules_reply` delivers mail to her from Bob, and Bob receives her replies, both removed afterwards by a run marker |
 | `dave@test.local` | one calendar, `Dave Shared`, with one event | the **calendar-only** grantor: shares that calendar with Alice read-only, and no mail |
 | `support@test.local` | `12-shared.eml` in its INBOX, `support-rota.ics` in its calendar | a **group** principal — a mailbox with no credentials of its own, which Alice belongs to |
 
@@ -268,6 +268,10 @@ exchange through Alice would push her INBOX permanently over the exact count the
 mail suites assert, so the whole two-party exchange happens between Bob and Carol,
 where nothing counts what is delivered. Prefer a scratch account over relaxing an
 assertion on the seeded one.
+
+Mail older than a sync window cannot be seeded by `APPEND` (the seeder stamps the moment of
+seeding), so a depth test plants it in a scratch account over JMAP with the `receivedAt` it
+needs, which Stalwart also serves as the IMAP `INTERNALDATE`, and removes it when it ends.
 
 ### The shared-mailbox fixture: two shares, deliberately unequal
 
@@ -382,10 +386,68 @@ One `live_caldav` run fits in the budget; back-to-back runs did not, and once it
 poll drew `429` (`Retry-After` up to a minute) until the wait timed out with
 `harness ready: Timeout(30s)` — 4 of 5 consecutive runs on v0.16.24 (#333). Polling once per test
 binary would only have moved the failure to the DAV connects, so the fix is the limit. Verified:
-five back-to-back `live_caldav` runs, where the fourth used to fail. `rateLimitAuthenticated`
-(1000/minute) is left as shipped. The smoke test `anonymous_requests_are_not_rationed` sends 150
-unauthenticated requests and fails on a harness started before the change, so a stale container
-says so rather than flaking.
+five back-to-back `live_caldav` runs, where the fourth used to fail. The smoke test
+`anonymous_requests_are_not_rationed` sends 150 unauthenticated requests and fails on a harness
+started before the change, so a stale container says so rather than flaking.
+
+### And so are the per-account limits a migration meets
+
+A migration host copies a whole mailbox into one account, and three of Stalwart's per-account
+limits stop that long before the copy is done. The entrypoint raises them, the same way, and logs
+`raised the per-account request and upload limits`:
+
+| Setting | As shipped (v1.0.2) | On the harness |
+| --- | --- | --- |
+| `x:Http.rateLimitAuthenticated` | 1,000 signed-in requests a minute per account | 1,000,000 a minute |
+| `x:Jmap.uploadQuota` / `maxUploadCount` | 50 MB or 1,000 blobs per account, counted for an hour (`uploadTtl`), imported or not | 1 TB / 1,000,000 blobs |
+| `x:Imap.rateLimit` | 2,000 commands a minute per account | 1,000,000 a minute |
+
+Measured on v1.0.2 before the change, each limit as one account: request 1,001 of a burst drew
+`429`; the third of three 17.5 MB uploads drew `429 Quota exceeded` with `Retry-After: 3075`; IMAP
+command 2,001 drew `NO [LIMIT] Too many requests, retry in 51 seconds` and the server closed the
+connection, so an `APPEND` per message ends a copy there. After it: 1,500 requests in under
+two seconds, four 20 MB uploads (80 MB), 1,100 small uploads and 2,500 IMAP commands, all
+accepted.
+
+**A settings write needs a reload.** `x:<object>/set` is stored and answered `updated`, but the
+running server keeps enforcing the old value until it restarts or is told to reload
+(`x:Action/set` creating `{"@type": "ReloadSettings"}`). Measured on `rateLimitAuthenticated`, the
+limit cheapest to observe (the others are assumed to behave alike): lowered to 1,000 a minute, it
+let 1,100 requests in three seconds all pass; after the reload, the 1,001st drew `429`. A fresh bootstrap hid this, because it restarts once to bind the STARTTLS
+listeners after the limits are written; a warm start on an older volume does not. So the
+entrypoint ends its settings with `reload_settings`, and `Harness::update_settings` reloads after
+every write.
+
+The per-request limits stay as shipped (`maxUploadSize` 50 MB, `maxConcurrentUploads` and
+`maxConcurrentRequests` 4, `maxRequestSize` 10 MB): the session states them, the engine keeps to them, and a real server
+has them too. The smoke test `per_account_limits_fit_a_migration` sends 1,100 signed-in requests
+as one account and reads the upload quota and the IMAP limit back, so a stale container says so.
+
+`provider-caldav/tests/live_concurrency.rs` measures the server's own rate refusals, so it sets
+`rateLimitAuthenticated` back to 1,000 a minute for its run, through the management API
+(`Harness::set_requests_per_minute`), and raises it again after, pass or fail. It restores the
+known raised value (`stalwart_harness::RAISED_REQUESTS_PER_MINUTE`, which must match the
+entrypoint), never the value it read, and refuses to start on a harness already at 1,000, so a
+killed run cannot make the lowering permanent. It also requires
+that run to have been refused something, so it cannot pass against the raised limit: a run whose
+lowering never applied (the missing reload above) refused nothing up to 400/s and failed there. A
+run killed midway leaves the shipped limit in place; `docker compose restart` raises it again.
+
+### The ban on failed sign-ins is not disarmed
+
+`x:Security`'s **`authBanRate`** bans a client IP after **100 failed sign-ins a day** (v1.0.2,
+`authBanPeriod` unset), and every harness test signs in from `127.0.0.1`, so a ban stops every
+live suite at once. The entrypoint leaves it as shipped, because a test that presents a wrong
+password should cost something visible. Such a test counts its wrong attempts against this budget
+and says so in its header: `provider-imap/tests/live_imap_credential.rs` spends three a run.
+Repeated runs of a wrong-password test belong on the Dovecot harness, which bans nobody.
+`x:BlockedIp/get` with `ids: null` lists the addresses banned so far.
+
+When several worktrees share these servers, take a lock (`flock`) around every live run, reseed
+and `docker compose`, so one checkout's reseed cannot land in the middle of another's run. The
+lock also covers `provider-caldav`'s `live_concurrency`, which lowers the request limit server-wide
+for its run: for about three and a half minutes it binds **every account**, and a migration-size
+run beside it would meet `429` from its 1,001st request in a minute.
 
 ## The seed dataset — and the invariant each fixture protects
 
@@ -497,6 +559,12 @@ run. Non-negotiable:
   Both read like a broken server. Fix a date when the *client* is what interprets it;
   derive it from today when the *server's* behaviour turns on whether it has passed, and
   when you fix one suite's fixture, grep the others for the same shape.
+- **Tests that share a scratch account need markers no other contains.** The tests of one binary
+  run at once, and a suite that plants mail picks out its own by a subject marker. JMAP's
+  `Email/query` `subject` filter matches substrings, so a residue sweep for `jmapband` can destroy
+  `jmapbandkill`'s mail mid-run, and a `starts_with` check counted that mail as its own: a failure
+  seen on CI only, where the two tests overlapped in time (#393). Give each test a marker that is
+  not a prefix or substring of another's, and match it with the space that follows it.
 - **Readiness, not sleeps.** The compose healthcheck gates on a post-seed marker
   *and* HTTP liveness; `Harness::wait_until_ready` polls `/healthz/live`. Never a
   fixed sleep.

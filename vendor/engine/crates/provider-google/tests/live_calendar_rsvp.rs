@@ -16,9 +16,10 @@
 //! invitation is sent, to anyone, and the `iCalUID` is preserved (`events.insert` mints its
 //! own). So the fixture costs no mail and the thing under test is a genuine invitation.
 //!
-//! The adapter has no import verb and should not grow one — importing is a migration tool,
-//! not a sync verb — so the seed is a direct HTTP call, the same exception
-//! `provider-caldav`'s scheduling suite makes for a seeded document. **Every assertion is
+//! Importing is not a sync verb: it lives behind the `import` feature, in traits of its own
+//! (`providers.md` → "Import"), and the Google adapter does not implement them. So the seed is
+//! a direct HTTP call, the same exception `provider-caldav`'s scheduling suite makes for a
+//! seeded document. **Every assertion is
 //! about what the adapter did.**
 //!
 //! # What only the live API can settle
@@ -46,7 +47,7 @@ use engine_core::{
     sync::SyncUpdate,
 };
 use engine_provider::{
-    CalendarWrites, EventDeletion, EventDraft, EventRsvp, Provider, RsvpResponse,
+    CalendarSync, CalendarWrites, EventDeletion, EventDraft, EventRsvp, Provider, RsvpResponse,
 };
 use provider_google::{GoogleCalendarProvider, GoogleClient};
 
@@ -55,6 +56,15 @@ const SELF_ADDRESS: &str = "allodia.e2e@gmail.com";
 /// The seeded organizer. A reserved domain that cannot receive mail, so even a mistaken
 /// `sendUpdates=all` would reach nobody.
 const ORGANIZER: &str = "boss@example.test";
+
+/// A window wide enough to be the whole calendar.
+fn whole_calendar() -> engine_core::time::Horizon {
+    engine_core::time::Horizon::new(
+        "2000-01-01T00:00:00Z".parse().unwrap(),
+        "2100-01-01T00:00:00Z".parse().unwrap(),
+    )
+    .unwrap()
+}
 
 fn account() -> engine_core::ids::AccountId {
     engine_core::ids::AccountId::try_from("live").unwrap()
@@ -163,7 +173,7 @@ fn in_primary(id: &str) -> EventId {
 /// Re-reads `id` through the adapter's own sync — the projection a host would see.
 async fn read_event(provider: &GoogleCalendarProvider, id: &EventId) -> Event {
     let sync = provider
-        .sync_events(&account(), &calendar(), None)
+        .sync_events(&account(), &calendar(), None, whole_calendar())
         .await
         .expect("sync events");
     let SyncUpdate::Snapshot { objects, .. } = &sync.update else {

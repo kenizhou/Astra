@@ -33,9 +33,9 @@ use engine_core::{
     version::{ETag, RevisionTokens},
 };
 use engine_provider::{
-    CalendarListing, CalendarWrites, Capabilities, ConnectionInfo, EventEdit, EventRsvp,
-    EventWrite, EventWriteReceipt, OverrideSurvival, Provider, ProviderError, ProviderResult,
-    RsvpControls, ScopeSync, WriteGuard, WritePrecondition,
+    CalendarListing, CalendarSync, CalendarWrites, Capabilities, ConnectionInfo, EventEdit,
+    EventRsvp, EventWrite, EventWriteReceipt, OverrideSurvival, Provider, ProviderError,
+    ProviderResult, RsvpControls, ScopeSync, WriteGuard, WritePrecondition,
 };
 
 /// The account's own address — and deliberately **not** the one the invitation was sent to,
@@ -227,7 +227,10 @@ impl Provider for CalendarServer {
             data_type: JmapDataType::Email,
         }
     }
+}
 
+#[async_trait::async_trait]
+impl CalendarSync for CalendarServer {
     async fn sync_calendars(
         &self,
         _account: &AccountId,
@@ -249,6 +252,7 @@ impl Provider for CalendarServer {
         _account: &AccountId,
         _calendar: &CalendarId,
         cursor: Option<&SyncState>,
+        _window: engine_core::time::Horizon,
     ) -> ProviderResult<ScopeSync<Event>> {
         let state = self.0.lock().unwrap();
         let next = SyncState::new(state.version.to_string());

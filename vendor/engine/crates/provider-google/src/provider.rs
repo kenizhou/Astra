@@ -12,16 +12,17 @@ use std::{collections::BTreeSet, sync::Arc};
 use async_trait::async_trait;
 use engine_core::{
     ids::{AccountId, ProviderKey},
-    mail::{Mailbox, Message},
+    mail::{Mailbox, Message, MessageMetadata},
     raw::RawMime,
-    sync::{SyncScope, SyncState, SyncUpdate, SyncWindow},
+    sync::{MailboxWindows, SyncScope, SyncState, SyncUpdate, SyncWindow},
     time::CalendarDate,
 };
 use engine_provider::{
-    CalendarWrites, Capabilities, ConnectionInfo, Draft, EmailStream, IdentityControls,
-    KeywordName, MailEdit, MailEditReceipt, MailboxEdit, MailboxEditReceipt, MailboxWrites,
-    Provider, ProviderResult, ReportControls, ReportEvidence, ReportVerdicts, ScopeSync,
-    SenderIdentity, SenderIdentityId, SourceStream, SubmissionReceipt,
+    CalendarSync, CalendarWrites, Capabilities, ConnectionInfo, CredentialSubject, Draft,
+    DraftReceipt, EmailStream, IdentityControls, KeywordName, MailEdit, MailEditReceipt,
+    MailboxEdit, MailboxEditReceipt, MailboxWrites, Provider, ProviderError, ProviderResult,
+    ReportControls, ReportEvidence, ReportVerdicts, ScopeSync, SenderIdentity, SenderIdentityId,
+    SourceStream, SubmissionReceipt,
 };
 use futures_util::StreamExt;
 use provider_imap::GmailMail;
@@ -127,12 +128,46 @@ impl GmailProvider {
     /// nothing per message and reads a thousand in about a second. Both write the same keys,
     /// threads, memberships and keywords, so an account moves between them without a resync
     /// of its rows (`crate::imap_labels`).
-    #[must_use]
-    pub fn with_imap<S>(self, mail: GmailMail<S>) -> Self
+    ///
+    /// Both halves sign in as one account with one token, so they must sign in as the same
+    /// credential subject, and a host gives both the same source: the
+    /// [`ImapConfig`](provider_imap::ImapConfig) the reader's account was connected with takes
+    /// the source this provider's client asks ([`GoogleClient::connect_with_source`]), and the
+    /// source answers the token with the account's address
+    /// ([`Credential::bearer_for`](engine_provider::Credential::bearer_for)), which IMAP's SASL
+    /// needs and the API ignores. A token the source replaces after either half's refusal is
+    /// then the one both present next.
+    ///
+    /// What is checked is the subject, as everything authenticated is keyed by it
+    /// ([`CredentialSource::subject`](engine_provider::CredentialSource::subject)): two sources
+    /// that name the same subject are, by that contract, the same account's, and are accepted.
+    ///
+    /// # Errors
+    ///
+    /// [`ProviderError::invalid_state`] when the reader signs in as another credential subject
+    /// than this provider's client ([`GmailMail::credential_subject`]): another account's mail,
+    /// or two fixed credentials, each under a subject of its own. Nothing is sent.
+    pub fn with_imap<S>(self, mail: GmailMail<S>) -> ProviderResult<Self>
     where
         S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
     {
-        self.with_imap_mail(Arc::new(mail))
+        let subject = mail.credential_subject().clone();
+        self.bind_imap(&subject, Arc::new(mail))
+    }
+
+    /// The reader `imap`, which signs in as `subject`, when that is who this provider's client
+    /// signs in as.
+    pub(crate) fn bind_imap(
+        self,
+        subject: &CredentialSubject,
+        imap: Arc<dyn ImapMail>,
+    ) -> ProviderResult<Self> {
+        if self.client.subject() != Some(subject) {
+            return Err(ProviderError::invalid_state(
+                "the account's IMAP and API halves must sign in as the same credential subject",
+            ));
+        }
+        Ok(self.with_imap_mail(imap))
     }
 
     pub(crate) fn with_imap_mail(mut self, imap: Arc<dyn ImapMail>) -> Self {
@@ -152,14 +187,19 @@ impl GmailProvider {
     /// Keeps each of `names`' keywords as a Gmail label under one of its names.
     ///
     /// Gmail stores no free-form keyword, so a keyword a draft asks for on its filed copy
-    /// ([`Draft::sent_copy_keywords`]) is kept only when it has a name here. A label under any
+    /// ([`Draft::sent_copy_metadata`]) is kept only when it has a name here. A label under any
     /// of a keyword's names is then read as that keyword: it leaves the label list and every
-    /// message's memberships, and the message carries the keyword instead. With at least one
-    /// name, the adapter advertises [`sent_copy_keywords`](Capabilities::sent_copy_keywords).
+    /// message's memberships, and the message carries the keyword instead. The same holds for
+    /// a stored draft's keywords. With at least one name, the adapter advertises
+    /// [`sent_copy_keywords`](Capabilities::sent_copy_keywords) and
+    /// [`draft_keywords`](Capabilities::draft_keywords).
     #[must_use]
     pub fn with_keyword_names(mut self, names: Vec<KeywordName>) -> Self {
         if !names.is_empty() {
-            self.capabilities = self.capabilities.with_sent_copy_keywords();
+            self.capabilities = self
+                .capabilities
+                .with_sent_copy_keywords()
+                .with_draft_keywords();
         }
         self.labels = Labels::new(names);
         self
@@ -231,33 +271,27 @@ impl Provider for GmailProvider {
         &'a self,
         _account: &'a AccountId,
         cursor: Option<&'a SyncState>,
-        window: SyncWindow,
+        window: MailboxWindows,
         // Gmail pages `messages.list`/`history.list` by server-controlled `pageToken`, so
         // the fetch-batch knob has no lever here; each server page is drained whole.
         _fetch_batch: usize,
         chunk_size: usize,
     ) -> EmailStream<'a> {
-        // A sync-depth window bounds the *backfill* via `q: after:<floor>`. A delta
-        // cannot carry one (`history.list` takes a `startHistoryId`, not a query), so a
-        // relabelled old message is reported whatever its date; the engine drops it on
-        // apply (`SyncWindow::admits`), which is where the delta's bound holds for every
-        // adapter.
+        // A sync-depth window bounds the *backfill*: the account's listing and one per label
+        // held further back (`crate::window_listing`). A delta cannot carry one (`history.list`
+        // takes a `startHistoryId`, not a query), so a relabelled old message is reported
+        // whatever its date; the engine judges it on apply (`MailboxWindows::admits`), which is
+        // where the delta's bound holds for every adapter.
         match &self.imap {
             Some(imap) => crate::imap_pass::stream(
                 imap.as_ref(),
                 &self.client,
                 &self.labels,
                 cursor,
-                window.floor(),
+                &window,
                 chunk_size,
             ),
-            None => crate::pass::stream(
-                &self.client,
-                &self.labels,
-                cursor,
-                window.floor(),
-                chunk_size,
-            ),
+            None => crate::pass::stream(&self.client, &self.labels, cursor, &window, chunk_size),
         }
     }
 
@@ -308,8 +342,7 @@ impl Provider for GmailProvider {
                         for (index, done) in answered.iter_mut().enumerate() {
                             if !*done {
                                 *done = true;
-                                let err =
-                                    engine_provider::ProviderError::new(err.class(), err.detail());
+                                let err = err.reworded(err.detail());
                                 yield (index, Err(err));
                             }
                         }
@@ -327,14 +360,26 @@ impl Provider for GmailProvider {
     /// Applies a [`MailEdit`] via `messages.modify`/`trash`/`delete` (`mutate`). The
     /// outbox owns durability/idempotency; this performs only the provider call.
     /// Stores a draft in `users.drafts`, replacing the one named by `replacing` in place.
-    /// The key is Gmail's **draft** id, which survives the replacement (`crate::drafts`).
+    /// The key is Gmail's **draft** id, which survives the replacement (`crate::drafts`). The
+    /// message under it is new on every save, so its keywords' labels go on again each time.
     async fn put_draft(
         &self,
         _account: &AccountId,
         draft: &engine_provider::Draft,
         replacing: Option<&ProviderKey>,
-    ) -> ProviderResult<ProviderKey> {
-        crate::drafts::put_draft(&self.client, draft, replacing).await
+        metadata: &MessageMetadata,
+    ) -> ProviderResult<DraftReceipt> {
+        let (key, message) = crate::drafts::put_draft(&self.client, draft, replacing).await?;
+        let kept = match message {
+            Some(message) if !metadata.keywords.is_empty() => {
+                self.labels
+                    .tag(&self.client, &message, &metadata.keywords)
+                    .await
+            }
+            _ => BTreeSet::new(),
+        };
+        // Gmail stamps a draft's arrival time itself, so only the keywords are kept.
+        Ok(DraftReceipt::stored(key).with_kept(MessageMetadata::default().with_keywords(kept)))
     }
 
     /// Removes a stored draft (`drafts.delete`), reporting one that is already gone as
@@ -383,7 +428,30 @@ impl Provider for GmailProvider {
     ) -> ProviderResult<engine_provider::ReportReceipt> {
         crate::report::report_message(&self.client, report).await
     }
+
+    /// The filters (`crate::rules`), on every Gmail account: whether the token may read or
+    /// write them is a scope, known only by asking.
+    fn mail_rules(&self) -> Option<&dyn engine_provider::MailRules> {
+        Some(self)
+    }
+
+    /// The vacation reply (`crate::vacation`), as for the filters.
+    fn vacation(&self) -> Option<&dyn engine_provider::Vacation> {
+        Some(self)
+    }
 }
+
+impl GmailProvider {
+    pub(crate) fn client(&self) -> &GoogleClient {
+        &self.client
+    }
+
+    pub(crate) fn labels(&self) -> &Labels {
+        &self.labels
+    }
+}
+
+impl CalendarSync for GmailProvider {}
 
 #[async_trait::async_trait]
 impl MailboxWrites for GmailProvider {
@@ -392,7 +460,7 @@ impl MailboxWrites for GmailProvider {
         _account: &AccountId,
         edit: &MailboxEdit,
     ) -> ProviderResult<MailboxEditReceipt> {
-        crate::labels_write::edit(&self.client, edit).await
+        crate::labels_write::edit(&self.client, edit, &self.connection_info().capabilities).await
     }
 }
 

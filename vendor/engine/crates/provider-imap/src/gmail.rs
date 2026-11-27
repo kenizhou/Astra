@@ -20,7 +20,7 @@ use engine_core::{
     mail::{MailboxRole, Message},
     raw::RawMime,
 };
-use engine_provider::{ProviderError, ProviderResult};
+use engine_provider::{CredentialSubject, ProviderError, ProviderResult};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::OnceCell,
@@ -88,8 +88,6 @@ pub struct GmailMessage {
     /// The envelope, size, dates, references and attachment flag. Its id and memberships
     /// are IMAP's (the folder and UID it was read from), for the caller to replace.
     pub message: Message,
-    /// The `Date` header as the message gave it, for the caller to read as its sent time.
-    pub date: Option<String>,
 }
 
 /// Which messages of a folder a [`GmailMail::search`] asks for; every criterion given must
@@ -102,6 +100,11 @@ pub struct GmailQuery {
     pub from_uid: Option<u32>,
     /// Only messages that arrived on or after this day (`SINCE`).
     pub since: Option<time::Date>,
+    /// Only messages that arrived before this day (`BEFORE`).
+    pub before: Option<time::Date>,
+    /// Only messages carrying this label (`X-GM-LABELS`), named as IMAP names it: a system
+    /// label with a backslash (`\Sent`), one of the user's by its name.
+    pub label: Option<String>,
     /// Only messages Gmail's own search matches (`X-GM-RAW`), e.g. `category:social`.
     pub raw: Option<String>,
 }
@@ -119,6 +122,7 @@ struct Folders {
 pub struct GmailMail<S> {
     pool: Arc<ImapPool<S>>,
     folders: Arc<OnceCell<Folders>>,
+    subject: CredentialSubject,
 }
 
 impl<S> core::fmt::Debug for GmailMail<S> {
@@ -126,6 +130,8 @@ impl<S> core::fmt::Debug for GmailMail<S> {
         f.debug_struct("GmailMail")
             .field("pool", &self.pool)
             .field("folders", &self.folders.get())
+            // Says named or minted, never the name.
+            .field("subject", &self.subject)
             .finish()
     }
 }
@@ -135,16 +141,26 @@ impl<S> Clone for GmailMail<S> {
         Self {
             pool: Arc::clone(&self.pool),
             folders: Arc::clone(&self.folders),
+            subject: self.subject.clone(),
         }
     }
 }
 
 impl<S> GmailMail<S> {
-    pub(crate) fn new(pool: Arc<ImapPool<S>>) -> Self {
+    pub(crate) fn new(pool: Arc<ImapPool<S>>, subject: CredentialSubject) -> Self {
         Self {
             pool,
             folders: Arc::new(OnceCell::new()),
+            subject,
         }
+    }
+
+    /// Who the account signs in as: the [`subject`](engine_provider::CredentialSource::subject)
+    /// of the source its [`ImapConfig`](crate::ImapConfig) asks. A host pairing this with the
+    /// same account's Gmail API client checks by it that both sign in as the same subject.
+    #[must_use]
+    pub fn credential_subject(&self) -> &CredentialSubject {
+        &self.subject
     }
 }
 

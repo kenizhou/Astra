@@ -1,9 +1,9 @@
-//! Unit tests for the OAuth SASL mechanisms.
+//! Unit tests for the SASL responses: `PLAIN` and the two OAuth mechanisms.
 //!
-//! The two initial-response vectors are the ones the specifications publish, decoded
-//! and re-encoded byte for byte: RFC 7628 §4.1's `OAUTHBEARER` example and Google's
-//! `XOAUTH2` example. A hand-written expectation would only prove the code agrees with
-//! itself — these prove it agrees with the servers.
+//! The initial-response vectors are the ones the specifications publish, decoded and
+//! re-encoded byte for byte: RFC 4616 §4's two `PLAIN` examples, RFC 7628 §4.1's
+//! `OAUTHBEARER` example and Google's `XOAUTH2` example. A hand-written expectation would only
+//! prove the code agrees with itself — these prove it agrees with the servers.
 
 use super::*;
 
@@ -27,7 +27,7 @@ fn oauthbearer_builds_the_rfc_7628_initial_response() {
             Some(143),
         )
         .expect("clean credential");
-    assert_eq!(built, RFC7628_INITIAL);
+    assert_eq!(built.as_str(), RFC7628_INITIAL);
 }
 
 #[test]
@@ -41,7 +41,7 @@ fn xoauth2_builds_googles_initial_response() {
             Some(993),
         )
         .expect("clean credential");
-    assert_eq!(built, XOAUTH2_INITIAL);
+    assert_eq!(built.as_str(), XOAUTH2_INITIAL);
 }
 
 #[test]
@@ -66,25 +66,29 @@ fn a_credential_carrying_a_frame_byte_is_refused_before_encoding() {
     // line. Each is rejected on each component, on both mechanisms.
     for mechanism in [Mechanism::OAuthBearer, Mechanism::XOAuth2] {
         for hostile in ["a\x01b", "a\rb", "a\nb", "a\0b"] {
+            // A credential that cannot be presented, which the source gave: nothing is sent.
             assert!(
-                mechanism
-                    .initial_response(hostile, "tok", "h", Some(1))
-                    .is_err(),
+                matches!(
+                    mechanism.initial_response(hostile, "tok", "h", Some(1)),
+                    Err(ImapError::Credential(_))
+                ),
                 "{mechanism:?} accepted {hostile:?} as a username"
             );
             assert!(
-                mechanism
-                    .initial_response("u", hostile, "h", Some(1))
-                    .is_err(),
+                matches!(
+                    mechanism.initial_response("u", hostile, "h", Some(1)),
+                    Err(ImapError::Credential(_))
+                ),
                 "{mechanism:?} accepted {hostile:?} as a token"
             );
         }
         // The host reaches only the OAUTHBEARER blob, but it is screened either way so
         // the guard cannot rot if XOAUTH2 ever grows a field.
         assert!(
-            mechanism
-                .initial_response("u", "tok", "h\x01port=1", Some(1))
-                .is_err(),
+            matches!(
+                mechanism.initial_response("u", "tok", "h\x01port=1", Some(1)),
+                Err(ImapError::Protocol(_))
+            ),
             "{mechanism:?} accepted a forged host"
         );
     }
@@ -206,4 +210,64 @@ fn a_hostile_challenge_cannot_forge_a_log_line_or_grow_without_bound() {
     assert_eq!(describe_challenge("not base64!"), "not base64!");
     // An empty challenge contributes nothing.
     assert_eq!(describe_challenge("   "), "");
+}
+
+/// RFC 4616 §4's two examples, verbatim: `\0tim\0tanstaaftanstaaf` (no authorization identity)
+/// and `Ursel\0Kurt\0xipj3plmq` (Kurt signs in to act as Ursel).
+const RFC4616_PLAIN: &str = "AHRpbQB0YW5zdGFhZnRhbnN0YWFm";
+const RFC4616_PLAIN_AUTHZID: &str = "VXJzZWwAS3VydAB4aXBqM3BsbXE=";
+
+#[test]
+fn plain_builds_the_rfc_4616_responses_with_and_without_an_authorization_identity() {
+    let own = plain_response(None, "tim", "tanstaaftanstaaf").unwrap();
+    assert_eq!(own.as_str(), RFC4616_PLAIN);
+    let acting = plain_response(Some("Ursel"), "Kurt", "xipj3plmq").unwrap();
+    assert_eq!(acting.as_str(), RFC4616_PLAIN_AUTHZID);
+    // Built at its final length, so no grown buffer left a copy of the password behind.
+    assert_eq!(acting.capacity(), acting.len());
+}
+
+#[test]
+fn plain_refuses_a_nul_in_any_component_before_encoding() {
+    // NUL is PLAIN's field separator, so a component holding one would move the boundaries:
+    // `alice\0admin` as an authorization identity reads as an authentication identity too.
+    // Every other byte is the server's to judge (RFC 4616 §2: UTF8SAFE excludes only NUL).
+    for (authzid, username, password) in [
+        (Some("a\0b"), "u", "p"),
+        (None, "u\0x", "p"),
+        (None, "u", "p\0x"),
+    ] {
+        let Err(err) = plain_response(authzid, username, password) else {
+            panic!("a NUL in {authzid:?}/{username:?}/{password:?} was encoded");
+        };
+        assert!(matches!(err, ImapError::Credential(_)), "{err:?}");
+        assert!(!err.to_string().contains('\0'), "{err}");
+    }
+    // Bytes that frame the OAuth mechanisms are ordinary password bytes here.
+    assert!(plain_response(None, "u", "p\x01\r\n").is_ok());
+}
+
+/// The GS2 header names the account as a `saslname` (RFC 7628 §3.1, RFC 5801 §4), where `,` ends
+/// the field and `=` starts an escape: both are legal in a username, so they go escaped as `=2C`
+/// and `=3D`, never refused. `XOAUTH2` frames the name with `^A`, which the screen refuses, so it
+/// has no such split.
+#[test]
+fn oauthbearer_escapes_a_comma_and_an_equals_sign_in_the_username() {
+    let built = Mechanism::OAuthBearer
+        .initial_response("a,b=c@example.com", "tok", "h", None)
+        .expect("legal username");
+    let decoded = String::from_utf8(crate::base64::decode(built.as_str()).unwrap()).unwrap();
+    assert!(
+        decoded.starts_with("n,a=a=2Cb=3Dc@example.com,\u{1}"),
+        "{decoded:?}"
+    );
+
+    let built = Mechanism::XOAuth2
+        .initial_response("a,b=c@example.com", "tok", "h", None)
+        .expect("legal username");
+    let decoded = String::from_utf8(crate::base64::decode(built.as_str()).unwrap()).unwrap();
+    assert!(
+        decoded.starts_with("user=a,b=c@example.com\u{1}"),
+        "{decoded:?}"
+    );
 }

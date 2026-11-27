@@ -189,3 +189,46 @@ fn sent_copy_keywords_is_its_own_promise() {
     assert!(caps.sent_copy_keywords());
     assert!(!Capabilities::none().with_submission().sent_copy_keywords());
 }
+
+#[test]
+fn keeping_the_copy_s_keywords_after_the_send_is_its_own_promise() {
+    assert!(!Capabilities::none().sent_copy_keywords_deferred());
+    let caps = Capabilities::none()
+        .with_submission()
+        .with_sent_copy_keywords()
+        .with_sent_copy_keywords_deferred();
+    assert!(caps.sent_copy_keywords_deferred());
+    assert!(
+        !Capabilities::none()
+            .with_sent_copy_keywords()
+            .sent_copy_keywords_deferred(),
+        "keeping them is not the same promise as keeping them later"
+    );
+}
+
+#[test]
+fn keeping_a_draft_s_keywords_is_its_own_promise() {
+    assert!(!Capabilities::none().draft_keywords());
+    let caps = Capabilities::none()
+        .with_mail_drafts()
+        .with_draft_keywords();
+    assert!(caps.draft_keywords());
+    assert!(!Capabilities::none().with_mail_drafts().draft_keywords());
+    assert!(
+        !Capabilities::none()
+            .with_sent_copy_keywords()
+            .draft_keywords(),
+        "keeping them on a Sent copy is not keeping them on a draft"
+    );
+}
+
+#[test]
+fn a_role_on_create_is_its_own_promise_and_needs_folder_writes() {
+    let writes = Capabilities::none().with_mail().with_mailbox_writes();
+    assert!(writes.mailbox_writes());
+    assert!(!writes.mailbox_create_role());
+    assert!(writes.with_mailbox_create_role().mailbox_create_role());
+    // A role on create is a kind of folder write: without the writes it promises nothing.
+    let without_writes = Capabilities::none().with_mail().with_mailbox_create_role();
+    assert!(!without_writes.mailbox_create_role());
+}

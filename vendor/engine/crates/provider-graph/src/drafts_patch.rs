@@ -19,7 +19,8 @@ use serde_json::{Value, json};
 
 use crate::{error::GraphError, transport::GraphClient};
 
-/// Rewrites the draft `existing` names to match `draft`, returning its (unchanged) key.
+/// Rewrites the draft `existing` names to match `draft`, returning its (unchanged) key and the
+/// categories the `PATCH` answer says it carries.
 ///
 /// `Ok(None)` means this path does not apply and the caller should store a replacement
 /// instead: either `draft` carries something `PATCH` cannot express, or the stored
@@ -33,7 +34,7 @@ pub(crate) async fn patch_in_place(
     client: &GraphClient,
     draft: &Draft,
     existing: &ProviderKey,
-) -> Result<Option<ProviderKey>, GraphError> {
+) -> Result<Option<(ProviderKey, Option<Vec<String>>)>, GraphError> {
     // An iTIP part is a body part carrying `method=`, which no message-resource property
     // expresses; only the MIME assembler can write one.
     if draft.calendar.is_some() {
@@ -67,10 +68,12 @@ pub(crate) async fn patch_in_place(
     if stored_has_attachments || !draft.attachments.is_empty() {
         crate::drafts_attachments::reconcile(client, existing, draft).await?;
     }
-    Ok(Some(existing.clone()))
+    let held = crate::categories::held_categories(patched.as_ref());
+    Ok(Some((existing.clone(), held)))
 }
 
-/// The message-resource properties a saved draft rewrites.
+/// The message-resource properties a saved draft rewrites. `importance` is sent at normal too,
+/// for the reason the Bcc list is: a re-save that lowers it must take the old value off.
 fn body(draft: &Draft) -> Value {
     let (content_type, content) = draft.html_body.as_ref().map_or_else(
         || ("Text", draft.text_body.clone()),
@@ -85,6 +88,7 @@ fn body(draft: &Draft) -> Value {
         // Sent empty rather than omitted: a recipient the user removed has to come off
         // the stored draft, and `PATCH` leaves out what it is not told about.
         "bccRecipients": recipients(&draft.bcc),
+        "importance": draft.importance.as_str(),
     })
 }
 

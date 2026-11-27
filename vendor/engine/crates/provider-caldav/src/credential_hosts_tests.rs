@@ -1,5 +1,8 @@
 //! A host's credential policy over the live transport: discovery may lead the connection to
-//! another origin, and the credential goes there only when the policy permits that host.
+//! another origin, and the credential goes there only when the policy permits that host. The
+//! policy is deprecated in favour of `CredentialSource::permits` (`credential_source_tests.rs`),
+//! and these keep it working while hosts move.
+#![allow(deprecated)]
 
 use std::sync::Arc;
 
@@ -43,10 +46,17 @@ async fn trust_origin_refuses_a_host_the_policy_does_not_permit() {
     .expect("client")
     .with_credential_hosts(Some(Arc::new(Only("127.0.0.1"))));
 
-    assert!(client.trust_origin("http://127.0.0.1:1/principals/"));
     assert!(
-        !client.trust_origin("http://localhost:1/principals/"),
-        "a host outside the policy must not receive the credential"
+        client
+            .trust_origin("http://127.0.0.1:1/principals/")
+            .is_ok()
+    );
+    let refused = client
+        .trust_origin("http://localhost:1/principals/")
+        .expect_err("a host outside the policy must not receive the credential");
+    assert_eq!(
+        refused.into_error().credential_failure(),
+        Some(engine_provider::CredentialFailureKind::NotPermitted)
     );
 }
 
@@ -104,5 +114,9 @@ async fn without_a_policy_any_origin_the_server_leads_to_is_trusted() {
         &engine_http::test_server::user_agent(),
     )
     .expect("client");
-    assert!(client.trust_origin("http://localhost:1/principals/"));
+    assert!(
+        client
+            .trust_origin("http://localhost:1/principals/")
+            .is_ok()
+    );
 }

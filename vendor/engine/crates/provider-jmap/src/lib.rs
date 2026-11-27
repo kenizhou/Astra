@@ -11,12 +11,14 @@
 //! # Layers
 //!
 //! - `transport` — reqwest HTTP with auth and error mapping.
-//! - `request` — the `{ using, methodCalls }` envelope, `#id` back-references, and typed response
-//!   lookup.
-//! - `session` — the session resource: capabilities, account ids, limits, and the
-//!   [`SessionUrlPolicy`] for resolving advertised URLs.
-//! - [`JmapClient`] — connect + execute, the low-level handle the normalization and `Provider` impl
-//!   build on.
+//! - [`Request`], [`ResultRef`] and [`Response`] — the `{ using, methodCalls }` envelope, `#`
+//!   result references, and the answer looked up by [`CallId`].
+//! - [`Session`] — the session resource: capabilities, account ids ([`JmapAccountId`]), limits, the
+//!   blob and push URL templates, and the [`SessionUrlPolicy`] for resolving advertised URLs.
+//! - [`blob`] — the download and upload URLs, and a download read as a stream.
+//! - [`JmapClient`] — connect, execute, upload and download: the low-level handle the normalization
+//!   and `Provider` impl build on, public for a host that needs JMAP the [`JmapProvider`] does not
+//!   wrap (a server's extension, Sieve scripts).
 //!
 //! # Two real-world notes
 //!
@@ -31,9 +33,10 @@
 //!   blob sub-step. Calendar raw (`RawJsCalendar`) *is* preserved on the object
 //!   (`docs/agent-guidance/jmap.md`).
 
+mod adapter;
 mod auth;
 mod base64;
-mod blob;
+pub mod blob;
 mod blob_batch;
 mod calendar;
 mod calendar_conference;
@@ -50,11 +53,15 @@ mod contact_write;
 mod contact_write_fields;
 mod drafts;
 mod drafts_blobs;
+mod email_band;
+mod email_window;
 mod error;
 mod executor;
 mod fetch;
 mod fetch_scope;
 mod identity;
+#[cfg(feature = "import")]
+mod import;
 mod json;
 mod mail;
 mod mailbox_write;
@@ -64,34 +71,42 @@ mod provider;
 mod provider_calendar;
 mod report;
 mod request;
+mod response;
+mod rules;
+mod server_text;
 mod session;
 mod session_accounts;
 mod session_limits;
+mod session_sieve;
 mod session_urls;
 mod shared;
+mod sieve_scripts;
 mod submit;
 mod submit_body;
 mod sync_ops;
 mod transport;
+mod vacation;
+mod vacation_include;
 mod walk;
 mod watch;
 
 use core::fmt;
 
+pub use adapter::JmapProvider;
 pub use config::{Credentials, JmapConfig};
+use engine_core::ids::BlobId;
 use engine_http::Exchange;
 use engine_provider::{ConnectObserver, ConnectStep, IgnoreConnectSteps};
 pub use error::JmapError;
-pub use provider::JmapProvider;
+pub use request::{CallId, Request, ResultRef, capability};
 use reqwest::Url;
+pub use response::Response;
+pub use server_text::ServerText;
 pub use session::{CoreLimits, Session, SessionUrlPolicy};
+pub use session_accounts::JmapAccountId;
 pub use watch::{DEFAULT_EVENT_SOURCE_PING, JmapWatcher};
 
-use crate::{
-    request::{Request, Response},
-    session_urls::resolve_against,
-    transport::Transport,
-};
+use crate::{blob::BlobDownload, session_urls::resolve_against, transport::Transport};
 
 /// The maximum number of redirects followed while discovering the session
 /// resource (the well-known endpoint 307-redirects to the session URL).
@@ -99,9 +114,33 @@ const MAX_SESSION_REDIRECTS: usize = 5;
 
 /// A connected JMAP client: an authenticated transport plus the resolved session.
 ///
-/// Built with [`JmapClient::connect`], which fetches and resolves the session.
-/// Method execution (`execute`, crate-internal) is what the mail and
-/// calendar normalization build on.
+/// Built with [`JmapClient::connect`], which fetches and resolves the session. It runs a
+/// [`Request`] ([`execute`](Self::execute)) and moves blobs ([`upload`](Self::upload),
+/// [`download`](Self::download), [`download_stream`](Self::download_stream)), every request
+/// authenticated, inside the account's concurrency gate, and throttled as the shared HTTP funnel
+/// throttles (`docs/agent-guidance/http-throttling.md`). [`JmapProvider`] is built on it; a host
+/// reaches for it directly for the JMAP the provider does not wrap.
+///
+/// # Examples
+///
+/// ```no_run
+/// use provider_jmap::{Credentials, JmapClient, JmapConfig, Request, capability};
+/// use serde_json::json;
+///
+/// # async fn example(user_agent: engine_http::UserAgent) -> Result<(), provider_jmap::JmapError> {
+/// let config = JmapConfig::new(
+///     "https://jmap.example.com",
+///     Credentials::bearer("token"),
+///     user_agent,
+/// );
+/// let client = JmapClient::connect(config).await?;
+/// let account = client.session().mail_account_id()?;
+/// let mut request = Request::new([capability::CORE, capability::MAIL]);
+/// let query = request.invoke("Email/query", json!({ "accountId": account, "limit": 20 }));
+/// let response = client.execute(&request).await?;
+/// let ids = &response.result(&query)?["ids"];
+/// # Ok(()) }
+/// ```
 pub struct JmapClient {
     transport: Transport,
     session: Session,
@@ -115,10 +154,17 @@ impl JmapClient {
     /// Reports each step to [`JmapConfig::with_connect_observer`]'s observer, if one
     /// is configured.
     ///
+    /// Every request asks the config's credential source for its credential
+    /// ([`JmapConfig::from_credential_source`]): no credential goes over plaintext HTTP unless
+    /// the request and the configured base are both on loopback, and a `401` refusing the
+    /// credential is sent once more with the source's replacement, if it has one.
+    ///
     /// # Errors
     ///
     /// Returns [`JmapError`] on a bad base URL, a transport/HTTP failure, or a
-    /// malformed/incomplete session resource.
+    /// malformed/incomplete session resource; [`JmapError::Credential`] when the credential
+    /// could not be presented (an origin refused, the source failed or did not answer) or the
+    /// source failed to replace one the server refused.
     pub async fn connect(config: JmapConfig) -> Result<Self, JmapError> {
         let base = Url::parse(&config.base_url)
             .map_err(|e| JmapError::session(format!("bad base_url {:?}: {e}", config.base_url)))?;
@@ -127,7 +173,8 @@ impl JmapClient {
             .as_deref()
             .unwrap_or(&IgnoreConnectSteps);
         let transport = Transport::new(
-            config.credentials,
+            &base,
+            config.source,
             &config.tls,
             &config.retry,
             &config.user_agent,
@@ -185,14 +232,19 @@ impl JmapClient {
         self.transport.tls_version()
     }
 
-    /// Ships a batched request to the API endpoint and parses the response
-    /// envelope; `exchange` says whether it submits a message. Method-level errors
-    /// surface when a result is read ([`Response::result`]).
+    /// Sends `request` to the API endpoint and parses the answer. A method the server answered
+    /// with an error reads as one where its result is read ([`Response::result`]).
     ///
     /// # Errors
     ///
-    /// Returns [`JmapError`] on a transport/HTTP failure or a malformed response.
-    pub(crate) async fn execute(
+    /// [`JmapError`] on a transport or HTTP failure, or an answer that is not a JMAP response.
+    pub async fn execute(&self, request: &Request) -> Result<Response, JmapError> {
+        self.send(request, Exchange::Ordinary).await
+    }
+
+    /// [`execute`](Self::execute), where `exchange` says whether the request submits a message
+    /// (`crate::submit`).
+    pub(crate) async fn send(
         &self,
         request: &Request,
         exchange: Exchange<'_>,
@@ -204,32 +256,95 @@ impl JmapClient {
         Response::parse(&value)
     }
 
-    /// GETs raw bytes from an already-resolved blob-download `url` — the raw RFC
-    /// 5322 source behind a message's `blobId` (RFC 8620 §6.2). The `url` is a
-    /// fully-substituted download template (see `crate::fetch::message_source`).
+    /// Downloads the blob at `url`, whole: a URL [`blob::download_url`] built from this
+    /// session's template (RFC 8620 §6.2).
+    ///
+    /// For a blob too large to hold, [`download_stream`](Self::download_stream) reads it a piece
+    /// at a time.
     ///
     /// # Errors
     ///
-    /// Returns [`JmapError`] on a transport/HTTP failure or a non-success status.
-    pub(crate) async fn download(&self, url: &str) -> Result<Vec<u8>, JmapError> {
+    /// [`JmapError::Refused`] when `url` is not on the origin of the session's `downloadUrl`
+    /// (the account's credential goes nowhere else), [`JmapError::Session`] when the session
+    /// advertised none, and [`JmapError`] on a transport failure or a non-success status.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use engine_core::ids::BlobId;
+    /// use provider_jmap::{JmapClient, blob};
+    ///
+    /// # async fn example(client: &JmapClient, id: &BlobId) -> Result<(), Box<dyn std::error::Error>> {
+    /// let session = client.session();
+    /// let template = session.download_url().ok_or("no downloadUrl")?;
+    /// let account = session.mail_account_id()?;
+    /// let url = blob::download_url(template, account, id, "message/rfc822", "message.eml");
+    /// let bytes = client.download(&url).await?;
+    /// # Ok(()) }
+    /// ```
+    pub async fn download(&self, url: &str) -> Result<Vec<u8>, JmapError> {
+        on_advertised_origin(url, self.session.download_url(), "downloadUrl")?;
         self.transport.get_bytes(url).await
     }
 
-    /// Uploads raw `bytes` of `media_type` to an already-resolved blob-upload `url`
-    /// (the session `uploadUrl` with `{accountId}` substituted), returning the
-    /// server-assigned `blobId` (RFC 8620 §6.1) — a draft references it to attach a
-    /// part (`crate::submit`).
+    /// Starts downloading the blob at `url`, to be read a piece at a time, so a large blob is
+    /// never whole in memory. The URL is checked as [`download`](Self::download) checks it, and
+    /// the status before anything is returned.
     ///
     /// # Errors
     ///
-    /// Returns [`JmapError`] on a transport/HTTP failure, a non-success status, or an
-    /// upload response missing its `blobId`.
-    pub(crate) async fn upload(
+    /// As [`download`](Self::download).
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use provider_jmap::{JmapClient, JmapError};
+    ///
+    /// async fn copy(client: &JmapClient, url: &str, out: &mut Vec<u8>) -> Result<(), JmapError> {
+    ///     let mut blob = client.download_stream(url).await?;
+    ///     while let Some(chunk) = blob.next_chunk().await? {
+    ///         out.extend_from_slice(&chunk);
+    ///     }
+    ///     Ok(())
+    /// }
+    /// ```
+    pub async fn download_stream(&self, url: &str) -> Result<BlobDownload, JmapError> {
+        on_advertised_origin(url, self.session.download_url(), "downloadUrl")?;
+        Ok(BlobDownload::new(self.transport.get_streaming(url).await?))
+    }
+
+    /// Uploads `bytes` of `media_type` to `url` (a URL [`blob::upload_url`] built from this
+    /// session's template), and returns the id the server stored them under (RFC 8620 §6.1).
+    /// A later call references the blob by it: an `Email/import`, or an attachment in an
+    /// `Email/set`.
+    ///
+    /// # Errors
+    ///
+    /// [`JmapError::Refused`] when `url` is not on the origin of the session's `uploadUrl`,
+    /// [`JmapError::Session`] when the session advertised none, [`JmapError::Protocol`] when
+    /// the answer names no usable `blobId`, and [`JmapError`] on a transport failure or a
+    /// non-success status: a `429` here can be the server's upload quota, which clears only
+    /// when its oldest upload expires, and carries the server's `Retry-After`.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use provider_jmap::{JmapClient, blob};
+    ///
+    /// # async fn example(client: &JmapClient, raw: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    /// let session = client.session();
+    /// let template = session.upload_url().ok_or("no uploadUrl")?;
+    /// let url = blob::upload_url(template, session.mail_account_id()?);
+    /// let blob = client.upload(&url, "message/rfc822", raw).await?;
+    /// # Ok(()) }
+    /// ```
+    pub async fn upload(
         &self,
         url: &str,
         media_type: &str,
         bytes: &[u8],
-    ) -> Result<String, JmapError> {
+    ) -> Result<BlobId, JmapError> {
+        on_advertised_origin(url, self.session.upload_url(), "uploadUrl")?;
         let value = self
             .transport
             .post_bytes(url, media_type, bytes.to_vec())
@@ -237,8 +352,23 @@ impl JmapClient {
         value
             .get("blobId")
             .and_then(serde_json::Value::as_str)
-            .map(str::to_owned)
+            .and_then(|id| BlobId::try_from(id).ok())
             .ok_or_else(|| JmapError::protocol("upload response missing blobId"))
+    }
+}
+
+/// Refuses a blob request to anywhere but the origin of the session's `template`: the URL
+/// carries the account's credential, and the session is the only party that names where it may
+/// go.
+fn on_advertised_origin(url: &str, template: Option<&str>, which: &str) -> Result<(), JmapError> {
+    let template =
+        template.ok_or_else(|| JmapError::session(format!("server advertised no {which}")))?;
+    if engine_provider::same_origin(url, template) {
+        Ok(())
+    } else {
+        Err(JmapError::Refused(format!(
+            "a blob request goes only to the origin of the session's {which}"
+        )))
     }
 }
 
@@ -247,6 +377,17 @@ impl fmt::Debug for JmapClient {
         f.debug_struct("JmapClient")
             .field("api_url", &self.session.api_url())
             .finish_non_exhaustive()
+    }
+}
+
+/// Why a session redirect from `current` to `location` is not followed. Every one of these
+/// requests carries the account's credentials, so a hop off TLS that `redirect_target` cannot
+/// take over TLS is the credential refused where the server led it
+/// (`CredentialFailureKind::LedToInsecure`); any other is a `Location` that does not resolve.
+fn refused_redirect(current: &str, location: &str) -> JmapError {
+    match engine_provider::redirect_off_tls(current, location) {
+        Some(insecure) => JmapError::from(insecure),
+        None => JmapError::session(engine_provider::redirect_refused(location)),
     }
 }
 
@@ -285,10 +426,8 @@ async fn fetch_session(
                 .get(reqwest::header::LOCATION)
                 .and_then(|v| v.to_str().ok())
                 .ok_or_else(|| JmapError::session("redirect without Location"))?;
-            // Unparseable, or a hop off TLS that `redirect_target` cannot take over TLS: every
-            // one of these requests carries the account's credentials.
             let next = engine_provider::redirect_target(&url, location)
-                .ok_or_else(|| JmapError::session(engine_provider::redirect_refused(location)))?;
+                .ok_or_else(|| refused_redirect(&url, location))?;
             // Both sides resolved, so a host sees the hop it can actually replay —
             // not a bare `Location` path whose origin it would have to reconstruct.
             observer.step(&ConnectStep::redirected(&url, &next));
@@ -323,9 +462,12 @@ pub fn fuzz_parse(data: &[u8]) {
     let _ = mail::message_from_json(&value);
     let _ = calendar::calendar_from_json(&value);
     let _ = calendar::event_from_json(&value);
-    let _ = request::Response::parse(&value);
+    let _ = response::Response::parse(&value);
     let _ = sync_ops::Changes::parse(&value);
 }
+
+#[cfg(test)]
+mod credential_test_support;
 
 #[cfg(test)]
 mod process_kill_tests;

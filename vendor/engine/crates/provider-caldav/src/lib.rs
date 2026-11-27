@@ -43,14 +43,22 @@
 
 mod caldav_config;
 mod calendar;
+mod calendar_create;
+#[cfg(feature = "import")]
+mod calendar_import;
 mod carddav;
 mod carddav_config;
 mod carddav_ops;
+mod contact_create;
+#[cfg(feature = "import")]
+mod contact_import;
 mod credential_hosts;
 mod credential_scope;
 mod ctag_sync;
 mod dav;
 mod dav_client;
+#[cfg(feature = "import")]
+mod dav_import;
 mod delete_guard;
 mod discovery;
 mod error;
@@ -58,6 +66,9 @@ mod href;
 pub mod imip;
 mod multiget;
 mod owners;
+#[cfg(feature = "import")]
+mod precondition;
+mod presentation;
 mod provider;
 mod request;
 mod response;
@@ -74,6 +85,7 @@ mod vcard_escape;
 mod vcard_property;
 mod vcard_write;
 mod write;
+mod write_refusal;
 
 #[cfg(test)]
 mod bound_tests;
@@ -86,6 +98,10 @@ mod carddav_unit_tests;
 #[cfg(test)]
 mod carddav_write_tests;
 #[cfg(test)]
+mod credential_failure_tests;
+#[cfg(test)]
+mod credential_source_tests;
+#[cfg(test)]
 mod ctag_sync_tests;
 #[cfg(test)]
 mod delete_guard_tests;
@@ -94,6 +110,8 @@ mod discovery_start_tests;
 #[cfg(test)]
 mod double_encoding_tests;
 #[cfg(test)]
+mod new_event_id_tests;
+#[cfg(test)]
 mod vcard_tests;
 #[cfg(test)]
 mod write_outcome_tests;
@@ -101,6 +119,7 @@ mod write_outcome_tests;
 pub use caldav_config::CalDavConfig;
 pub use carddav::CardDavProvider;
 pub use carddav_config::CardDavConfig;
+#[allow(deprecated)]
 pub use credential_hosts::CredentialHosts;
 /// The product a host names in every request's `User-Agent`, required by both configs.
 pub use engine_http::UserAgent;

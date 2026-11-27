@@ -31,6 +31,7 @@ export STALWART_SMTP_ADDR=127.0.0.1:11025          # SMTP plaintext
 export STALWART_SMTP_TLS_ADDR=127.0.0.1:11465      # SMTP submission implicit-TLS
 export STALWART_IMAP_STARTTLS_ADDR=127.0.0.1:11143 # IMAP STARTTLS
 export STALWART_SMTP_STARTTLS_ADDR=127.0.0.1:11587 # SMTP submission STARTTLS
+export STALWART_MANAGESIEVE_ADDR=127.0.0.1:14190   # ManageSieve STARTTLS
 export STALWART_ACCOUNT=alice@test.local
 export STALWART_PASSWORD=harness-alice-pw
 cargo test -p stalwart-harness --test smoke --test smoke_shared_stores -- --nocapture
@@ -56,6 +57,7 @@ Without `STALWART_HTTP_ADDR` set, every Stalwart-touching test **skips**, so
 | IMAP                          | 993       | `11993` | implicit TLS (self-signed) |
 | IMAP                          | 143       | `11143` | STARTTLS (self-signed)     |
 | SMTP submission               | 587       | `11587` | STARTTLS (self-signed)     |
+| ManageSieve (RFC 5804)        | 4190      | `14190` | STARTTLS (self-signed)     |
 
 Stalwart supports STARTTLS on 143/587 but [recommends](https://stalw.art/docs/install/security/)
 implicit TLS (993/465), so a fresh bootstrap does not create these listeners; the
@@ -70,7 +72,7 @@ file since v0.16 — see the design doc).
 | ------------------- | ------------------ | ----------------------------- |
 | `alice@test.local`  | `harness-alice-pw` | primary; holds the whole seed (mail + calendar + contacts) |
 | `bob@test.local`    | `harness-bob-pw`   | scratch: SMTP recipient, and **organizer** in the scheduling suite |
-| `carol@test.local`  | `harness-carol-pw` | scratch: **attendee** in the scheduling suite |
+| `carol@test.local`  | `harness-carol-pw` | scratch: **attendee** in the scheduling suite; the live import suites' target |
 | `dave@test.local`   | `harness-dave-pw`  | shares one calendar with Alice, read-only, and nothing else |
 | `admin`             | `harness-admin-pw` | fallback admin (management)   |
 
@@ -85,7 +87,16 @@ per sender-domain→recipient otherwise breaks the scheduling suite after a few 
 does so silently — see the harness guidance doc. It raises the **anonymous HTTP rate limit**
 (`x:Http.rateLimitAnonymous`, 100/minute) too, logging `relaxed the anonymous HTTP rate
 limit`: readiness polls and the uncredentialed first request of each DAV connection spend it,
-and back-to-back runs used to exhaust it.
+and back-to-back runs used to exhaust it. And it raises the **per-account limits a migration
+meets**, logging `raised the per-account request and upload limits`: signed-in requests
+(`x:Http.rateLimitAuthenticated`, 1,000/minute), the JMAP upload quota
+(`x:Jmap.uploadQuota` / `maxUploadCount`, 50 MB or 1,000 blobs an hour) and IMAP commands
+(`x:Imap.rateLimit`, 2,000/minute), so a real-size mailbox can be copied into one account. It
+then asks the server to reload its settings (`ReloadSettings`), without which a written setting
+is stored but not enforced until the next restart. `provider-caldav`'s `live_concurrency`
+measures Stalwart's own request limit, so it sets the shipped value back for its run, for every
+account (run it under the harness lock), and raises it again after. If a killed run left it
+lowered, `docker compose restart` raises it again.
 
 ## Layout
 

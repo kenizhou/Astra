@@ -19,7 +19,7 @@ use engine_core::{
     sync::{SyncScope, SyncUpdate},
     time::TimeZoneId,
 };
-use engine_provider::Provider;
+use engine_provider::CalendarSync;
 use engine_recurrence::Horizon;
 use engine_store::{ManualClock, StoreRead, WorkerId};
 use engine_sync::sync_calendar;
@@ -317,6 +317,7 @@ async fn sabredav_storing_an_invitation_is_a_guarded_create() {
     };
     let _serial = common::serial_guard().await;
     common::imip::storing_an_invitation_is_a_guarded_create(&provider, &account).await;
+    common::imip::a_long_uid_is_stored_under_the_id_minted_for_it(&provider, &account).await;
 }
 
 /// SabreDAV accepts meetings created and edited through the neutral API, but this
@@ -437,4 +438,24 @@ async fn sabredav_a_meeting_goes_on_and_comes_off() {
     };
     let _serial = common::serial_guard().await;
     common::conference_write::a_meeting_goes_on_and_comes_off(&provider, &account).await;
+}
+
+/// Calendar import against SabreDAV (`common::import`), the server that stores a second object
+/// with a `UID` it holds: the importer's lookup is all that keeps a duplicate out here.
+#[cfg(feature = "import")]
+#[tokio::test]
+async fn sabredav_import_round_trip() {
+    let Some((addr, user, pass)) = harness() else {
+        eprintln!("skipping sabredav_import_round_trip: SABREDAV_HTTP_ADDR unset");
+        return;
+    };
+    let _serial = common::serial_guard().await;
+    let provider = connect(&addr, &user, &pass).await;
+    let account = AccountId::try_from("sabredav-import-live").unwrap();
+    let server = common::import::DavServer {
+        base: format!("http://{addr}"),
+        user,
+        pass,
+    };
+    common::import::import_round_trip(&provider, &account, &server).await;
 }

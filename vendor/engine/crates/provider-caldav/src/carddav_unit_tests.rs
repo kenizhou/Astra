@@ -1,14 +1,9 @@
-use engine_core::{
-    contact::{ContactCard, ContactEmail, ContactName, ContactProperty, PropertyId},
-    ids::{AddressBookId, ContactId},
-    membership::Memberships,
-};
 use engine_provider::{ContactsProvider, IgnoreConnectSteps, Provider};
 use engine_tls::TlsClientConfig;
 
 use crate::{
     CardDavConfig, CardDavProvider, Credentials,
-    carddav_ops::{bind_collection, decode_data_uri, discover_home, encode_segment, stable_suffix},
+    carddav_ops::{bind_collection, decode_data_uri, discover_home},
     test_support::{Replay, ok, options},
     transport::HttpResponse,
 };
@@ -49,24 +44,12 @@ fn collection_uri_and_stable_resource_helpers_cover_edge_input() {
             .as_str(),
         "/dav/books/alice/team/"
     );
-    assert_eq!(encode_segment("Ada + Zoë"), "Ada%20%2B%20Zo%C3%AB");
+    assert_eq!(
+        crate::href::resource_name("Ada + Zoë@example.test"),
+        "Ada%20%2B%20Zo%C3%AB@example.test"
+    );
     let report = crate::request::addressbook_multiget_report(&["/book/a&b.vcf".to_owned()]);
     assert!(report.contains("/book/a&amp;b.vcf"));
-
-    let book = AddressBookId::try_from("/book/").unwrap();
-    let mut card = ContactCard::new(
-        ContactId::try_from("/book/ada.vcf").unwrap(),
-        Memberships::of_one(book),
-    );
-    card.name = Some(ContactName {
-        full: Some("Ada".into()),
-        ..ContactName::default()
-    });
-    card.emails.insert(
-        PropertyId::new("email").unwrap(),
-        ContactProperty::new(ContactEmail::new("ada@example.test")),
-    );
-    assert!(stable_suffix(&card).starts_with("contact-"));
 
     assert_eq!(decode_data_uri("image/png;base64,AQID").unwrap(), [1, 2, 3]);
     assert!(decode_data_uri("image/png;base64").is_err());

@@ -7,7 +7,10 @@ use engine_core::{
 };
 
 use super::*;
-use crate::test_support::{fake_client, folder_routes, json, replay_server};
+use crate::test_support::{
+    FakeRoute, answered_folder_routes, fake_client, fake_client_fallible, folder_routes, json,
+    replay_server,
+};
 
 const SNAPSHOT: &str = include_str!("../tests/fixtures/mail/messages_delta_snapshot.json");
 const CHANGED: &str = include_str!("../tests/fixtures/mail/messages_delta_changed.json");
@@ -51,7 +54,9 @@ fn initial_delta_url_windows_by_received_datetime_only_when_since_is_set() {
 
 #[tokio::test]
 async fn folders_resolve_roles_by_id_and_null_root_parents() {
-    let mailboxes = folders(&fake_client(folder_routes())).await.unwrap();
+    let mailboxes = folders(&fake_client_fallible(folder_routes()))
+        .await
+        .unwrap();
     let parent = |name: &str| {
         mailboxes
             .iter()
@@ -82,7 +87,9 @@ async fn folders_walk_the_whole_tree_not_only_the_root() {
     // `/mailFolders` answers with one level. A folder nested under another is reachable
     // only through its parent's `childFolders`, and until the walk existed a Microsoft
     // account showed neither the folder nor one message in it.
-    let mailboxes = folders(&fake_client(folder_routes())).await.unwrap();
+    let mailboxes = folders(&fake_client_fallible(folder_routes()))
+        .await
+        .unwrap();
     let find = |name: &str| mailboxes.iter().find(|m| m.name == name).unwrap();
     // Eight top-level folders, plus the two the walk reached.
     assert_eq!(mailboxes.len(), 10);
@@ -116,13 +123,13 @@ async fn folders_drain_every_page_of_a_child_level() {
             "parentFolderId": "folder-archive"
         }]
     });
-    let mut routes: Vec<(&str, Value)> = folder_routes()
+    let mut routes: Vec<(&str, FakeRoute)> = folder_routes()
         .into_iter()
         .filter(|(key, _)| !key.contains("/folder-archive/childFolders"))
         .collect();
-    routes.push(("childFolders?$skiptoken=P2", page2));
-    routes.push(("/mailFolders/folder-archive/childFolders", page1));
-    let mailboxes = folders(&fake_client(routes)).await.unwrap();
+    routes.push(("childFolders?$skiptoken=P2", Ok(page2)));
+    routes.push(("/mailFolders/folder-archive/childFolders", Ok(page1)));
+    let mailboxes = folders(&fake_client_fallible(routes)).await.unwrap();
     assert!(mailboxes.iter().any(|m| m.name == "Child A"));
     assert!(mailboxes.iter().any(|m| m.name == "Child B"));
 }
@@ -140,12 +147,15 @@ async fn folders_leave_a_childless_folder_unasked() {
             "parentFolderId": "folder-root"
         }]
     });
-    let mut routes: Vec<(&str, Value)> = folder_routes()
+    let mut routes: Vec<(&str, FakeRoute)> = folder_routes()
         .into_iter()
         .filter(|(key, _)| !key.contains("childFolders") && *key != "/mailFolders?$top")
         .collect();
-    routes.push(("mailFolders?$top", list));
-    assert_eq!(folders(&fake_client(routes)).await.unwrap().len(), 1);
+    routes.push(("mailFolders?$top", Ok(list)));
+    assert_eq!(
+        folders(&fake_client_fallible(routes)).await.unwrap().len(),
+        1
+    );
 }
 
 #[tokio::test]
@@ -164,13 +174,13 @@ async fn folders_descend_when_a_payload_names_no_child_count() {
             "parentFolderId": "folder-a"
         }]
     });
-    let mut routes: Vec<(&str, Value)> = folder_routes()
+    let mut routes: Vec<(&str, FakeRoute)> = folder_routes()
         .into_iter()
         .filter(|(key, _)| !key.contains("childFolders") && *key != "/mailFolders?$top")
         .collect();
-    routes.push(("/mailFolders/folder-a/childFolders", children));
-    routes.push(("mailFolders?$top", list));
-    let mailboxes = folders(&fake_client(routes)).await.unwrap();
+    routes.push(("/mailFolders/folder-a/childFolders", Ok(children)));
+    routes.push(("mailFolders?$top", Ok(list)));
+    let mailboxes = folders(&fake_client_fallible(routes)).await.unwrap();
     assert!(mailboxes.iter().any(|m| m.name == "A child"));
 }
 
@@ -179,7 +189,9 @@ async fn folders_survive_a_child_count_that_names_only_hidden_folders() {
     // `childFolderCount` counts hidden children, which `childFolders` does not return,
     // so a folder can promise children and answer with an empty page (Conversation
     // History does exactly that). The pass carries on rather than failing.
-    let mailboxes = folders(&fake_client(folder_routes())).await.unwrap();
+    let mailboxes = folders(&fake_client_fallible(folder_routes()))
+        .await
+        .unwrap();
     assert!(mailboxes.iter().any(|m| m.name == "Gesprekgeschiedenis"));
 }
 
@@ -192,6 +204,7 @@ async fn snapshot_page_yields_full_objects_and_a_delta_cursor() {
         None,
         None,
         &[],
+        0,
     )
     .await
     .unwrap();
@@ -215,13 +228,13 @@ async fn snapshot_follows_nextlink_across_pages() {
         .unwrap_or(next);
     // Page 1 from the initial call; page 2 from following the real nextLink.
     let client = fake_client(vec![("messages/delta", p1.clone()), (next_path, p2)]);
-    let first = messages_page(&client, &inbox(), None, None, None, &[])
+    let first = messages_page(&client, &inbox(), None, None, None, &[], 0)
         .await
         .unwrap();
     assert_eq!(first.changed.len(), 1);
     // Following the real nextLink reaches page 2 — proving continuation works.
     let token = first.next_page.expect("a nextLink continuation");
-    let second = messages_page(&client, &inbox(), None, Some(&token), None, &[])
+    let second = messages_page(&client, &inbox(), None, Some(&token), None, &[], 0)
         .await
         .unwrap();
     assert_eq!(second.changed.len(), 1);
@@ -240,7 +253,7 @@ async fn a_lightweight_partial_resolves_to_state_and_removed_tombstones() {
             json(STATE),
         ),
     ]);
-    let page = messages_page(&client, &inbox(), Some(&cursor), None, None, &[])
+    let page = messages_page(&client, &inbox(), Some(&cursor), None, None, &[], 0)
         .await
         .unwrap();
     assert_eq!(page.kind, SyncKind::Delta);
@@ -279,7 +292,7 @@ async fn a_lightweight_partial_resolves_to_state_and_removed_tombstones() {
 
     // A removed entry → an inline tombstone, no re-fetch.
     let client = fake_client(vec![("delta-token-1", json(REMOVED))]);
-    let page = messages_page(&client, &inbox(), Some(&cursor), None, None, &[])
+    let page = messages_page(&client, &inbox(), Some(&cursor), None, None, &[], 0)
         .await
         .unwrap();
     assert_eq!(page.removed.len(), 1);
@@ -301,7 +314,7 @@ async fn a_snapshot_entry_without_an_etag_is_still_a_whole_message() {
         ("messages/delta", snapshot),
         ("/me/messages/", json(DETAIL)),
     ]);
-    let page = messages_page(&client, &inbox(), None, None, None, &[])
+    let page = messages_page(&client, &inbox(), None, None, None, &[], 0)
         .await
         .unwrap();
     assert_eq!(page.kind, SyncKind::Snapshot);
@@ -318,7 +331,7 @@ async fn incremental_delta_uses_a_full_changed_entry_without_refetch() {
     // "changed entries are full objects" common case.
     let cursor = SyncState::new("https://graph.test/me/mailFolders/folder-inbox/delta-token-1");
     let client = fake_client(vec![("delta-token-1", json(CHANGED_FULL))]);
-    let page = messages_page(&client, &inbox(), Some(&cursor), None, None, &[])
+    let page = messages_page(&client, &inbox(), Some(&cursor), None, None, &[], 0)
         .await
         .unwrap();
     assert_eq!(page.changed.len(), 1);
@@ -330,13 +343,13 @@ async fn incremental_delta_uses_a_full_changed_entry_without_refetch() {
 async fn a_response_without_a_value_array_is_a_protocol_error() {
     let client = fake_client(vec![("messages/delta", json(r#"{"unexpected":true}"#))]);
     assert!(
-        messages_page(&client, &inbox(), None, None, None, &[])
+        messages_page(&client, &inbox(), None, None, None, &[], 0)
             .await
             .is_err()
     );
     // An unrouted request surfaces the fake's error rather than hanging.
     assert!(
-        messages_page(&fake_client(vec![]), &inbox(), None, None, None, &[])
+        messages_page(&fake_client(vec![]), &inbox(), None, None, None, &[], 0)
             .await
             .is_err()
     );
@@ -363,21 +376,22 @@ async fn folders_drain_every_page_of_the_list() {
             "parentFolderId": "folder-root"
         }]
     });
-    let mut routes: Vec<(&str, Value)> = folder_routes()
+    let mut routes: Vec<(&str, FakeRoute)> = folder_routes()
         .into_iter()
         .filter(|(key, _)| *key != "/mailFolders?$top")
         .collect();
-    routes.push(("mailFolders?$top", page1));
-    routes.push(("skiptoken=PAGE2", page2));
-    let mailboxes = folders(&fake_client(routes)).await.unwrap();
+    routes.push(("mailFolders?$top", Ok(page1)));
+    routes.push(("skiptoken=PAGE2", Ok(page2)));
+    let mailboxes = folders(&fake_client_fallible(routes)).await.unwrap();
     assert_eq!(mailboxes.len(), 2);
 }
 
 #[tokio::test]
 async fn folders_skip_an_unprovisioned_well_known_alias() {
     // The `archive` alias is unrouted → the replay server 404s it → its role is
-    // skipped, and the rest of the folder list still syncs.
-    let routes: Vec<(&str, Value)> = folder_routes()
+    // skipped, and the rest of the folder list still syncs. The Sync Issues aliases are
+    // unrouted too, so they reach the real transport as a 404 as well.
+    let routes: Vec<(&str, Value)> = answered_folder_routes()
         .into_iter()
         .filter(|(key, _)| *key != "/mailFolders/archive")
         .collect();
@@ -403,18 +417,18 @@ async fn folders_address_a_shared_mailbox() {
     // The first request (msgfolderroot) is routed ONLY under the
     // /users/{address} prefix, so the whole folder sync succeeds only if the
     // principal roots the URLs there — proving a shared mailbox is reachable.
-    let mut routes: Vec<(&str, Value)> = folder_routes()
+    let mut routes: Vec<(&str, FakeRoute)> = folder_routes()
         .into_iter()
         .filter(|(key, _)| *key != "/mailFolders/msgfolderroot")
         .collect();
     routes.push((
         "/users/info@example.org/mailFolders/msgfolderroot",
-        json(include_str!(
+        Ok(json(include_str!(
             "../tests/fixtures/wellknown/msgfolderroot.json"
-        )),
+        ))),
     ));
-    let client =
-        fake_client(routes).with_principal(MailboxPrincipal::user("info@example.org").unwrap());
+    let client = fake_client_fallible(routes)
+        .with_principal(MailboxPrincipal::user("info@example.org").unwrap());
     assert!(folders(&client).await.is_ok());
 }
 
@@ -422,11 +436,11 @@ async fn folders_address_a_shared_mailbox() {
 async fn folders_propagate_a_non_404_alias_failure() {
     // A non-404 failure on an alias (here the fake's protocol error for an
     // unrouted alias) is propagated, not silently skipped like a 404.
-    let routes: Vec<(&str, Value)> = folder_routes()
+    let routes: Vec<(&str, FakeRoute)> = folder_routes()
         .into_iter()
         .filter(|(key, _)| *key != "/mailFolders/inbox")
         .collect();
-    assert!(folders(&fake_client(routes)).await.is_err());
+    assert!(folders(&fake_client_fallible(routes)).await.is_err());
 }
 
 #[tokio::test]
@@ -444,7 +458,7 @@ async fn delta_refetch_skips_a_message_that_404s() {
     let cursor = SyncState::new(
         "https://graph.microsoft.com/v1.0/me/mailFolders('inbox')/messages/delta?$deltatoken=x",
     );
-    let page = messages_page(&client, &inbox(), Some(&cursor), None, None, &[])
+    let page = messages_page(&client, &inbox(), Some(&cursor), None, None, &[], 0)
         .await
         .unwrap();
     assert_eq!(page.changed, []);
@@ -457,7 +471,7 @@ async fn delta_refetch_propagates_a_non_404_failure() {
     let cursor = SyncState::new("https://graph.test/me/mailFolders/folder-inbox/delta-token-1");
     let client = fake_client(vec![("delta-token-1", json(CHANGED))]);
     assert!(
-        messages_page(&client, &inbox(), Some(&cursor), None, None, &[])
+        messages_page(&client, &inbox(), Some(&cursor), None, None, &[], 0)
             .await
             .is_err()
     );

@@ -7,7 +7,7 @@
 use engine_core::{
     error::FailureClass,
     ids::{AccountId, MailboxId, MessageIdHeader},
-    mail::EmailAddress,
+    mail::{EmailAddress, MessageMetadata},
 };
 use engine_provider::{Draft, Provider};
 use serde_json::json;
@@ -50,7 +50,11 @@ async fn a_first_save_creates_the_message_and_returns_its_id() {
         Ok(json!({ "id": "AAMkAGnew" })),
     )]));
 
-    let key = p.put_draft(&account(), &draft(), None).await.unwrap();
+    let key = p
+        .put_draft(&account(), &draft(), None, &MessageMetadata::default())
+        .await
+        .unwrap()
+        .key;
 
     assert_eq!(key.as_str(), "AAMkAGnew");
 }
@@ -77,9 +81,15 @@ async fn a_replacement_that_cannot_purge_the_old_copy_is_still_saved() {
 
     let old = engine_core::ids::ProviderKey::new("AAMkAGold").unwrap();
     let key = p
-        .put_draft(&account(), &invitation, Some(&old))
+        .put_draft(
+            &account(),
+            &invitation,
+            Some(&old),
+            &MessageMetadata::default(),
+        )
         .await
-        .unwrap();
+        .unwrap()
+        .key;
 
     assert_eq!(key.as_str(), "AAMkAGnew");
 }
@@ -91,7 +101,10 @@ async fn a_create_that_returned_no_id_is_a_protocol_error() {
         Ok(json!({ "subject": "Hi" })),
     )]));
 
-    let err = p.put_draft(&account(), &draft(), None).await.unwrap_err();
+    let err = p
+        .put_draft(&account(), &draft(), None, &MessageMetadata::default())
+        .await
+        .unwrap_err();
 
     assert_eq!(err.class(), FailureClass::Permanent);
 }

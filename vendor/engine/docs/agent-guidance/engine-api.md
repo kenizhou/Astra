@@ -1,10 +1,13 @@
 # `engine-api` — the host facade
 
-`engine-api` is the stable, host-facing entry point to the engine (`north-star.md`:
-*"Host-facing APIs live behind `engine-api`."*). It is the **one composition
-point**: instead of wiring `engine-store`, `engine-sync`, the providers, a search
-layer, and a clock together, every host — mobile (UniFFI), desktop/daemon (the C
-ABI), the CLI, and server adapters — drives the engine through this crate.
+`engine-api` is the stable entry point for a **sync host** (`north-star.md` →
+"Hosts"): one that syncs a window into the engine's store and writes through the
+outbox. It is that host's **composition point**: instead of wiring `engine-store`,
+`engine-sync`, the providers, a search layer, and a clock together, a sync host —
+mobile (UniFFI), desktop/daemon (the C ABI), the CLI, or a server — drives the
+engine through this crate. It is a convenience, not a gate: any host may use the
+provider layer directly, as a transfer host always does, and a direct host gets
+its own store-less facade, `engine-direct` (planned).
 
 This doc is authoritative for the facade's shape and the order its slices land.
 Read it before touching `engine-api` or adding a binding/reference-host seam.
@@ -16,7 +19,10 @@ Read it before touching `engine-api` or adding a binding/reference-host seam.
 - Hosts call `Engine::open` / `open_in_memory`, then `sync_mail` / `sync_calendar`; build a mailbox
   list with `mail_window` (the projected rows a list renders, across any set of accounts
   in one ordered answer), complete its conversations with `mail_on_threads` and resolve
-  a named message with `mail_by_keys`; read `mailboxes` / `messages` /
+  a named message with `mail_by_keys`; read one mailbox's messages between two instants with
+  `mail_in_mailbox_between` (newest first, capped, with the oldest date the store holds for that
+  mailbox beside them, so a host can tell "nothing older exists here" from "nothing older was
+  synced"); read `mailboxes` / `messages` /
   `calendars` / `events` and `search_mail` / `search_calendar` (which now also
   matches fetched **body** text); open a message with `message_body` (fetch-on-demand;
   caches the raw bytes on disk and the extracted text in SQLite, so reopen is a fast
@@ -75,7 +81,18 @@ Read it before touching `engine-api` or adding a binding/reference-host seam.
   stored events over a new window with no network, and is also the path for a display-zone
   or tzdata change. Both it and `sync_calendar` report the events they could **not**
   expand (`unexpandable`): those materialize zero occurrences and so render nowhere, and
-  the host is expected to surface that rather than lose them silently.
+  the host is expected to surface that rather than lose them silently. A calendar another
+  pass holds is **waited for**, not answered `Busy`: the holder expands only what it changes,
+  so nothing else would widen it, and a host has nothing better to do than ask again.
+- **Fetch a further range with `reach_calendar`; expanding will not.** `expand_horizon`
+  re-derives what the store holds, and on a windowed transport (Graph, Google) the store holds
+  only the window the calendar's cursor was opened over: the host's horizon at the first sync.
+  A page past it would render its repeating series and lack its one-off events.
+  `reach_calendar(provider, account, range)` makes the store hold every event in `range` and
+  keeps them current: a range inside the recorded window asks nothing, and one past it reopens
+  the cursor over the union. It answers per calendar (`CalendarReach::failures`); a failed one
+  records nothing, so asking again fetches again. A host paging past its horizon calls both, in
+  either order, in coarse steps — each reopen re-reads the whole union.
 - **A provider key resolves to one *message*, not to one row.** The store's key is
   `(scope, key)`, and two of an account's mail scopes can hold the same key: a Microsoft
   Graph move keeps the message's immutable id and Graph mail sync is per folder, so between
@@ -128,8 +145,11 @@ Read it before touching `engine-api` or adding a binding/reference-host seam.
   `P: Provider`. A host that picks a concrete adapter at runtime can hold a
   `Box<dyn Provider>` and still call them: `engine-provider` provides a blanket
   `impl<P: Provider + ?Sized> Provider for Box<P>` that delegates every method to the
-  box's contents — kept there, not special-cased in `engine-api`. `ContactsProvider`
-  has the same blanket impl, and needs it for the same reason.)
+  box's contents — kept there, not special-cased in `engine-api`. `Provider`'s
+  supertraits (`CalendarSync`, `CalendarWrites`, `MailboxWrites`) and `ContactsProvider`
+  have the same blanket impl, and need it for the same reason. A host that wraps an
+  adapter in a `Provider` of its own implements each supertrait too, forwarding to the
+  inner adapter, or the wrapper answers with the rejecting defaults.)
 - **Host-config is hardcoded in this slice, by design (deferred seams).** An
   `Engine` stamps a fixed `WorkerId` (`"engine-api"`), uses a fixed `LEASE_TTL`
   (5 min — a generous safety bound, not a deadline; the sync loop re-claims and
@@ -147,10 +167,13 @@ Read it before touching `engine-api` or adding a binding/reference-host seam.
   parallel, but two of the *same* `(account, scope)` cannot both hold its lease: the
   store returns the retryable `ScopeHeld`, the sync loop surfaces it (it recovers
   only `StaleLease`), and the facade maps it to `ApiError::Busy` — a distinct,
-  retryable signal separate from `ApiError::Sync`. The facade does **not** itself
+  retryable signal separate from `ApiError::Sync`. A *sync* does **not** itself
   queue or auto-retry; a host serializes per account or retries on `Busy`. If a
   future slice wants transparent serialization, add a per-account async lock in the
-  facade — do not widen `run_scope` to swallow `ScopeHeld`.
+  facade — do not widen `run_scope` to swallow `ScopeHeld`. The calendar maintenance calls
+  are the exception, because the holder would not do their work: `expand_horizon` and
+  `reach_calendar` wait out a held scope (`store-and-sync.md` → "A held scope is waited for")
+  and never answer `Busy`.
 - **Abrupt process recovery is explicit.** A host that knows prior workers for the
   store are gone after process death can call `Engine::abandon_sync_leases` once at
   startup. It clears held scope leases and bumps their fencing tokens while
@@ -176,10 +199,11 @@ Read it before touching `engine-api` or adding a binding/reference-host seam.
   and `ApiError::is_shutting_down()` says so, so a host reports the process ending rather
   than a failed sync. Nothing ran and nothing was written; the next launch does the work.
 - **Re-export signature types.** Types that appear in the facade's own signatures
-  (`AccountId`, `TimeZoneId`, `Horizon`, the sync reports, `Provider`, and the
+  (`AccountId`, `MailboxId`, `TimeZoneId`, `Horizon`, the sync reports, `Provider`, and the
   streaming vocabulary — `StreamTuning`, `SyncObserver`, `SyncCommit`, `IgnoreCommits`,
-  `AccountProgress`, `ProgressSnapshot`, `SyncScope`, `SyncWindow`, `CalendarDate`) are
-  re-exported so a host depends on `engine-api` alone. The concrete provider still
+  `AccountProgress`, `ProgressSnapshot`, `SyncScope`, `SyncWindow`, `MailboxWindows`,
+  `CalendarDate`, and `MessageMetadata` and `RawMime` for a draft's save and a message's
+  source) are re-exported so a host depends on `engine-api` alone. The concrete provider still
   comes from the adapter crate.
 - **Display-side timezone resolution.** `resolve_instant` / `resolve_instant_in` /
   `is_supported_zone` (with `ExpandError`) are re-exported from `engine-recurrence`
@@ -207,8 +231,11 @@ Step 6 lands in small, tested slices. Order and status:
 3. **Writes / outbox — _done_.** `Engine::submit_mail` drives `engine-sync`'s outbox
    `submit_mail` (durable op → claim → provider send → record), returning a
    `SubmitOutcome` (sent key, `Message-ID`, op id, what became of the Sent copy and
-   which of the draft's `sent_copy_keywords` it carries; a provider that keeps a keyword only as
-   a named category needs a `KeywordName`, re-exported here); a failed send is recorded
+   what of the draft's `sent_copy_metadata` it carries; `Engine::put_draft` takes the metadata a
+   stored draft should carry and its `PutDraftOutcome` says which it does; a provider that keeps a
+   keyword only as a named category needs a `KeywordName`, re-exported here, and one that keeps them after the
+   send (`Capabilities::sent_copy_keywords_deferred`) reports none and has the outbox record a
+   `MailEdit::SetKeywords` a later `drain_outbox` applies); a failed send is recorded
    `Failed` / `NeedsConfirmation` *before* surfacing as `ApiError::Sync`, so the
    outbox never blind-retries. `Engine::pending_op_state` exposes
    `StoreRead::pending_op_state` for polling an op's lifecycle (e.g. confirming an
@@ -247,7 +274,9 @@ Step 6 lands in small, tested slices. Order and status:
    - **`put_calendar_document` can create, not only replace.** `EventWrite::creating(…)`
      asks the server to store the document **only if nothing is there** (`WritePrecondition::IfAbsent`),
      so putting an invitation that arrived as mail onto the calendar is a guarded create: a
-     resource that appeared in the meantime is a `Conflict`, never a silent overwrite. This
+     resource that appeared in the meantime is a `Conflict`, never a silent overwrite. The
+     address comes from `provider.new_event_id(calendar, uid)` (`CalendarWrites`), the
+     adapter's own naming rule, never a host's copy of it. This
      is the path for an inbound invitation because only the received raw document preserves
      its organiser, participant response states, sequence and extensions. `EventDraft::meeting`
      is instead the organiser-authored path for creating a new invitation.
@@ -296,13 +325,27 @@ Step 6 lands in small, tested slices. Order and status:
    `engine_http::RequestGate`, one per account (`http-throttling.md`).
 
    Each folder commits **chunk by chunk** under its own lease, reporting a `SyncCommit
-   { scope, fetched, total, upserted, removed }` after each committed chunk — so a UI
-   shows recent mail before the sync finishes **and** splices its list from the exact
-   rows without re-querying. An additive pass checkpoints the cursor per chunk, so a
+   { scope, fetched, total, upserted, removed, tombstoned, widening }` after each committed
+   chunk — so a UI shows recent mail before the sync finishes **and** splices its list from
+   the exact rows without re-querying. An additive pass checkpoints the cursor per chunk, so a
    mid-stream crash resumes where it stopped; a reconcile re-snapshot holds the cursor
    until its tombstoning final chunk (`store-and-sync.md`). `StreamTuning` sets the
    per-sync depth `window` and decouples the fetch batch (round trips) from the chunk
    size (commit granularity).
+
+   **Widening is the window, not a verb.** `sync_mail` with a wider `StreamTuning::within(..)`
+   widens: each scope whose recorded depth falls short runs its delta, then fetches only what
+   the wider window adds (a band, where the adapter can; a reopen over the new window where it
+   cannot), and a widening killed mid-way, band or reopen, is continued by the next sync. A host does **not** call
+   `clear_mail_cursors` to widen or to deepen a mailbox, and builds the window with
+   `SyncWindow::months_back(n, today)` rather than date arithmetic of its own. A commit of a
+   band carries `widening: true`, its `fetched`/`total` counting the band alone, and
+   `FolderSync::reached_window` says whether each folder's mail now reaches the window asked;
+   the depth is complete when every folder's is (`docs/design/windows-and-widening.md`, §7.1).
+   `clear_mail_cursors` stays for a forced re-snapshot, and for narrowing until the prune
+   lowers the recorded depth itself. **Rolling back** past this version needs no clear: the
+   widening record is written so an older engine reads the same covered depth and hands its
+   provider the same cursor (`StampedCursor`, `docs/design/windows-and-widening.md` §12).
 
    The observer also receives the pass's **lifecycle** — `account_sync_started(folders)`
    once the denominator is known, `folder_sync_finished` per folder, and
@@ -377,6 +420,13 @@ facade"*).
   `ApiError::item_unavailable()`: `true` only for a `ProviderError::item_unavailable`, an item
   the provider stored but can never serve, so a host may stop asking for it. Any other
   permanent failure may be about the account or the request, and says nothing about the item.
+  Whether no credential could be had, and why (`ProviderError::is_credential_failure` and
+  `credential_failure`, a `CredentialFailureKind`: the source failed or did not answer, the
+  credential would leave TLS on the configured address or where the server led it, the host's policy
+  refuses the origin, it cannot be presented in its form, or it names another account) is a provider
+  fact a host that drives adapters reads directly, for its reconnect rule and its wording; through
+  the facade it is reachable on the `ProviderError` inside `ApiError::Sync`, and the facade adds no
+  accessor for it until a host needs one.
   The one deliberate exception is `ScopeHeld`,
   which `map_sync_error` classifies as `ApiError::Busy` (a retryable race, not a
   failure) — classification, not restringing. Add similar classifications there if

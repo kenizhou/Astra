@@ -1,7 +1,7 @@
 //! Test-support harness for the deterministic Stalwart protocol fixture.
 //!
 //! This crate is the Rust side of the Stalwart Docker harness described in
-//! `docs/agent-guidance/stalwart-harness.md`. It does three things and nothing
+//! `docs/agent-guidance/stalwart-harness.md`. It does four things and nothing
 //! more:
 //!
 //! 1. **Discovery + gating.** [`Harness::from_env`] returns `Some` only when `STALWART_HTTP_ADDR`
@@ -14,13 +14,17 @@
 //!    smoke suite (`tests/smoke.rs`). They assert on content the harness controls (subjects,
 //!    `Message-ID`s, iCalendar UIDs, counts), never on server-assigned ids (JMAP id, IMAP UID, DAV
 //!    ETag).
+//! 4. **Settings.** [`Harness::settings`] and [`Harness::update_settings`] read and change the
+//!    server's own limits, for a suite that measures one the entrypoint raised.
 //!
 //! The deep protocol suites (JMAP `Email/changes`, IMAP `UIDVALIDITY`, …) are
 //! the provider clients' job in build-order steps 4–5; this crate only proves
 //! the fixture is up, reachable on every protocol, and seeded.
 
+mod dated_mail;
 mod http;
 mod imap;
+mod management;
 mod shared_stores;
 mod smtp;
 
@@ -28,6 +32,7 @@ use std::time::{Duration, Instant};
 
 pub use http::{HttpResponse, base64_encode};
 pub use imap::{ImapProbe, run_probe};
+pub use management::{RAISED_REQUESTS_PER_MINUTE, SHIPPED_REQUESTS_PER_MINUTE};
 pub use shared_stores::{
     CALENDAR_SHARE_OWNER, GROUP_CALENDAR_EVENT_UID, SHARED_CALENDAR_EVENT_UID,
     SHARED_CALENDAR_NAME, dav_propfind,
@@ -300,11 +305,20 @@ impl Harness {
     /// Returns [`HarnessError::Protocol`] on a non-200 status and
     /// [`HarnessError::Json`] if the body is not valid JSON.
     pub fn jmap_session(&self) -> Result<serde_json::Value, HarnessError> {
+        self.jmap_session_as(self.auth())
+    }
+
+    /// The JMAP session resource as `auth` — any account, not only the seeded one.
+    ///
+    /// # Errors
+    /// Returns [`HarnessError::Protocol`] on a non-200 status and
+    /// [`HarnessError::Json`] if the body is not valid JSON.
+    pub fn jmap_session_as(&self, auth: (&str, &str)) -> Result<serde_json::Value, HarnessError> {
         let resp = http::request(
             &self.http_addr,
             "GET",
             "/jmap/session",
-            Some(self.auth()),
+            Some(auth),
             &[],
             &[],
         )?;
@@ -400,14 +414,7 @@ impl Harness {
     /// # Errors
     /// Propagates transport/parse failures from the HTTP probe.
     pub fn jmap_post(&self, body: &[u8]) -> Result<HttpResponse, HarnessError> {
-        http::request(
-            &self.http_addr,
-            "POST",
-            "/jmap/",
-            Some(self.auth()),
-            &[("Content-Type", "application/json")],
-            body,
-        )
+        self.jmap_post_as(self.auth(), body)
     }
 }
 

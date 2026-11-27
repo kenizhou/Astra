@@ -17,11 +17,14 @@
 //! outcome travelling up *is* the diagnostic. What it must never do is fail the send: the
 //! mail is already gone, and a caller that treated filing as delivery would re-send it.
 
-use engine_core::ids::ProviderKey;
+use std::collections::HashSet;
+
+use engine_core::{ids::ProviderKey, mail::MessageMetadata};
 use engine_provider::{
-    Draft, HandOver, HandedOver, ProviderError, ProviderResult, SubmissionReceipt,
+    CredentialProtocol, Draft, HandOver, HandedOver, ProviderError, ProviderResult,
+    SubmissionReceipt,
 };
-use engine_rfc5322::assemble_filed_message;
+use engine_rfc5322::{assemble_filed_message, assemble_message};
 use time::OffsetDateTime;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
@@ -31,7 +34,7 @@ use tokio_rustls::{TlsConnector, client::TlsStream, rustls::pki_types::ServerNam
 
 pub(crate) use crate::smtp_sender::{SmtpSender, resolve_smtp};
 use crate::{
-    credentials::with_renewal,
+    credentials::{submit_as, with_credential},
     deadline,
     error::{ImapError, ImapResult},
     place::{Filing, Placed, append_to_role_folder, place_if_absent, placed_key},
@@ -39,8 +42,23 @@ use crate::{
     smtp::{self, Disposition, SmtpResult},
     smtp_auth::SmtpAuth,
     transport::Connection,
-    wrap::Submission,
 };
+
+/// Everything derived from a draft once, shared by the wire send and the filed copy —
+/// so a STARTTLS send (which negotiates before transmitting) and a plaintext/implicit
+/// one run identical preparation and filing around the differing transmit step.
+struct Submission {
+    /// One timestamp for both the transmitted and filed copy (they differ only in Bcc).
+    now: OffsetDateTime,
+    /// The over-the-wire message — **without** the `Bcc` header.
+    message: Vec<u8>,
+    /// Envelope `MAIL FROM` address.
+    from: String,
+    /// De-duplicated envelope `RCPT TO` list (To + Cc + Bcc).
+    to: Vec<String>,
+    /// The `EHLO` identity (the sender's domain).
+    ehlo: String,
+}
 
 impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static> ImapProvider<S> {
     /// Submits `draft` over the provider's configured SMTP transport, opening a fresh
@@ -61,28 +79,25 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static> ImapProvider<S> 
             .smtp
             .as_deref()
             .ok_or_else(|| ProviderError::invalid_state("no SMTP transport configured"))?;
-        // Preparation is hoisted above the transport match so a wrapper's refusal
-        // lands BEFORE any socket dials (the plaintext arm dialled first when this
-        // ran inside `submit_over`), and always before `hand_over.commit()`: a
-        // refused send never reaches the server, whichever transport it would have
-        // taken.
-        let sub = crate::wrap::prepare_submission(draft, self.mime_wrapper.as_ref()).await?;
-        let prepared = &sub;
         match sender {
             SmtpSender::Plaintext { addr } => {
                 let tcp = deadline::connect(addr).await?;
-                self.submit_over(tcp, prepared, draft, None, hand_over)
-                    .await
+                self.submit_over(tcp, draft, None, hand_over).await
             }
-            // An `AUTH` refusal comes before `MAIL FROM`, so nothing was sent when the
-            // renewal re-dials: a send is never repeated (`with_renewal`).
+            // An `AUTH` refusal comes before `MAIL FROM`, so nothing was sent when a
+            // replacement re-dials: a send is never repeated (`with_credential`).
             SmtpSender::ImplicitTls {
                 addr,
                 server_name,
                 connector,
                 credentials,
+                origin,
             } => {
-                let result = with_renewal(credentials.as_ref(), |credentials| async move {
+                let sub = Self::prepare(draft)?;
+                let prepared = &sub;
+                let (source, smtp) = (credentials.as_ref(), CredentialProtocol::Smtp);
+                let result = with_credential(source, smtp, origin, |credentials| async move {
+                    submit_as(&credentials)?;
                     let tcp = deadline::connect(addr).await?;
                     let tls = tls_connect(connector, server_name, tcp).await?;
                     let (ehlo, from, to) = (&prepared.ehlo, &prepared.from, &prepared.to);
@@ -97,8 +112,13 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static> ImapProvider<S> 
                 server_name,
                 connector,
                 credentials,
+                origin,
             } => {
-                let result = with_renewal(credentials.as_ref(), |credentials| async move {
+                let sub = Self::prepare(draft)?;
+                let prepared = &sub;
+                let (source, smtp) = (credentials.as_ref(), CredentialProtocol::Smtp);
+                let result = with_credential(source, smtp, origin, |credentials| async move {
+                    submit_as(&credentials)?;
                     let tcp = deadline::connect(addr).await?;
                     // Cleartext STARTTLS handshake, then upgrade the socket and transmit
                     // (authenticating) over the now-established TLS.
@@ -126,7 +146,6 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static> ImapProvider<S> 
     pub(crate) async fn submit_over<W>(
         &self,
         smtp: W,
-        sub: &crate::wrap::Submission,
         draft: &Draft,
         auth: Option<SmtpAuth<'_>>,
         hand_over: &HandOver<'_>,
@@ -134,9 +153,45 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static> ImapProvider<S> 
     where
         W: AsyncRead + AsyncWrite + Unpin + Send,
     {
+        let sub = Self::prepare(draft)?;
         let (ehlo, from, to) = (&sub.ehlo, &sub.from, &sub.to);
         let result = smtp::send(smtp, ehlo, from, to, &sub.message, auth, hand_over).await?;
-        self.file_result(result, sub, draft, hand_over).await
+        self.file_result(result, &sub, draft, hand_over).await
+    }
+
+    /// Derives the [`Submission`] (wire message, envelope, EHLO identity) from `draft`.
+    fn prepare(draft: &Draft) -> ProviderResult<Submission> {
+        // One timestamp for both the transmitted and the filed copy, so they differ ONLY in
+        // the Bcc header.
+        let now = OffsetDateTime::now_utc();
+        // The over-the-wire message OMITS the Bcc header — Bcc recipients are reached via the
+        // envelope only, so no recipient can see them.
+        let message = assemble_message(draft, now)?;
+        let from = draft.from.email.as_str();
+        // Every envelope recipient gets a `RCPT TO`: To + Cc + Bcc, de-duplicated
+        // case-insensitively (the same address can appear in more than one field — e.g. To and
+        // Cc) so a strict server never rejects a repeated `RCPT`. Bcc is delivered here but not
+        // in the wire message's headers, so it stays hidden from the other recipients.
+        let mut seen: HashSet<String> = HashSet::new();
+        let to: Vec<String> = draft
+            .to
+            .iter()
+            .chain(&draft.cc)
+            .chain(&draft.bcc)
+            .filter(|address| seen.insert(address.email.to_ascii_lowercase()))
+            .map(|address| address.email.clone())
+            .collect();
+        let ehlo = from
+            .rsplit_once('@')
+            .map_or("localhost", |(_, domain)| domain)
+            .to_owned();
+        Ok(Submission {
+            now,
+            message,
+            from: from.to_owned(),
+            to,
+            ehlo,
+        })
     }
 
     /// Classifies the send's disposition, then (on delivery) files the Sent copy and
@@ -170,13 +225,12 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static> ImapProvider<S> 
 
         // The filed Sent copy INCLUDES the Bcc header (it is APPENDed locally, never
         // transmitted), so the sender's Sent folder records whom they Bcc'd — Outlook/
-        // Thunderbird behavior. A wrapped send takes the wrapper's own filed output;
-        // a plain one keeps the old rule (identical to the wire message when there's no
-        // Bcc, so only re-assemble then).
-        let filed = match &sub.filed {
-            Some(wrapped) => wrapped.clone(),
-            None if draft.bcc.is_empty() => sub.message.clone(),
-            None => assemble_filed_message(draft, sub.now)?,
+        // Thunderbird behavior. Identical to the wire message when there's no Bcc, so only
+        // re-assemble then.
+        let filed = if draft.bcc.is_empty() {
+            sub.message.clone()
+        } else {
+            assemble_filed_message(draft, sub.now)?
         };
         // The Sent folder is resolved by its `\Sent` SPECIAL-USE role (falling back to
         // the conventional "Sent"), so the copy lands in the account's real Sent
@@ -192,7 +246,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static> ImapProvider<S> 
                 draft.message_id.clone(),
                 &handed_over,
             )
-            .with_sent_copy_keywords(placed.keywords)),
+            .with_sent_copy_kept(placed.kept)),
             // Delivered, but the copy is not in Sent and no later sync can find it — there
             // is nothing on the server to reconcile against. Never an `Err`: the message
             // has reached its recipients, and a caller that saw a failure here would
@@ -233,7 +287,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static> ImapProvider<S> 
                         &store,
                         Filing::Sent,
                         filed,
-                        &draft.sent_copy_keywords,
+                        &draft.sent_copy_metadata,
                     )
                     .await
                 }
@@ -285,14 +339,14 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static> ImapProvider<S> 
         draft: &Draft,
     ) -> ProviderResult<Placed> {
         let store = self.store_on(connection).await?;
-        let keywords = &draft.sent_copy_keywords;
+        let asked = &draft.sent_copy_metadata;
         place_if_absent(
             connection,
             &store,
             Filing::Sent,
             &draft.message_id,
             filed,
-            keywords,
+            asked,
         )
         .await
     }
@@ -312,13 +366,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static> ImapProvider<S> 
     /// A classified [`ProviderError`] if neither a pooled connection nor one proved alive for
     /// the retry could file it. The caller may offer the retry again.
     pub(crate) async fn refile(&self, draft: &Draft) -> ProviderResult<ProviderKey> {
-        // The filed copy keeps the Bcc header, exactly as the original filing would
-        // have — and when the account's MIME wrapper is installed and the draft asks,
-        // the repair WRAPS TOO (the same helper the send path uses): an `Unfiled`
-        // crypto send must never re-file a plaintext copy of a ciphertext message.
-        let now = OffsetDateTime::now_utc();
-        let prepared = crate::wrap::prepare_message(draft, now, self.mime_wrapper.as_ref()).await?;
-        let filed = crate::wrap::filed_bytes(draft, now, &prepared)?;
+        // The filed copy keeps the Bcc header, exactly as the original filing would have.
+        let filed = assemble_filed_message(draft, OffsetDateTime::now_utc())?;
         let first = match self.session().await {
             Ok(mut connection) => {
                 let result = self
@@ -354,7 +403,15 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static> ImapProvider<S> 
         let mut connection = self.session().await?;
         let result = async {
             let store = self.store_on(&mut connection).await?;
-            crate::drafts::put_draft(&mut connection, &store, draft, None).await
+            let saved = crate::drafts::put_draft(
+                &mut connection,
+                &store,
+                draft,
+                None,
+                &MessageMetadata::default(),
+            )
+            .await?;
+            Ok(saved.key)
         }
         .await;
         connection.settle(result)
@@ -383,6 +440,10 @@ mod tests;
 #[cfg(test)]
 #[path = "filing_smtp_server_tests.rs"]
 pub(crate) mod smtp_server_tests;
+
+#[cfg(test)]
+#[path = "filing_credential_tests.rs"]
+mod credential_tests;
 
 // The Sent-copy retry needs a real dial (a mock stream cannot express "this session is dead,
 // open another"), so its in-process IMAP + SMTP servers live in their own file.

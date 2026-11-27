@@ -2,11 +2,11 @@
 //! into the engine's generic calendar sync.
 //!
 //! One `CalDavProvider` serves **every calendar** under the calendar home its discovery
-//! found: [`sync_calendars`](Provider::sync_calendars) lists them under the per-account
+//! found: [`sync_calendars`](CalendarSync::sync_calendars) lists them under the per-account
 //! [`DavCollectionList`](engine_core::sync::SyncScope::DavCollectionList) container scope,
 //! each with the collection tag the same `PROPFIND` reads, and each calendar's events sync
 //! under its own [`DavCollection`](engine_core::sync::SyncScope::DavCollection) scope
-//! ([`event_scope`](Provider::event_scope)). The collection list is re-snapshotted each pass
+//! ([`event_scope`](CalendarSync::event_scope)). The collection list is re-snapshotted each pass
 //! (no list cursor), exactly as IMAP re-`LIST`s its folders. A create lands in the calendar
 //! its draft names. The provider advertises
 //! [`Capabilities::calendars`] **and** [`Capabilities::calendar_writes`] — it both
@@ -20,18 +20,17 @@ use engine_core::{
     sync::{SyncScope, SyncState, SyncUpdate},
 };
 use engine_provider::{
-    CalendarListing, CalendarUserAddresses, CalendarWrites, Capabilities, ConnectObserver,
-    ConnectStep, ConnectionInfo, EventDeletion, EventDraft, EventEdit, EventRsvp, EventWrite,
-    EventWriteReceipt, IgnoreConnectSteps, OverrideSurvival, Provider, ProviderResult,
+    CalendarListing, CalendarSync, CalendarUserAddresses, CalendarWrites, Capabilities,
+    ConnectObserver, ConnectStep, ConnectionInfo, EventDeletion, EventDraft, EventEdit, EventRsvp,
+    EventWrite, EventWriteReceipt, IgnoreConnectSteps, OverrideSurvival, Provider, ProviderResult,
     RsvpControls, ScopeSync, SharedAccount, SharedAccounts, WriteGuard,
 };
 
 use crate::{
     caldav_config::CalDavConfig,
-    credential_hosts::refuse_unpermitted_base,
     discovery,
     error::CalDavError,
-    href::{collection_href, encode_path_segment},
+    href::{collection_href, resource_name},
     multiget::Multigets,
     transport::{DavClient, DavExecutor},
 };
@@ -83,6 +82,13 @@ pub struct CalDavProvider {
     user: Option<String>,
     /// Each foreign owner principal's address, once read (`crate::owners`).
     owners: crate::owners::Owners,
+    /// Whether an import can be promised silent here (`calendar_importer`): the server
+    /// advertises scheduling, or the principal has nothing to schedule with.
+    #[cfg_attr(
+        not(feature = "import"),
+        expect(dead_code, reason = "read by the import accessor alone")
+    )]
+    silent_import: bool,
     multigets: Multigets,
 }
 
@@ -110,10 +116,9 @@ impl CalDavProvider {
             .connect_observer
             .as_deref()
             .unwrap_or(&IgnoreConnectSteps);
-        refuse_unpermitted_base(config.credential_hosts.as_ref(), &config.base_url)?;
-        let client = DavClient::new(
+        let client = DavClient::from_source(
             &config.base_url,
-            config.credentials,
+            config.source,
             &config.tls,
             &config.retry,
             &config.user_agent,
@@ -194,7 +199,22 @@ impl CalDavProvider {
             user: home.user,
             owners: crate::owners::Owners::default(),
             multigets: Multigets::default(),
+            // RFC 6638 §7.1 binds a server that schedules (and so advertises it) to honour
+            // `SCHEDULE-AGENT=CLIENT`; a principal with no scheduling inbox or outbox on a server
+            // that advertises nothing has nothing to send with. Anything else is unknown.
+            silent_import: scheduling || home.scheduling_collections == Some(false),
         })
+    }
+
+    /// The transport, for the verbs implemented beside this file (`calendar_create`,
+    /// `calendar_import`).
+    pub(crate) fn executor(&self) -> &dyn DavExecutor {
+        self.executor.as_ref()
+    }
+
+    /// The calendar home every calendar of this provider is under.
+    pub(crate) fn home(&self) -> &str {
+        &self.home_href
     }
 
     /// Whether this provider opens a store shared with the credential rather than its own.
@@ -218,13 +238,15 @@ impl CalDavProvider {
     /// `<collection>/<uid>.ics`, the universal CalDAV convention (RFC 4791 §5.3.2 lets the
     /// client choose the resource name). `calendar` is the href the listing gave it. The
     /// `uid` is percent-encoded as a single path segment, so an unusual `UID` still yields a
-    /// valid href.
+    /// valid href, and a `UID` too long to be a name is named by its hash
+    /// (`href::resource_name`).
     ///
     /// [`create_event`](CalendarWrites::create_event) mints this itself, so a host does not need
     /// it — a create states an [`EventDraft`] and learns the resulting id from the receipt.
     /// It stays public for the operations that address a resource *before* it has been
     /// synced: pre-cleaning a throwaway event, or the iMIP RSVP path
-    /// ([`imip`](crate::imip)). A patch or delete of a synced event reuses its stored
+    /// ([`imip`](crate::imip)). A host holding a `dyn Provider` asks the same rule through
+    /// [`CalendarWrites::new_event_id`]. A patch or delete of a synced event reuses its stored
     /// [`Event::id`](engine_core::calendar::Event::id).
     ///
     /// # Errors
@@ -234,7 +256,7 @@ impl CalDavProvider {
         let href = format!(
             "{}{}.ics",
             collection_href(calendar.as_str())?,
-            encode_path_segment(uid.as_str())
+            resource_name(uid.as_str())
         );
         EventId::try_from(href.as_str())
             .map_err(|e| CalDavError::protocol(format!("bad event href {href:?}: {e}")))
@@ -254,6 +276,38 @@ impl Provider for CalDavProvider {
         }
     }
 
+    /// The other principals' calendar homes the credential may read (`crate::shared`): the
+    /// same answer whichever store this provider is bound to, since it starts from the
+    /// credential's own principal.
+    async fn list_shared_accounts(&self) -> ProviderResult<Vec<SharedAccount>> {
+        let Some(user) = &self.user else {
+            return Err(engine_provider::ProviderError::invalid_state(
+                "the server named no principal to look for shared calendars from",
+            ));
+        };
+        Ok(crate::shared::list(self.executor.as_ref(), user).await?)
+    }
+
+    /// CalDAV imports events with a `PUT` that tells nobody (`crate::calendar_import`), offered
+    /// where that is known: the server advertises `calendar-auto-schedule`, which RFC 6638 §7.1
+    /// binds to leave a `SCHEDULE-AGENT=CLIENT` party to the client (proven live on Stalwart, and
+    /// in the transfer host's spike on SabreDAV and Nextcloud with scheduling), or it advertises
+    /// no scheduling and the principal has no scheduling inbox or outbox, so nothing can be sent.
+    /// A principal with those collections on a server that does not advertise scheduling may
+    /// schedule without saying so, and gets `None` (`docs/spec-deviations.md`).
+    #[cfg(feature = "import")]
+    fn calendar_importer(&self) -> Option<&dyn engine_provider::import::CalendarImporter> {
+        self.silent_import.then_some(self)
+    }
+
+    /// CalDAV creates calendars with `MKCALENDAR` (`crate::calendar_create`).
+    fn calendar_collections(&self) -> Option<&dyn engine_provider::CalendarCollections> {
+        Some(self)
+    }
+}
+
+#[async_trait]
+impl CalendarSync for CalDavProvider {
     fn calendar_scope(&self, account: &AccountId) -> SyncScope {
         SyncScope::DavCollectionList {
             account: account.clone(),
@@ -306,7 +360,9 @@ impl Provider for CalDavProvider {
         _account: &AccountId,
         calendar: &CalendarId,
         cursor: Option<&SyncState>,
+        _window: engine_core::time::Horizon,
     ) -> ProviderResult<ScopeSync<Event>> {
+        // `sync-collection` reports the calendar whole, so there is no window to open over.
         Ok(crate::sync::sync_events(
             self.executor.as_ref(),
             &self.multigets,
@@ -315,18 +371,6 @@ impl Provider for CalDavProvider {
             cursor,
         )
         .await?)
-    }
-
-    /// The other principals' calendar homes the credential may read (`crate::shared`): the
-    /// same answer whichever store this provider is bound to, since it starts from the
-    /// credential's own principal.
-    async fn list_shared_accounts(&self) -> ProviderResult<Vec<SharedAccount>> {
-        let Some(user) = &self.user else {
-            return Err(engine_provider::ProviderError::invalid_state(
-                "the server named no principal to look for shared calendars from",
-            ));
-        };
-        Ok(crate::shared::list(self.executor.as_ref(), user).await?)
     }
 }
 impl engine_provider::MailboxWrites for CalDavProvider {}
@@ -342,7 +386,9 @@ impl CalendarWrites for CalDavProvider {
     ) -> ProviderResult<EventWriteReceipt> {
         engine_provider::refuse_native_conference(draft.conference.as_ref())?;
         let href = self.event_href(&draft.calendar, &draft.uid)?;
-        Ok(crate::write::create_event(self.executor.as_ref(), href, draft).await?)
+        crate::write::create_event(self.executor.as_ref(), href, draft)
+            .await
+            .map_err(CalDavError::into_write_error)
     }
 
     async fn patch_event(
@@ -365,7 +411,14 @@ impl CalendarWrites for CalDavProvider {
         _account: &AccountId,
         write: &EventWrite,
     ) -> ProviderResult<EventWriteReceipt> {
-        Ok(crate::write::put_event(self.executor.as_ref(), write).await?)
+        crate::write::put_event(self.executor.as_ref(), write)
+            .await
+            .map_err(CalDavError::into_write_error)
+    }
+
+    /// [`event_href`](CalDavProvider::event_href), the rule every create here uses.
+    fn new_event_id(&self, calendar: &CalendarId, uid: &Uid) -> ProviderResult<EventId> {
+        Ok(self.event_href(calendar, uid)?)
     }
 
     async fn rsvp_event(

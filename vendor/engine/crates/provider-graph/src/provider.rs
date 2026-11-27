@@ -15,17 +15,17 @@ use async_trait::async_trait;
 use engine_core::{
     error::FailureClass,
     ids::{AccountId, MailboxId, ProviderKey},
-    mail::{Mailbox, Message},
+    mail::{Mailbox, Message, MessageMetadata},
     raw::RawMime,
-    sync::{SyncScope, SyncState, SyncUpdate, SyncWindow},
+    sync::{MailboxWindows, SyncScope, SyncState, SyncUpdate, SyncWindow},
     time::CalendarDate,
 };
 use engine_provider::{
-    CalendarWrites, Capabilities, ConnectionInfo, Draft, EmailChunk, EmailStream, IdentityControls,
-    KeywordName, MailEdit, MailEditReceipt, MailboxEdit, MailboxEditReceipt, MailboxWrites,
-    PageToken, PassMode, Provider, ProviderResult, ReportControls, ReportEvidence, ReportVerdicts,
-    ScopeSync, SenderIdentity, SharedAccount, SharedAccounts, SubmissionReceipt, SyncKind,
-    split_page,
+    CalendarSync, CalendarWrites, Capabilities, ConnectionInfo, Draft, DraftReceipt, EmailChunk,
+    EmailStream, IdentityControls, KeywordName, MailEdit, MailEditReceipt, MailboxEdit,
+    MailboxEditReceipt, MailboxWrites, PageToken, PassMode, Provider, ProviderResult,
+    ReportControls, ReportEvidence, ReportVerdicts, ScopeSync, SenderIdentity, SharedAccount,
+    SharedAccounts, SubmissionReceipt, SyncKind, split_page,
 };
 
 use crate::{categories::Categories, fetch, transport::GraphClient};
@@ -38,8 +38,8 @@ const FOLDER_LIST_CURSOR: &str = "graph-folders";
 ///
 /// Construct one with [`GraphProvider::new`] from a connected
 /// [`GraphClient`](crate::GraphClient) and the folder to bind. It advertises mail
-/// read/sync, mutating writes (mark-read/flag, move, delete), and submission; calendar
-/// is a separate provider.
+/// read/sync, a message's source, mutating writes (mark-read/flag, move, delete), and
+/// submission; calendar is a separate provider.
 pub struct GraphProvider {
     client: GraphClient,
     folder: MailboxId,
@@ -78,6 +78,8 @@ impl GraphProvider {
             capabilities: Capabilities::none()
                 .with_mail()
                 .with_mail_writes()
+                // A message's whole RFC 5322 source, from `/messages/{id}/$value` (`crate::fetch`).
+                .with_message_source()
                 // Create, rename, move, trash and delete a folder (`crate::mailbox_write`).
                 .with_mailbox_writes()
                 // A draft is created from the same MIME `/sendMail` takes, into the
@@ -123,17 +125,29 @@ impl GraphProvider {
     /// Keeps each of `names`' keywords as an Outlook category under one of its names.
     ///
     /// Graph stores no free-form keyword, so a keyword a draft asks for on its filed copy
-    /// ([`Draft::sent_copy_keywords`]) is kept only when it has a name here, and sync reports
+    /// ([`Draft::sent_copy_metadata`]) is kept only when it has a name here, and sync reports
     /// a message carrying any of a keyword's names as carrying the keyword. With at least one
     /// name, the adapter advertises
-    /// [`sent_copy_keywords`](Capabilities::sent_copy_keywords).
+    /// [`sent_copy_keywords`](Capabilities::sent_copy_keywords), kept after the send rather
+    /// than within it ([`sent_copy_keywords_deferred`](Capabilities::sent_copy_keywords_deferred)),
+    /// and a [`MailEdit::SetKeywords`] can set or clear such a keyword on any message. A stored
+    /// draft keeps them the same way ([`draft_keywords`](Capabilities::draft_keywords)).
     #[must_use]
     pub fn with_keyword_names(mut self, names: Vec<KeywordName>) -> Self {
         if !names.is_empty() {
-            self.capabilities = self.capabilities.with_sent_copy_keywords();
+            self.capabilities = self
+                .capabilities
+                .with_sent_copy_keywords()
+                .with_sent_copy_keywords_deferred()
+                .with_draft_keywords();
         }
         self.categories = Categories::new(names);
         self
+    }
+
+    /// The client every request goes through.
+    pub(crate) fn client(&self) -> &GraphClient {
+        &self.client
     }
 }
 
@@ -225,18 +239,18 @@ impl Provider for GraphProvider {
         &'a self,
         _account: &'a AccountId,
         cursor: Option<&'a SyncState>,
-        window: SyncWindow,
-        // Graph consumer `messages/delta` page size is server-controlled (`graph.md`),
-        // so the fetch-batch knob has no lever here; each server page is drained whole.
-        _fetch_batch: usize,
+        window: MailboxWindows,
+        // Asked for as each delta page's `odata.maxpagesize` (`fetch::page_size_prefer`).
+        fetch_batch: usize,
         chunk_size: usize,
     ) -> EmailStream<'a> {
         // A sync-depth window bounds a snapshot via a `receivedDateTime` `$filter`. A
         // delta cannot carry one (the `deltaLink` is opaque), so a message moved into the
         // folder is reported however old it is; the engine drops it on apply
         // (`SyncWindow::admits`), which is where the delta's bound holds for every adapter.
-        // The snapshot's bound is this `$filter`, and is not re-checked there.
-        let floor = window.floor();
+        // The snapshot's bound is this `$filter`, and is not re-checked there. The bound folder
+        // fetches under its own window.
+        let floor = window.window_for(&self.folder).floor();
         Box::pin(async_stream::try_stream! {
             // Each Graph page is fetched whole over HTTP and re-chunked for incremental
             // commit; intermediate chunks hold the cursor and a final marker advances it
@@ -254,6 +268,7 @@ impl Provider for GraphProvider {
                     page_token.as_ref(),
                     floor,
                     self.categories.names(),
+                    fetch_batch,
                 )
                 .await
                 {
@@ -340,22 +355,27 @@ impl Provider for GraphProvider {
         draft: &Draft,
         hand_over: &engine_provider::HandOver<'_>,
     ) -> ProviderResult<SubmissionReceipt> {
-        crate::submit::send(&self.client, draft, &self.categories, hand_over).await
+        crate::submit::send(&self.client, draft, hand_over).await
     }
 
     /// Applies a [`MailEdit`] to an already-synced message: mark-read/flag (a `PATCH` of
     /// `isRead`/`flag`), move (`POST …/move`), or permanent delete (`POST …/permanentDelete`).
     ///
-    /// Stores a draft (`POST /me/messages` in MIME format), removing the message it
-    /// supersedes. Graph has no MIME update, so a re-save creates and deletes, and the
-    /// key moves (`crate::drafts`).
+    /// Stores a draft (`POST /me/messages` in MIME format, or a `PATCH` of the stored one;
+    /// `crate::drafts`), then sets its keywords as categories (`crate::categories`).
     async fn put_draft(
         &self,
         _account: &AccountId,
         draft: &Draft,
         replacing: Option<&ProviderKey>,
-    ) -> ProviderResult<ProviderKey> {
-        crate::drafts::put_draft(&self.client, draft, replacing).await
+        metadata: &MessageMetadata,
+    ) -> ProviderResult<DraftReceipt> {
+        let (key, held) = crate::drafts::put_draft(&self.client, draft, replacing).await?;
+        let kept = (self.categories)
+            .keep_on_draft(&self.client, &key, held, &metadata.keywords)
+            .await;
+        // Graph stamps a draft's arrival time itself, so only the keywords are kept.
+        Ok(DraftReceipt::stored(key).with_kept(MessageMetadata::default().with_keywords(kept)))
     }
 
     /// Removes a stored draft (`DELETE /me/messages/{id}`), reporting one that is already
@@ -372,7 +392,7 @@ impl Provider for GraphProvider {
         _account: &AccountId,
         edit: &MailEdit,
     ) -> ProviderResult<MailEditReceipt> {
-        crate::mutate::edit_mail(&self.client, edit).await
+        crate::mutate::edit_mail(&self.client, &self.categories, edit).await
     }
 
     async fn sender_identities(&self, _account: &AccountId) -> ProviderResult<Vec<SenderIdentity>> {
@@ -394,7 +414,20 @@ impl Provider for GraphProvider {
     async fn resolve_shared_account(&self, address: &str) -> ProviderResult<SharedAccount> {
         crate::shared::resolve(&self.client, address).await
     }
+
+    /// The inbox rules (`crate::rules`), on every Graph mailbox: whether the credential may read
+    /// them is known only by asking, and a `403` says it may not.
+    fn mail_rules(&self) -> Option<&dyn engine_provider::MailRules> {
+        Some(self)
+    }
+
+    /// The automatic replies (`crate::vacation`), as for the rules.
+    fn vacation(&self) -> Option<&dyn engine_provider::Vacation> {
+        Some(self)
+    }
 }
+
+impl CalendarSync for GraphProvider {}
 
 /// Folder changes are account-level, like submission: any of an account's folder-bound
 /// providers can make one (`crate::mailbox_write`).
@@ -405,6 +438,9 @@ impl MailboxWrites for GraphProvider {
         _account: &AccountId,
         edit: &MailboxEdit,
     ) -> ProviderResult<MailboxEditReceipt> {
+        // No create gives a folder a role here (`crate::mailbox_write`); the capability says so,
+        // and the gate is that capability.
+        edit.role_as(&self.connection_info().capabilities, |_| None)?;
         crate::mailbox_write::edit_mailbox(&self.client, edit).await
     }
 }

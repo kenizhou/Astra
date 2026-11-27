@@ -19,8 +19,8 @@ use std::{
 
 use engine_core::ids::{MailboxId, SharedAccountId};
 use engine_provider::{
-    Capabilities, ConnectionInfo, MimeWrapper, ProviderResult, ReportControls, ReportEvidence,
-    ReportVerdicts, SharedAccounts, TlsVersion,
+    Capabilities, ConnectionInfo, CredentialSubject, ProviderResult, ReportControls,
+    ReportEvidence, ReportVerdicts, SharedAccounts, TlsVersion,
 };
 use tokio::{
     io::{AsyncRead, AsyncWrite},
@@ -31,11 +31,13 @@ use tokio_rustls::{TlsConnector, client::TlsStream};
 use crate::{
     capability::Extension,
     config::ImapConfig,
+    credentials::PresentedIdentity,
     dial::connect_session,
     error::ImapError,
     filing::{SmtpSender, resolve_smtp},
     gmail::GmailMail,
-    pool::{DEFAULT_MAX_CONNECTIONS, Dial, ImapPool, VALIDATE_AFTER_REST},
+    managesieve::Sieve,
+    pool::{DEFAULT_MAX_CONNECTIONS, Dial, ImapPool, VALIDATE_AFTER_REST, other::Budget},
     provider::ImapProvider,
     store::Namespaces,
     transport::Connection,
@@ -53,10 +55,6 @@ pub struct ImapAccount<S> {
     pool: Arc<ImapPool<S>>,
     /// Shared by every provider this account binds; each send dials its own SMTP connection.
     smtp: Option<Arc<SmtpSender>>,
-    /// The host-installed MIME wrapper every folder's submissions consult when a
-    /// draft asks for crypto ([`engine_provider::Draft::sign`],
-    /// [`engine_provider::Draft::encrypt`]); `None` sends plainly.
-    mime_wrapper: Option<Arc<dyn MimeWrapper>>,
     /// The sync-depth floor from `ImapConfig::with_since`, handed to every provider.
     since: Option<time::Date>,
     /// The capabilities and TLS version the first connection negotiated. Every connection in
@@ -70,6 +68,11 @@ pub struct ImapAccount<S> {
     namespaces: Arc<OnceLock<Namespaces>>,
     /// Whether the session advertised Gmail's `X-GM-EXT-1` (`crate::gmail`).
     gmail: bool,
+    /// The account's rules and reply over ManageSieve, where configured and answering
+    /// (`crate::managesieve::reach`).
+    sieve: Option<Arc<dyn Sieve>>,
+    /// Who the account's source signs in as, which every connection in the pool presents.
+    pub(crate) subject: CredentialSubject,
 }
 
 impl<S> core::fmt::Debug for ImapAccount<S> {
@@ -85,9 +88,12 @@ impl<S> core::fmt::Debug for ImapAccount<S> {
 
 impl ImapAccount<TlsStream<TcpStream>> {
     /// Connects over TLS (implicit or STARTTLS, per the config) and authenticates with the
-    /// [`Credentials`](crate::Credentials) the config's source gives, a password or an OAuth
-    /// 2.0 access token, proving them and reading the server's capabilities. The connection is kept
-    /// for the first folder that needs one.
+    /// [`Credential`](engine_provider::Credential) the config's source gives: a password, an
+    /// OAuth 2.0 access token, or an administrator's password acting as another account
+    /// ([`Credential::ActingAs`](engine_provider::Credential::ActingAs), read its warning
+    /// first). This proves the credential and reads the server's capabilities, and the
+    /// connection is kept for the first folder that needs one. Every later connection the
+    /// account opens must sign in as the same account, the one whose mailbox this one opened.
     ///
     /// The `connector` carries the host's trust policy — the library never bakes in a root
     /// store, so a mobile host (or the self-signed test fixture) injects its own
@@ -103,35 +109,78 @@ impl ImapAccount<TlsStream<TcpStream>> {
             .smtp
             .as_ref()
             .map(|settings| resolve_smtp(settings, &connector, config));
-        let (connection, tls_version) = connect_session(config, &connector).await?;
-        let dial = dial_tls(config.clone(), connector);
-        Ok(Self::build(
-            connection,
-            dial,
-            smtp,
-            config.mime_wrapper.clone(),
-            config.since,
-            tls_version,
-        ))
+        // One identity for every connection the account opens, the first included.
+        let presented = Arc::new(PresentedIdentity::default());
+        // ManageSieve is probed alongside the mail, under its own deadline, so it adds at most
+        // that to the connect (`crate::managesieve::reach`).
+        let (mail, probed) = match &config.managesieve {
+            None => (connect_session(config, &presented, &connector).await, None),
+            Some(endpoint) => {
+                // Boxed, so the two side by side do not make every caller's future large.
+                let (mail, probed) = tokio::join!(
+                    Box::pin(connect_session(config, &presented, &connector)),
+                    Box::pin(crate::managesieve::probe(endpoint, &connector))
+                );
+                (mail, Some(probed))
+            }
+        };
+        let (connection, tls_version) = mail?;
+        let sieve_slot = Arc::new(OnceLock::new());
+        let dial = dial_tls(
+            config.clone(),
+            presented,
+            connector.clone(),
+            Arc::clone(&sieve_slot),
+        );
+        let subject = config.credentials.subject().clone();
+        let mut account = Self::build(connection, dial, smtp, config.since, tls_version, subject);
+        let budget = Arc::clone(&account.pool) as Arc<dyn Budget>;
+        if let Some(sieve) =
+            probed.and_then(|probed| crate::managesieve::reach(config, &connector, budget, probed))
+        {
+            let _ = sieve_slot.set(Arc::clone(&sieve));
+            account.sieve = Some(sieve);
+        }
+        Ok(account)
     }
 }
 
 /// The pool's dial for a live account: the same TCP, TLS and authentication sequence as the
 /// first connection, from the same config. Each dial asks the config's
 /// [`CredentialSource`](crate::CredentialSource) afresh, so a connection opened an hour after
-/// [`ImapAccount::connect`] presents a token that is valid then.
-fn dial_tls(config: ImapConfig, connector: TlsConnector) -> Dial<TlsStream<TcpStream>> {
+/// [`ImapAccount::connect`] presents a token that is valid then, and every one signs in as the
+/// account the first connection signed in as (`presented`). Where the account's ManageSieve
+/// service wants another probe (after a failure that may pass, or [`ImapAccount::invalidate`]),
+/// the dial runs it alongside (`crate::managesieve::reprobe`).
+fn dial_tls(
+    config: ImapConfig,
+    presented: Arc<PresentedIdentity>,
+    connector: TlsConnector,
+    sieve: SieveSlot,
+) -> Dial<TlsStream<TcpStream>> {
     let config = Arc::new(config);
     Arc::new(move || {
         let config = Arc::clone(&config);
+        let presented = Arc::clone(&presented);
         let connector = connector.clone();
+        let sieve = Arc::clone(&sieve);
         Box::pin(async move {
-            connect_session(&config, &connector)
-                .await
-                .map(|(connection, _tls_version)| connection)
+            let dial = connect_session(&config, &presented, &connector);
+            Box::pin(crate::managesieve::reprobe(
+                sieve.get().map(Arc::as_ref),
+                &config,
+                &connector,
+                dial,
+            ))
+            .await
+            .map(|(connection, _tls_version)| connection)
         })
     })
 }
+
+/// The account's ManageSieve service, set once the account's first connection is up, for the
+/// dials after it to probe again where it wants that.
+type SieveSlot = Arc<OnceLock<Arc<crate::managesieve::service::ManageSieve<TlsStream<TcpStream>>>>>;
 
 impl<S> ImapAccount<S> {
     /// Builds an account around its first `connection`, advertising submission iff SMTP is
@@ -141,9 +190,9 @@ impl<S> ImapAccount<S> {
         connection: Connection<S>,
         dial: Dial<S>,
         smtp: Option<SmtpSender>,
-        mime_wrapper: Option<Arc<dyn MimeWrapper>>,
         since: Option<time::Date>,
         tls_version: Option<TlsVersion>,
+        subject: CredentialSubject,
     ) -> Self {
         let capabilities = capabilities(&connection, smtp.is_some());
         let gmail = connection.negotiated.has(Extension::XGmExt1);
@@ -152,7 +201,6 @@ impl<S> ImapAccount<S> {
         Self {
             pool,
             smtp: smtp.map(Arc::new),
-            mime_wrapper,
             since,
             connection_info: ConnectionInfo {
                 tls_version,
@@ -161,6 +209,8 @@ impl<S> ImapAccount<S> {
             shared_account: None,
             namespaces: Arc::new(OnceLock::new()),
             gmail,
+            sieve: None,
+            subject,
         }
     }
 
@@ -168,19 +218,6 @@ impl<S> ImapAccount<S> {
     /// second: once the one connection is spent, a call fails the way it would with no network.
     #[cfg(test)]
     pub(crate) fn offline(connection: Connection<S>, smtp: Option<SmtpSender>) -> Self
-    where
-        S: 'static,
-    {
-        Self::offline_wrapped(connection, smtp, None)
-    }
-
-    /// [`offline`](Self::offline), with a MIME wrapper installed for the wrap-seam tests.
-    #[cfg(test)]
-    pub(crate) fn offline_wrapped(
-        connection: Connection<S>,
-        smtp: Option<SmtpSender>,
-        mime_wrapper: Option<Arc<dyn MimeWrapper>>,
-    ) -> Self
     where
         S: 'static,
     {
@@ -192,7 +229,12 @@ impl<S> ImapAccount<S> {
                 )))
             })
         });
-        Self::build(connection, dial, smtp, mime_wrapper, None, None)
+        // A subject of its own, as a fixed credential has.
+        let fixed = engine_provider::FixedCredential::unique(engine_provider::Credential::bearer(
+            "offline",
+        ));
+        let subject = engine_provider::CredentialSource::subject(&fixed).clone();
+        Self::build(connection, dial, smtp, None, None, subject)
     }
 
     /// The same account, covering a mail store shared **with** the credential rather than the
@@ -215,12 +257,13 @@ impl<S> ImapAccount<S> {
         Self {
             pool: Arc::clone(&self.pool),
             smtp: self.smtp.clone(),
-            mime_wrapper: self.mime_wrapper.clone(),
             since: self.since,
             connection_info: self.connection_info,
             shared_account: Some(handle),
             namespaces: Arc::clone(&self.namespaces),
             gmail: self.gmail,
+            sieve: self.sieve.clone(),
+            subject: self.subject.clone(),
         }
     }
 
@@ -230,7 +273,7 @@ impl<S> ImapAccount<S> {
     #[must_use]
     pub fn gmail(&self) -> Option<GmailMail<S>> {
         (self.gmail && self.shared_account.is_none())
-            .then(|| GmailMail::new(Arc::clone(&self.pool)))
+            .then(|| GmailMail::new(Arc::clone(&self.pool), self.subject.clone()))
     }
 
     /// A provider bound to `mailbox` for its email scope, drawing its connections from this
@@ -241,12 +284,13 @@ impl<S> ImapAccount<S> {
             Arc::clone(&self.pool),
             mailbox,
             self.smtp.clone(),
-            self.mime_wrapper.clone(),
             self.since,
             self.connection_info,
             self.shared_account.clone(),
             Arc::clone(&self.namespaces),
         )
+        // A shared mail store's rules are its owner's, not this login's.
+        .with_sieve(self.sieve.clone().filter(|_| self.shared_account.is_none()))
     }
 
     /// How many more folders this account can watch before a watch would take the last
@@ -263,6 +307,10 @@ impl<S> ImapAccount<S> {
     /// watches are untouched, and fail on their own when their socket does.
     pub fn invalidate(&self) {
         self.pool.invalidate();
+        // A new network may reach a ManageSieve service the old one did not, or not reach it.
+        if let Some(sieve) = &self.sieve {
+            sieve.want_probe();
+        }
     }
 }
 
@@ -303,8 +351,8 @@ fn capabilities<S>(connection: &Connection<S>, smtp: bool) -> Capabilities {
         .with_mail()
         .with_mail_writes()
         // All three registered keywords are expressible; whether the *server* stores them is a
-        // per-mailbox fact (`\*` in `PERMANENTFLAGS`) that only a `SELECT` can answer, so the
-        // report path checks it per call and refuses rather than writing a flag the server
+        // per-mailbox fact (`PERMANENTFLAGS`, `crate::permanent`) that only a `SELECT` can answer,
+        // so the report path checks it per call and refuses rather than writing a flag the server
         // discards (`crate::report`). The evidence is `Convention`: IMAP has no way to say
         // whether anything trained on the keyword.
         .with_mail_report(ReportControls {
@@ -315,8 +363,14 @@ fn capabilities<S>(connection: &Connection<S>, smtp: bool) -> Capabilities {
         // Storing a draft is an `APPEND`, so it needs nothing submission needs: an account with
         // no SMTP transport configured can still keep drafts.
         .with_mail_drafts()
+        // On the draft's own `APPEND`; a Drafts folder that allows no new keywords gets the
+        // draft without them, and the receipt says so (`crate::place`).
+        .with_draft_keywords()
         // `CREATE`/`RENAME`/`DELETE` are base protocol on both dialects.
-        .with_mailbox_writes();
+        .with_mailbox_writes()
+        // `UID SEARCH UID 1:n SINCE … BEFORE …` is base protocol, so a widening fetches only the
+        // folder's older mail and keeps its cursor (`crate::band`).
+        .with_band_widening();
     if smtp {
         // Both submission capabilities ride the same SMTP transport: the assembler
         // (`engine-rfc5322`) builds the whole message, so this adapter owns every
@@ -334,6 +388,11 @@ fn capabilities<S>(connection: &Connection<S>, smtp: bool) -> Capabilities {
     // whether to offer an "as it comes in" strategy or fall back to polling.
     if connection.idle_available() {
         capabilities = capabilities.with_idle();
+    }
+    // A new folder can be given a role only where the server advertises `CREATE-SPECIAL-USE`
+    // and roles can be read back (`Negotiated::may_create_with_role`).
+    if connection.negotiated.may_create_with_role() {
+        capabilities = capabilities.with_mailbox_create_role();
     }
     // Shares are listable where the server can say whose mail is whose (`NAMESPACE`) and can
     // grant access at all (`ACL`, RFC 4314 — how one IMAP user shares with another). Gmail and

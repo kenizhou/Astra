@@ -5,30 +5,28 @@
 //! Each `sync_*` delegates to a shared container/member fetcher that picks
 //! **snapshot** (first sync, or `cannotCalculateChanges` recovery) or **delta**
 //! (`Foo/changes` → `Foo/get` over a result back-reference). Method execution goes
-//! through the [`Executor`] seam so the orchestration is unit-tested offline
-//! against captured Stalwart response documents; the live [`JmapClient`] is the
-//! production executor.
+//! through the [`Executor`](crate::executor::Executor) seam so the orchestration is unit-tested
+//! offline against captured Stalwart response documents; the live
+//! [`JmapClient`](crate::JmapClient) is the production executor. The adapter handle itself, and
+//! the helpers every capability module shares, are in `crate::adapter`.
 
 use async_trait::async_trait;
 use engine_core::{
-    calendar::Event,
-    ids::{AccountId, AddressBookId, CalendarId},
+    ids::AccountId,
     mail::{Mailbox, Message},
     raw::RawMime,
-    sync::{JmapDataType, SyncScope, SyncState, SyncWindow},
+    sync::{JmapDataType, MailboxWindows, SyncScope, SyncState, Widening},
 };
 use engine_provider::{
-    CalendarListing, Capabilities, ConnectionInfo, Draft, EmailChunk, EmailStream, HandOver,
-    MessageReport, PassMode, Provider, ProviderResult, ReportReceipt, ScopeSync, SenderIdentity,
-    SenderIdentityId, SharedAccount, SourceStream, SubmissionReceipt, SyncKind, split_page,
+    ConnectionInfo, Draft, EmailChunk, EmailStream, HandOver, MessageReport, PassMode, Provider,
+    ProviderResult, ReportReceipt, ScopeSync, SenderIdentity, SenderIdentityId, SharedAccount,
+    SourceStream, SubmissionReceipt, SyncKind, split_page,
 };
 use serde_json::json;
 
 use crate::{
-    JmapClient, JmapConfig,
-    calendar::{calendar_from_json, event_from_json},
-    error::JmapError,
-    executor::Executor,
+    JmapProvider,
+    email_window::email_filter,
     fetch,
     fetch::{MemberFetch, UpdatedAsState},
     fetch_scope,
@@ -36,117 +34,8 @@ use crate::{
         EMAIL_PROPERTIES, EMAIL_STATE_PROPERTIES, mailbox_from_json, message_from_json,
         state_from_json,
     },
-    request::{Request, capability},
+    request::capability,
 };
-
-/// The JMAP provider adapter.
-///
-/// Construct one with [`JmapProvider::connect`]. It implements
-/// [`engine_provider::Provider`] for the step-4 mail spine (mailboxes + email);
-/// submission and calendar land in later slices.
-pub struct JmapProvider {
-    pub(crate) executor: Box<dyn Executor>,
-    capabilities: Capabilities,
-    /// The address book host-facing contact writes target, once
-    /// [`JmapProvider::with_contact_address_book`] has bound one. `None` until then:
-    /// JMAP has no well-known default book, so a fabricated id would advertise a
-    /// destination the server will reject.
-    pub(crate) contact_address_book: Option<AddressBookId>,
-}
-
-impl core::fmt::Debug for JmapProvider {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("JmapProvider")
-            .field("capabilities", &self.capabilities)
-            .field("contact_address_book", &self.contact_address_book)
-            .finish_non_exhaustive()
-    }
-}
-
-impl JmapProvider {
-    /// Connects to a JMAP server and discovers its session.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`JmapError`] on a connect/HTTP failure or a malformed session.
-    pub async fn connect(config: JmapConfig) -> Result<Self, JmapError> {
-        let client = JmapClient::connect(config).await?;
-        Ok(Self::with_executor(Box::new(client)))
-    }
-
-    /// Wraps an executor, snapshotting its advertised capabilities.
-    fn with_executor(executor: Box<dyn Executor>) -> Self {
-        let capabilities = executor.session().capabilities();
-        Self {
-            executor,
-            capabilities,
-            contact_address_book: None,
-        }
-    }
-
-    /// Binds host-facing contact writes to one **discovered** address book.
-    ///
-    /// Until this is called the provider advertises no contact destination, so a host
-    /// that forgot to bind one fails at its own validation rather than on the wire.
-    #[must_use]
-    pub fn with_contact_address_book(mut self, address_book: AddressBookId) -> Self {
-        self.contact_address_book = Some(address_book);
-        self
-    }
-
-    pub(crate) fn executor(&self) -> &dyn Executor {
-        self.executor.as_ref()
-    }
-
-    pub(crate) fn contact_account(&self) -> Result<String, JmapError> {
-        Ok(self.executor.session().contact_account_id()?.to_owned())
-    }
-
-    pub(crate) async fn contact_call(
-        &self,
-        method: &str,
-        arguments: serde_json::Value,
-    ) -> Result<serde_json::Value, JmapError> {
-        let mut request = Request::new([capability::CORE, capability::CONTACTS]);
-        let call = request.invoke(method, arguments);
-        let response = self.executor.execute(&request).await?;
-        Ok(response.result(&call)?.clone())
-    }
-
-    pub(crate) async fn download_contact_blob(
-        &self,
-        blob: &str,
-        media_type: Option<&str>,
-    ) -> Result<Vec<u8>, JmapError> {
-        let account = self.contact_account()?;
-        let template = self
-            .executor
-            .session()
-            .download_url()
-            .ok_or_else(|| JmapError::session("server advertised no downloadUrl"))?;
-        // `media_type` comes from the server's JSContact payload, not from a fixed
-        // literal, so the substitution must be encoded: an unencoded `?`/`#`/`&`/`..`
-        // in it would re-point or re-parameterize the download URL.
-        let url = crate::blob::download_url(
-            template,
-            &account,
-            blob,
-            media_type.unwrap_or("application/octet-stream"),
-            "contact-photo",
-        );
-        self.executor.download(&url).await
-    }
-
-    /// The JMAP (server-side) mail account id for mail method arguments.
-    pub(crate) fn mail_account(&self) -> Result<String, JmapError> {
-        Ok(self.executor.session().mail_account_id()?.to_owned())
-    }
-
-    /// The JMAP (server-side) calendar account id for calendar method arguments.
-    pub(crate) fn calendar_account(&self) -> Result<String, JmapError> {
-        Ok(self.executor.session().calendar_account_id()?.to_owned())
-    }
-}
 
 #[async_trait]
 impl Provider for JmapProvider {
@@ -202,20 +91,16 @@ impl Provider for JmapProvider {
         &'a self,
         _account: &'a AccountId,
         cursor: Option<&'a SyncState>,
-        window: SyncWindow,
+        window: MailboxWindows,
         fetch_batch: usize,
         chunk_size: usize,
     ) -> EmailStream<'a> {
         // Newest-first, so a fresh sync surfaces recent mail before it finishes.
         let sort = json!([{ "property": "receivedAt", "isAscending": false }]);
-        // A sync-depth window bounds a snapshot via `receivedAt` (RFC 8621 §4.4.1). A
-        // delta carries no filter — `Email/changes` takes none — so an old message moved
-        // into scope is reported as a change; the engine drops it on apply
-        // (`SyncWindow::admits`), which is where the delta's bound holds for every adapter.
-        // The snapshot's bound is this filter, and is not re-checked there.
-        let filter = window
-            .floor()
-            .map(|date| json!({ "after": format!("{date}T00:00:00Z") }));
+        let filter = email_filter(&window);
+        // A band in progress rides beside the `Email` state; the delta runs from the state.
+        let (cursor, band) = cursor.map(crate::email_band::split).unzip();
+        let band = band.flatten();
         Box::pin(async_stream::try_stream! {
             let account = self.mail_account()?;
             let fetch = MemberFetch {
@@ -228,7 +113,8 @@ impl Provider for JmapProvider {
             // The JMAP round trip is atomic, so each page is fetched whole and
             // re-chunked for incremental commit; intermediate chunks hold the cursor
             // and a final marker advances it (JMAP is not cheaply resumable mid-pass).
-            let mut pass = fetch::MemberPass::new(&fetch, sort, filter, fetch_batch, cursor);
+            let mut pass =
+                fetch::MemberPass::new(&fetch, sort, filter, fetch_batch, cursor.as_ref());
             let updated = UpdatedAsState {
                 properties: EMAIL_STATE_PROPERTIES,
                 normalize: state_from_json,
@@ -263,7 +149,10 @@ impl Provider for JmapProvider {
             // The final marker carries the cursor (and, for reconcile, tombstones
             // against the accumulated present set).
             yield match mode.unwrap_or(PassMode::Additive) {
+                // A delta tombstones nothing, so a band in progress continues after it; a
+                // snapshot may have tombstoned what the band stored, and starts it over.
                 PassMode::Additive => {
+                    let final_cursor = crate::email_band::carried(final_cursor, band.as_ref());
                     EmailChunk::additive(Vec::new(), Vec::new(), total, final_cursor)
                 }
                 PassMode::Reconcile => {
@@ -273,41 +162,16 @@ impl Provider for JmapProvider {
         })
     }
 
-    async fn sync_calendars(
-        &self,
-        _account: &AccountId,
-        cursor: Option<&SyncState>,
-    ) -> ProviderResult<CalendarListing> {
-        let account = self.calendar_account()?;
-        Ok(fetch_scope::container_sync(
-            self.executor.as_ref(),
-            &account,
-            &[capability::CORE, capability::CALENDARS],
-            "Calendar",
-            cursor,
-            calendar_from_json,
-        )
-        .await?
-        .into())
-    }
-
-    /// Every calendar's events, under the account-wide `CalendarEvent` state: whichever
-    /// calendar asks, the answer is the same.
-    async fn sync_events(
-        &self,
-        _account: &AccountId,
-        _calendar: &CalendarId,
-        cursor: Option<&SyncState>,
-    ) -> ProviderResult<ScopeSync<Event>> {
-        let account = self.calendar_account()?;
-        let fetch = MemberFetch {
-            executor: self.executor.as_ref(),
-            account: &account,
-            using: &[capability::CORE, capability::CALENDARS],
-            type_name: "CalendarEvent",
-            properties: None,
-        };
-        Ok(fetch_scope::member_sync(&fetch, cursor, event_from_json).await?)
+    /// Walks only the bands the widening adds, keeping the `Email` state (`crate::email_band`).
+    fn widen_email<'a>(
+        &'a self,
+        _account: &'a AccountId,
+        cursor: &'a SyncState,
+        widening: &'a Widening,
+        fetch_batch: usize,
+        chunk_size: usize,
+    ) -> EmailStream<'a> {
+        self.band_stream(cursor, widening, fetch_batch, chunk_size)
     }
 
     // `put_event` is deliberately **not** implemented: replacing a whole stored document is
@@ -322,11 +186,11 @@ impl Provider for JmapProvider {
         _account: &AccountId,
         draft: &engine_provider::Draft,
         replacing: Option<&engine_core::ids::ProviderKey>,
-    ) -> ProviderResult<engine_core::ids::ProviderKey> {
-        // One `Email/set` carries the create and the destroy, so the replacement exists
-        // before the copy it supersedes goes (`crate::drafts`).
-        let account = self.mail_account()?;
-        Ok(crate::drafts::put_draft(self.executor.as_ref(), &account, draft, replacing).await?)
+        metadata: &engine_core::mail::MessageMetadata,
+    ) -> ProviderResult<engine_provider::DraftReceipt> {
+        // One `Email/set` creates the new copy before it destroys the old (`crate::drafts`).
+        let (account, executor) = (self.mail_account()?, self.executor.as_ref());
+        Ok(crate::drafts::put_draft(executor, &account, draft, replacing, metadata).await?)
     }
 
     async fn delete_draft(
@@ -387,8 +251,8 @@ impl Provider for JmapProvider {
         hand_over: &HandOver<'_>,
     ) -> ProviderResult<SubmissionReceipt> {
         crate::submit_body::reject_unsendable_calendar(draft)?;
-        let mail_account = self.executor.session().mail_account_id()?.to_owned();
-        let submission_account = self.executor.session().submission_account_id()?.to_owned();
+        let mail_account = self.executor.session().mail_account_id()?.to_string();
+        let submission_account = self.executor.session().submission_account_id()?.to_string();
         Ok(crate::submit::send(
             self.executor.as_ref(),
             &mail_account,
@@ -400,7 +264,7 @@ impl Provider for JmapProvider {
     }
 
     async fn sender_identities(&self, _acct: &AccountId) -> ProviderResult<Vec<SenderIdentity>> {
-        let account = self.executor.session().submission_account_id()?.to_owned();
+        let account = self.executor.session().submission_account_id()?.to_string();
         Ok(crate::identity::list(self.executor.as_ref(), &account).await?)
     }
 
@@ -410,7 +274,7 @@ impl Provider for JmapProvider {
         identity: &SenderIdentityId,
         name: &str,
     ) -> ProviderResult<()> {
-        let account = self.executor.session().submission_account_id()?.to_owned();
+        let account = self.executor.session().submission_account_id()?.to_string();
         let executor = self.executor.as_ref();
         Ok(crate::identity::set_name(executor, &account, identity, name).await?)
     }
@@ -418,6 +282,36 @@ impl Provider for JmapProvider {
     /// The session's shared accounts, each asked what it holds (`crate::shared`).
     async fn list_shared_accounts(&self) -> ProviderResult<Vec<SharedAccount>> {
         Ok(crate::shared::list(self.executor.as_ref()).await?)
+    }
+
+    /// JMAP imports by `Email/import` (`crate::import`) into an account that takes mail writes
+    /// and blobs (an upload URL, or the blob extension), so a host holding this adapter as a
+    /// `dyn Provider` reaches it without knowing the adapter. An account that takes no blob has
+    /// no way to send a message's bytes, so it imports nothing.
+    #[cfg(feature = "import")]
+    fn mail_importer(&self) -> Option<&dyn engine_provider::import::MailImporter> {
+        let session = self.executor.session();
+        (self.capabilities.mail_writes() && crate::import::takes_blobs(session)).then_some(self)
+    }
+
+    /// The account's out-of-office reply (`crate::vacation`), where the session gives this
+    /// client an account with `urn:ietf:params:jmap:vacationresponse`: not on a read-only share,
+    /// which lists none.
+    fn vacation(&self) -> Option<&dyn engine_provider::Vacation> {
+        crate::vacation::reachable(self.executor.session()).then_some(self)
+    }
+
+    /// The account's mail rules (`crate::rules`), where the session gives this client an account
+    /// with `urn:ietf:params:jmap:sieve`.
+    fn mail_rules(&self) -> Option<&dyn engine_provider::MailRules> {
+        crate::rules::reachable(self.executor.session()).then_some(self)
+    }
+
+    /// Mail rules and the reply imported (`crate::import::rules`) where the account has rules:
+    /// the reply's half answers for itself where it has none.
+    #[cfg(feature = "import")]
+    fn rules_importer(&self) -> Option<&dyn engine_provider::import::RulesImporter> {
+        crate::rules::reachable(self.executor.session()).then_some(self)
     }
 
     async fn report_message(

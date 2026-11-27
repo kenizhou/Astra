@@ -30,7 +30,7 @@ use engine_core::{
         MembershipRow,
     },
     sync::{SyncObject, SyncScope, SyncState},
-    time::{ExpansionWindow, UtcDateTime},
+    time::{ExpansionWindow, Horizon, UtcDateTime},
     version::CollectionTag,
     write::{IdempotencyKey, PendingOp, PendingOpId},
 };
@@ -87,6 +87,8 @@ pub(super) struct ScopeCell {
     window: Option<ExpansionWindow>,
     /// The collection tag recorded with `state`.
     collection_tag: Option<CollectionTag>,
+    /// The fetch window recorded with `state` (windowed event scopes only).
+    fetch_window: Option<Horizon>,
     objects: HashMap<ProviderKey, Value>,
     fts: HashMap<ProviderKey, Vec<FtsField>>,
     occurrences: HashMap<ProviderKey, Vec<OccurrenceRow>>,
@@ -108,6 +110,7 @@ impl ScopeCell {
             state: None,
             window: None,
             collection_tag: None,
+            fetch_window: None,
             objects: HashMap::new(),
             fts: HashMap::new(),
             occurrences: HashMap::new(),
@@ -303,6 +306,27 @@ pub(super) struct PhotoCell {
 struct ObservationCell {
     observation: RecipientObservation,
     suppressed: bool,
+}
+
+/// Records `observation` once per `(account, source message, email)`. A replay changes nothing
+/// but a sent instant the stored observation lacks: it is the source message's, which never
+/// changes, so the replay read what the first read could not.
+fn record_observation(
+    observations: &mut BTreeMap<(AccountId, MessageId, CanonicalEmail), ObservationCell>,
+    observation: &RecipientObservation,
+) {
+    let key = (
+        observation.account.clone(),
+        observation.source_message.clone(),
+        observation.email.clone(),
+    );
+    let cell = observations.entry(key).or_insert_with(|| ObservationCell {
+        observation: observation.clone(),
+        suppressed: false,
+    });
+    if cell.observation.sent_at.is_none() {
+        cell.observation.sent_at = observation.sent_at;
+    }
 }
 
 /// An in-memory [`Store`](crate::Store) + [`StoreRead`](crate::StoreRead),

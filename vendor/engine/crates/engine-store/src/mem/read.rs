@@ -7,9 +7,9 @@ use async_trait::async_trait;
 use engine_core::{
     ids::{AccountId, MailboxId, ProviderKey, ThreadId},
     mail::Keyword,
-    search_index::MembershipKind,
+    search_index::{MailRow, MembershipKind},
     sync::SyncScope,
-    time::{ExpansionWindow, Horizon},
+    time::{ExpansionWindow, Horizon, UtcDateTime},
     version::CollectionTag,
     write::PendingOpId,
 };
@@ -73,6 +73,14 @@ impl<C: Clock> StoreRead for MemStore<C> {
             .and_then(|cell| cell.collection_tag.clone()))
     }
 
+    async fn fetch_window(&self, scope: &SyncScope) -> Result<Option<Horizon>> {
+        Ok(self
+            .lock()
+            .scopes
+            .get(scope)
+            .and_then(|cell| cell.fetch_window))
+    }
+
     async fn object_keys(&self, scope: &SyncScope) -> Result<Vec<ProviderKey>> {
         let inner = self.lock();
         let mut keys: Vec<ProviderKey> = inner
@@ -127,7 +135,7 @@ impl<C: Clock> StoreRead for MemStore<C> {
             // Mail rows are cleared on tombstone (`remove_derived`), so the stored ones are
             // exactly the scope's live mail objects — no separate liveness join needed.
             for (key, mail) in &cell.messages {
-                if !selects(select, key, mail.thread_id.as_ref()) {
+                if !selects(select, cell, key, mail) {
                     continue;
                 }
                 rows.push(MailListRow {
@@ -147,6 +155,25 @@ impl<C: Clock> StoreRead for MemStore<C> {
         });
         rows.truncate(limit);
         Ok(rows)
+    }
+
+    async fn oldest_in_mailbox(
+        &self,
+        account: &AccountId,
+        mailbox: &MailboxId,
+    ) -> Result<Option<UtcDateTime>> {
+        let inner = self.lock();
+        Ok(inner
+            .scopes
+            .iter()
+            .filter(|(scope, _)| scope.account() == account)
+            .flat_map(|(_, cell)| {
+                cell.messages
+                    .iter()
+                    .filter(|(key, _)| mailboxes_of(cell, key).contains(mailbox))
+                    .filter_map(|(_, mail)| mail.date_utc)
+            })
+            .min())
     }
 
     async fn scope_occurrences(
@@ -240,11 +267,23 @@ impl<C: Clock> StoreRead for MemStore<C> {
 
 /// Whether one stored row is named by `select`. An empty `Threads`/`Keys` slice names nothing,
 /// which is what makes "complete these conversations" with no conversations a no-op.
-fn selects(select: MailSelector<'_>, key: &ProviderKey, thread: Option<&ThreadId>) -> bool {
+fn selects(select: MailSelector<'_>, cell: &ScopeCell, key: &ProviderKey, mail: &MailRow) -> bool {
     match select {
         MailSelector::Newest => true,
-        MailSelector::Threads(threads) => thread.is_some_and(|id| threads.contains(id)),
+        MailSelector::Threads(threads) => mail
+            .thread_id
+            .as_ref()
+            .is_some_and(|id: &ThreadId| threads.contains(id)),
         MailSelector::Keys(keys) => keys.contains(key),
+        MailSelector::Mailbox {
+            mailbox,
+            since,
+            until,
+        } => {
+            mail.date_utc
+                .is_some_and(|date| since <= date && date < until)
+                && mailboxes_of(cell, key).contains(mailbox)
+        }
     }
 }
 

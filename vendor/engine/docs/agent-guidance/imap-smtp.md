@@ -49,7 +49,10 @@ is authoritative for the `provider-caldav` calendar client.
   is classified the same way, since it is the other way into a session. SMTP `AUTH`, with a
   password or a token, follows the same rule in its own terms: a 4xx is "try again later"
   (RFC 5321 §4.2.1), so it is `RateLimited` too, except RFC 4954's `432` (a password
-  transition is needed), which only the user can resolve and stays `Authentication`. Nothing in the adapter waits either
+  transition is needed), which only the user can resolve and stays `Authentication`. Of the
+  `5xx` answers only `535` judged the credential (`ImapError::Auth`); `504`, `530`, `534`, `538`
+  and `432` are `ImapError::AuthUnsupported`, the same `Authentication` class, which asks the
+  credential source for no replacement ("Authentication", below). Nothing in the adapter waits either
   out; the class is the host's cue to back off (`http-throttling.md` covers the HTTP
   adapters, where the engine does the waiting).
 - **A refused command is classed by its response code.** A tagged `NO` is `ImapError::No`
@@ -220,7 +223,8 @@ is authoritative for the `provider-caldav` calendar client.
   reset), so fetching a page whole before re-chunking is fine, and previews *are*
   hydrated there.
 - **Sync-depth window (per sync).** The sync-depth floor is now a **per-sync
-  argument** — `stream_email(…, window, …)` takes a `SyncWindow { since }` — so a host
+  argument** — `stream_email(…, window, …)` takes a `MailboxWindows`, of which the bound
+  mailbox fetches under its own `window_for` — so a host
   changes depth without reconnecting the provider; `ImapConfig::with_since(date)`
   survives only as the `default_sync_window` the whole-scope `sync_email` drain fetches
   under. Either way it bounds a **snapshot/backfill** to mail delivered on or after
@@ -263,12 +267,42 @@ is authoritative for the `provider-caldav` calendar client.
   `HIGHESTMODSEQ` a server reports without that capability is not trusted for this. Mail
   that aged out of a sync-depth window is dropped on the next pass that finds a change, as
   on the QRESYNC path.
+- **Widening a folder by band (`band.rs`).** A pass asked for more than its folder's cursor
+  covers runs its delta, then `widen_email`: one `UID SEARCH UID 1:<UIDNEXT−1> SINCE <day before
+  the new floor> BEFORE <day after the old floor>` (`SINCE` left out for a band reaching the whole
+  history, `transport_search::DatedSearch`), whose UIDs are fetched in the cold backfill's
+  descending groups as additive chunks that tombstone nothing. The UID bound is the kept cursor's
+  `UIDNEXT`, so mail arriving during the band comes through the next delta. Each group checkpoints
+  a **band watermark**, `;w<low>`, beside the kept cursor; the last chunk advances to the kept
+  cursor alone, so the `UIDNEXT` and `HIGHESTMODSEQ` the band started from replay every change made
+  to band mail afterwards. **The band continues below a watermark only when the caller says the
+  widening resumes** (`Widening::resumes`); otherwise it starts afresh. The watermark rides through
+  every delta on the same UID space, a reconciling one (no QRESYNC) included: the orchestrator asks
+  that delta under the depth the band widens to, so its reconcile lists, and keeps, every message
+  the band stored, and a band on a server without QRESYNC still continues. A `UIDVALIDITY` that
+  moved, or a cursor of an older sync, voids the cursor: the folder is fetched afresh under the
+  wider window.
+- **A window is searched one server day past each end.** `SINCE` and `BEFORE` compare the
+  server's day of a message's `INTERNALDATE`, and Dovecot reads that day in the server's zone,
+  while the engine judges mail by its UTC day (`MailboxWindows::admits`). UTC offsets run from −12
+  to +14 hours, so the two days differ by at most one, in either direction: a server ahead of UTC
+  dates a message near a floor a day later than the engine, one behind it a day earlier. So every
+  window search names the day **before** its floor (`stream::imap_since`, a fresh pass, a reconcile
+  and a band alike), and a band's `BEFORE` the day **after** the floor it stops at. What the extra
+  day adds is dropped by the window: an additive chunk by the caller's filter, a reconcile by the
+  adapter before it is yielded (`stream::within`), its key left present so nothing held is
+  tombstoned for it. Measured on the harness image run with `TZ=Pacific/Kiritimati` (UTC+14) and
+  `TZ=Etc/GMT+12` (UTC−12) (`live_imap_band.rs`): at UTC+14, a band ending exactly `BEFORE` the
+  old floor left out a message the first pass had fetched and the filter dropped; at UTC−12, a
+  first pass `SINCE` the floor missed the floor's first message, which the server dates the day
+  before.
 - **Message limits and UID mode** (RFC 9738, RFC 9586, RFC 9394). A server advertising
   `MESSAGELIMIT=<n>` may refuse or cut short a command over `n` messages. Every sync `FETCH`
   is capped at `n` (`Negotiated::within_message_limit`), including a page whose caller set no
   limit. A window search (`transport_search`) that returns `n` matches, or is refused with
-  `NO [LIMIT]`, is read as cut off: the window is then decided from each message's own
-  `INTERNALDATE`, compared by day as `SINCE` compares, fetched `PARTIAL 1:<n>` at a time
+  `NO [LIMIT]`, is read as cut off: the window (or a band, with its `BEFORE` and its UID bound
+  too) is then decided from each message's own `INTERNALDATE`, compared by day as `SINCE` and
+  `BEFORE` compare, fetched `PARTIAL 1:<n>` at a time
   where `PARTIAL` is advertised and in UID spans of width `n` otherwise. Yahoo is why: it
   answers `UID SEARCH SINCE` with the newest `n` matches by date and a plain `OK`, in either
   mode, and cuts before any other criterion, so narrowing by UID finds nothing more; its
@@ -316,9 +350,13 @@ is authoritative for the `provider-caldav` calendar client.
   changes no longer needs `Engine::clear_mail_cursors` against a QRESYNC server — a plain
   delta sync reconciles them.
 - **Normalization.** `UID FETCH (UID FLAGS INTERNALDATE RFC822.SIZE ENVELOPE
-  BODY.PEEK[HEADER.FIELDS (REFERENCES CONTENT-TYPE CONTENT-DISPOSITION)])` (safe metadata — none
-  sets `\Seen`). The `References` header is not an `ENVELOPE` field, so it rides a
-  separate peek-safe body-header item to feed threading (`threading.md`).
+  BODY.PEEK[HEADER.FIELDS (REFERENCES IMPORTANCE X-MSMAIL-PRIORITY X-PRIORITY CONTENT-TYPE
+  CONTENT-DISPOSITION)])` (safe metadata — none sets `\Seen`). The `References` header is not an
+  `ENVELOPE` field, so it rides a separate peek-safe body-header item to feed threading
+  (`threading.md`); the headers that state a message's importance, `Importance::HEADERS`
+  (`modeling.md`), ride the same item, every occurrence of each, and `header_section` hands the
+  rule the last (live-verified, `tests/live_imap_importance.rs`; captured,
+  `tests/fixtures/importance_fetch.txt`).
   `BODYSTRUCTURE` is a **second** command, `UID FETCH <set> (UID BODYSTRUCTURE)`, over only the
   rows whose top-level headers do not show one text body (`engine-mime::is_single_text_body`:
   `text/plain` or `text/html`, or no `Content-Type`, and no `attachment` disposition); such a
@@ -350,7 +388,10 @@ is authoritative for the `provider-caldav` calendar client.
   `\Seen`/`\Flagged`/
   `\Answered`/`\Draft` map to their `$`-keywords; `\Deleted`/`\Recent` are
   deliberately not keywords (expunge/session model); custom keywords pass through.
-  `INTERNALDATE` → a UTC instant (offset applied). `ENVELOPE` → subject, flattened
+  `INTERNALDATE` → `received_at`, a UTC instant (offset applied). `ENVELOPE`'s first field, the
+  `Date` header → `sent_at`, through `engine_mime::date` (`mime.md`); an absent or unreadable
+  one is `None` (live-verified, `tests/live_imap_sent_at.rs`; captured,
+  `tests/fixtures/sent_at_fetch.txt`). `ENVELOPE` → subject, flattened
   addresses, and the `Message-ID`/`In-Reply-To` hints (the body-header item adds
   `References`) — the threading inputs; **RFC 2047 encoded-words** in
   the subject and display names are decoded (`B`/`Q`, UTF-8/ISO-8859-1/Windows-1252 —
@@ -390,37 +431,113 @@ is authoritative for the `provider-caldav` calendar client.
   keyword and whose last is a bare `.`, so read as data it invents a mailbox named `.`.
 
 
-## Authentication: a password or an OAuth 2.0 token
+## Authentication: a password, an OAuth 2.0 token, or an administrator acting as an account
 
-`ImapConfig::new(addr, server_name, credentials)` takes a **`Credentials`** —
-`Password` (IMAP `LOGIN`, SMTP `AUTH PLAIN`) or `OAuth2` (a bearer access token over
-SASL). That is the same shape `provider-jmap` and `provider-caldav` already expose, and
-the same posture as Graph and Google: **the engine stays OAuth-agnostic** — acquiring,
-storing and refreshing the token is the host's job (`north-star.md`).
+`ImapConfig::new(addr, server_name, credential)` takes an `engine_provider::Credential`:
+`Password` (IMAP `LOGIN`, SMTP `AUTH PLAIN`), `Bearer` (an access token over SASL, with the
+account's username, which both SASL mechanisms carry: `Credential::bearer_for`), or `ActingAs`
+(an administrator's password signing in as another account, IMAP only: below). It is the
+engine's one credential type, which every adapter now asks for through a source
+(`docs/design/credential-source.md`). The posture is the same as Graph and Google: **the engine
+stays OAuth-agnostic**: acquiring, storing and refreshing the token is the host's job
+(`north-star.md`). `provider_imap::Credentials` remains as a deprecated alias, and its
+`password`/`oauth2` constructors still build the same credentials.
 
-**Every dial asks for its credential.** The config holds a `CredentialSource`, not a
-credential: an async trait with `credentials()` (what to present now) and `renew(refused)`
-(a replacement after the server refused one, `None` by default). A `Credentials` is its own
-source, which is what `ImapConfig::new` wraps; a host whose account signs in with OAuth
-passes its token store to `ImapConfig::from_credential_source`. The source is asked once
-per connection the account's pool dials and once per SMTP submission, because the pool
-dials for as long as the host runs and a token lives about an hour: a pool that presented
-the token it connected with would lose every new connection an hour in, while the sessions
-already open went on working. A session outlives the token that opened it, so nothing
-renews an open one.
+**Every dial asks for its credential.** The config holds an `engine_provider::CredentialSource`,
+not a credential: `subject()` (who it signs in as), `permits(origin)` (default: yes),
+`credential(request)` (what to present now) and `replace(refused, request)` (a replacement after
+the server refused one, `None` by default). `ImapConfig::new` wraps a fixed credential in a
+`FixedCredential` under a subject of its own; a host whose account signs in with OAuth passes its
+token store to `ImapConfig::from_credential_source`. The source is asked once per connection the
+account's pool dials and once per SMTP submission, because the pool dials for as long as the host
+runs and a token lives about an hour: a pool that presented the token it connected with would
+lose every new connection an hour in, while the sessions already open went on working. A session
+outlives the token that opened it, so nothing replaces an open one.
 
-- **A refused token is renewed once, on a fresh connection.** An `Auth` refusal asks the
-  source's `renew`; a replacement is presented on a new connection (a server may drop a
-  connection after a failed sign-in, and counts the attempt either way). One re-dial at
-  most. A password's source never renews, so a refused password is never sent again: the
-  same secret to the same server gets the same answer, at a provider that may be counting
-  towards a lockout. The same rule wraps SMTP, where `AUTH` precedes `MAIL FROM`, so a
-  retried submission has sent nothing. Proof: `dial_renewal_tests.rs` and
-  `filing_smtp_server_tests.rs`.
+- **Each ask says where the credential goes.** The request names the protocol (`Imap` or `Smtp`)
+  and the origin: the **TLS server name** (not the dial address, which a loopback fixture maps),
+  the port, and RFC 8314's service name as the scheme: `imaps` or `imap` (`STARTTLS`) for IMAP,
+  `submissions` or `submission` (`STARTTLS`) for SMTP. A source that does not `permit` the origin
+  fails the dial as `Permanent`, and nothing is dialled.
+- **Each ask runs under the dial deadline** (`deadlines.md`). A source that does not answer in
+  30 s fails the dial as `Retryable`, so a hung token endpoint cannot hang a sync.
+- **A refused credential is replaced once, on a fresh connection.** An `Auth` refusal asks the
+  source's `replace`; a replacement is presented on a new connection (a server may drop a
+  connection after a failed sign-in, and counts the attempt either way). One re-dial at most.
+  Only a judgement of the credential is a refusal: a `NO` to `LOGIN` or `AUTHENTICATE` that is
+  not `[LIMIT]` or a temporary code, and SMTP `535`. A failure that judged none, such as no
+  mechanism the credential can use or SMTP `504`/`534`/`538`/`432`, is
+  `ImapError::AuthUnsupported`: still `Authentication`, but no replacement and no re-dial,
+  because a fresh credential would meet the same answer. A fixed credential never replaces, so a refused
+  password is never sent again: the same secret to the same server gets the same answer, at a
+  provider that may be counting towards a lockout. The same rule wraps SMTP, where `AUTH`
+  precedes `MAIL FROM`, so a retried submission has sent nothing. The ask-and-replace loop is the
+  engine's one helper, `engine_provider::with_credential`; this crate supplies only what counts
+  as a refusal. Proof: `dial_renewal_tests.rs`, `dial_credential_tests.rs`,
+  `filing_smtp_server_tests.rs`, `filing_credential_tests.rs`, and live on Dovecot and Stalwart
+  (`live_imap_credential.rs`).
 - **A source that cannot produce a credential dials nothing.** It fails with
   `ImapError::Credential`, classified as the source classified it: a revoked grant is
-  `Authentication`, an unreachable token endpoint is retryable. It is not a session
-  refusal, so the pool's ceiling does not move.
+  `Authentication`, an unreachable token endpoint is retryable. It is not a session refusal, so
+  the pool's ceiling does not move. A bearer credential without a username dials nothing either
+  (`Permanent`): both SASL mechanisms name the account. As a `ProviderError` it is the source's
+  error as it came, its wait included, and `is_credential_failure()` says no credential could be
+  had; so does every credential the protocol cannot carry (a missing username, a kind or a byte
+  SASL cannot frame, an administrator acting as another account over SMTP or ManageSieve) and one
+  for another account than the pool's. A fetch does not dial again after one: a new connection
+  would ask the same source at once.
+- **Copies of the secret this crate makes are zeroed.** Every buffer the crate builds around a
+  password or token is `Zeroizing` and allocated once at its final length (`secret_line.rs`),
+  because a `String` that grows frees its old buffer unzeroed: the IMAP `LOGIN` line (built and
+  sent raw, not through `command`, whose `format!` would copy it), the SASL blob and its base64,
+  the `AUTHENTICATE` line and its SASL-IR-less continuation, the `AUTH PLAIN` bytes and token, and
+  every SMTP `AUTH` line, CRLF included (sent with `write_raw`; `write_line` formats a copy and is
+  for lines without a secret). Out of reach: the copies the TLS stack makes as it writes, and
+  whatever the host holds.
+
+**An administrator acting as another account** (`Credential::acting_as(admin, password,
+account)`) signs in with `AUTHENTICATE PLAIN` and an authorization identity (RFC 4616,
+`authzid NUL authcid NUL passwd`): how a Dovecot master user works, and what a transfer host
+holds where a server grants administrative access. The PLAIN token is built once, in
+`sasl::plain_response`, which SMTP's `AUTH PLAIN` uses too (with no authorization identity); a
+NUL in any field is refused before anything is encoded, since it would move the field
+boundaries.
+
+- **IMAP only.** It needs `AUTH=PLAIN` advertised (`AuthUnsupported` otherwise, naming what was
+  offered), and goes inline where `SASL-IR` is advertised and after the `+` prompt where it is
+  not. Dovecot (both services) and Stalwart advertise `SASL-IR AUTH=PLAIN` over TLS. A refusal is
+  classed as for `LOGIN`: Dovecot answers a wrong master password and an account that may not
+  act as the one named with the same `NO [AUTHENTICATIONFAILED]`, `Authentication`. A plain
+  password keeps `LOGIN`, which has no field for an authorization identity. SMTP refuses the
+  variant before dialling (`Permanent`): submitting as another account is a different grant from
+  reading its mailbox, and no server has been seen to take it. An empty account to act as is
+  refused too, since an empty authorization identity means the administrator's own.
+- **The engine cannot check that the server honoured it.** IMAP has no "whose session is
+  this?": `NAMESPACE`, `ID` and `MYRIGHTS` name no account. Stalwart's `GETACL INBOX` names the
+  owner, but only where the ACL extension is offered, in an identifier format of the server's
+  own (`admin` beside `alice@test.local`); a server without the extension has nothing to ask.
+  Stalwart (v1.0.2) ignores the authorization identity and signs the authentication identity in
+  to its **own** mailbox with `OK`: alice naming bob gets alice's, its recovery administrator
+  naming alice gets the administrator's (`spec-deviations.md`, STALWART-9). Its
+  impersonation takes `target%admin` as the username instead, a plain `Password` to the engine.
+  So a host uses `ActingAs` only against a server it has verified honours it. Proof:
+  `transport_acting_as_tests.rs` (Dovecot's observed lines), and live in
+  `live_imap_acting_as.rs`: on both Dovecot services the administrator acting as alice reads
+  alice's seeded INBOX and acting as bob reads bob's; a non-master naming alice and a wrong
+  master password are refused; on Stalwart the deviation is pinned with its control.
+- **An account's connections all sign in as one account.** The first dial that signs in fixes
+  it (`credentials::PresentedIdentity`, shared by `ImapAccount::connect` and its pool's dial):
+  the account whose mailbox opens, `Credential::authorization_identity` (the username, or for
+  `ActingAs` the account acted as). A later credential naming another fails its dial as
+  `ImapError::Credential`, `InvalidState`, before anything is opened, so a source answering for
+  the wrong subject cannot put another mailbox's session in the pool. Within one dial, a
+  replacement must name the account the refused credential named, so a refusal cannot switch
+  accounts even on the first dial; a dial whose credentials were all refused fixes nothing. A
+  second identity reaching `remember` (two first dials racing) fails that dial too, as
+  `ImapError::SignedInAsAnotherAccount` (`InvalidState`, and no credential failure: the server
+  took the credential). The
+  comparison is exact, byte for byte: `Alice@example.com` and `alice@example.com` are two
+  accounts to it, even on a server that folds case. Proof: `dial_identity_tests.rs`.
 
 **The mechanism is negotiated, never configured.** Two SASL mechanisms carry a bearer
 token, and providers disagree about which:
@@ -480,13 +597,24 @@ would exercise it rested on a documentation claim the server disproves.
   travels in the error, because it is the only place the server says *whether* the token
   was expired, wrongly scoped, or issued for another account.
 - **A token is never downgraded into a password attempt.** A server advertising no OAuth
-  mechanism fails with an `Auth` error naming what it *did* offer — the usual cause is an
+  mechanism fails with an `AuthUnsupported` error (class `Authentication`, and no replacement is
+  asked for, since no token would be taken) naming what it *did* offer — the usual cause is an
   OAuth credential pointed at an account that only takes a password — and no credential
   reaches the wire.
 - **Credential components are screened before encoding.** `%x01` is the key/value
   separator itself, so a token carrying one could append its own `auth=` pair; CR/LF/NUL
   would break out of the command line the base64 rides on. Rejected up front — the same
-  guard `smtp.rs` applies to envelope addresses and `engine-rfc5322` to header values.
+  guard `smtp.rs` applies to envelope addresses and `engine-rfc5322` to header values. `LOGIN`
+  is screened too: its username and password go as quoted strings, which cannot carry CR, LF or
+  NUL (RFC 3501 §9), and a CRLF in a password would end the line and send the rest as a command
+  of its own. Each is a credential that cannot be presented (`Permanent`, a credential failure),
+  refused before anything is written. `OAUTHBEARER`'s GS2 header names the account as a
+  `saslname` (RFC 7628 §3.1, RFC 5801 §4), where `,` would end the field and `=` starts an escape:
+  both are legal in a username, so they go escaped as `=2C` and `=3D`. `XOAUTH2` frames the name
+  with `^A`, which the screen refuses, and `PLAIN` with NUL, likewise refused, so neither splits.
+  Stalwart takes the escaped header (`live_imap_oauthbearer_name.rs`), but reads no
+  authorization identity from it (STALWART-9), so the escaping is checked offline only; a server
+  that reads the field is still needed to prove it live.
 - **The pre-auth `CAPABILITY` is a third call, not a duplicate of the other two.** The
   session already asks before `STARTTLS` (is the upgrade offered?) and again after
   authenticating (what does *this* session get — servers advertise a different set once
@@ -561,7 +689,9 @@ credential.
   `In-Reply-To: <id>` when `Draft.in_reply_to` is set and `References: <id1> <id2> …`
   (space-separated, each angle-bracketed) when `Draft.references` is non-empty — each
   control-char-guarded like the other ids and omitted when its field is empty, so a
-  sent reply threads with its original (`threading.md`). The body is normalized so a
+  sent reply threads with its original (`threading.md`). An importance other than normal is
+  written as `Importance: high|low` and `X-Priority: 1 (Highest)|5 (Lowest)` in every assembly
+  (wire, filed copy, draft); normal writes neither. The body is normalized so a
   bare CR/LF never reaches the wire. Plain drafts emit `text/plain`; drafts with an
   HTML alternative emit `multipart/alternative`; CID-referenced inline attachments
   wrap the body in `multipart/related`; regular attachments wrap the result in
@@ -569,37 +699,37 @@ credential.
   attachment bodies are base64 encoded, and non-ASCII attachment filenames use
   RFC 5987-style `filename*` / `name*` parameters. (Long encoded-words are not yet
   folded into 75-octet runs — a later refinement.)
-- **The MIME-wrap seam (`MimeWrapper`, `wrap.rs`).** A host can install one
-  `engine_provider::MimeWrapper` per account (`ImapConfig::with_mime_wrapper`,
-  the `with_connect_observer` precedent) and ask for it per message with the
-  serde-defaulted `Draft::sign` / `Draft::encrypt` flags. When both line up,
-  submission preparation (`wrap::prepare_submission`, shared by `submit` and
-  `refile`) assembles the **filed** variant — the one with the `Bcc` header — and
-  hands it to the wrapper once; the wrapper returns both variants, the wire one
-  the same ciphertext minus the `Bcc` header. Preparation runs **before any
-  transport dials** and always before `HandOver::commit`, so a refusal — a
-  `ProviderError::permanent`, for a gate the user must resolve — settles the op
-  without a byte reaching the server, and the outbox's retry re-runs the whole
-  wrap. The Sent-copy repair (`refile`) re-wraps through the same helper: an
-  `Unfiled` wrapped send never re-files plaintext. With no wrapper installed, or
-  neither flag set, assembly is byte-for-byte the pre-seam one.
-- **Keywords on the Sent copy.** A draft's `sent_copy_keywords` ride the Sent `APPEND` as
-  flags, and only where the folder's `PERMANENTFLAGS` carries `\*` (RFC 9051 §7.1):
-  without it the server answers `OK` and keeps no new keyword, the same silent success
-  `report.rs` refuses. Reading `PERMANENTFLAGS` needs a `SELECT`, which the first attempt
-  issues only when the draft asks for keywords, so an ordinary send costs nothing extra;
-  the retry reads it from the `SELECT` its probe already makes, and gives a copy it finds
-  already placed the keywords with an idempotent `+FLAGS`. A `SELECT` or `STORE` that
-  fails leaves them out rather than failing the placement. The receipt's
-  `sent_copy_keywords` names the ones the copy carries; a `PERMANENTFLAGS` that lists a
-  keyword by name without `\*` counts as not allowing it, since only `\*` is parsed. The
-  repair (`refile`) sets them the same way and returns only the key, so what it kept is
-  read from the next sync (`place.rs`, `tests/live_imap_sent_keywords.rs`).
+- **Which keywords a folder keeps: one rule, `permanent.rs`.** Every write that sets a keyword
+  (the `APPEND` of a Sent copy, a draft or an import; the `STORE` of a report verdict or of a
+  copy already placed) asks the folder's `PERMANENTFLAGS` (RFC 9051 §7.1), because a server that
+  cannot keep a flag answers `OK` and drops it. A keyword is kept when the list names it, or,
+  for anything but the four system flags, when it carries `\*`. With no `PERMANENTFLAGS` at all,
+  RFC 9051 §6.3.2 says every flag can be changed permanently, read as every flag `FLAGS` names;
+  creating a keyword it does not name is stated only by `\*`, so it is not assumed. One routine
+  (`store_message.rs`) applies the rule for every `APPEND`: it opens the folder only when a
+  keyword is asked for, once per folder, and a folder that refuses the `SELECT` gets the message
+  without the keywords. The answer reports what was kept, never the filing's own flags
+  (`\Seen` on a Sent copy, `\Draft \Seen` on a draft). The harness servers all list every
+  system flag and `\*` (`tests/fixtures/select_inbox_*.txt`); a folder that names its keywords
+  instead is pinned offline.
+- **Keywords on the Sent copy.** The keywords of a draft's `sent_copy_metadata` ride the Sent
+  `APPEND` as flags, by the rule above. Reading `PERMANENTFLAGS` needs a `SELECT`, which the
+  first attempt issues only when the draft asks for keywords, so an ordinary send costs nothing
+  extra; the retry reads it from the `SELECT` its probe already makes, and gives a copy it finds
+  already placed the keywords with an idempotent `+FLAGS`. A refused `SELECT` or a failed
+  `STORE` leaves them out rather than failing the placement. The receipt's `sent_copy_kept`
+  names the ones the copy carries. The server stamps the copy's arrival time, so an asked one is
+  neither sent nor kept. The repair (`refile`) sets them the same way and returns only the key,
+  so what it kept is read from the next sync (`place.rs`, `tests/live_imap_sent_keywords.rs`).
 - **Folder resolution.** The sent copy / draft is filed into the account's **real
   folder for the role**, discovered via the `\Sent`/`\Drafts` SPECIAL-USE attribute
   in a `LIST` (so a Gmail `[Gmail]/Sent Mail` or a localized name is honored), and
   only when the server advertises none does it fall back to creating the
   conventional `Sent`/`Drafts` name. This costs one `LIST` per submission (rare path).
+  Where the server advertises `CREATE-SPECIAL-USE` that folder is created **with** its role,
+  `CREATE "Sent" (USE (\Sent))` (RFC 6154 §3), so the next lookup, this client's or any
+  other's, finds it by the role whatever it is called; a refusal of the role falls back to the
+  plain `CREATE`, since the copy needs a folder more than the folder needs its role.
 - **Three transports.** `ImapConfig::with_smtp(addr)` is **plaintext, no auth** — for
   an MX that accepts local mail (the fixture's port 25). `with_smtp_tls(addr,
   server_name)` is **implicit TLS + `AUTH`** (port 465) using the account credentials and
@@ -741,10 +871,36 @@ credential.
   mailbox or message on the line with it, and one folder nobody can name costs an account its
   entire `LIST`. `tokenize` keeps both bytes verbatim, so the name survives to be split like any
   other; what the escape *means* is the folder-list rule's business, not the tokenizer's.
+- **Import (`MailImporter`, the `import` feature, `import.rs`).** Reached through
+  `Provider::mail_importer`, which `ImapProvider` answers with itself. Each message is stored by
+  the one routine a Sent copy and a draft use (`store_message.rs`), into the mailbox it names:
+  one per message, so `max_mailboxes` is 1 and more is refused before anything is sent. Its
+  keywords ride the `APPEND` by the one rule above (a folder that refuses the `SELECT` takes the
+  message without them), and `ImportedMessage::kept` says which. The arrival time goes as the
+  `INTERNALDATE` (`"dd-Mon-yyyy hh:mm:ss +0000"`, UTC) in the whole seconds one holds, which is
+  the time `kept` reports; a time before year 0 has no `date-year`, so it is left for the server
+  to stamp. The stated size is `APPENDLIMIT=<n>` (a bare `APPENDLIMIT` is per mailbox and states
+  none). A tagged `NO` or `BAD` in place of the continuation is a refusal of that message alone,
+  and `TOOBIG` (RFC 7889) is `item_unavailable`. `APPEND` is not idempotent, so the transport
+  says which side of the point of no return a failure fell on (`AppendFailure`): until the
+  literal's closing CRLF is written nothing is stored; after it, a lost answer is
+  `requires_confirmation`. Either ends the batch, the connection is discarded, and every later
+  message is answered "not sent". `import_cursor` is the folder's sync cursor from the `SELECT` a
+  pass opens it with, so a delta from it through a provider bound to the folder lists what was
+  stored after it (`live_imap_import.rs`, Stalwart and both Dovecot revisions, through the
+  shared `engine_provider::import::conformance` check the JMAP suite runs too). A server may add
+  keywords of its own: Stalwart files every stored message `$hasattachment` or
+  `$hasnoattachment`.
+- **A `NO` naming the target's state carries the neutral reason** (`ImapError`'s conversion,
+  `providers.md` → "Import"): `OVERQUOTA` is `TargetRefusal::StorageFull`, `TRYCREATE` and
+  `NONEXISTENT` are `NoSuchContainer`, `NOPERM` is `ReadOnlyContainer`. Each was
+  `InvalidState` already; the reason says which, under the engine's own words. A `BAD` never
+  is one: it is the request's fault.
 - **`put_draft` / `delete_draft` (no SMTP).** A draft is `APPEND`ed into the account's
   Drafts folder (resolved by `\Drafts` SPECIAL-USE, else creating `Drafts`) flagged
   `\Draft \Seen`, so keeping a draft works against any IMAP server even where SMTP
-  submission cannot. Unlike Sent placement an `APPEND` failure surfaces: saving the
+  submission cannot. The keywords of the metadata `put_draft` is given ride the same `APPEND`, by
+  the one rule (`permanent.rs`), reported in `DraftReceipt::kept` either way. Unlike Sent placement an `APPEND` failure surfaces: saving the
   draft is the whole op. `ImapProvider::save_draft` remains as the first-save
   convenience the example and the live suite use, and is the same code path.
 - **A re-save is `APPEND` then `UID STORE +FLAGS (\Deleted)` + `UID EXPUNGE`, in that
@@ -763,6 +919,69 @@ credential.
   names a different message, and deleting it would delete someone else's mail; the
   caller re-syncs instead. A UID the folder simply no longer holds is a `UID STORE`
   no-op, so a repeated delete settles rather than parking the op that drives it.
+
+## Rules and the reply over ManageSieve
+
+An IMAP account's mail rules and out-of-office reply live on a ManageSieve service (RFC 5804) beside
+the mailbox, as one Sieve script. `src/managesieve/` is that client, a module of this crate because
+it serves the same account: the account's TLS connector, credential source, SASL mechanisms and
+connection budget (`docs/design/filters-and-out-of-office.md`, decision 7, and "As built in slice
+3" there).
+
+- **Configured, not discovered.** `ImapConfig::with_managesieve(addr, server_name)`; no SRV lookup.
+  `STARTTLS` is the protocol's one transport and is required.
+- **Probed at connect, beside the mail, optional to the account.** `ImapAccount::connect` reads
+  the greeting and the capabilities over TLS (no credential) alongside the first IMAP connection
+  (`join`, so the outcome never depends on which finishes first), under the probe's own deadline
+  (`reach::PROBE_DEADLINE`, 10 s: a blackholed endpoint costs the connect that and no more), and
+  sends `LOGOUT` without waiting for its answer. Success: `ConnectStep::Negotiated("ManageSieve",
+  …)` and every provider of the account (not a shared store's) answers `mail_rules()`, and
+  `vacation()` where `vacation` is listed. A failure or a timeout:
+  `ConnectStep::Unavailable { service: ManageSieve, class }`, and neither is offered. A `Retryable`
+  one is probed again beside a later dial, as is any after `invalidate()`; a permanent one (no
+  `STARTTLS`, not ManageSieve) waits for `invalidate()`. After any failure no dial probes for
+  `PROBE_BACKOFF` (5 min), so a blackholed endpoint costs a dial at most one probe deadline per
+  backoff; a probe whose dial is dropped is wanted again. The accessors answer what the last probe
+  found, read in one load of the state byte (`probe_state::ProbeState`). Mail works either way. An offer does not mean signing in works:
+  a `Credential::ActingAs`, or a token against a `PLAIN`-only server, fails at the first call.
+- **A session per call, in the budget.** `ImapPool::reserve_other` takes a permit (closing the
+  longest-parked IMAP socket when the shelf and the slots in use would pass the ceiling); the
+  session dials, signs in (`AUTHENTICATE "PLAIN"` with `sasl::plain_response`, or
+  `OAUTHBEARER`/`XOAUTH2`) and works, within `SESSION_DEADLINE` (2 min); past it, after a write
+  went out, the call answers needs-confirmation. `LOGOUT` then goes out outside the deadline,
+  unawaited, so a slow answer to it never puts a finished write in doubt. The credential is asked
+  as `CredentialProtocol::ManageSieve` for `sieve://<server name>:<port>`. A `Credential::ActingAs`
+  is refused before sending (`ImapError::Credential`, `Permanent`), as SMTP refuses it: `PLAIN`
+  with an authorization identity over ManageSieve has not been proven on a harness server yet.
+- **The wire.** No tags: one command at a time, its response ends at `OK`, `NO` or `BYE`. Strings
+  are quoted where they can be, else sent as `{n+}` literals (a script always is). A refusal keeps
+  its response code (`NONEXISTENT`, `ACTIVE`, `QUOTA/…`, `TRYLATER`) and never the prose, which
+  quotes the script. A `NO` to `AUTHENTICATE` is a refused credential (one replacement asked),
+  except `TRYLATER` (retryable) and `TRANSITION-NEEDED`/`AUTH-TOO-WEAK`/`ENCRYPT-NEEDED`
+  (authentication, no replacement).
+- **Rules and reply.** `managesieve::state` picks the script (as JMAP does) and hashes the list and
+  the script into the version; `rules` and `vacation` implement the traits over
+  `engine_sieve::dialect`, the reply as Roundcube's reply rule (`dialect::reply`). The guard is
+  `Absent`; a stale base is refused in the write's own session. The receipt says whether the
+  rules written run (`RulesReceipt::activation`): a write never switches the script on or off.
+  **No rule files by id here**: `fileinto :mailboxid` names an RFC 8474 `MAILBOXID`, and this
+  adapter knows a folder by its name, so the vocabulary leaves `FileIntoId` out
+  (`RuleVocabulary::without`), and a rule another client wrote with `:mailboxid` is read carried
+  whole (`engine_sieve::dialect::folder_ids_carried`) and copied back as it was, never handed to a
+  host as one of its folder ids.
+- **Import** (`managesieve/import.rs`, the `import` feature): `RulesImporter` through
+  `engine_provider::import::append_rules` and `import_reply` over the same service
+  (`providers.md`, "Importing rules and the reply"), answered by `Provider::rules_importer`
+  wherever `mail_rules` is. No rule files by id here (above), so a rule filing by id loses that
+  action: `MissingMailbox` where the host's `FolderMap` does not hold the folder, `NotExpressible`
+  where it does; a host names an IMAP target's folders by path. A rules import never stops a
+  running reply here either: the write refuses where the server's reply script runs and it lists
+  no `include`, as an edit does, and the reply's own write refuses to switch stored rules on.
+- **Proven live** on both harness servers (`managesieve/live_tests.rs`,
+  `live_provider_tests.rs`, and `live_import_tests.rs` for the import, which CI's Dovecot job runs
+  with `--features import`); offline over the captured responses in
+  `tests/fixtures/managesieve/`. Stalwart's `HAVESPACE` says yes to any size (STALWART-10), so
+  nothing asks it before storing.
 
 ## Mail mutations
 
@@ -799,15 +1018,42 @@ protocol on both dialects.
   the server renames every folder beneath it too (RFC 9051 §6.3.6), so every receipt names the
   path the folder has **after** the edit. Each edit starts with one `LIST` and judges against
   it.
-- **Names.** A leaf carrying the delimiter would make levels nobody asked for, and a
-  subfolder on a server whose delimiter is `NIL` has nowhere to go; both are `InvalidState`
-  before anything is sent, as is any edit of the store's Inbox and a top-level folder called
-  `INBOX`. The top level is the store's: for a provider bound to a shared store it is below
-  the store's root (see "Shared mailboxes").
-  Names go through `quoted_name`, so rev1 sends modified UTF-7 (`Reçus` → `Re&AOc-us`).
+- **Names.** The adapter refuses exactly what IMAP cannot carry as one level, and nothing more
+  (`providers.md`): an empty leaf, CR, LF or NUL (a quoted string cannot hold them), a leaf
+  carrying the delimiter, which would make levels nobody asked for, a subfolder on a server
+  whose delimiter is `NIL`, which has nowhere to go, and a top-level folder called `INBOX`. The
+  delimiter is the one the edit's `LIST` reports, so these are judged after that read and before
+  any command that changes the tree; all are `InvalidState`. An edit of the store's Inbox is
+  refused before the `LIST`. A tab, a surrounding space, or a `/` on a server whose delimiter is
+  `.` are the server's to judge. The top level is the store's: for a provider bound to a shared
+  store it is below the store's root (see "Shared mailboxes"). Names go through `quoted_name`,
+  so rev1 sends modified UTF-7 (`Reçus` → `Re&AOc-us`).
 - **`Create`** → `CREATE "<path>"`, then `SUBSCRIBE`. A path the `LIST` already holds is not
   created again, and `NO [ALREADYEXISTS]` is success: a retry meets what the first attempt
   made.
+- **A create with a role** → `CREATE "<path>" (USE (\Archive))` (RFC 6154 §3). A client must
+  not send `USE` unless the server advertises `CREATE-SPECIAL-USE` (§3), a capability apart
+  from `SPECIAL-USE`; RFC 9051 does not fold it in (Appendix E item 2 takes only SPECIAL-USE's
+  attribute list, and rev2's `create` takes no parameters, §9), and it needs no `ENABLE`
+  (`Extension::CreateSpecialUse`). One answer, `Negotiated::may_create_with_role`, decides it
+  for the capability, a folder write and the sent copy's fallback folder: `CREATE-SPECIAL-USE`
+  advertised **and** roles readable back (`SPECIAL-USE` advertised, or rev2, where they are base
+  `LIST` data), since without them a landed retry could not be told from someone else's folder
+  nor the role confirmed. `Capabilities::mailbox_create_role` is that answer, and the adapter
+  refuses on it. Where it is false, or the role has no attribute (the inbox, which IMAP names by
+  its name; `ServerRecords`, `ChatHistory`, any `Other`), the create is refused before the
+  `LIST`, as `InvalidState` with a `CreateRoleError` source (`providers.md`). The rule is
+  checked again on the live session, since the capability was read at the first connect and a
+  redial may land on a backend that does not advertise it. After an `OK`, one `LIST "" "<path>"`
+  reads the role back, asking `RETURN (SPECIAL-USE)` where `SPECIAL-USE` is advertised (on rev2
+  without it the role is base `LIST` data); a folder without it is `CreateRoleError::NotKept`,
+  the one refusal with a side effect: the folder is subscribed as any created folder is, never
+  deleted, and named in the error. A folder the `LIST` already holds at the path is the retry only if
+  it carries the attribute; without it, it is a `Conflict`. `NO [USEATTR]` is told apart by the
+  `LIST`, never by the prose: another folder of the store holding the attribute is a
+  `Conflict`, none is `InvalidState` (the server will not give that role). `NO [ALREADYEXISTS]`
+  lists again to see the attribute. RFC 6154 lets a server take the role from another folder or
+  let two share it instead; that is the server's choice and the create succeeds.
 - **`Update`** → `RENAME "<from>" "<to>"`. `NO [NONEXISTENT]` or `[ALREADYEXISTS]` is a
   `Conflict`, as is a destination the `LIST` already holds (refused without a request).
 - **`Trash`** → `RENAME` under the Trash folder. Where Trash is `\Noinferiors`, or the
@@ -821,6 +1067,31 @@ protocol on both dialects.
   a client listing only subscribed folders would lose a folder we moved. So a rename
   unsubscribes each old path of the subtree and subscribes each new one, and a delete
   unsubscribes. A refusal of either is ignored: the folder change itself went through.
+
+The role on create is pinned offline (`mailbox_write_role_tests.rs`: the `USE` bytes, nothing
+sent where unadvertised or formless, each refusal's class). `tests/live_mailbox_create_role.rs`
+reads each server's `CAPABILITY` on a raw session and holds the adapter's capability to it.
+Observed:
+
+| | `CREATE-SPECIAL-USE` | what happens |
+|---|---|---|
+| Stalwart | advertised | the adapter's `CREATE … (USE (\Archive))` makes a folder that lists with `\Archive`, and a retry meets it. A second folder asking for a role another holds is refused, `NO [USEATTR] A mailbox with role 'archive' already exists.`: one folder per role, as on its JMAP. The adapter reads that as a `Conflict` (the `LIST` shows the holder), and the first folder keeps the role |
+| Dovecot rev1 and rev2 (2.4.4) | **not** advertised | the adapter refuses and sends nothing. Sent raw anyway, `CREATE "x" (USE (\Archive))` answers `OK Create completed` and makes the folder **without** the attribute: a plain `LIST` shows `(\HasNoChildren)`, one asking `RETURN (SPECIAL-USE)` shows no flags, and the adapter's folder list gives it no role. `\Archive` is held there (the harness gives its `Archive` that role, and the same session lists `Archive` with `\Archive`, so the listing can show a role); the test asks for the unheld `\Flagged` too |
+
+**Dovecot takes `USE` without advertising it, and drops the role** (`DOVECOT-1` in
+`docs/spec-deviations.md`: RFC 4466 §2.2 has a server reject a parameter it does not support with
+`BAD`, and RFC 6154 §3 has it make no mailbox it cannot give the role, held or not). This is why
+the adapter's refusal matters and is not merely the client rule of RFC 6154 §3: had it sent `USE`
+to Dovecot, the create would have come back a success with an ordinary folder, which a host would
+take for its Archive; and why a role create is read back (`NotKept`) wherever it is sent. The
+capability is the only safe signal, so the adapter keeps to it on every server. The live test
+asserts, on every server, that a refused create makes nothing and a taken one makes the folder,
+and on Dovecot asserts the observed behaviour for a held role and an unheld one, so DOVECOT-1
+goes red the day Dovecot changes.
+
+The sent copy's fallback folder (`place.rs`) is created with its role under the same answer; a
+`[ALREADYEXISTS]` to that create means a `Sent` without the role is there already, and no plain
+`CREATE` follows it.
 
 Proven live on Stalwart (as the scratch account `carol@`) and both Dovecot dialects by
 `tests/live_mailbox_writes.rs`: create (including a non-ASCII name), create again, rename with
@@ -1026,6 +1297,11 @@ object. `ImapAccount::gmail` (offered only on a session advertising `X-GM-EXT-1`
 `GmailMail` instead: a reader of All Mail (`\All`), Spam (`\Junk`) and Trash (`\Trash`), the
 three folders that between them hold every message once. It reads and never writes; what a
 label means is `provider-google`'s (`google.md`, "Mail read over IMAP"), which is the only user.
+`GmailMail::credential_subject` says who it signs in as (the subject of its config's source,
+recorded by `ImapAccount::connect`), so the Gmail adapter can refuse a reader that does not sign
+in as the same credential subject as its API half. `test_server::gmail` (the `test-server`
+feature, which only dev-dependencies turn on) serves an in-process Gmail over TLS, so another
+crate's suite can connect a real `ImapAccount` offline.
 
 - **Gmail's items.** `X-GM-MSGID`, `X-GM-THRID` and `X-GM-LABELS` (`parse_gmail`) are the same
   for a message in every folder; a message moving between the three keeps its Gmail id under a
@@ -1078,8 +1354,8 @@ label means is `provider-google`'s (`google.md`, "Mail read over IMAP"), which i
   message in one response and one transaction. Per-page streaming of the delta is a later
   refinement. It still fetches `1:*` regardless of the sync-depth window, which is correct:
   `VANISHED` needs `1:*` to report already-expunged UIDs, and the window must restrict only
-  the *upserts*. It does — in the orchestrator, for every adapter's **delta** at once
-  (`SyncWindow::admits`, `store-and-sync.md`), so an out-of-window UID above the cursor
+  the *upserts*. It does — in `EmailChunk::into_update`, for every adapter's **delta** at once
+  (`MailboxWindows::admits`, `store-and-sync.md`), so an out-of-window UID above the cursor
   cannot re-enter the store. The snapshot path is not re-checked there: its bound is the
   `UID SEARCH SINCE` above, in the server's own date semantics. An *unsolicited* flag-only `FETCH` (no `ENVELOPE`) that the server
   interleaves mid-response is dropped, so it can never overwrite a stored message's
@@ -1098,8 +1374,9 @@ label means is `provider-google`'s (`google.md`, "Mail read over IMAP"), which i
 - **`UID EXPUNGE` requires UIDPLUS** (RFC 4315). A server without it would need a
   plain `EXPUNGE` (which expunges every `\Deleted` message in the mailbox) — also a
   later refinement.
-- **`SEARCH` is implemented only for the sync-depth window** (`UID SEARCH SINCE`, see
-  Sync-depth window above), not yet as a general **provider-search fallback** (the
+- **`SEARCH` is implemented only for the sync-depth window and a widening's band**
+  (`UID SEARCH SINCE`, and `UID SEARCH UID 1:n SINCE … BEFORE …`; see above), not yet as a
+  general **provider-search fallback** (the
   `search-coverage.md` slice). `UID SEARCH SINCE` is parsed for both the classic
   `* SEARCH` and extended `* ESEARCH … ALL` replies; richer criteria and the
   full-text provider fallback remain a later refinement.
@@ -1168,6 +1445,9 @@ whole rule:
 - **QRESYNC is not folded in.** rev2 took only its `CLOSED` response code (item 9), so
   CONDSTORE/QRESYNC keeps its own capability and its own `ENABLE`.
 - **Neither is UIDONLY** (RFC 9586), which needs its own `ENABLE` on either dialect.
+- **Nor is CREATE-SPECIAL-USE** (RFC 6154 §3). rev2 folds in SPECIAL-USE's *attributes* only
+  ("the list of new mailbox attributes", item 2), and its `CREATE` takes no parameters (§9), so
+  a `USE` parameter needs the capability on either dialect. It needs no `ENABLE`.
 - **Folded in ≠ will arrive.** rev2 folds in SPECIAL-USE's *attributes* and makes them base
   `LIST` data (§7.3.1) — it defines **no** `RETURN (SPECIAL-USE)` option of its own, which
   reads like a rev2 session never has to ask. **Dovecot's rev2 disproves that**: it
@@ -1350,11 +1630,11 @@ keyword — `$Junk`, `$NotJunk`, `$Phishing` — but IMAP keeps the flag and the
 different verbs, so it is two commands rather than one.
 
 **`PERMANENTFLAGS` is read before the write, and it is the only probe IMAP offers here.**
-RFC 9051 §7.1 makes `\*` the server's statement that a client may create new keywords.
-Without it a server answers `UID STORE +FLAGS ($Junk)` with a plain `OK` and stores nothing
-— the report would read as delivered and be absent on the next `FETCH`. `SelectData` now
-carries `permanent_flags_allow_new`, and a mailbox without it makes the report an
-`InvalidState` rather than a silent no-op.
+A server that cannot keep the verdict keyword answers `UID STORE +FLAGS ($Junk)` with a plain
+`OK` and stores nothing — the report would read as delivered and be absent on the next `FETCH`.
+`SelectData::permanent` carries what the mailbox said, and the report asks it by the one rule
+every keyword write follows (`permanent.rs`: named in `PERMANENTFLAGS`, or `\*`). A mailbox that
+keeps neither makes the report an `InvalidState` rather than a silent no-op.
 
 **That refusal branch has no server to exercise it.** Stalwart and both Dovecot dialects
 advertise `\*`, so the live suite can only pin the *premise* (`live_imap_report.rs` →

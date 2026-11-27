@@ -19,7 +19,8 @@ engine-provider = { workspace = true, features = ["http"] }
 # preserves the caller's Message-ID and threading — see `submit`).
 engine-rfc5322 = { workspace = true }
 # Gmail hands back raw RFC 5322 header values, so subjects and display names still need
-# RFC 2047 decoding — through the engine's one decoder, shared with the IMAP adapter.
+# RFC 2047 decoding, and the `Date` header parsing: through the engine's one decoder and one
+# date parser, shared with the IMAP adapter.
 engine-mime = { workspace = true }
 # One shared TLS trust policy across every provider (`docs/agent-guidance/tls.md`);
 # `reqwest` enables the preconfigured-client builder this HTTP transport uses.
@@ -55,6 +56,8 @@ tokio = { workspace = true, features = ["time", "test-util"] }
 engine-http = { workspace = true, features = ["test-server"] }
 # The gated live test builds a (bundled) TlsClientConfig to pass into `connect`.
 engine-tls = { workspace = true }
+# A real `ImapAccount` over an in-process Gmail server, for the offline `with_imap` tests.
+provider-imap = { workspace = true, features = ["test-server"] }
 
 [lints]
 workspace = true

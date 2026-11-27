@@ -18,8 +18,9 @@ than Graph:
 - **Google Calendar is IANA-native** and returns recurring **masters with an RFC 5545
   `RRULE`** — no Windows-zone table, no pre-expanded `calendarView` (contrast Graph).
 
-The engine stays **OAuth-agnostic**: a host supplies a bearer access token; token
-acquisition/refresh is the host's job (`north-star.md`). `tools/google-oauth` is a
+The engine stays **OAuth-agnostic**: a host supplies the account's `CredentialSource`
+(`GoogleClient::connect_with_source`), or a fixed bearer token (`connect`); acquiring and
+refreshing the token is the source's job (`north-star.md`, `credential-source.md`). `tools/google-oauth` is a
 standalone dev helper (outside the workspace gates) that drives the interactive
 Auth-Code+PKCE loopback flow and captures fixtures — the exact mirror of
 `tools/graph-oauth`.
@@ -49,8 +50,14 @@ Auth-Code+PKCE loopback flow and captures fixtures — the exact mirror of
   against captured fixtures.
 - **`transport`** — a `GoogleTransport` seam over bearer HTTP. `HttpTransport` (reqwest +
   rustls, built from the caller-supplied `TlsClientConfig` passed to
-  `GoogleClient::connect`/`with_base` — `tls.md`) is production; the seam lets the
-  fetch/provider orchestration run offline. There is **no session discovery** (the API
+  `GoogleClient::connect_with_source`/`with_base_and_source`, or `connect`/`with_base` for a
+  fixed token — `tls.md`) is production; the seam lets the
+  fetch/provider orchestration run offline. **The token is asked for, not held**: every
+  authenticated request goes through the account's `engine_http::AuthenticatedClient`, as on
+  Graph (`graph.md`, "The crate"); a `401` whose challenge offers `Bearer` (Google's says
+  `error="invalid_token"`) is replaced once and the request sent again, only a token is ever
+  presented, and content URLs (People photos) keep their anonymous client. `GoogleClient` is a
+  cheap clone whose clones share the transport, its request gate and its quota pacing. There is **no session discovery** (the API
   root is fixed) and **no immutable-id preference header** (unlike Graph). Like Graph,
   having no connect-time request, Google's `ConnectionInfo::http_version` is `None` until
   its first fetch, recorded at the transport's single funnel. Google returns opaque
@@ -71,6 +78,8 @@ Auth-Code+PKCE loopback flow and captures fixtures — the exact mirror of
   read over IMAP, when the host connects it (below).
 - **`mutate`/`submit`** — `edit_mail` (label deltas) and `submit_email` (`messages.send`).
 - **`labels_write`**: `edit_mailbox`, the folder changes (below).
+- **`rules`**, **`rules_query`**, **`rules_read`**, **`rules_write`**, **`rules_apply`**,
+  **`rules_apply_support`**, **`vacation`**: the filters and the vacation reply (below).
 - **`provider`** — `GmailProvider`, the `Provider` impl.
 
 ## The base URL
@@ -142,7 +151,9 @@ Gmail labels drive all three of the message's independent axes (`modeling.md`):
 re-grouped by local derivation. The `Message-Id` header (mixed-case in the wire, so
 lookup is case-insensitive) is preserved bracket-stripped as a threading **hint**, never
 identity — the Gmail message `id` is identity. `internalDate` (epoch-millis) →
-`received_at`; the `Date` header (RFC 2822) → `sent_at`.
+`received_at`; the `Date` header (RFC 5322) → `sent_at`, through `engine_mime::date`. The IMAP
+pass reads the same header off `ENVELOPE` with the same parser inside `provider-imap`, so a
+message says it was sent at one instant whichever pass read it (`modeling.md`).
 
 ## Sync (backfill, reconcile, history delta)
 
@@ -152,7 +163,9 @@ part way; `reconcile;h=…` is a backfill finished and not yet reconciled.
 
 - **Backfill** (no cursor, or `backfill;…`): capture the account `historyId` from `profile`
   **before** enumerating, then page `messages.list`, fetching each id full (`format=metadata` with a
-  fixed `metadataHeaders` set for a minimal, deterministic payload). `format=metadata` carries no
+  fixed `metadataHeaders` set for a minimal, deterministic payload, `Importance::HEADERS` among
+  it, since a metadata read returns no header it does not name; it returns every occurrence of one
+  it does, in the message's order, and the importance rule reads the last). `format=metadata` carries no
   parts tree, so these rows arrive with `has_attachment` false; the flag is settled when the
   message's source is read, by an open or the warming pass (`store-and-sync.md`, "The source
   answers the row's paperclip"). Reading the tree here would be `format=full`, three times the
@@ -179,7 +192,16 @@ part way; `reconcile;h=…` is a backfill finished and not yet reconciled.
   the account's `engine_http::RequestGate` to (`http-throttling.md`), so the ceiling now
   bounds everything the account does at once rather than one page's fan-out at a time — a
   body warm overlapping a backfill used to be able to exceed it. A `SyncWindow` floor windows
-  the enumeration to `q: after:<epoch>`.
+  the enumeration to `q: after:<epoch>`. A label the host holds further back (`MailboxWindows`)
+  is a listing of its own, after the account's: `labelIds=<label>` with
+  `q: after:<its floor> before:<the account's>` (`window_listing.rs`), so only that label's
+  older mail is fetched. The backfill cursor names the listing it is in
+  (`backfill;h=…;l=<label>;p=…`), and the reconcile lists every listing. Observed: an
+  unknown `labelIds` lists nothing rather than failing, and `after:` and `before:` both
+  include a message dated exactly on their epoch, so the boundary is listed twice rather
+  than missed. The IMAP pass searches each listing in every folder, a label by the name
+  `X-GM-LABELS` gives it with `SINCE` and `BEFORE`, and Spam and Trash as their own folders
+  (`store-and-sync.md`).
 
   It is **additive** and checkpointed after every page with the token of the next, because at
   20 units a message a large mailbox takes many passes (about 270 messages a minute under the
@@ -233,7 +255,15 @@ part way; `reconcile;h=…` is a backfill finished and not yet reconciled.
 
 `GmailProvider::with_imap` takes a `provider_imap::GmailMail` (from `ImapAccount::gmail`,
 offered only on a session advertising `X-GM-EXT-1`) and moves the message sync and every body
-read onto IMAP. Labels, writes, drafts, sending, reports and identities stay on the API. The
+read onto IMAP. **Both halves sign in as the same credential subject.** A host gives the
+`ImapConfig` the source the client asks (`ImapConfig::from_credential_source`), answering the
+token with the account's address (`Credential::bearer_for`: SASL needs it, the API ignores it),
+and `with_imap` refuses a reader that signs in as another credential subject
+(`GmailMail::credential_subject`) as `InvalidState`, before anything is read: another account's
+reader would write its mail under this one. The check is the subject, not the source object:
+two sources naming one subject are one account's by the subject contract, and are accepted.
+With one source, a token replaced after either half's refusal is the one the other presents
+next (`tests/live_credential_source.rs`). Labels, writes, drafts, sending, reports and identities stay on the API. The
 reason is the quota: the API bills a message's metadata 20 units and its body 60 against 6,000
 per user per minute, about 270 messages a minute, and IMAP bills nothing per message.
 
@@ -294,12 +324,12 @@ per user per minute, about 270 messages a minute, and IMAP bills nothing per mes
   (`providers.md`), and a `2xx` whose `id` cannot be read falls back to the placeholder key
   rather than failing a send Gmail has accepted.
   With that id in hand, a keyword the draft asks for on its filed copy
-  (`Draft::sent_copy_keywords`) is kept as the label standing for it: an existing label under
+  (`Draft::sent_copy_metadata`) is kept as the label standing for it: an existing label under
   any of the keyword's names, else one created under `KeywordName::create_as` with
   `labelListVisibility: labelHide` and `messageListVisibility: show`, then one
   `messages.modify` adding it. A `409` on the create (another device won by a moment) reads
   the list again. Nothing in it fails the send; what was kept is in
-  `SubmissionReceipt::sent_copy_keywords`.
+  `SubmissionReceipt::sent_copy_kept`.
 
 - **`put_draft` / `delete_draft`** → the `users.drafts` collection. Gmail is the **one
   transport in this workspace with a draft object of its own**, so this is the only
@@ -314,13 +344,22 @@ per user per minute, about 270 messages a minute, and IMAP bills nothing per mes
   than the key `put_draft` returned. That is safe only because the two draft verbs are the
   sole consumers of that key: nothing else addresses a message by it. Keying by the
   message id instead would have forced create-and-delete here too, for no gain.
+- **A draft's keywords are hidden named labels on the message under it**, as a Sent copy's
+  are, and the adapter advertises `draft_keywords` once a `KeywordName` is registered. The save
+  answers with that message's id, and one `messages.modify` labels it. Google's guide says a
+  draft's message takes no label; live, the label is put on and the draft carries it, and the
+  next `drafts.update` replaces the message and the label with it, so **every save labels the new
+  message again**. A save asking for none costs no request, and a refused modify leaves the draft
+  saved and the keyword out of `DraftReceipt::kept`.
 - ⚠️ **Gmail rewrites the `Message-ID` on `drafts.create`, not only on send.** A draft
   written with `<local@test.local>` comes back as `<CALRU+…@mail.gmail.com>`
   (live-verified). This is the same behaviour as the send finding above, and it has a
   consequence a host feels rather than the adapter: **a saved Gmail draft cannot be
   correlated with a local copy by `Message-ID`**, so anything matching the two has to use
   the key `put_draft` returned. `tests/live_drafts.rs` pins the rewrite itself, and
-  identifies drafts by subject for exactly this reason.
+  identifies drafts by subject for exactly this reason. The `Date` header is replaced too,
+  with the moment of the save; every other header comes back as written, each occurrence of a
+  repeated one in order (`tests/fixtures/mail/message_metadata_importance*.json`).
 - ⚠️ **`drafts.create` refuses an empty `To` group.** `To: undisclosed-recipients:;`, the
   header a Bcc-only *send* carries, answers `400 invalidArgument` "Invalid To header", so a
   draft saved before anyone is addressed failed on every autosave (observed through a host).
@@ -361,8 +400,16 @@ nesting lives in the name alone (above):
 | delete | `labels.delete` of the subtree, deepest first; a `404` is removed. Mail is not destroyed: Gmail keeps it in All Mail |
 
 Label ids never move, so every receipt names the id the edit started with, and a trash names
-none. A system label, a system parent and the synthetic All Mail are refused as
-`InvalidState` before anything is sent; a label gone from the list is a `Conflict`.
+none. A create's or rename's name that is empty, or that carries a `/`, which Gmail would read
+as nesting and so make a label nobody asked for, is refused as `InvalidState` before any
+request, the label list included. A system label, a system parent and the synthetic All Mail
+are refused as `InvalidState` too, after the label list is read and before any change is
+sent. A label gone from the list is a `Conflict`.
+
+No create gives a label a role: Gmail's role folders are its system labels, which exist already,
+and a user label is never one. So `mailbox_create_role` is `false`, and a create that asks for a
+role is refused as `InvalidState` (`CreateRoleError::NotSupported`, `providers.md`) before any
+request, the label list included.
 
 ⚠️ **Live verification is pending.** The request shapes are pinned offline through the recording
 fake (`labels_write_tests`), from the documented API, not from captured replies.
@@ -398,8 +445,16 @@ read/sync **and** writes guarded by `If-Match` (`WriteGuard::Enforced`).
   data-loss). A per-instance override (`recurringEventId` set) is dropped (deferred —
   `calendar-semantics.md`); a `status:"cancelled"` entry is a tombstone.
 - **Sync** (`cal_fetch`): `events.list` with a per-calendar `nextSyncToken`. The window
-  (`timeMin`/`timeMax`) is **optional** and applies only to the initial snapshot (a
-  `syncToken` request cannot also carry a window). A `410` on a stale `syncToken`
+  (`timeMin`/`timeMax`) applies only to the initial snapshot (a `syncToken` request cannot
+  also carry a window). Google takes it as optional, but the provider advertises
+  `windowed_events` and the engine always names one (the `window` of `sync_events`): the
+  host's horizon at the first sync, or the union a `reach_calendar` reopens over. The provider
+  takes no window of its own. **A `syncToken` taken after a bounded list reports changes past
+  its bounds**: undocumented (`events.list` only forbids `timeMin`/`timeMax` beside a
+  `syncToken`), and measured in `tests/live_calendar_window.rs`, with an event created inside
+  the bounds as the control. Unlike a Graph `deltaLink`, which does not. It still never lists an
+  event that existed past the bounds and did not change, so the engine reopens the cursor over
+  the union rather than relying on the feed. A `410` on a stale `syncToken`
   classifies as `NeedsResync` → snapshot restart (the same mechanism as Gmail's
   history-expiry; here the error classifier maps `410` directly, no special case).
   **A subscribed holiday calendar never syncs incrementally.** Its snapshot carries a
@@ -554,8 +609,10 @@ Restoring the old mapping fails the live test on `writer: share`. The captured e
 an omission. Gmail delegation is a real product feature, but a user credential cannot reach it:
 the API route that would serve it, `users/{userId}` for another user, needs a **service
 account with domain-wide delegation** — a different credential model from the user bearer
-token this adapter holds. Advertising anything else would offer a host an onboarding flow that
-could only fail, so both discovery verbs keep their rejecting defaults (`providers.md`).
+token this adapter is given. Advertising anything else would offer a host an onboarding flow that
+could only fail, so both discovery verbs keep their rejecting defaults (`providers.md`). A host
+holding domain-wide delegation needs nothing from this: its source mints a token for each user,
+and each user is an account of its own (`credential-source.md`, "Administrative credentials").
 
 `GoogleCalendarProvider` advertises `Unsupported` too, for the calendar half of the same
 question (`SharedAccounts`, `providers.md`). A calendar shared with the user arrives **in the
@@ -564,6 +621,94 @@ so it already syncs under the user's own account. What has no route is the other
 calendar opened as part of **another user's store**: like Gmail's `users/{userId}`, reaching
 another user's calendars needs a service account with domain-wide delegation, not a user
 token. So there is nothing to bind, and a host never needs to ask.
+
+## Filters and the vacation reply
+
+`GmailProvider` implements `MailRules` (`rules`, `rules_query`, `rules_read`, `rules_write`,
+`rules_apply`, `rules_apply_support`) and `Vacation` (`vacation`), and answers `Some` from
+`mail_rules()` and `vacation()` on every account: whether the token may read or write them is a
+scope, known only by asking. The mapping is the Gmail column of
+`docs/design/filters-and-out-of-office.md` §5; what follows is what the adapter adds.
+
+- **Where.** Filters are `users.settings.filters` (`list`, `create`, `delete`; there is no
+  update), the reply `users.settings.vacation` (`getVacation`, and `updateVacation`, a `PUT` of the
+  whole setting, so a part left out is cleared). Writing either needs `gmail.settings.basic`. An
+  account with no filters answers `204` with no body (observed), which the transport reads as
+  `null`, an empty listing.
+- **Criteria are searches**, read typed only where every part is in a small subset
+  (`rules_query`): `from` and `subject` holding a word, a quoted phrase, or several as `a OR b`,
+  `(a OR b)` or `{a b}`; and in `query` the terms `from:`, `subject:`, `has:attachment`, `larger:`
+  and `smaller:` (bytes: observed through the same search on mail), joined by spaces. `from:` and
+  `subject:` read as what Gmail matches, a word match (`TextOp::Words`), `from:` over the sender's
+  name and address (`AddressPart::WithName`): exact here, and held by no other target, so such a
+  rule is not kept on Sieve or Graph rather than carried wider or narrower. Anything else keeps its
+  criterion whole, as a native condition: `to` (it matches `Bcc` too), `me` bare or quoted, any
+  other term or operator. A `negatedQuery` of terms joined by ` OR ` is the rule's exceptions; one
+  whose terms must all hold stays native. A `query` of terms joined by ` OR ` beside no other
+  criterion is an any-of rule.
+- **Written back**: a subject that *contains* a value is approximated as a word search, which
+  matches less, so it is held as a condition only, never as an exception (`ExactExceptions`); an
+  address alone, the recipients, a subject that *is* a value, a body and a domain are not held,
+  since each would widen the rule. A native part puts its keys back first; a typed condition whose
+  criterion is taken goes into `query`, after a native query held there in brackets (`(…) term`,
+  stored as sent, observed), and the exceptions likewise into `negatedQuery` (`(…) OR term`).
+- **Actions are label changes.** A user's label added files the message, moved where `INBOX` is
+  removed; `TRASH` and `SPAM` added are Trash and Junk; `INBOX` removed with nothing else to file
+  into is the Archive role; `STARRED` added and `UNREAD` removed are `$flagged` and `$seen`; a label
+  standing for a keyword (`named_labels`) is that keyword, held only for a keyword the host named;
+  `IMPORTANT` added or removed marks the importance high or low (Gmail's own marker,
+  approximated); `forward` is a redirect that keeps the message. Every other label change is a
+  native action that sends no mail, and so is an action key Gmail may add later: Gmail documents
+  three, `forward` is the one that sends, and a Gmail action carries to Gmail alone.
+- **What Gmail refuses, the plan sees** (`RuleLimit`s of `rules::vocabulary`): a word match on an
+  address other than the sender with its name (`WordsOnSubjectAndSender`), two of the user's
+  labels on one filter (a folder and a keyword label alike; `400`, observed), a filter with no
+  criteria (`400`, observed), a second forward (a native one included), a value no search spells,
+  a native condition in an any-of rule or as an exception, an importance neither high nor low,
+  filing into a role other than Trash, Junk and the archive, or a copy into one.
+- **No name, stop or disabled filter, and the order approximated.** Gmail applies every filter
+  that matches, so without a stop the label changes and forwards come out the same in any order: a
+  set read from Gmail plans whole against its own vocabulary, and a set from elsewhere loses its
+  stops, not its order. The listing is sorted by id, and the version is a SHA-256 of it
+  (`engine_provider::RuleListing`, shared with Graph).
+- **Written filter by filter** (`rules_apply`). A changed rule is created as a new filter, and the
+  old one is deleted only once the new one is stored. A rule whose filter Gmail already holds (the
+  one it was read as, one no rule claims, one this write created) is not sent: Gmail refuses a
+  filter identical to one it holds (`400 failedPrecondition`, observed). **A rule that is not
+  written, because the plan does not keep it or the server refuses it, leaves the filter it was
+  read as where it is**, and the receipt names it (`RulesReceipt::left_as_read`); only the filters
+  no rule names are deleted, last. A forward to an address the account has not verified
+  (`settings.forwardingAddresses`, `accepted`), typed or Gmail's own, is held back as
+  `ForwardNotAllowed` before anything is sent. A base is the listing read when its version is that
+  of its raw form as the adapter parses it, so a host that stored the raw form and handed it back
+  re-encoded is still understood (`RuleListing::of_base`); sent anyway, Gmail refuses it
+  (`400 failedPrecondition`, observed). A label made for a keyword of a filter then not stored is
+  deleted again, where a read of it shows it still holds no message (`messagesTotal: 0`; a label
+  just made reads so, observed): another device's keyword write may have put it to use since, and
+  then it stays. That narrows the race to one round trip and does not close it: a keyword write
+  between the read and the delete, or a `messagesTotal` that lags, can still lose such a label.
+  `left_as_read` is conservative: a rule whose write failed with its outcome unknown is left out of
+  it even where the failure came before the filter was sent, though its filter is then untouched.
+  A success whose body does not read counts as done.
+- **Guards.** Both are `Absent`: a filter and the reply carry no ETag. A write reads again and
+  refuses a base that moved as `Conflict`, which narrows the race and does not close it, and
+  neither receipt carries a version. Gmail showed every write on the next read (no lag observed).
+- **The reply.** `startTime` and `endTime` are milliseconds, written with the start rounded up and
+  the end down, so the window is never wider than asked. `responseSubject` is put before the
+  answered message's subject rather than in its place. **One body**: where text and HTML are both
+  sent, Gmail keeps the HTML and drops the text (observed), so the vocabulary is
+  `ReplyBodies::One` and a reply with both is refused before sending. `restrictToContacts` is
+  Contacts, `restrictToDomain` Organization, both ContactsInOrganization; the domain restriction is
+  a Workspace account's alone, so the vocabulary asks the affiliation (`userinfo.email`); a token
+  whose grant falls short (a `Permanent` failure) gets the personal vocabulary, as does one that no
+  longer signs in (`Authentication`) when only the vocabulary is asked; a write limited to the
+  organization surfaces `Authentication`, so the host asks the user to sign in again. A throttled
+  or failing ask stays an error, and a write asks only for a reply limited to the organization.
+
+Live: `tests/live_rules.rs` (reads), `tests/live_rules_writes.rs` and `tests/live_reply_writes.rs`
+(writes, each behind a gate of its own, `GMAIL_RULES_WRITES=1` and `GMAIL_REPLY_WRITES=1`), all
+run on the throwaway account on 2026-11-24, every claim marked observed above asserted there; the
+write suites leave every filter they did not create and the reply byte for byte as they found them.
 
 ## Testing (3-tier, mirroring Graph — `AGENTS.md` offline-mock caveat)
 

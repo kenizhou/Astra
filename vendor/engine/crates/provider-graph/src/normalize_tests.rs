@@ -50,9 +50,30 @@ fn resolved_roles() -> Vec<(MailboxId, MailboxRole)> {
             "junkemail",
             include_str!("../tests/fixtures/wellknown/junkemail.json"),
         ),
+        (
+            "syncissues",
+            include_str!("../tests/fixtures/wellknown/syncissues.json"),
+        ),
+        (
+            "conflicts",
+            include_str!("../tests/fixtures/wellknown/conflicts.json"),
+        ),
+        (
+            "localfailures",
+            include_str!("../tests/fixtures/wellknown/localfailures.json"),
+        ),
+        (
+            "serverfailures",
+            include_str!("../tests/fixtures/wellknown/serverfailures.json"),
+        ),
+        (
+            "conversationhistory",
+            include_str!("../tests/fixtures/wellknown/conversationhistory.json"),
+        ),
     ];
     WELL_KNOWN_ROLES
         .iter()
+        .chain(RECORD_ROLES)
         .map(|(alias, role)| {
             let fixture = aliases.iter().find(|(a, _)| a == alias).unwrap().1;
             let id = well_known_folder_id(&serde_json::from_str(fixture).unwrap()).unwrap();
@@ -103,9 +124,13 @@ fn roles_resolve_by_id_not_by_localized_name() {
     assert_eq!(role_of("Ongewenste e-mail"), Some(MailboxRole::Junk));
     assert_eq!(role_of("Concepten"), Some(MailboxRole::Drafts));
     assert_eq!(role_of("Archiveren"), Some(MailboxRole::Archive));
-    // Outbox and Conversation History have no standard role.
+    // Conversation History holds the chats the service stored, whatever it is called.
+    assert_eq!(
+        role_of("Gesprekgeschiedenis"),
+        Some(MailboxRole::ChatHistory)
+    );
+    // The Outbox has no role.
     assert_eq!(role_of("Postvak UIT"), None);
-    assert_eq!(role_of("Gesprekgeschiedenis"), None);
 }
 
 #[test]
@@ -300,4 +325,39 @@ fn the_select_keeps_the_recipients_that_make_sender_an_address() {
     // Without them Graph answers `sender` with an X.500 DN, not an address (`MESSAGE_SELECT`).
     assert!(MESSAGE_SELECT.contains(&"sender"));
     assert!(MESSAGE_SELECT.contains(&"toRecipients"));
+}
+
+#[test]
+fn importance_is_read_from_its_property() {
+    let importance = |id: &str| {
+        messages()
+            .into_iter()
+            .find(|m| m.id.as_str() == id)
+            .unwrap()
+            .envelope
+            .importance
+    };
+    assert_eq!(importance("message-1"), engine_core::mail::Importance::Low);
+    assert_eq!(importance("message-2"), engine_core::mail::Importance::High);
+    assert_eq!(
+        importance("message-3"),
+        engine_core::mail::Importance::Normal
+    );
+    assert!(MESSAGE_SELECT.contains(&"importance"));
+}
+
+/// A draft created from MIME carrying `Importance: high`, read back with the sync's own `$select`:
+/// Exchange turns the header into the property, lowercased.
+#[test]
+fn a_header_set_on_the_mime_reads_back_as_the_property() {
+    let doc: Value = serde_json::from_str(include_str!(
+        "../tests/fixtures/mail/message_importance.json"
+    ))
+    .unwrap();
+    assert_eq!(doc["importance"], "high");
+    let message = message_from_json(&doc, &[]).unwrap();
+    assert_eq!(
+        message.envelope.importance,
+        engine_core::mail::Importance::High
+    );
 }

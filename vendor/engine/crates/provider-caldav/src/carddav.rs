@@ -12,17 +12,17 @@ use engine_core::{
     sync::{SyncScope, SyncState, SyncUpdate},
 };
 use engine_provider::{
-    CalendarWrites, Capabilities, ConnectObserver, ConnectStep, ConnectionInfo, ContactDestination,
-    ContactPhoto, ContactSourceSync, ContactUnavailable, ContactWriteReceipt, ContactsProvider,
-    IgnoreConnectSteps, Provider, ProviderResult, ScopeSync, WriteGuard,
+    CalendarSync, CalendarWrites, Capabilities, ConnectObserver, ConnectStep, ConnectionInfo,
+    ContactDestination, ContactPhoto, ContactSourceSync, ContactUnavailable, ContactWriteReceipt,
+    ContactsProvider, IgnoreConnectSteps, Provider, ProviderResult, ScopeSync, WriteGuard,
 };
 
 use crate::{
     carddav_config::CardDavConfig,
     carddav_ops::{
         ADDRESSBOOK, advertised_classes, bind_collection, contact_id, contact_report,
-        contact_update, decode_data_uri, discover_home, encode_segment, fallback_contact_sync,
-        list_address_books, normalize_response, require_writable, stable_suffix, supported_fields,
+        contact_update, decode_data_uri, discover_home, fallback_contact_sync, list_address_books,
+        new_card, normalize_response, require_writable, supported_fields,
     },
     ctag_sync::{is_ctag_cursor, refuses_sync_collection},
     error::CalDavError,
@@ -60,8 +60,8 @@ fn no_address_books() -> ContactUnavailable {
 
 /// CardDAV adapter bound to one address-book collection.
 pub struct CardDavProvider {
-    executor: Box<dyn DavExecutor>,
-    home_href: String,
+    pub(crate) executor: Box<dyn DavExecutor>,
+    pub(crate) home_href: String,
     /// The `current-user-principal` the server named during discovery, if it named one.
     principal: Option<String>,
     collection: AddressBookId,
@@ -104,13 +104,9 @@ impl CardDavProvider {
             .connect_observer
             .as_deref()
             .unwrap_or(&IgnoreConnectSteps);
-        crate::credential_hosts::refuse_unpermitted_base(
-            config.credential_hosts.as_ref(),
+        let client = DavClient::from_source(
             &config.base_url,
-        )?;
-        let client = DavClient::new(
-            &config.base_url,
-            config.credentials,
+            config.source,
             &config.tls,
             &config.retry,
             &config.user_agent,
@@ -209,7 +205,20 @@ impl Provider for CardDavProvider {
             ..ConnectionInfo::new(self.capabilities)
         }
     }
+
+    /// CardDAV imports cards by `PUT` (`crate::contact_import`), on a server with address books.
+    #[cfg(feature = "import")]
+    fn contact_importer(&self) -> Option<&dyn engine_provider::import::ContactImporter> {
+        self.advertised.then_some(self)
+    }
+
+    /// An extended `MKCOL` (`crate::contact_create`), on a server with address books.
+    fn address_book_collections(&self) -> Option<&dyn engine_provider::AddressBookCollections> {
+        self.advertised.then_some(self)
+    }
 }
+
+impl CalendarSync for CardDavProvider {}
 
 impl engine_provider::MailboxWrites for CardDavProvider {}
 impl CalendarWrites for CardDavProvider {}
@@ -359,19 +368,16 @@ impl ContactsProvider for CardDavProvider {
                 "CardDAV draft targets a different address book",
             ));
         }
-        let suffix = draft
-            .card
-            .uid
-            .as_deref()
-            .map_or_else(|| stable_suffix(&draft.card), str::to_owned);
-        let href = format!("{}{}.vcf", self.href(), encode_segment(&suffix));
+        // One naming rule for every create, an event's and an import's included.
+        let (uid, name) = new_card(draft);
+        let href = format!("{}{name}.vcf", self.href());
         self.executor
             .send_write(WriteRequest {
                 method: DavMethod::Put,
                 href: href.clone(),
                 content_type: Some("text/vcard; charset=utf-8"),
                 precondition: Precondition::IfNoneMatch,
-                body: vcard_write::build_vcard(&draft.card),
+                body: vcard_write::build_vcard(&draft.card, &uid),
             })
             .await?
             .into_write_etag()?;

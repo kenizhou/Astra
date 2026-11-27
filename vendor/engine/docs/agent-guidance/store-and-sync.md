@@ -81,7 +81,8 @@ unanalysed, and the failure mode is a correct answer arrived at by sorting every
 
 `message` holds one row per stored mail object carrying exactly what a list row, a sort,
 a conversation group and a date filter need — `(account, scope_key, provider_key)`,
-`thread_id`, `message_id`, `date_utc`, the `flags` bitfield, `has_attachment`, and the
+`thread_id`, `message_id`, `date_utc`, the `flags` bitfield, `has_attachment`, the sender's
+`importance` (its RFC 2156 token), and the
 row's visible text (`from_name`, `from_addr`, `subject`, `preview`). `object.payload`
 stays the canonical normalized record and is off the list path entirely: opening a
 message reads it, showing a message in a list does not.
@@ -149,7 +150,7 @@ Consequences that the orchestrator must not paper over:
   (`http-throttling.md`). Conflating them breaks in both directions: an IMAP folder holds its
   own socket, so its ceiling is per connection, while every Graph folder shares the mailbox's.
 - **A calendar provider serves every calendar of its account, and the engine owns the
-  fan-out.** `Provider::event_scope(account, calendar)` names the scope a calendar's events
+  fan-out.** `CalendarSync::event_scope(account, calendar)` names the scope a calendar's events
   sync under: one per calendar where the event delta is per collection (CalDAV, Graph,
   Google), one shared by every calendar where it is account-wide (JMAP). `sync_calendar`
   syncs the calendar list, groups the listed calendars by scope, and syncs each scope once,
@@ -439,24 +440,43 @@ disposition. The two modes differ in **resumability**:
 **Two decoupled knobs (`StreamTuning { window, fetch_batch, chunk_size }`).** A single
 page size used to conflate network batching with commit granularity. `fetch_batch`
 bounds each provider round trip (an IMAP `UID FETCH` window, a JMAP `Email/get` page, a
-Graph `$top`); `chunk_size` bounds how many messages accumulate before a chunk is
-committed and reported. A large `fetch_batch` with a small `chunk_size` gives *both*
+Graph delta page's `odata.maxpagesize`); `chunk_size` bounds how many messages accumulate
+before a chunk is committed and reported. A large `fetch_batch` with a small `chunk_size` gives *both*
 few round trips *and* row-as-it-arrives commits (`StreamTuning::responsive` is the
 interactive default, `bulk` the throughput one). `window` is the per-sync **depth**
 (`SyncWindow { since }`, `engine-core`) — a provider-neutral date floor, passed per sync so
-a host changes depth without reconnecting providers. It bounds the pass twice, and the two
-are different jobs:
+a host changes depth without reconnecting providers. It is carried as `MailboxWindows`: the
+account's `SyncWindow`, plus any mailbox held further back (below). It bounds the pass twice,
+and the two are different jobs:
 
 - **What is fetched.** Each adapter maps the floor to its protocol's date filter on the
   snapshot/backfill: IMAP `UID SEARCH SINCE`, JMAP an `Email/query` `after`, Graph a
   `receivedDateTime ge` `$filter`, Gmail `q: after:`. **No delta can carry one** — a
   `deltaLink`, a `startHistoryId` and `Email/changes` all take a cursor, not a query.
-- **Where a pass resumes.** The orchestrator stores each email cursor with the floor it was
-  fetched under (`engine_sync::window_cursor`), and a pass asking for an earlier floor starts
-  the folder over, since the cursor knows nothing of the mail between the two. A later floor
-  resumes: a host computes the floor from today, so it moves on every day.
-- **What a `PassMode::Additive` delta stores.** The orchestrator drops any incoming message
-  the window does not admit (`SyncWindow::admits`) before the apply. A delta's "new arrival"
+- **Where a pass resumes, and how it widens.** Each email cursor is stored with the depth it
+  **covers** and, while a widening runs, the depth it widens **to** (`StampedCursor`, in
+  `engine-core`, so a store can read the record): a folder-bound scope's folder window, an
+  account-wide scope's account window and every mailbox held further back (below). The decision
+  is `engine_sync::window_cursor`'s. A depth the covered one covers resumes with a delta: a host
+  computes the floor from today, so it moves on every day and never widens anything. A depth
+  reaching further back **widens**: the pass runs its delta, then `Provider::widen_email` with
+  `Widening::new(covered, asked)` under the same lease, and records the asked depth as covered
+  only in a commit of its own once the band stream has ended, so a pass killed mid-band claims
+  nothing it did not fetch. The record also says whether the band has begun, and **the
+  orchestrator, not the adapter, decides whether the next pass continues it**
+  (`Widening::resuming`): only when the band had begun toward a depth covering the one asked, so
+  a pass under a narrower window in between, which may have dropped band mail, makes the next
+  widening start afresh. A band adapter (IMAP, JMAP)
+  fetches only `Widening::bands()` as additive chunks that tombstone nothing and checkpoint the
+  adapter's position in the band beside the kept delta cursor; the default **reopens**, a fresh
+  pass over the wider window, which is what the clear used to cost and is still correct for
+  every adapter. A host therefore never clears cursors to widen. `clear_mail_cursors` stops a
+  pass already running at its next commit, and forces a fresh snapshot
+  (`docs/design/windows-and-widening.md`).
+- **What a `PassMode::Additive` delta stores.** Any incoming message the window does not
+  admit (`MailboxWindows::admits`) is dropped before the apply. The rule lives on the chunk,
+  `EmailChunk::into_update` in `engine-provider`, so `engine-sync`'s streaming loop and a host
+  that applies `stream_email` to its own store share one implementation. A delta's "new arrival"
   is new to *us*, not recent: IMAP has no in-place edit, so filing a three-year-old message
   into a folder mints a UID above the cursor; Graph, Gmail and JMAP report a move the same
   way. Unfiltered, mail the user asked this device not to keep walks back in through every
@@ -477,10 +497,55 @@ and never tombstoned either. Depth on the snapshot path is the adapter's job, an
 the same value `MailRow::date_utc` carries — and admits **undated** mail, which is not provably
 outside the window.
 
+**No host does date arithmetic of its own.** `SyncWindow::months_back(n, today)` is the one rule
+for "N months back" (whole calendar months, the day clamped to the month it lands in: 31 March
+less one month is 28 February), `today` being the host's day, since the engine reads no clock
+there; "all mail" is `SyncWindow::full()`. A calendar horizon around a day is
+`Horizon::days(from, until)` over `CalendarDate::checked_add_days` and `checked_months_before`.
+
+**A mailbox held further back (`MailboxWindows`).** A host that wants one mailbox's longer
+history (a Sent folder) deepens it, `MailboxWindows::new(account).deepen(mailbox, window)`,
+rather than widening every mailbox. An override only deepens: a mailbox's window is the wider
+of the account's and its own. One rule decides, everywhere depth is decided: **a message is
+inside when the window of any mailbox it is filed in admits it** (`MailboxWindows::admits`).
+
+- **What is fetched.** `Provider::stream_email` takes the `MailboxWindows`, and a snapshot
+  or backfill fetches what any mailbox's window admits and no more. A folder-bound scope
+  (IMAP, Graph) fetches under its own folder's window (`window_for`). An account-wide scope
+  fetches the account's window and, beside it, each deepened mailbox's own
+  (`MailboxWindows::deepened`): JMAP joins `{after}` and `{inMailbox, after}` with an `OR`
+  in its one `Email/query`; Gmail lists the account and then each deepened label alone
+  (`labelIds`, `q: after: before:` over the API; `X-GM-LABELS` with `SINCE`/`BEFORE` in each
+  folder over IMAP, Spam and Trash being folders of their own). Deepening Sent never fetches
+  the account's older mail as a whole. A mailbox the server does not have is not fetched
+  further back: Gmail lists an unknown `labelIds` as empty, and the IMAP path has no name to
+  search it by.
+- **What an additive chunk stores.** Judged per message, by its own mailboxes. This is what
+  keeps a deeper pass's mail: a fresh IMAP backfill commits its older groups as *additive*
+  chunks before its completing reconcile, so judging them by the account window would drop the
+  deeper mail while its key stayed in `present`: fetched, never stored, never tombstoned.
+- **What a prune keeps.** `prune_account_mail_outside_window` takes the same `MailboxWindows`,
+  so a depth-reduction prune never deletes what a deeper pass fetched.
+- **Recipient coverage** records the **account** window: it claims how far back every
+  mailbox's recipients were observed, which a deeper Sent does not make true. A wider account
+  window is recorded only once every folder of the pass reached it (`FolderSync::reached_window`):
+  until a widening's bands have all ended, the record keeps the window it had.
+- **The deeper pass starts on its own.** Every cursor records the depth it covers
+  (`window_cursor`, above), so the next pass after a mailbox is deepened widens the one scope
+  that fetches it, by that mailbox's band alone where the adapter widens by band
+  (`Widening::band_for(folder)` for a folder-bound scope, `Widening::bands()` for an account-wide
+  one), with every other folder resuming: deepening is widening. An adapter on the default reopen
+  fetches its scope's whole new window again instead. A host does not clear the mail cursors to
+  deepen a mailbox; a pass already running finishes under the windows it began with, and the
+  next one widens. Holding a mailbox less far
+  back, or no longer at all, resumes; what the narrower window no longer wants stays until a
+  prune.
+
 **Change events (`SyncObserver` / `SyncCommit`).** After every committed chunk the
 orchestrator calls the caller's `SyncObserver::committed` with a `SyncCommit { scope,
-fetched, total, upserted, removed }` — the running progress *and* the exact rows that
-just landed (borrowed, zero-copy on the engine side). A host splices its view from
+fetched, total, upserted, removed, tombstoned, widening }` — the running progress *and* the exact
+rows that just landed (borrowed, zero-copy on the engine side). `widening` marks a commit of a
+widening's band, whose `fetched`/`total` count the band alone, so a host can label it older mail. A host splices its view from
 `upserted`/`removed` **without re-querying** the mailbox. (Reconcile tombstones are
 computed by present-set diff inside the store, so they are not enumerated in `removed`;
 the pass's `SyncApplied::tombstoned` count signals a host may re-read to reconcile.)
@@ -565,6 +630,69 @@ Still deferred: a `tzdata-version` index to find *only* stale scopes, and an
 occurrence-only clear so a pure horizon advance need not re-project unchanged text.
 Today `expand_calendar_horizon` re-expands every event in the scope on every call, so a
 host widens in coarse chunks against its own watermark rather than calling it per page.
+
+**A held scope is waited for, not reported busy.** A sync that finds its scope held gives up,
+because the holder brings the same changes. An expansion cannot: the holder expands only what
+it changed, over the window it found, so giving up leaves the widening undone and the host
+guessing when to ask again. So `expand_calendar_horizon` (and `reach_calendar`, below) poll the
+claim with a backoff capped at a second until the holder releases the lease or its lease
+lapses (`engine-sync/src/scope_wait.rs`). It is polled rather than woken because the holder
+can be another process on the same store. A caller that wants to stop waiting drops the future.
+An expansion widens every scope nobody holds before it waits on the held ones, so one long pass
+does not keep the account's other calendars narrow.
+
+## The fetch window is the store's too
+
+Some transports fetch a calendar only inside a date window (`Capabilities::windowed_events`):
+Graph's `calendarView/delta` takes a mandatory range and its `deltaLink` keeps it; Google's
+`events.list` bounds the snapshot its `syncToken` continues with `timeMin`/`timeMax`. CalDAV and
+JMAP fetch a calendar whole. On a windowed transport the store holds every event inside the
+window the scope's cursor was opened over and, outside it, only what happened to arrive — so
+`expand_calendar_horizon` over a wider horizon draws the repeating series there and none of the
+one-off events.
+
+So the engine, not the host's adapter construction, names the window: a windowed scope is
+fetched with the window as an argument of `CalendarSync::sync_events`, which opens any cursor it
+must open (none yet, or one the server expired) over it; a transport that fetches whole ignores
+it, and an adapter takes no window at construction. That window is recorded **with the
+cursor**, in the same commit (`ApplyBatch::fetch_window`, `StoreRead::fetch_window`, schema
+v23), so the two cannot disagree: a snapshot records the window it was opened over, and a delta
+records nothing and keeps it. The first sync opens over the expansion window (the host's horizon
+then); a scope opened before windows were recorded has a cursor and no window, and is treated
+as covering nothing beyond what the host shows.
+
+`engine_sync::reach_calendar` (`Engine::reach_calendar`) fetches a further range. It does not
+list the range beside the cursor, because the cursor would not keep those events current: a
+Graph `deltaLink` reports changes only inside the window it was opened over, and although a Google
+`syncToken` does report changes past a bounded list (both measured, in each adapter's
+`tests/live_calendar_window.rs`), neither ever lists an event that was already there and did not
+change. It **reopens** the scope's cursor over the union of the recorded
+window and the range, as a fresh snapshot, and records the union. One cursor then covers every
+event the store claims to hold, on every transport.
+
+- **Not fetched twice.** The recorded window only grows. A range inside it is answered without a
+  request, and a second caller asking for the same range waits for the first one's lease, then
+  finds it covered.
+- **Decided under the lease.** Every read a pass of an event scope decides on (the recorded
+  fetch window, the expansion window, the tag a reopen keeps) is made after its claim, in
+  `ScopeSyncer::prepare`, never before it. A read made before the claim goes stale while the
+  holder of the lease finishes: a reach planned on it reopens over a smaller union, deleting the
+  events the other reach fetched and shrinking the window, and events fetched after an
+  expansion are expanded over the old horizon, leaving the new days empty
+  (`engine-sync/src/tests/calendar_reach/race.rs`).
+- **The tag survives.** A reopen records the collection tag the scope already had: the calendar
+  it lists is at least as new as the state that tag names, so a later pass whose listing shows
+  the same tag still skips the calendar without a request.
+- **While it runs**, it holds the scope's lease; reads answer from the store as it was, and the
+  fetched events land in one commit per calendar. A sync of the calendar meanwhile reports it
+  held; an expansion waits.
+- **On failure**, nothing is recorded: the old cursor and window stand, the scope reports its
+  error (`CalendarReach::failures`), and asking again fetches the range again.
+- **Cost.** A reopen re-reads the whole union, and its snapshot tombstones any stored event
+  outside it (one a Google feed brought from past the bounds, say). Hosts reach in coarse steps.
+- **Independent of the expansion window.** Reaching fetches; expanding materializes what is
+  shown. A fetched event is expanded over the stored expansion window as any synced event is, so
+  a host paging past its horizon calls both, in either order.
 
 On-demand fetched bodies **are** searchable (resolving the "does opening old mail
 make it searchable?" question: yes), via a separate lease-free body index — **not**
@@ -711,8 +839,11 @@ than a delta off a cursor over rows that are gone.
 ## Local depth narrowing without a provider
 
 The per-sync `window` (`SyncWindow { since }`, above) lets a host **widen or narrow** sync
-depth on the next sync without reconnecting. Narrowing is enforced for a reachable account by
-clearing the mail cursors and re-syncing: the snapshot under the narrower window carries only
+depth on the next sync without reconnecting. Widening needs nothing more: the next pass widens
+each scope by band (above). Narrowing is enforced for a reachable account by clearing the mail
+cursors and re-syncing (until the prune lowers the recorded depth itself, slice 3 of
+`docs/design/windows-and-widening.md`; a cursor left stamped deeper than the store holds after a
+prune would widen back to nothing): the snapshot under the narrower window carries only
 in-window ids, so its reconciliation **tombstones the out-of-window rows**. That path needs the
 provider. When the account cannot reach it, the app can store the new depth but cannot force
 that re-snapshot — so the engine owns a local cleanup that reproduces the *same* end state
@@ -727,6 +858,9 @@ returning a `PruneReport { messages_removed }` (`engine-store`).
 - **Undated mail is kept.** A message with no `date_utc` is not provably out of window, and a
   prune must never over-delete; a `NULL` date is left in place (an unbounded window is likewise
   a no-op — nothing is outside it).
+- A **deepened mailbox keeps its older mail**: pass the same `MailboxWindows` the account
+  syncs under, and a message filed in a deepened mailbox stays while that mailbox's window
+  admits it (above).
 - It reuses the scope **tombstone** (object + all derived search/thread/occurrence rows), so
   the removed mail leaves nothing orphaned and search/reads reflect it immediately — the same
   cleanup a snapshot reconciliation performs. It runs only over the account's **mail** scopes
@@ -831,6 +965,14 @@ one event never race on either provider.
   delivered or may have been, is `SyncError::Unrecorded`, never `SyncError::Store`. The op is
   left to recovery.
   `ApiError::may_have_applied` is the host's one question over both (`engine-api.md`).
+- **A send can leave one follow-up.** On an adapter that keeps the keywords of a draft's
+  `sent_copy_metadata` after the send (`Capabilities::sent_copy_keywords_deferred`: Graph, whose `sendMail` files the
+  copy itself a moment later), a delivered send queues, without claiming, a `MailEdit::SetKeywords`
+  on the copy's key, idempotent by `sent-copy-keywords:<Message-ID>`. The one attempt the inline
+  `submit_mail` and the drainer share records it, so the send's answer never waits for the copy. The
+  adapter answers the edit **retryable** while the copy is not there yet, so it rides the store's
+  backoff like any other write. A store failure recording it is not the send's: the op is settled
+  and the message has gone, so it only leaves the keywords off the copy.
 
 - **The payload is the intent, not the rendered bytes.** A calendar patch stores the
   `EventEdit` — which occurrence, and what changed — never the document it produced. That is
@@ -838,10 +980,6 @@ one event never race on either provider.
   base. Re-sending bytes built from the copy the server has moved past would silently revert
   somebody else's edit with a write the server happily accepts. (The drainer that will do
   that recovery is issue #60; today a `Conflict` is recorded and surfaced to the caller.)
-  A submission's payload is the `Draft` the same way: it carries the serde-defaulted
-  `sign`/`encrypt` flags rather than wrapped bytes, so a retry re-assembles and re-wraps
-  against the account's **current** MIME wrapper (`providers.md`), and a payload serialized
-  before the flags existed decodes as a plain send.
 
 - **A write does not update the store; a *reconcile* does** (issue #65). The drivers are
   deliberately pure: they record the op, call the provider, record the outcome. They never
@@ -918,12 +1056,8 @@ one event never race on either provider.
 
 - **The queue is readable, and withdrawable.** `StoreRead::list_pending_ops(account)` returns
   every row that has not settled, and every send that settled `Failed`
-  (`engine_store::stays_listed`), in enqueue order, with its kind, payload, attempts, backoff,
-  last failure class, and the provider's own detail for that failure — a refused op's row says
-  *why* in the provider's words (a MIME wrapper's refusal crosses the same way, so a crypto
-  gate's reason is what the failed row shows), and a parked retry keeps it too, so a host can
-  say why something is still queued, not only that it is. This is what makes the outbox a
-  queue rather than a set of ids a
+  (`engine_store::stays_listed`), in enqueue order, with its kind, payload, attempts, backoff
+  and last failure class. This is what makes the outbox a queue rather than a set of ids a
   caller had to remember: `pending_op_state` answers about one op the caller already holds
   the id of, which a host that has restarted does not. A failed send stays because it is a
   message that has not gone: it leaves the queue only when the host sends it again
@@ -956,6 +1090,11 @@ one event never race on either provider.
   is not the one that went in (`providers.md`). A host that drops the report stores a
   second draft beside the first.
 
+- **A draft save carries its keywords in its payload** (`DraftPut::keywords`, defaulted so an
+  older payload still reads), so a save queued offline stores them when it drains, and the
+  op's name hashes them with the text: a save that changes only a keyword is a write of its
+  own. Only the inline save reports what was kept (`PutDraftOutcome::kept`); a drained one
+  is read from the next sync, as a Sent copy's keywords are.
 - **A queued draft save supersedes the one before it.** A draft is saved *repeatedly*, so
   five saves with no network must not become five rounds of store-and-remove against a
   folder the user is watching. `put_draft_mail` withdraws an unsettled save already queued
@@ -975,7 +1114,9 @@ one event never race on either provider.
 - **A folder change is judged when it runs, not when it was queued.**
   `engine_sync::edit_mailbox` stores a `MailboxChange`: the host's intent, plus `seen`, the
   place (name and parent) the user saw the folder in. It never stores the `MailboxEdit` the
-  intent comes to. Before anything is sent, inline or from the drainer, the op reads the
+  intent comes to. Its `Create` carries no role: the outbox makes ordinary folders, and a role
+  on create (`MailboxEdit::create_with_role`, `providers.md`) is for a host that drives the
+  provider directly. Before anything is sent, inline or from the drainer, the op reads the
   folder list from the server and plans against it (`outbox/mailbox_plan.rs`):
   - a folder that is gone, or no longer at `seen`, is a `Conflict`, settled and never
     sent. On JMAP, Graph and Gmail a folder id survives a rename, so without this a
@@ -987,9 +1128,13 @@ one event never race on either provider.
   - the name a trashed folder takes inside Trash (`Bills`, `Bills 2` …) is chosen from
     the list as it stands then.
   Every change to one account's tree serialises on one resource (`mailbox-tree`), because
-  an IMAP rename moves the key of every folder beneath it. The names no transport accepts
-  (empty, surrounded by whitespace, a control character, `/`) are refused before enqueue
-  (`validate_mailbox_name`, which a host can call while the user types).
+  an IMAP rename moves the key of every folder beneath it. A name outside the engine's
+  portable policy (empty, surrounded by whitespace, a control character, `/`) is refused
+  before enqueue (`validate_mailbox_name`, in `engine_core::mail` and re-exported here and by
+  `engine-api`, which a host can call while the user types), as `InvalidState` with the typed
+  `MailboxNameError` as the error's source. It is a policy, not a transport limit, so the
+  adapters do not apply it: each refuses only what its own transport cannot carry
+  (`providers.md`).
 - **A folder the list no longer holds takes its mail with it.** Where message sync is per
   folder (IMAP, Graph) a folder's mail is its own scope, and on IMAP a rename is a new path,
   so the old path's scope would otherwise keep a full copy of the mail that every search
@@ -1193,8 +1338,9 @@ construction detail (plain SQLite over OS file encryption by default, SQLCipher
 opt-in), so the same contract holds either way. A small `StoreRead` companion
 (lease-free object/key inspection, plus `account_scopes` to enumerate an account's
 claimed scopes, `scope_objects` to batch-read a scope's objects, and `list_mail` to read
-a mailbox list — a window, a conversation, or named messages — without reading the mail
-around it) backs the contract suite and the read path.
+a mailbox list — a window, a conversation, named messages, or one mailbox over a span of time —
+without reading the mail around it, beside `oldest_in_mailbox`, how far back the store holds a
+mailbox) backs the contract suite and the read path.
 
 Supporting types (abbreviated):
 

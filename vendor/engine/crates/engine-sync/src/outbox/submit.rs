@@ -16,11 +16,11 @@ use std::collections::BTreeSet;
 
 use engine_core::{
     ids::{AccountId, MessageIdHeader, ProviderKey},
-    mail::Keyword,
+    mail::{Keyword, MessageMetadata},
     write::{IdempotencyKey, PendingOp, PendingOpId, PendingOpKind, PendingOutcome, ResourceKey},
 };
 use engine_provider::{
-    Draft, HandOver, HandOverLog, Provider, ProviderError, SentCopy, SubmissionReceipt,
+    Draft, HandOver, HandOverLog, MailEdit, Provider, ProviderError, SentCopy, SubmissionReceipt,
 };
 use engine_store::{LeasedPendingOp, OpLease, Store, StoreError, WorkerId};
 
@@ -44,12 +44,16 @@ pub struct SubmitOutcome {
     /// ignores it drops it for good: nothing later can rediscover a copy that was never
     /// written to the server.
     pub sent_copy: SentCopy,
-    /// Which of the draft's [`Draft::sent_copy_keywords`] the filed copy carries; see
-    /// [`SubmissionReceipt::sent_copy_keywords`](engine_provider::SubmissionReceipt::sent_copy_keywords).
+    /// Of the draft's [`Draft::sent_copy_metadata`], what the filed copy carries; see
+    /// [`SubmissionReceipt::sent_copy_kept`](engine_provider::SubmissionReceipt::sent_copy_kept).
     ///
     /// Like [`Self::sent_copy`], only this outcome carries it: a send the outbox drains
     /// later reports nothing, and the copy's keywords are then read from the next sync.
-    pub sent_copy_keywords: BTreeSet<Keyword>,
+    ///
+    /// Empty on an adapter that keeps them after the send
+    /// ([`Capabilities::sent_copy_keywords_deferred`](engine_provider::Capabilities::sent_copy_keywords_deferred)):
+    /// the outbox has queued an edit for them instead, and whether it landed is read from sync.
+    pub sent_copy_kept: MessageMetadata,
 }
 
 /// The outbox's record of a hand-over: [`Store::record_hand_over`] under the attempt's lease.
@@ -121,7 +125,6 @@ where
         Err(err) => PendingOutcome::Failed {
             class: err.class(),
             retry_after: err.retry_after(),
-            detail: err.detail().to_owned(),
         },
     };
     match store.mark_pending_op(&leased.lease, outcome).await {
@@ -138,10 +141,58 @@ where
         Err(err) => return Err(err.into()),
     }
     Ok(match sent {
-        Ok(receipt) => Attempt::Delivered(receipt),
+        Ok(receipt) => {
+            record_deferred_keywords(provider, store, account, draft, &receipt).await;
+            Attempt::Delivered(receipt)
+        }
         Err(err) if err.requires_confirmation() => Attempt::Unknown(err),
         Err(err) => Attempt::Refused(err),
     })
+}
+
+/// Records the edit that keeps `draft`'s sent-copy keywords, on an adapter that keeps them
+/// after the send rather than within it
+/// ([`Capabilities::sent_copy_keywords_deferred`](engine_provider::Capabilities::sent_copy_keywords_deferred)).
+///
+/// Queued, not sent: the send's answer does not wait for the copy to appear, and the drainer
+/// applies the edit, retrying on the store's schedule while the adapter says the copy is not
+/// there yet. Idempotent by the `Message-ID`, so a send reported twice records it once. A store
+/// failure here is not the send's: the message has gone and its op is settled, so it only
+/// leaves the keywords off the copy, which sync shows.
+async fn record_deferred_keywords<P, S>(
+    provider: &P,
+    store: &S,
+    account: &AccountId,
+    draft: &Draft,
+    receipt: &SubmissionReceipt,
+) where
+    P: Provider,
+    S: Store,
+{
+    if !provider
+        .connection_info()
+        .capabilities
+        .sent_copy_keywords_deferred()
+        || !receipt.sent_copy.is_filed()
+    {
+        return;
+    }
+    let wanted: BTreeSet<Keyword> = draft
+        .sent_copy_metadata
+        .keywords
+        .difference(&receipt.sent_copy_kept.keywords)
+        .cloned()
+        .collect();
+    if wanted.is_empty() {
+        return;
+    }
+    let edit = MailEdit::SetKeywords {
+        target: receipt.email_key.clone(),
+        add: wanted,
+        remove: BTreeSet::new(),
+    };
+    let idempotency = format!("sent-copy-keywords:{}", draft.message_id.as_str());
+    let _ = super::queue_mail_edit(store, account, &idempotency, &edit).await;
 }
 
 /// Sends `draft` through the outbox: durable op → claim → provider submit → record.
@@ -197,6 +248,6 @@ where
         email_key: receipt.email_key,
         message_id: receipt.message_id,
         sent_copy: receipt.sent_copy,
-        sent_copy_keywords: receipt.sent_copy_keywords,
+        sent_copy_kept: receipt.sent_copy_kept,
     })
 }

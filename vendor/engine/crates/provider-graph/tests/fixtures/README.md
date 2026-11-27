@@ -34,15 +34,25 @@ gitignored raw captures under `tools/graph-oauth/.local/raw/` to these files. Th
 | `mail/messages_delta_removed.json` | replay after `DELETE` | `{ id, @removed:{reason} }` tombstone shape |
 | `mail/messages_list_page1.json` / `_page2.json` | `GET …/messages?$top=2` + its `@odata.nextLink` | real `nextLink` pagination chain |
 | `mail/message_detail.json` | `GET /me/messages/{id}` | full single-message shape (the changed-id re-fetch) |
+| `mail/importance_header_shapes.json` | thirty drafts created from MIME, one per importance header shape, each read back with `$select=importance` and deleted | what Exchange makes of every shape (precedence, a repeated header, an unreadable value, whitespace, comments): the rule `Importance::from_headers` copies, checked shape by shape by `importance_shapes_tests.rs`. Only header lines and the stored value; nothing identifies the account |
+| `mail/message_importance.json` | `POST /me/messages` with base64 MIME carrying `Importance: high` and `X-Priority: 1`, then `GET /me/messages/{id}?$select=…` with `MESSAGE_SELECT` | that Exchange turns the MIME header into the `importance` property (lowercased), which is how a draft and a send written as MIME keep their importance. A self-addressed draft, deleted after the capture; the display name was the account owner's and is scrubbed with the rest |
 | `mail/message_state.json` | `GET /me/messages/{id}?$select=id,isRead,isDraft,flag,lastModifiedDateTime,changeKey` | the **state-only** read a lightweight partial resolves through — and that it answers with `@odata.etag` (see Finding 15) |
+| `mail/draft_patched_with_category.json` | `PATCH /me/messages/{id}` rewriting the subject and body of a self-addressed draft that carries the category `Engine draft probe` | that a draft's rewrite keeps its categories, and that the `PATCH` answer reports them, so a save sets a draft's keywords without reading it again. Deleted after the capture |
 | `mail/message_patched.json` | `PATCH /me/messages/{id}` body `{isRead,flag}` | the write echo of a mark-read + flag edit (`isRead:true`, `flag.flagStatus:"flagged"`) |
 | `mail/sent_copy_lookup.json` | `GET /me/mailFolders/sentitems/messages?$filter=internetMessageId eq '<…>'&$select=id,categories&$top=1`, a few seconds after a `sendMail` | finding the filed copy of a just-sent message by the `Message-ID` its MIME carried, to give it a category (`categories`) |
 | `mail/category_in_use.json` | the same folder, `$filter=categories/any(c:c eq '…') or categories/any(c:c eq '…')` | which of a keyword's names a sent message already carries, so a device reuses it rather than adding a second |
 | `mail/message_moved.json` | `POST /me/messages/{id}/move` body `{destinationId}` | the move echo — **same `id`** (immutable), `parentFolderId` now the destination |
 | `wellknown/*.json` | `GET /me/mailFolders/{inbox,drafts,…}` | well-known-name → id role resolution |
+| `wellknown/conversationhistory.json` | `GET /me/mailFolders/conversationhistory?$select=id`, on the personal account, November 2026 | that the alias answers with the id of `Gesprekgeschiedenis` in `mail/mailfolders.json` (`folder-extra-1`), so a folder named in Dutch gets `MailboxRole::ChatHistory` |
+| `wellknown/{syncissues,conflicts,localfailures,serverfailures}.json` | the same, on a **work/school** tenant | the four Sync Issues aliases resolving; ids are placeholders, and the user in `@odata.context` is a zero object id |
+| `error/syncissues_not_found.json` | `GET /me/mailFolders/syncissues?$select=id` on the personal account | the `404 ErrorFolderNotFound` an account without Sync Issues answers (the Exchange trace says the default folder "cannot be created"); `conflicts`, `localfailures` and `serverfailures` answered the same, each naming its own folder. Nothing identifies the account. The offline fake routes all four aliases to it. The trace implies other default folders are created when first accessed; whether a read of an alias does that is unverified (`graph.md`, "Roles resolved by id") |
+| `mail/mailfolder_sync_issues.json` | `GET /me/mailFolders/syncissues`, on the work/school tenant | the Sync Issues folder itself, `Synchronisatieproblemen`, with its `childFolderCount` of 3; `fetch_roles_tests.rs` adds it to the personal folder list, since the tenant's own list names private folders |
+| `mail/mailfolders_sync_issues_children.json` | `GET /me/mailFolders/{sync issues}/childFolders?$top=100`, on the work/school tenant | Conflicts, Local Failures and Server Failures in Dutch, under Sync Issues; the sizes and item and unread counts are zeroed |
 | `mail/message_reported.json` | `POST {beta}/messages/{id}/reportMessage` `{ReportAction,IsMessageMoveRequested}` | the report echo — a **`reportMessageCommandResult`**, not the `message` object the docs describe (see Finding 17) |
 | `error/report_bad_action.json` | the same call with `ReportAction: unknownFutureValue` | the `400 RequestBodyRead` for a `reportAction` outside the three that exist |
 | `error/bad_request.json` / `unauthorized.json` | a 400 and a 401 | `error` envelope → `FailureClass` mapping |
+| `error/unauthorized_challenge.txt` | `GET /me/mailFolders` with a token Graph did not issue, November 2026 | the `WWW-Authenticate` value of Graph's refusal of a token: one `Bearer` challenge, so the refused token is replaced once and the request sent again (`credential_source_tests.rs`). The `client_id` (Graph's own resource id) is a placeholder. The directory's `401` on a personal account (`contacts_directory_unauthorized.json`) carries **no** challenge, which is MICROSOFT-2 |
+| `error/irresolvable_conflict.json` | `PATCH /me/messages/{id}` `{categories}` on a Sent copy found by its `internetMessageId` a moment after the send, with no `If-Match` | the `412 ErrorIrresolvableConflict` Exchange answers while it is still writing the copy: the categories edit retries rather than settling. Nothing identifies the account |
 | `mail/shared_mailbox_probe.json` | `GET /users/{shared}/mailFolders/inbox?$select=id` | the shared-mailbox probe's success shape — a **work/school** tenant, so the address is scrubbed to `shared@example.test` (percent-encoded in `@odata.context`, as Graph writes it) |
 | `mail/own_inbox_probe.json` | `GET /me/mailFolders/inbox?$select=id` | the id the own-mailbox check compares against; Graph names the user in `@odata.context` by **object id**, not address, so that is scrubbed too |
 | `error/shared_mailbox_invalid_user.json` | the probe, for an address not in the tenant | `404 ErrorInvalidUser` |
@@ -68,14 +78,21 @@ gitignored raw captures under `tools/graph-oauth/.local/raw/` to these files. Th
 
 ## Real-behavior findings (captured, not assumed)
 
-1. **Personal `mailFolder` has no `wellKnownName`** (work/school-only) — selecting
-   it 400s. Role mapping must resolve the well-known *aliases* (`/me/mailFolders/inbox`
-   …) to ids and match, not read a role property.
+1. **`wellKnownName` is not a v1.0 property** — selecting it 400s
+   (`error/bad_request.json`, from the personal account). A work/school tenant answered the
+   same request with the same body, request ids aside, in November 2026; that capture is
+   not kept. Role mapping must
+   resolve the well-known *aliases* (`/me/mailFolders/inbox` …) to ids and match, not read
+   a role property. When `mail/mailfolders.json` was captured a personal account's folders
+   did not carry it at all; in November 2026 the default projection of the list and of
+   `childFolders` carried it on both accounts (`mail/mailfolders_sync_issues_children.json`
+   keeps it as it came). It is still undeclared, and `$select` still refuses it, so the
+   adapter does not read it.
 2. **Folder `displayName`s are localized** (these are Dutch: "Postvak IN" = Inbox).
    Never parse display names for roles.
-3. **`messages/delta` `$top` does not paginate on consumer.** Page size is
-   server-controlled; `@odata.nextLink` appears only on large result sets. The
-   `nextLink`-following path is therefore exercised via the *list* endpoint, whose
+3. **`messages/delta` `$top` does not paginate on consumer.** The page size is set with
+   `Prefer: odata.maxpagesize` instead (finding 26). The captured snapshot is a single
+   page, so the `nextLink`-following path is exercised via the *list* endpoint, whose
    `$top` does paginate.
 4. **Incremental `delta` — full objects, except lightweight changes.** Per
    Microsoft's delta-query-messages doc a changed entry is a *full* object, and it
@@ -112,6 +129,17 @@ gitignored raw captures under `tools/graph-oauth/.local/raw/` to these files. Th
     **hidden** folders that `childFolders` does not return — Conversation History reports 1
     and answers with an empty page — so only a stated `0` stops the descent, and an empty
     page is ordinary.
+
+26. **A delta page holds ten messages unless `odata.maxpagesize` asks for more, and the ask
+    does not travel in the links.** Measured on a personal account and an Exchange Online
+    mailbox with the adapter's own `$select`/`$expand`: no header answers ten a page on
+    both; the header is honoured up to **512** on Exchange Online, where an ask for 1,000
+    answers 512 without an error. A first page asked for 100 named no page size in its
+    `@odata.nextLink`, and that link followed without the header answered ten, so the header
+    goes on every request. A deltaLink read with it answered `200`. No response carried a
+    `Preference-Applied` for the size. The rates are in `graph.md` (**Page size**); no
+    fixture is kept, since the page bodies are the mailbox's own mail and the finding is
+    their count.
 
 ## Mail-write findings (captured, not assumed)
 

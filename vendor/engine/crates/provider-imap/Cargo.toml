@@ -11,31 +11,50 @@ license.workspace = true
 engine-core = { workspace = true }
 engine-provider = { workspace = true }
 # Deriving a list preview from a synced body (IMAP has no server-side snippet, unlike
-# Graph/JMAP): the shared MIME parser turns a raw message into decoded text.
+# Graph/JMAP): the shared MIME parser turns a raw message into decoded text. ENVELOPE's
+# header text goes through its RFC 2047 decoder and its `Date` parser.
 engine-mime = { workspace = true }
 # The RFC 5322 / MIME message assembler for SMTP submission (shared with the Graph
 # adapter's MIME send), producing the bytes fed to the SMTP `DATA` command.
 engine-rfc5322 = { workspace = true }
+# Mail rules and the out-of-office reply over ManageSieve: the Sieve dialect the engine reads and
+# writes, shared with provider-jmap's JMAP Sieve (`managesieve::rules`, `managesieve::vacation`).
+engine-sieve = { workspace = true }
 # `io-util` for the line-protocol reader/writer over any async stream; `net` for
 # the live TCP connect; `time` for the IDLE watcher's keep-alive timeout (the
 # RFC 2177 re-issue clock). The protocol is generic over `AsyncRead + AsyncWrite`,
 # so the offline tests drive it over an in-memory duplex with no socket or TLS.
 tokio = { workspace = true, features = ["io-util", "net", "sync", "time"] }
 tokio-rustls = { workspace = true }
+# The self-signed certificate `test_server` presents; only with the `test-server` feature.
+rcgen = { version = "0.13", optional = true }
 # `try_stream!` builds the resumable, incremental email chunk stream; `futures-util`
 # drives the inner streamed FETCH loop.
 async-stream = { workspace = true }
 futures-util = { workspace = true }
 async-trait = { workspace = true }
+# Zeroes the copies of a secret this crate derives to put on the wire: the IMAP `LOGIN` line, a
+# SASL blob and its base64, an `AUTH PLAIN` token, and the `AUTHENTICATE` and SMTP `AUTH` lines
+# that carry them (`secret_line.rs`).
+zeroize = { workspace = true }
 thiserror = { workspace = true }
+# The version a ManageSieve rule set is guarded by: a hash of the script list and the script, since
+# ManageSieve keeps none of its own (`managesieve::state`).
+sha2 = { workspace = true }
 # Parsing IMAP `INTERNALDATE` (`dd-Mon-yyyy hh:mm:ss +zzzz`) into a UTC instant
 # needs offset normalization with calendar rollover; `time` (the same crate
 # engine-core wraps) does it correctly.
 time = { workspace = true }
 
 [features]
+# Importing into a mailbox (`engine_provider::import::MailImporter` for `ImapProvider`): `APPEND`
+# with the message's flags, keywords and arrival time.
+import = ["engine-provider/import"]
 # Exposes `fuzz_parse` for the `fuzz/` cargo-fuzz target; off in normal builds.
 fuzzing = []
+# TEST BUILDS ONLY: `test_server`, an in-process Gmail IMAP server over TLS, for another crate's
+# suite to connect a real account to. Only dev-dependencies turn it on.
+test-server = ["dep:rcgen"]
 
 [dev-dependencies]
 # Tests add the blocking/macro pieces and `test-util` for `start_paused` — so the
@@ -54,6 +73,8 @@ rcgen = "0.13"
 serde = { workspace = true }
 serde_json = { workspace = true }
 stalwart-harness = { path = "../stalwart-harness" }
+# The import claims every adapter's live suite shares (`tests/live_imap_import.rs`).
+engine-provider = { workspace = true, features = ["import-conformance"] }
 # The offline integration + gated live tests drive the full loop through the store.
 engine-store = { workspace = true }
 engine-search = { workspace = true }
@@ -61,6 +82,10 @@ engine-sync = { workspace = true }
 store-sqlite = { workspace = true }
 # The process-kill suite's store files, one directory per case.
 tempfile = { workspace = true }
+# The Stalwart harness's own OAuth endpoints mint the tokens `live_imap_oauthbearer_name.rs`
+# signs in with (`provider-jmap/tests/stalwart_oauth`, included by path).
+engine-http = { workspace = true, features = ["test-server"] }
+reqwest = { workspace = true }
 
 [lints]
 workspace = true

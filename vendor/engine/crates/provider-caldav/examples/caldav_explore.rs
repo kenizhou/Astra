@@ -37,7 +37,7 @@ use engine_core::{
     sync::{SyncObject, SyncUpdate},
     time::CalendarDateTime,
 };
-use engine_provider::{CalendarWrites, Provider};
+use engine_provider::{CalendarSync, CalendarWrites};
 use provider_caldav::{CalDavConfig, CalDavProvider, Credentials};
 
 #[tokio::main]
@@ -103,7 +103,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\nReading events from: {}", calendar.as_str());
 
     // Sync the calendar's events (a full snapshot — no prior cursor).
-    let events = provider.sync_events(&account, &calendar, None).await?;
+    // CalDAV reads a calendar whole and ignores the window.
+    let whole = engine_core::time::Horizon::new(
+        "1900-01-01T00:00:00Z".parse()?,
+        "2200-01-01T00:00:00Z".parse()?,
+    )?;
+    let events = provider
+        .sync_events(&account, &calendar, None, whole)
+        .await?;
     let evs = objects(&events.update);
     println!("\n{} event(s):", evs.len());
     for ev in evs.iter().take(25) {

@@ -192,7 +192,7 @@ async fn append_without_a_continuation_is_a_protocol_error() {
     let (stream, _) = MockStream::new(server);
     let mut conn = Connection::open(stream).await.unwrap();
     conn.login("a", "b").await.unwrap();
-    assert!(conn.append("Sent", "\\Seen", b"x\r\n").await.is_err());
+    assert!(conn.append("Sent", "\\Seen", None, b"x\r\n").await.is_err());
 }
 
 #[tokio::test]
@@ -201,7 +201,7 @@ async fn create_issues_the_command() {
     let (stream, recorded) = MockStream::new(server);
     let mut conn = Connection::open(stream).await.unwrap();
     conn.login("a", "b").await.unwrap();
-    conn.create("Sent").await.unwrap();
+    conn.create("Sent", None).await.unwrap();
     assert!(written(&recorded).contains("a2 CREATE \"Sent\""));
 }
 
@@ -218,7 +218,7 @@ async fn append_sends_a_literal_and_parses_appenduid() {
     conn.login("a", "b").await.unwrap();
 
     let message = b"Subject: x\r\n\r\nhi\r\n"; // 18 bytes
-    let uid = conn.append("Sent", "\\Seen", message).await.unwrap();
+    let uid = conn.append("Sent", "\\Seen", None, message).await.unwrap();
     assert_eq!(uid, Some((99, 7)));
 
     let sent = written(&recorded);
@@ -369,8 +369,46 @@ async fn append_tolerates_an_untagged_response_before_the_continuation() {
     conn.login("a", "b").await.unwrap();
 
     let uid = conn
-        .append("Sent", "\\Seen", b"Subject: x\r\n\r\nhi\r\n")
+        .append("Sent", "\\Seen", None, b"Subject: x\r\n\r\nhi\r\n")
         .await
         .unwrap();
     assert_eq!(uid, Some((99, 7)));
+}
+
+#[tokio::test]
+async fn a_literal_announced_with_a_bare_lf_is_still_read_as_one() {
+    // IMAP has always taken `{n}` and a bare LF as a literal; ManageSieve's stricter reading must
+    // not change that.
+    let (stream, _) = crate::mock::MockStream::new(b"* 1 FETCH (BODY[] {3}\nabc)\r\n".to_vec());
+    let mut connection = Connection::resume(stream);
+    let line = connection.read_line().await.unwrap();
+    assert_eq!(line, b"* 1 FETCH (BODY[] {3}\nabc)\r\n");
+}
+
+/// A quoted string cannot carry CR, LF or NUL (RFC 3501 §9 `quoted`, RFC 9051 §9): a password
+/// holding CRLF would end the `LOGIN` line early and send what follows as a command of its own.
+/// Such a credential is refused as one that cannot be presented, and nothing is written.
+#[tokio::test]
+async fn a_login_credential_a_quoted_string_cannot_carry_sends_nothing() {
+    for (user, password) in [
+        ("alice@test.local", "pw\r\na2 DELETE INBOX"),
+        ("alice@test.local", "pw\nx"),
+        ("alice@test.local\r\n", "pw"),
+        ("alice\0@test.local", "pw"),
+    ] {
+        let server = script(&[GREETING, "a1 OK LOGIN completed\r\n"]);
+        let (stream, recorded) = MockStream::new(server);
+        let mut conn = Connection::open(stream).await.unwrap();
+
+        let err = conn.login(user, password).await.unwrap_err();
+
+        assert!(matches!(err, ImapError::Credential(_)), "{err:?}");
+        assert_eq!(err.failure_class(), FailureClass::Permanent);
+        assert!(!err.to_string().contains("pw"), "{err}");
+        assert_eq!(
+            engine_provider::ProviderError::from(err).credential_failure(),
+            Some(engine_provider::CredentialFailureKind::Form)
+        );
+        assert_eq!(written(&recorded), "", "nothing reaches the server");
+    }
 }

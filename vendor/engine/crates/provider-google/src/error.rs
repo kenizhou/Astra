@@ -68,6 +68,19 @@ pub enum GoogleError {
     /// an absent list array, a malformed value, …).
     #[error("malformed Google response: {0}")]
     Protocol(String),
+
+    /// The credential could not be presented, or not replaced: the account's
+    /// [`CredentialSource`](engine_provider::CredentialSource) did not permit the origin, had no
+    /// credential to give, or did not answer within the request's deadline; the engine refused
+    /// the origin (plaintext HTTP, except to loopback from an account configured there); or the
+    /// credential is not a token, which is all the Google APIs sign in with. In each of those
+    /// nothing was sent. When the source fails as it is asked to replace a token Google refused
+    /// with a `401`, a request was sent and refused, and this takes the `401`'s place.
+    /// Classified as the source classified it, and `Permanent` for a refusal.
+    /// As a [`ProviderError`] it is the source's own, which says that no credential could be had
+    /// ([`ProviderError::is_credential_failure`]).
+    #[error("no credential to present: {0}")]
+    Credential(ProviderError),
 }
 
 impl GoogleError {
@@ -141,12 +154,14 @@ impl GoogleError {
     /// `502` or `504` says the server behind it gave no answer rather than that it refused,
     /// or a success arrived whose body cannot be read. Every other status is the server's own
     /// answer, and a connect or handshake that never completed sent nothing.
-    fn leaves_outcome_unknown(&self) -> bool {
+    pub(crate) fn leaves_outcome_unknown(&self) -> bool {
         match self {
             Self::Transport(err) => err.may_have_been_received(),
             Self::Status { status, .. } => engine_http::gateway_without_answer(*status),
             Self::Json(_) => true,
-            Self::HistoryExpired(_) | Self::Protocol(_) => false,
+            // Nothing was sent, or what was sent was refused with a `401`, which says the
+            // request was not processed.
+            Self::HistoryExpired(_) | Self::Protocol(_) | Self::Credential(_) => false,
         }
     }
 
@@ -157,10 +172,17 @@ impl GoogleError {
     pub(crate) fn optional_answer(
         result: Result<Option<Value>, Self>,
     ) -> Result<Option<Value>, ProviderError> {
+        Self::readable(result).map_err(Self::into_write_error)
+    }
+
+    /// A write's answer with a success whose body does not read taken as done, with no body: the
+    /// status already says the write was done. Failures stay as they are, for a caller that
+    /// classifies them itself.
+    pub(crate) fn readable(result: Result<Option<Value>, Self>) -> Result<Option<Value>, Self> {
         match result {
             // The transport makes this only from a success's body.
             Err(Self::Json(_)) => Ok(None),
-            other => other.map_err(Self::into_write_error),
+            other => other,
         }
     }
 
@@ -189,6 +211,9 @@ impl GoogleError {
             // Malformed JSON or a structurally invalid response is a protocol-level
             // incompatibility: retrying the same request will not fix it.
             Self::Json(_) | Self::Protocol(_) => FailureClass::Permanent,
+            // The source's own class: a broker that is down is retried, consent that is gone is
+            // the person's to give again.
+            Self::Credential(source) => source.class(),
         }
     }
 }
@@ -200,6 +225,14 @@ fn transport_class(err: &engine_http::SendError) -> FailureClass {
         FailureClass::Permanent
     } else {
         FailureClass::Retryable
+    }
+}
+
+/// The source's failure, or the engine's refusal of an origin or a kind of credential, with
+/// the class it gave.
+impl From<engine_provider::CredentialFailure> for GoogleError {
+    fn from(failure: engine_provider::CredentialFailure) -> Self {
+        Self::Credential(failure.into_error())
     }
 }
 
@@ -300,6 +333,11 @@ pub(crate) fn unread_answer(detail: &str) -> ProviderError {
 
 impl From<GoogleError> for ProviderError {
     fn from(err: GoogleError) -> Self {
+        // The source's own error, passed through as it gave it: its class, and a rate limit's
+        // instant with it.
+        if let GoogleError::Credential(source) = err {
+            return source;
+        }
         let class = err.failure_class();
         let detail = err.to_string();
         // A rate limit is the one class that carries *when*. The outbox obeys a provider's

@@ -197,7 +197,6 @@ pub(in crate::contract) async fn outcomes_record_failure_and_ambiguity<S: Store 
             PendingOutcome::Failed {
                 class: FailureClass::Permanent,
                 retry_after: None,
-                detail: String::new(),
             }
         } else {
             PendingOutcome::NeedsConfirmation {

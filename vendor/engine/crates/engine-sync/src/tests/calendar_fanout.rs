@@ -91,7 +91,10 @@ impl Provider for FakeDav {
     fn connection_info(&self) -> ConnectionInfo {
         ConnectionInfo::new(Capabilities::none().with_calendars())
     }
+}
 
+#[async_trait::async_trait]
+impl CalendarSync for FakeDav {
     fn calendar_scope(&self, account: &AccountId) -> SyncScope {
         SyncScope::DavCollectionList {
             account: account.clone(),
@@ -134,6 +137,7 @@ impl Provider for FakeDav {
         _account: &AccountId,
         calendar: &CalendarId,
         _cursor: Option<&SyncState>,
+        _window: engine_core::time::Horizon,
     ) -> ProviderResult<ScopeSync<Event>> {
         self.fetched.lock().unwrap().push(calendar.clone());
         let held = self.calendars.lock().unwrap().get(calendar).cloned();

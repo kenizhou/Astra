@@ -16,7 +16,7 @@ use std::collections::{BTreeSet, HashSet};
 
 use engine_core::{
     ids::{MessageIdHeader, ProviderKey},
-    mail::{EmailAddress, Keyword, Mailbox, MailboxRole},
+    mail::{EmailAddress, Keyword, Mailbox, MailboxRole, MessageMetadata},
 };
 use engine_provider::{Draft, HandOver, HandedOver, ProviderResult, SubmissionReceipt};
 use serde_json::{Map, Value, json};
@@ -24,9 +24,10 @@ use serde_json::{Map, Value, json};
 use crate::{
     error::JmapError,
     executor::Executor,
-    mail::mailbox_from_json,
+    mail::{IMPORTANCE_HEADER, X_PRIORITY_HEADER, mailbox_from_json},
     mutate::keyword_pointer,
-    request::{Request, capability},
+    request::{CallId, Request, capability},
+    response::Response,
     submit_body::body,
     sync_ops::objects,
 };
@@ -93,7 +94,7 @@ pub(crate) async fn send(
     )
     .map_err(JmapError::into_answer_error)?;
     let kept = tag_sent_copy(executor, mail_account, receipt.email_key.as_str(), draft).await;
-    Ok(receipt.with_sent_copy_keywords(kept))
+    Ok(receipt.with_sent_copy_kept(MessageMetadata::default().with_keywords(kept)))
 }
 
 /// Uploads every draft attachment's bytes, returning the `blobId`s in attachment
@@ -111,17 +112,18 @@ pub(crate) async fn upload_attachments(
     if draft.attachments.is_empty() {
         return Ok(Vec::new());
     }
-    let url = executor
+    let template = executor
         .session()
         .upload_url()
-        .ok_or_else(|| JmapError::session("server advertised no uploadUrl; cannot attach"))?
-        .replace("{accountId}", mail_account);
+        .ok_or_else(|| JmapError::session("server advertised no uploadUrl; cannot attach"))?;
+    let url = crate::blob::fill_upload(template, mail_account);
     let mut blob_ids = Vec::with_capacity(draft.attachments.len());
     for attachment in &draft.attachments {
         blob_ids.push(
             executor
                 .upload(&url, &attachment.media_type, &attachment.content)
-                .await?,
+                .await?
+                .to_string(),
         );
     }
     Ok(blob_ids)
@@ -239,6 +241,11 @@ pub(crate) fn build_draft(drafts_mailbox: &str, draft: &Draft, blob_ids: &[Strin
             .map(MessageIdHeader::as_str)
             .collect();
     }
+    // Normal is stated by carrying neither header, as on every other transport.
+    if let Some(x_priority) = draft.importance.x_priority() {
+        create[IMPORTANCE_HEADER] = json!(draft.importance.as_str());
+        create[X_PRIORITY_HEADER] = json!(x_priority);
+    }
     create
 }
 
@@ -278,8 +285,8 @@ fn envelope_recipients(draft: &Draft) -> Vec<Value> {
         .collect()
 }
 
-/// Sets `draft.sent_copy_keywords` on the filed copy `email_id`, returning the ones it
-/// carries. Asks nothing, and costs no request, when the draft wants none.
+/// Sets the keywords of `draft.sent_copy_metadata` on the filed copy `email_id`, returning the ones
+/// it carries. Asks nothing, and costs no request, when the draft wants none.
 ///
 /// A request of its own after the send, rather than part of the create or of
 /// `onSuccessUpdateEmail`: the create is also a saved draft's, which must not carry them, and
@@ -304,14 +311,15 @@ async fn tag_sent_copy(
     }
 }
 
-/// The `Email/set` that puts `draft.sent_copy_keywords` on `email_id`, or `None` when the
-/// draft asks for none.
+/// The `Email/set` that puts the keywords of `draft.sent_copy_metadata` on `email_id`, or `None`
+/// when the draft asks for none.
 fn keyword_update(mail_account: &str, email_id: &str, draft: &Draft) -> Option<Value> {
-    if draft.sent_copy_keywords.is_empty() {
+    if draft.sent_copy_metadata.keywords.is_empty() {
         return None;
     }
     let patch: Map<String, Value> = draft
-        .sent_copy_keywords
+        .sent_copy_metadata
+        .keywords
         .iter()
         .map(|keyword| (keyword_pointer(keyword.as_str()), Value::Bool(true)))
         .collect();
@@ -334,7 +342,7 @@ fn kept_keywords(result: Result<&Value, JmapError>, draft: &Draft) -> BTreeSet<K
                 .is_none_or(Map::is_empty)
     });
     if applied {
-        draft.sent_copy_keywords.clone()
+        draft.sent_copy_metadata.keywords.clone()
     } else {
         BTreeSet::new()
     }
@@ -348,17 +356,29 @@ fn address(addr: &EmailAddress) -> Value {
     }
 }
 
+/// The two answers a submission reads its receipt from, each with the call it answers.
+struct Answered<'a> {
+    email: &'a Value,
+    email_set: CallId,
+    submission: &'a Value,
+    submission_set: CallId,
+}
+
 /// Reads the submission's answer into a receipt.
 fn answer(
-    resp: &crate::request::Response,
-    email_set: &str,
-    submission_set: &str,
+    resp: &Response,
+    email_set: &CallId,
+    submission_set: &CallId,
     message_id: &MessageIdHeader,
     handed_over: &HandedOver,
 ) -> Result<SubmissionReceipt, JmapError> {
     parse_receipt(
-        resp.result(email_set)?,
-        resp.result(submission_set)?,
+        &Answered {
+            email: resp.result(email_set)?,
+            email_set: email_set.clone(),
+            submission: resp.result(submission_set)?,
+            submission_set: submission_set.clone(),
+        },
         message_id,
         handed_over,
     )
@@ -367,15 +387,18 @@ fn answer(
 /// Extracts the sent email's key, mapping a `SetError` on either create into a
 /// classified [`JmapError`].
 fn parse_receipt(
-    email_result: &Value,
-    submission_result: &Value,
+    answered: &Answered<'_>,
     message_id: &MessageIdHeader,
     handed_over: &HandedOver,
 ) -> Result<SubmissionReceipt, JmapError> {
-    let email_id = created_id(email_result, "draft")
-        .ok_or_else(|| set_error(email_result, "draft", "Email/set"))?;
-    if created_id(submission_result, "sub").is_none() {
-        return Err(set_error(submission_result, "sub", "EmailSubmission/set"));
+    let email_id = created_id(answered.email, "draft")
+        .ok_or_else(|| set_error(answered.email, "draft", &answered.email_set))?;
+    if created_id(answered.submission, "sub").is_none() {
+        return Err(set_error(
+            answered.submission,
+            "sub",
+            &answered.submission_set,
+        ));
     }
     let key = ProviderKey::new(email_id)
         .map_err(|e| JmapError::protocol(format!("bad created email id: {e}")))?;
@@ -402,8 +425,9 @@ pub(crate) fn created_id<'a>(result: &'a Value, creation_id: &str) -> Option<&'a
         .and_then(Value::as_str)
 }
 
-/// Turns a `notCreated` `SetError` (RFC 8620 §5.3) into a classified method error.
-pub(crate) fn set_error(result: &Value, creation_id: &str, method: &str) -> JmapError {
+/// Turns a `notCreated` `SetError` (RFC 8620 §5.3) in the answer to `call` into a classified
+/// method error.
+pub(crate) fn set_error(result: &Value, creation_id: &str, call: &CallId) -> JmapError {
     let error_type = result
         .get("notCreated")
         .and_then(|nc| nc.get(creation_id))
@@ -412,7 +436,7 @@ pub(crate) fn set_error(result: &Value, creation_id: &str, method: &str) -> Jmap
         .unwrap_or("unknown")
         .to_owned();
     JmapError::Method {
-        call_id: method.to_owned(),
+        call_id: call.clone(),
         error_type,
     }
 }

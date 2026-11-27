@@ -26,8 +26,21 @@ each over its own `GraphClient` on the same token. The mail layers:
   unit-tested against captured fixtures.
 - **`transport`** — a `GraphTransport` seam over bearer HTTP. `HttpTransport`
   (reqwest + rustls, built from the caller-supplied `TlsClientConfig` passed to
-  `GraphClient::connect`/`for_mailbox`/`with_base` — `tls.md`) is production; the
-  seam lets the fetch/provider orchestration run offline against fixtures. There is **no session discovery**
+  `GraphClient::connect_with_source`/`with_base_and_source`, or `connect`/`for_mailbox`/
+  `with_base` for a fixed token — `tls.md`) is production; the
+  seam lets the fetch/provider orchestration run offline against fixtures. **The token is
+  asked for, not held**: every authenticated request goes through the account's
+  `engine_http::AuthenticatedClient`, which asks its `CredentialSource` (`credential-source.md`).
+  No redirect is followed; a token goes over plaintext only to loopback from a base on
+  loopback, and only to an origin the source permits. A `401` whose challenge offers `Bearer`
+  is replaced once and the request sent again (a `sendMail` included: a `401` says it was not
+  processed), and so is one with no challenge at all (YAHOO-1), except on the directory's
+  delta (`/users/delta`), which Graph answers that way on a personal account with a good token
+  (MICROSOFT-2, `spec-deviations.md`): only that read takes a bare `401` as final. Only a token is presented (`engine_http::present_bearer`): a source
+  answering a password fails the request as `Permanent` before it is sent. Content URLs keep
+  their anonymous client and never ask. `GraphClient` is a cheap clone whose clones share the
+  transport, so one client per account serves every folder-bound `GraphProvider`; a token with
+  application permissions reaches another mailbox through `with_principal`. There is **no session discovery**
   (the v1.0 root is fixed); requests carry `Prefer: IdType="ImmutableId"`.
   Having no connect-time request, Graph is the one adapter whose
   `ConnectionInfo::http_version` is `None` until its first fetch — the transport
@@ -49,6 +62,8 @@ each over its own `GraphClient` on the same token. The mail layers:
   message.
 - **`provider`** — `GraphProvider`, bound to one folder for email; submission and
   writes are account-level, so every bound provider advertises them.
+- **`rules`/`rules_read`/`rules_write`/`rules_apply`, `vacation`** — the inbox rules and the
+  automatic replies (see **Mail rules and the out-of-office reply** below).
 
 ## Graph specifics implemented
 
@@ -89,17 +104,72 @@ each over its own `GraphClient` on the same token. The mail layers:
   short tree. And **`childFolderCount` counts hidden folders that `childFolders` does not
   return** (Conversation History has one), so a folder can promise a child and answer with
   an empty page; that is ordinary, not a failure.
-- **Roles resolved by id, never by name.** A personal `mailFolder` carries **no**
-  `wellKnownName` (selecting it `400`s) and a **localized** `displayName`
-  (e.g. Dutch "Postvak IN"). The provider `GET`s the well-known aliases
-  (`inbox`, `archive`, `drafts`, `sentitems`, `deleteditems`, `junkemail`) to
-  learn their ids and matches by id; `msgfolderroot` is resolved to null the
-  parent of top-level folders. `outbox`/conversation-history have no standard
-  role.
+- **Roles resolved by id, never by name.** A `mailFolder` has a **localized** `displayName`
+  (e.g. Dutch "Postvak IN"), and `wellKnownName` is not in v1.0's schema: selecting it `400`s
+  on the personal account and the work/school tenant we test with. (The default projection
+  of the folder list does carry it on both, observed November 2026; an undeclared property
+  is not something to build on, so the adapter does not read it.) The provider `GET`s the
+  well-known aliases (`/mailFolders/{alias}?$select=id`) to learn their ids and matches by id;
+  `msgfolderroot` is resolved to null the parent of top-level folders. `outbox` has no role.
+
+  | Alias | Role | An alias that answers… |
+  |---|---|---|
+  | `inbox`, `archive`, `drafts`, `sentitems`, `deleteditems`, `junkemail` | `Inbox`, `Archive`, `Drafts`, `Sent`, `Trash`, `Junk` | not found: no role; anything else fails the listing |
+  | `syncissues`, and under it `conflicts`, `localfailures`, `serverfailures` | `ServerRecords` | not found or `403`: no role; anything else fails the listing |
+  | `conversationhistory` | `ChatHistory` | the same |
+
+  `ServerRecords` is Exchange's own bookkeeping: Outlook's logs of failed synchronisations
+  and the copies a sync conflict left behind. `ChatHistory` is Conversation History, the
+  chats Exchange stored as messages: records of chats, not mail. The visible folder mainly
+  holds Skype for Business conversations; Microsoft 365 keeps its copies of Teams chats in a
+  hidden folder under it, which `childFolders` does not return (Conversation History counts
+  one child and lists none: `tests/fixtures/mail/mailfolders_children_hidden.json`), so
+  neither the folder list nor this role reaches them. Gmail's chats (`CHAT`) are the same
+  thing and do **not** behave alike: the Gmail adapter treats `CHAT` as a label that files
+  nothing (`NORMALIZER_VERSION` 12), so a chat appears only in the synthetic All Mail (role
+  `All`) and nothing marks it as a chat. A host that leaves `ChatHistory` out still copies
+  Gmail's chats. They are two roles, not one, because a host may treat stored chats
+  differently from bookkeeping and cannot tell them apart by their localized names
+  ("Synchronisatieproblemen", "Gesprekgeschiedenis"). Over IMAP the same Exchange folders
+  are listed with no SPECIAL-USE attribute (unverified here), so `provider-imap` gives them
+  no role: only a name would tell, and names are localized.
+
+  The five are information about a folder, so a folder list never fails for want of one:
+  an alias answering not found or `403` (the folder is absent, or not the caller's to see)
+  leaves its role unassigned. "Not found" is one predicate,
+  `mailbox_write::is_not_found`. The six standard aliases keep failing the listing on a
+  `403`, which there is the credential's grant falling short of the mailbox.
+
+  Observed on a personal account and one work/school tenant, November 2026: the personal
+  account has Conversation History but no Sync Issues, and answers those four aliases `404
+  ErrorFolderNotFound` (`tests/fixtures/error/syncissues_not_found.json`); the tenant
+  answered all five. Other folders Exchange keeps, such as `scheduled`, `searchfolders` or
+  RSS Subscriptions, have no role: none of them was surveyed.
+
+  ⚠️ **Unverified: whether reading an alias creates its folder.** The `404` for Sync Issues
+  carries an Exchange trace saying the default folder "cannot be created by XSO (it does not
+  have CanCreate behavior)", which implies that some default folders *are* created when
+  they are first accessed. Both test accounts already had Conversation History and an
+  Archive, so whether a `GET` on `conversationhistory` or `archive` (asked on every folder
+  listing) creates a missing one was not observed, and was not provoked. If it does, a
+  folder listing writes to the mailbox it reads, which matters for a source a migration
+  host promises to leave untouched.
 - **Snapshot = the initial delta enumeration** (full objects): drain
   `@odata.nextLink` pages, ending at the `@odata.deltaLink` that becomes the
-  persisted cursor. `$top` does **not** paginate consumer delta (page size is
-  server-controlled; `@odata.nextLink` appears only on large result sets).
+  persisted cursor. `$top` does **not** paginate consumer delta; the page size is asked for
+  with `Prefer: odata.maxpagesize` on every request (**Page size**, below).
+- **Page size.** Without the header a delta page holds **ten** messages on both a personal
+  account and Exchange Online, so a folder's first sync is one sequential round trip per ten
+  messages. The adapter sends `odata.maxpagesize` set to the stream's `fetch_batch` (`0` asks
+  for the most, `MAX_DELTA_PAGE`), on the first page, every `@odata.nextLink` continuation
+  and every deltaLink, because neither link carries it: a continuation followed without the
+  header drops back to ten. Measured on an Exchange Online folder, 1,500 messages, two
+  alternating rounds: no header 22–29 messages/s, 50 → 69–80/s, 100 → 85–96/s,
+  250 → 104–111/s, 500 → 127–136/s. Asked for 1,000, Exchange answers **512** a page without
+  an error, which is why `MAX_DELTA_PAGE` is 512. The rate flattens past 250 while each page
+  waits longer (500: about 4 s), so a host weighing first rows against throughput chooses
+  through `fetch_batch`; the response carries no `Preference-Applied` for the size, so the
+  only evidence it was honoured is the page itself.
 - **Incremental delta: full objects, except lightweight changes.** Microsoft's
   [delta-query-messages](https://learn.microsoft.com/graph/delta-query-messages)
   guidance says a changed entry is a *full* object — and it is for substantive
@@ -107,9 +177,17 @@ each over its own `GraphClient` on the same token. The mail layers:
   The exception, **not in the docs** and observed on consumer mailboxes, is a
   *lightweight* property change (notably `isRead`): it returns only the changed
   property + `id`, with **no** `@odata.etag`. So the adapter uses the entry
-  directly when it carries `@odata.etag` (the common case) and resolves the
-  etag-less partials as **state changes** through the narrow `MESSAGE_STATE_SELECT`
-  rather than re-fetching the whole message.
+  directly when it carries `@odata.etag` (the common case) and resolves an
+  etag-less partial as a **state change** through the narrow `MESSAGE_STATE_SELECT`,
+  but only when every property it names is one that select reads, or its folder
+  (`normalize_state::names_only_state`). An etag-less entry naming anything else,
+  `importance` or a draft's `subject` above all, is read whole: Exchange changes
+  content under a stable id (a draft's `PATCH`, Outlook's importance on a received
+  message), and treating that as a state change would lose it. Observed November 2026,
+  an importance-only and a subject-only change to a draft and an importance change to
+  a received message each came back as a full entry, while an `isRead` change came back
+  full in one capture and lightweight in `live_provider.rs` the same day. Nothing
+  promises either form for any change, so both are handled for every one.
 
   That narrow read cannot ask for the etag: `@odata.etag` is an OData *annotation*,
   not a property, so naming it in a `$select` is an error — whether a `$select`ed
@@ -139,8 +217,8 @@ each over its own `GraphClient` on the same token. The mail layers:
   (`SyncWindow::admits`, `store-and-sync.md`), which is where the bound holds for every
   adapter. `GraphProvider::with_since` survives only as the `default_sync_window` the
   whole-scope `sync_email` drain fetches under. The `chunk_size` knob is the commit
-  granularity; the `fetch_batch` knob has no lever yet (page size is server-controlled —
-  see Known limitations).
+  granularity; the `fetch_batch` knob is each delta page's `odata.maxpagesize` (**Page
+  size**, above).
 - **Keyword/revision mapping.** `isRead`→`$seen`, `isDraft`→`$draft`,
   `flag.flagStatus == "flagged"`→`$flagged`; `internetMessageId` is preserved
   bracket-stripped as a threading hint (never identity); `conversationId`→thread
@@ -189,17 +267,24 @@ Its hand-over is recorded before the last piece of that body, the point of no re
 
 Graph stores no free-form keyword. The nearest thing is `categories`, a list of names on each
 message that Outlook shows the person. So a keyword a draft asks for on its filed copy
-(`Draft::sent_copy_keywords`) is kept only when the host registered a name for it
+(`Draft::sent_copy_metadata`) is kept only when the host registered a name for it
 (`GraphProvider::with_keyword_names`, taking `KeywordName`s), and only then does the adapter
 advertise `sent_copy_keywords` (`crate::categories`).
 
-- **After the send, never inside it.** `sendMail` answers `202` and files the copy a moment
-  later, with no id. The copy is looked up in Sent Items by the `internetMessageId` the MIME
-  carried (`$filter=internetMessageId eq '<…>'`), after each wait of a short schedule (five
-  tries over about five seconds; a live mailbox shows it within about three), and given the
-  category with a `PATCH {categories}` that keeps any the person set. The message is delivered
-  before any of it starts: a copy not found or a refused `PATCH` only leaves the keyword out of
-  `SubmissionReceipt::sent_copy_keywords`.
+- **After the send, never inside it, and not while the send waits.** `sendMail` answers `202`
+  and files the copy a moment later, with no id, so the adapter keeps nothing within the send:
+  the receipt's `sent_copy_kept` is empty and the adapter advertises
+  `sent_copy_keywords_deferred`. The outbox then records a `MailEdit::SetKeywords` on the copy's
+  `sent:<Message-ID>` placeholder key (`engine-sync`'s `record_deferred_keywords`), and the drainer
+  applies it. The adapter resolves a placeholder by looking the copy up in Sent Items by the
+  `internetMessageId` the MIME carried (`$filter=internetMessageId eq '<…>'`; a live mailbox shows
+  it within about three seconds), answers **retryable** while it is not there, so the outbox tries
+  again on its own backoff, and gives it the category with a `PATCH {categories}` that keeps any
+  the person set. That `PATCH` can meet `412 ErrorIrresolvableConflict` though it sends no
+  `If-Match`: Exchange is still writing the copy a moment after it appears (live). The categories
+  it read are then stale, so that is retryable too. The edit resolves to the copy's own id. The
+  same `SetKeywords` sets or clears a named keyword on any synced message, beside
+  `$seen`/`$flagged` in one `PATCH`; a keyword without a registered name is still refused.
 - **One category per keyword, whatever the device's language.** Before its first tag an adapter
   asks Sent Items for a message already carrying any of the keyword's names
   (`categories/any(c:c eq '…') or …`) and settles on the name it finds, creating the category
@@ -211,8 +296,9 @@ advertise `sent_copy_keywords` (`crate::categories`).
   `MESSAGE_STATE_SELECT`), and a category matching a registered name, ignoring case, is reported
   as the keyword. Any other category is the person's own and reports nothing. A category change
   arrives in the folder's `messages/delta` (live-verified).
-- **Live-verified** (`tests/live_sent_copy_categories.rs`): the receipt keeps the keyword, the
-  Sent copy syncs back carrying it, and a second adapter registering the names the other way
+- **Live-verified** (`tests/live_sent_copy_categories.rs`): the receipt keeps nothing, the edit
+  on the placeholder answers retryable until the copy is filed and then resolves to its id, the
+  Sent copy syncs back carrying the keyword, and a second adapter registering the names the other way
   round tags its copy with the category the first created. The copy delivered to the Inbox
   carries none.
 
@@ -224,6 +310,23 @@ what sending it would have delivered. Graph files it into Drafts and sets `isDra
 itself: nothing in the request names a folder, which is live-verified rather than
 assumed (`tests/live_drafts.rs`). Graph advertises `mail_drafts`.
 
+- **A draft's keywords are named categories**, as a Sent copy's are, and Graph advertises
+  `draft_keywords` once a `KeywordName` is registered. After the save the stored draft is given
+  the category of each keyword the save asks for and has none of another registered keyword's
+  names, keeping the person's own, in one `PATCH {categories}`, sent only when that changes
+  anything. The save's own answer (the create's, or the rewrite's `PATCH`) says which categories
+  the draft holds; one that does not is read again. A rewrite in place keeps the message and its
+  categories (live), which is why a keyword the save no longer asks for has to be taken off. A
+  refused `PATCH` leaves the draft saved and the keyword out of `DraftReceipt::kept`.
+
+- **Importance is the message's `importance` property**, in `MESSAGE_SELECT`. Exchange reads it
+  from a message's MIME by the rule `Importance::from_headers` copies, observed for thirty header
+  shapes in `tests/fixtures/mail/importance_header_shapes.json` and checked against the engine's
+  rule by `importance_shapes_tests.rs` (MICROSOFT-1 lists where it departs from RFC 5322). A
+  draft created from MIME takes it from the `Importance` header the assembler writes; a re-save's
+  `PATCH` sends it every time, normal included, or lowering it would never reach the stored draft
+  (`tests/live_importance.rs`). A change to it arrives as a changed message, never as state
+  (above).
 - **A re-save rewrites the stored message in place: `PATCH /me/messages/{id}`.** A
   draft's `subject`, `body`, `from` and recipient collections are writable while
   `isDraft` is true (they are read-only once it is not), so a text edit is **one
@@ -351,6 +454,15 @@ are account-level, so any folder-bound provider makes them.
   deleted, and Outlook's own delete is a move to Deleted Items, which `Trash` already is.
   `permanentDelete` is served on the global cloud only. A `404` is success: the op behind
   it is retried.
+- **No create gives a folder a role.** Graph's role folders are its well-known folders
+  (`archive`, `sentitems`, … and `msgfolderroot`), which every mailbox has; no request makes
+  another or names an existing folder as one. So `mailbox_create_role` is `false` and a create
+  that asks for a role is refused before any request, by the provider's own capability
+  (`InvalidState`, `CreateRoleError::NotSupported`, `providers.md`), rather than making an ordinary folder a host would take for
+  its Archive. A host that mirrors a role onto Graph resolves the well-known folder instead.
+- **Names are the server's to judge.** The adapter refuses none itself, a trash's included,
+  and makes no claim about which characters Exchange holds (unmeasured); a name it refuses
+  comes back as the server's own error (`providers.md`).
 - **A duplicate create is answered with the existing folder**: on `409` or
   `ErrorFolderExists` the parent's `childFolders` is read and a folder of **exactly** that
   name is the success a retry meets. One differing only in case is a `Conflict`, as are a
@@ -536,10 +648,142 @@ with the identical symptom in
 has no mailbox *kind* and cannot have one on this credential model; that would need an
 application permission, a different credential model and a separate decision.
 
+An **application** token is another matter (observed 2026-11-24, client credentials with the one
+application permission `MailboxSettings.Read`): `/users/{address}/mailboxSettings` answers `200`
+for a user's mailbox and for a shared one, `userPurpose` reading `user` and `shared`. That is the
+transfer host's path ("Mail rules and the out-of-office reply" below).
+
 Graph grants Full Access all-or-nothing per mailbox and reports no folder rights, so a Graph
 folder is `MailboxAccess::owner()` (`modeling.md`). Folder-level Outlook delegation (one
 shared Inbox rather than the whole mailbox) is not reported by Graph at all — a documented
 limitation, not a silent one.
+
+## Mail rules and the out-of-office reply
+
+`GraphProvider` implements `MailRules` (`rules`, `rules_read`, `rules_write`, `rules_apply`) and
+`Vacation` (`vacation`), and answers `Some` from `mail_rules()` and `vacation()` on every
+mailbox: whether the credential may read them is known only by asking. The mapping is the Graph
+column of `docs/design/filters-and-out-of-office.md` §5; what follows is what the adapter adds.
+
+- **Where.** Rules are `{root}/mailFolders/inbox/messageRules`, the reply
+  `{root}/mailboxSettings/automaticRepliesSetting`, written with a `PATCH` of
+  `{root}/mailboxSettings`. `{root}` is the client's principal, so `/me` and `/users/{address}`
+  read alike. Graph also takes `/users/{object id}` (observed, delegated, for the signed-in user's
+  own id), but `MailboxPrincipal` takes an address, so a host names a mailbox by its UPN or SMTP
+  address.
+- **Permissions.** Reading needs `MailboxSettings.Read`, writing `MailboxSettings.ReadWrite`. A
+  delegated token without it answers `403 ErrorAccessDenied` (observed on a personal account
+  whose token carried neither; `tools/graph-oauth` now asks for `MailboxSettings.ReadWrite`). A
+  `403` is `Permanent`, as every Graph `403`: the credential's grant falls short, and signing in
+  again with the scope is the way out. An **application** token with `MailboxSettings.Read` reads
+  the rules and the reply of a user's mailbox and of a shared mailbox at `/users/{address}`
+  (observed 2026-11-24; the listing it read was byte for byte the one the user's own delegated
+  token read), which is what a transfer host holding application permissions uses; `/me` means
+  nothing to such a token and is refused.
+- **Reading.** The listing is followed through `@odata.nextLink` and sorted by `sequence`, ties
+  by id; `$top` is ignored on it (asked for two, got nine, no next link). Each predicate and
+  action the model types is read typed; every other one (an Exchange message class,
+  `headerContains`, `bodyOrSubjectContains`, `withinSizeRange`, a category list that is not
+  lowercase keywords, `forwardAsAttachmentTo`) is one `Native` part holding that key alone, so it
+  goes back as it came. `hasError` and `isReadOnly` are `MailRule::in_error` and `read_only`; the
+  rule's id stays in the raw listing and its origin is `RuleOrigin::Listed`, its index there. No
+  `fromAddresses` entry of the mailbox read was an X.500 address (checked, 0 of 4).
+- **What Graph holds** is a constant vocabulary with `RuleLimit`s, so `plan_rules` sees every
+  limit before anything is written: one test per kind among the conditions (Graph's predicates are
+  keys of one object, any-of within a key) and, among the exceptions, one only of a kind with a
+  single value (an importance), since tests with values merge there; one move, copy and importance
+  per rule; `To` and `Cc` only together; no system keyword but `$seen`; filing only into folders,
+  never a virtual collection. The one pair the plan cannot see is a `Native` predicate under a key
+  a typed test also writes: the reader makes none (it reads natively only keys the model has no
+  type for, or values Graph does not document), and a host-built pair meets the writer's refusal,
+  the server's rule left as it was. A domain is not offered: `senderContains
+  "@example.com"` also matches `example.com.evil.test`, which would widen the condition. A rule the
+  writer still cannot place (a role whose folder the account lacks) keeps the server's rule as it
+  was and is a `Permanent` failure.
+- **Graph keeps the rules as a list** (observed on a work account, 2026-11-24): `sequence` is a
+  rule's position, renumbered on every change; a number past the end is clamped to it; a `PATCH`
+  of `sequence` alone moves the rule. So the writer removes left-out rules first, then walks the
+  planned rules keeping the server's list as it goes: a new rule is `POST`ed at its position, a
+  rule out of place gets a `PATCH` of `sequence` alone, a rule in place is not sent. Inserting or
+  moving one rule sends nothing to the others. Removing first keeps the positions those of the
+  rules that stay; the cost is that a rule left out is gone even where a later write of the set
+  fails, which is what the caller asked for of that rule. It matters where a host replaces a rule
+  with one it built (no origin) rather than editing the one it read: the old rule is removed
+  before the new one is created, so a create that fails leaves neither, and the receipt lists the
+  new rule as not written. A host that wants the old rule kept until its successor exists edits the
+  rule it read, which writes it anew in place, new first. The offline tests run against a fake that
+  keeps such a list (`rules_fake.rs`), and check the list each write leaves.
+- **A `PATCH` clears nothing.** A predicate, an action or `displayName` sent as `null` stays as it
+  was, with a `200` (observed). A changed rule that drops none is `PATCH`ed whole, its recipients'
+  display names kept; one that drops a part, or sends a list shorter (whether a `PATCH` replaces a
+  list is what the second live run asks), is written as a new rule in its place, `POST`ed first,
+  and the old one `DELETE`d after. Where the `POST` fails the old rule stays and nothing is
+  deleted; where the `DELETE` fails both stay, the new one first, and the rule's outcome says so
+  beside the receipt's failure. A host that meets either re-reads the rules and edits from what it
+  reads, never replays its old edit, which would write the rule a third time.
+- **Every rule has a name.** A `POST` without `displayName` is accepted and Graph names the rule
+  itself (observed). An edit that removes a rule's name leaves the old name, and the outcome reports
+  the name as not written.
+- **No ETag, and no read to trust straight after a write.** A `messageRule` carries no
+  `@odata.etag`, in the listing or read alone, and a `PATCH` with a stale `If-Match` lands
+  (observed), so both guards are `WriteGuard::Absent`. The version is a SHA-256 of what was read
+  (the listing in order; the reply's setting without `@odata.context`, which names the mailbox),
+  and a write reads again first and refuses a moved base as `Conflict`. That narrows the race and
+  no more, because **Graph answers a write before it applies it** (observed): the rules' listing
+  did not yet show a rule `POST`ed a moment earlier, so a base read before it passed the check;
+  and of two `mailboxSettings` writes a few seconds apart, the reads straight after the second
+  showed it while reads minutes later showed the first. So neither receipt carries a version: the
+  next write reads first, and a host that needs to know a write landed reads until it holds. After a
+  rule written anew, a read soon after may still list the old rule beside the new one, or neither;
+  a removal retried then may meet a `404`, which counts as done.
+- **Ids are percent-encoded path segments**: every byte outside RFC 3986's unreserved set, so a
+  base64 `=` goes as `%3D` (observed to work) and a `+` as `%2B`. An id holding a `/` is never
+  written to, and a `404` for one is never counted as done: Graph re-parses a decoded `%2F`
+  (`principal.rs`), none has been seen (0 of 9 ids read, 0 of the test's own), so it is unproven.
+- **Every failure lands in the receipt and on the rule's outcome.** An `isReadOnly` rule is never
+  sent: changing it, moving it out of place or removing it is a `Permanent` entry in `failures`, as
+  is every request that fails, and the rest go ahead. The rule's outcome then says
+  `LossReason::NotWritten`, not kept where the rule itself was not stored and reduced where only
+  its place was not.
+- **An edit that is not kept does not apply.** A rule the plan does not keep, or whose write
+  failed, leaves the rule it was read as where it is, as it was, and the receipt names it
+  (`RulesReceipt::left_as_read`); nothing is removed for it. A rule whose write may have landed
+  (a timeout, a gateway's `502` or `504`) is not named there: its edit may have applied. Before this the writer removed the
+  rule a not-kept edit was read as. Proven offline with the Graph fake (`rules_apply_tests.rs`);
+  no live Graph write was run for it. A rule written anew whose old copy could not be removed is
+  `LossReason::LeftBeside`: both run until the old one goes.
+- **The reply** is canonical on read (`vacation.rs`): `disabled` is off with no window, even where
+  Graph keeps a schedule beside it; `scheduled` is on within its two ends, each
+  `dateTimeTimeZone` read as the instant it names; one HTML string per message; an external
+  message equal to the internal one, or one nobody outside gets (`externalAudience: none`), is no
+  outside reply. A wall time the zone skips or repeats names two instants: the start takes the
+  later and the end the earlier, so the window never widens; a zone the engine cannot resolve is
+  `item_unavailable`, never a guess. Written, a text body is escaped into HTML, an off reply keeps
+  its window, and a message the model does not hold is not sent: with no outside reply and an
+  audience of the organization, `externalReplyMessage` is left out. Both accounts read so far store
+  their schedule in `UTC`. For a reply that is not scheduled, Graph reports a schedule of its own:
+  from the top of the current hour to exactly a day later, moving every hour (observed on the work
+  account, confirmed with an app-only token). The raw form keeps it; the version leaves it out
+  unless `status` is `scheduled`, or a guarded write would meet a conflict nothing caused.
+
+**Live status.** Reads are proven live: delegated at `/me`, application-only for a user's and a
+shared mailbox (`tests/live_rules.rs`). Writes are proven live on the delegated work mailbox, only
+on rules each test created, every other rule byte for byte as before after every run:
+
+- the first run settled the facts above, and showed a reply write and its restore landing out of
+  order (restored by hand with one verbatim `PATCH`, read back unchanged for fifteen minutes);
+- `tests/live_reply_writes.rs` (gate `GRAPH_REPLY_WRITES=1`) wrote a reply scheduled for 2099,
+  settled it over five minutes, restored the setting and settled that, and found 0 fields differing
+  five minutes later;
+- `tests/live_rules_writes.rs` (gate `GRAPH_RULES_WRITES=1`) created five rules after the user's,
+  rotated three of them, shortened a list by hand and by the engine (written anew in place), renamed
+  one in place, saw a stale base refused once the listing had settled, and removed them, each write
+  settled by three reads ten seconds apart. It refuses to start unless the user's rules are numbered
+  1 to n and every one plans whole, and finds every rule it edits by its marker and tag.
+
+A `PATCH` replaces a list it is sent shorter (observed: two addresses sent as one read back as
+one), where it keeps a part sent as `null`. The writer still writes a shortened list anew, which is
+proven too; sending it as a `PATCH` instead is a follow-up.
 
 ## Known limitations (documented, not bugs)
 
@@ -584,16 +828,12 @@ limitation, not a silent one.
 - **No cross-folder orchestration yet.** The provider is folder-bound; syncing
   every folder is the orchestrator's job (the live test binds the inbox alias).
 - **Per-id delta re-fetch (and role resolution) are sequential GETs.** A changed id
-  is re-fetched with one `GET` each, and the 6 role aliases + `msgfolderroot` are
-  resolved with one `GET` each per folder-list pass; both could collapse to a few
-  round-trips via `$batch` (≤20 sub-requests) — a follow-up optimization. A
+  is re-fetched with one `GET` each, and the 11 role aliases + `msgfolderroot` are
+  resolved with one `GET` each per folder-list pass (12 before the folder list itself);
+  both could collapse to a few round-trips via `$batch` (≤20 sub-requests) — a follow-up
+  optimization. A
   changed-id re-fetch that `404`s (deleted/moved in the race since the delta) is
   skipped, so a single vanished message cannot wedge the pass.
-- **Page size is server-controlled.** The delta cycle drains every server page
-  (correct), but the adapter does not yet send `Prefer: odata.maxpagesize` — the
-  page-size control the delta-query-messages doc documents — so it ignores the
-  `stream_email` `fetch_batch`. A follow-up for responsive streaming. (`$top` does
-  *not* paginate consumer delta, which is why the header is the right lever.)
 - **National clouds aren't auto-rebased.** `with_base` rebasing rewrites only the
   commercial-cloud origin (`graph.microsoft.com/v1.0`); links a national-cloud
   endpoint (e.g. `graph.microsoft.us`) returns would be followed verbatim — fine
@@ -602,7 +842,10 @@ limitation, not a silent one.
   `$orderby`). A streaming newest-first snapshot via the list endpoint is a
   possible later refinement.
 - **Mail read/sync + submission + writes (`GraphProvider`).** The provider advertises
-  `mail` + `mail_writes` + `submission` (see **Submission** and **Mail writes** above).
+  `mail` + `message_source` + `mail_writes` + `submission` (see **Submission** and **Mail
+  writes** above). A source is one `GET /messages/{id}/$value` per message, at most
+  `MAX_CONCURRENT_SOURCE_FETCHES` at once; the capability holds for the adapter, not every
+  message: a message Exchange cannot render as MIME answers `item_unavailable` (above).
   Both submission and writes are account-level (keyed by immutable id), so they need no
   per-folder config. Calendar is a separate provider (see **Calendar** below), not this one.
 
@@ -667,9 +910,15 @@ Layers: `cal_fetch` (calendar list + `calendarView/delta` paging), `cal_normaliz
   overrides off the display-zone reading would miss by a day for any series near midnight.
   Also measured: the header accepts the name Graph itself reported, IANA or Windows
   (`W. Europe Standard Time`), and an all-day series' date does not move under any zone.
-- **Time-windowed, per calendar.** The mandatory date range comes from a host-supplied
-  `CalendarWindow` (its recurrence-expansion horizon; `providers.md`); the `deltaLink`
-  encodes it, so it is applied only to the initial request.
+- **Time-windowed, per calendar.** The mandatory date range is the `window` the engine names in
+  `sync_events` (the provider advertises `windowed_events`): the host's horizon at the first
+  sync, or the union a `reach_calendar` reopens over. The provider takes no window of its own.
+  The `deltaLink` encodes the
+  range, so it applies only to the request that opens the cursor, and **a delta reports
+  changes only inside it**: an event created past the window never arrives through it
+  (measured, with an event created inside it at the same moment as the control,
+  `tests/live_calendar_window.rs`). That is why the engine reopens rather than lists a further
+  range beside the cursor; a reopened cursor reports changes across the whole union.
 - **Authoring-zone times via `Prefer: outlook.timezone`.** A plain read returns UTC,
   which expands a recurring master DST-incorrectly. The provider sends `Prefer:
   outlook.timezone="<display_zone IANA>"` (the host's home/display zone) on every
@@ -759,9 +1008,11 @@ Layers: `cal_fetch` (calendar list + `calendarView/delta` paging), `cal_normaliz
   another zone is correct to the instant but carries the display zone's name. A
   `seriesMaster` is re-read in its own `originalStartTimeZone` (above), so a recurring event
   expands in the zone it was written in and its DST transitions are its own.
-- **Windowed coverage.** Sync covers the `CalendarWindow` only; events outside it are not
-  synced (the `providers.md` "possibly-incomplete coverage" model). Coverage reporting is
-  a follow-up.
+- **Windowed coverage.** Sync covers the window the cursor was opened over; events outside
+  it are not synced until a host reaches them (`Engine::reach_calendar`, which reopens the
+  cursor over the union and records it). The window does not roll forward by itself: a host
+  whose horizon moves on reaches the new range, or the cursor keeps the window it opened
+  with.
 - **No alerts / `SEQUENCE`.** Graph reminders → engine `Alert`s, and iTIP `SEQUENCE`, are
   not yet mapped (the reminder rides the preserved raw). `create_event` rejects a
   floating-time start (Graph has no floating events).
@@ -1050,7 +1301,8 @@ Two more, both load-bearing:
   the same external sender, six subsequent messages from it landed in the Inbox. Its
   deprecated predecessor `markAsJunk` explicitly *did* block. Caveat this honestly: the
   blocked-senders list has no Graph surface (`/me/mailboxSettings` and
-  `.../messageRules` both `403` on a personal account), so this is behavioural evidence,
+  `.../messageRules` both `403` on a personal account, whose token lacked `MailboxSettings.*`;
+  neither lists blocked senders anyway), so this is behavioural evidence,
   not the list read back.
 - **The immutable id survives the move**, so the receipt carries the unchanged target —
   but only because every request sends `Prefer: IdType="ImmutableId"`. A probe without

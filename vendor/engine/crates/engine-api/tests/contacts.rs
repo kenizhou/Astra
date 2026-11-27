@@ -22,8 +22,8 @@ use engine_core::{
     version::{ChangeKey, ETag, RevisionTokens},
 };
 use engine_provider::{
-    CalendarWrites, ConnectionInfo, ContactSourceSync, ContactWriteReceipt, ProviderError,
-    ProviderResult, ScopeSync,
+    CalendarSync, CalendarWrites, ConnectionInfo, ContactSourceSync, ContactWriteReceipt,
+    ProviderError, ProviderResult, ScopeSync,
 };
 
 #[derive(Default)]
@@ -51,7 +51,7 @@ impl FakeContacts {
             full: Some(name.into()),
             ..ContactName::default()
         });
-        card.uid = Some(id.into());
+        card.uid = Some(engine_core::ids::Uid::new(id).unwrap());
         card.emails.insert(
             PropertyId::new("email").unwrap(),
             ContactProperty::new(ContactEmail::new(email)),
@@ -71,6 +71,8 @@ impl Provider for FakeContacts {
         )
     }
 }
+
+impl CalendarSync for FakeContacts {}
 
 impl engine_provider::MailboxWrites for FakeContacts {}
 impl CalendarWrites for FakeContacts {}

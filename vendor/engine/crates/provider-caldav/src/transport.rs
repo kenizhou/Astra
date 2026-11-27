@@ -58,6 +58,10 @@ pub(crate) enum DavMethod {
     Put,
     /// `DELETE` (RFC 4918 §9.6) — remove a calendar object resource.
     Delete,
+    /// `MKCALENDAR` (RFC 4791 §5.3.1) — create a calendar collection with its properties.
+    Mkcalendar,
+    /// Extended `MKCOL` (RFC 5689) — create an address book with its properties.
+    Mkcol,
 }
 
 impl DavMethod {
@@ -70,6 +74,8 @@ impl DavMethod {
             Self::Report => "REPORT",
             Self::Put => "PUT",
             Self::Delete => "DELETE",
+            Self::Mkcalendar => "MKCALENDAR",
+            Self::Mkcol => "MKCOL",
         }
     }
 }
@@ -89,7 +95,7 @@ pub(crate) enum Precondition {
     None,
 }
 
-/// A WebDAV write request (`PUT`/`DELETE`): the verb, target href, optional typed
+/// A WebDAV write request (`PUT`/`DELETE`/`MKCALENDAR`): the verb, target href, optional typed
 /// body, and the conditional precondition. Distinct from the read [`DavExecutor::send`]
 /// shape (Depth + XML), so the proven read path is untouched.
 #[derive(Debug, Clone)]
@@ -136,12 +142,20 @@ pub(crate) trait DavExecutor: Send + Sync {
     /// server led discovery there, by a redirect or by naming the principal or the home
     /// ([`crate::credential_scope`]).
     ///
-    /// Returns `false` when the origin is **refused**: a plaintext origin on a connection
-    /// that started on TLS, or a host the [`CredentialHosts`] policy does not permit. The
+    /// Answers the refusal when the origin is **refused**, as a credential failure of the kind
+    /// that refused it: plaintext HTTP, unless both it and the configured server are loopback
+    /// (`Insecure` where the configured server breaks that rule itself, `LedToInsecure` where
+    /// discovery was led there from one it accepts); an origin the account's source does not
+    /// [permit](engine_provider::CredentialSource::permits), or a host the deprecated
+    /// [`CredentialHosts`] policy, where one is set, does not permit (`NotPermitted`). The
     /// caller fails discovery rather than going on without the credential. A relative `url`
     /// names no origin and is accepted. The default, for a fake, accepts everything.
-    fn trust_origin(&self, _url: &str) -> bool {
-        true
+    ///
+    /// # Errors
+    ///
+    /// The refusal, `Permanent`.
+    fn trust_origin(&self, _url: &str) -> Result<(), engine_provider::CredentialFailure> {
+        Ok(())
     }
 
     /// Whether a request to `href` carries the credential without being asked: its origin has
@@ -231,5 +245,7 @@ mod method_tests {
         assert_eq!(DavMethod::Report.as_str(), "REPORT");
         assert_eq!(DavMethod::Put.as_str(), "PUT");
         assert_eq!(DavMethod::Delete.as_str(), "DELETE");
+        assert_eq!(DavMethod::Mkcalendar.as_str(), "MKCALENDAR");
+        assert_eq!(DavMethod::Mkcol.as_str(), "MKCOL");
     }
 }

@@ -23,6 +23,7 @@ Read before relevant work:
 - `docs/agent-guidance/search.md` before touching the query AST/DSL, the search executor, or projection→index rows.
 - `docs/agent-guidance/search-coverage.md` before touching search result completeness or provider-search fallback.
 - `docs/agent-guidance/mime.md` before touching MIME body extraction (`engine-mime`, the `MessageBody` type, or message-body fetch/caching in `engine-provider`/`engine-sync`/`store-sqlite`).
+- `docs/agent-guidance/html.md` before touching how a message's HTML is made safe to render (`engine-html`: the sanitiser, inline `cid:` images, the strict-CSP reading document, the dark-scheme transform and reflow, the print page, or the link-scheme policy), or how a host renders it.
 - `docs/agent-guidance/threading.md` before touching email threading (`Message.thread_id`, the `Thread` model, the message-id graph, the assignment inside the apply, or `Engine::rebuild_thread_index`).
 - `docs/agent-guidance/calendar-semantics.md` before touching timezone handling, recurrence, or scheduling (iTIP/iMIP).
 - `docs/agent-guidance/stalwart-harness.md` before touching the Stalwart Docker harness, the seed fixtures, or the protocol smoke tests (`docker/stalwart/`, `crates/stalwart-harness`).
@@ -224,6 +225,28 @@ Three things have each cost multiples here, none of them visible in a profiler:
   *healthy* target, not this. It regrows fast — two builds took the fresh 3.9 GB back to 7.0 GB and
   88 executables to 124 — so this is periodic, not permanent.
 
+### Several worktrees on one machine
+
+Worktrees in parallel share one CPU, one memory and one set of harness servers, and the full gate
+is the most expensive thing any of them runs: clippy, a build, the test suite, a second complete
+build instrumented for coverage, and the docs. Measured on an 8-core, 22 GB Linux machine with
+three worktrees gating at once: a load average near 20 for hours, memory down to 6 GB free, and a
+gate that takes about 7 minutes alone took 20 to 40. Run them one after another and each takes 7.
+
+- **One full gate at a time on the machine.** Queue them behind a lock
+  (`flock <lockfile> <gate script>`), and give every cargo command `CARGO_BUILD_JOBS` below the
+  core count while more than one build runs.
+- **While iterating, test and lint the crates you touched** (`cargo test -p`, `cargo clippy -p …
+  --all-targets --all-features`). The full gate runs once per branch, before the push.
+- **A branch is gated in its own checkout.** Checking out several branches in turn in one worktree
+  rebuilds the workspace each time; use a second worktree for the branches below the top of a
+  stack.
+- **The tests run once per gate.** `cargo llvm-cov` runs the whole suite instrumented, so on a busy
+  machine its run plus `cargo test --doc` can stand in for the plain `cargo test` of the gate.
+  Alone on a machine, run the gate as written, which is what CI does.
+- **Keep the compiler cache on** (`docs/agent-guidance/rust.md`, "Share the compile work with
+  kache"), coverage included.
+
 ## Stacked pull requests
 
 **Chained work goes in a stack, not in parallel PRs off `main`.** A PR that depends on another
@@ -248,6 +271,31 @@ made by hand rather than by `gh stack add` — it needs no local tracking state,
 idempotent, so re-running it after adding a branch is how the stack grows. Run every `gh stack`
 command non-interactively: `view` needs `--json`, `submit` needs `--auto`, and `init`/`add`/
 `checkout` need their branch names as arguments, or they hang on a prompt.
+
+**When a branch below merges by squash, rebase the rest onto `main` past it.** The squashed
+commit has a new SHA, so a plain `git rebase origin/main` replays the old commits and conflicts on
+every one. Name the old base instead: `git rebase --onto origin/main <old-base-sha> <branch>`, then
+the next branch onto that, and gate again before the force-push.
+
+### Independent work in parallel still meets in a few files
+
+Separate features, each in its own worktree or stack off `main`, can still edit the same files, so
+merging one makes the others conflict and each needs a rebase and another gate. Four parallel
+streams in November 2026 all met in the same places:
+
+- **The `Provider` trait and its `Box` forwarding** (`engine-provider/src/provider.rs`,
+  `boxed.rs`): every capability accessor is a method in both, at the end of the same group.
+- **The tables of `docs/agent-guidance/providers.md`** and the account table of
+  `stalwart-harness.md`.
+- **The ids of `docs/spec-deviations.md`.** Two streams each took the next free `STALWART-` id;
+  give a new row its id when it merges, not when it is written.
+- **Files near the 500-line limit**, which a second stream's lines push over it.
+- **A type both streams need**, found halfway through. Land it first, on its own, and build both
+  streams on it.
+
+Before splitting work into streams, list the files each will touch. Land what several of them
+share first, as a small PR of its own; otherwise run the streams that share files one after
+another. Each conflict costs a rebase and another gate.
 
 ## Required Verification
 
@@ -286,8 +334,21 @@ cargo +nightly fmt --all --check      # must now be clean
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo build --workspace --all-features
 cargo test --workspace --all-features
+cargo test --config 'profile.dev.package.engine-core.debug-assertions=false' \
+  --all-features --lib -p engine-core -p engine-provider -p provider-graph -p provider-jmap
 cargo doc --workspace --all-features --no-deps
 ```
+
+**The second `cargo test` is the redacted `Debug`.** An id's or a cursor's own `Debug` prints its
+value only where engine-core is built with debug assertions (`engine_core::redact`,
+`modeling.md`), so the plain test run only ever sees the shown form, and an impl reverted to
+`#[derive(Debug)]` would stay green. This run builds engine-core without them and runs the unit
+tests of the crates whose types use `redact::Content`; add a crate to the list when one of its
+types does. The override names engine-core alone, because it is engine-core's build that decides,
+which keeps the third-party dependency tree shared with the first run (one extra build of the
+workspace crates, about 300 MB). It goes through `profile.dev`, whose `package` overrides
+`profile.test` inherits (see the comment in the root [`Cargo.toml`](Cargo.toml)), so it reaches
+every unit of the run: engine-core's own tests and engine-core built for the other crates' tests.
 
 **Every checkout builds in its own `target/`**, Cargo's default, so a new worktree's first build
 compiles the whole dependency tree and holds several GB of its own. ⚠️ Never point two checkouts at
@@ -324,6 +385,7 @@ live/harness tests (they run in the gated `stalwart` job) and the `dav-cli` debu
 tool; the exclusion list mirrors CI's `COVERAGE_IGNORE` (see `.github/workflows/ci.yml`):
 
 ```sh
+cargo llvm-cov clean        # profile data of an earlier run would be counted again
 cargo llvm-cov --no-report --workspace --all-features
 threshold="$(yq '.coverage.status.project.default.target' codecov.yml | tr -d '%')"   # single source
 cargo llvm-cov report --fail-under-lines "$threshold" \

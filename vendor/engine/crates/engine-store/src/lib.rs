@@ -118,4 +118,20 @@ pub use store::Store;
 ///   or in another store bound to — said it could be written, deleted and shared. The JMAP calendar
 ///   list is a delta, so an unchanged calendar would keep the default indefinitely; the re-snapshot
 ///   is what makes each one say what it really allows.
-pub const NORMALIZER_VERSION: u32 = 15;
+/// - `16`: a message carries the importance its sender stated
+///   ([`Importance`](engine_core::mail::Importance)), read from `Importance` and `X-Priority` and
+///   from Graph's `importance`. A stored message reads as normal until the re-snapshot re-reads it;
+///   a Graph delta link carries the `$select` it was minted with, so only a fresh snapshot asks for
+///   the property at all.
+/// - `17`: a message read over IMAP says when it was sent
+///   ([`Message::sent_at`](engine_core::mail::Message::sent_at)), read from the `Date` header
+///   ENVELOPE carries, as every other transport already did. A stored IMAP message has no sent
+///   instant until the re-snapshot re-reads it, and the recipients observed on it then gain the
+///   instant they were last written to.
+/// - `18`: a contact's `uid` holds only a real vCard `UID` or JSContact `uid`
+///   ([`ContactCard::uid`](engine_core::contact::ContactCard::uid)). A Google People card held its
+///   resource name there and a Graph contact a `urn:microsoft:graph:` made of its id; both now hold
+///   none. A stored card keeps the provider id posing as a UID (it loads as a valid one), and both
+///   sources are read by token or delta, so an unchanged card would keep it indefinitely; the
+///   re-snapshot re-reads every card without it.
+pub const NORMALIZER_VERSION: u32 = 18;

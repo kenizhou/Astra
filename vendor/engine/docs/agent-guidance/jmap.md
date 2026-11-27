@@ -27,7 +27,8 @@ body-download concurrency. Reach for it to capture a fixture from observed bytes
   implements just the domains it serves — mail providers override `sync_mailboxes`
   + the **streaming** `stream_email` (plus `default_sync_window`,
   `mailbox_scope`/`email_scope`); a calendar-only provider (`provider-caldav`)
-  overrides `sync_calendars`/`sync_events` and leaves the mail methods at their
+  overrides `sync_calendars`/`sync_events` (on the `CalendarSync` supertrait, with the
+  calendar scopes) and leaves the mail methods at their
   unsupported defaults. `sync_email` is a drain over `stream_email` (one streaming
   method gets both incremental streaming and whole-fetch); `submit_email` defaults to
   unsupported. `SyncPage`/`PageToken`/`SyncKind` survive as provider-**internal**
@@ -44,6 +45,8 @@ body-download concurrency. Reach for it to capture a fixture from observed bytes
   queried/container sync, bounded by
   `maxObjectsInGet`), `mail`/`calendar`/`json` (normalizers),
   `submit` (sending), `provider` (the trait impl) behind an `Executor` seam.
+  The client primitives under all of that are public (below), so a host never carries a JMAP
+  client of its own.
 - **`engine-sync`** — the per-scope loop: `claim → fetch → project/derive →
   apply → release`, with `StaleLease` re-claim-and-recompute and container-
   before-member ordering. `sync_mail`, `sync_calendar` (project + `expand`
@@ -60,6 +63,343 @@ body-download concurrency. Reach for it to capture a fixture from observed bytes
   cross-scope orchestrator (dependency-ordered fan-out, outbox workers, tzdata
   fan-out) is a later step; this is deliberately the minimal driver that proves the
   cycle.
+
+## The public client
+
+`provider-jmap` exports the primitives it is built from, for a host that needs JMAP the
+`JmapProvider` verbs do not wrap (a server's extension, Sieve scripts) and for the
+store-less facade the design note `docs/design/query-and-engine-direct.md` describes. One
+protocol, one client: a host's own envelope, session parsing, back-references and URL templates
+are what this replaces.
+
+- **`Request`** builds the `{using, methodCalls}` envelope. `Request::new` takes any URNs (the
+  `capability` constants, or an extension's own), and `invoke` returns a **`CallId`**, a newtype,
+  so a call id cannot be mixed up with a method name or an object id.
+- **`ResultRef { of, name, path }`** is the one way to write a back-reference (RFC 8620 §3.7):
+  `set_on(arguments, "ids")` writes `#ids` and removes a plain `ids`, which the RFC refuses
+  beside it.
+- **`Response`** is keyed by `CallId`. A method error reads as `JmapError::Method { call_id,
+  error_type }` carrying the call that caused it, and an unanswered call as
+  `JmapError::MissingResponse(call_id)`. Measured live (`tests/live_client.rs`): Stalwart answers
+  a call to an unknown account `accountNotFound` under that call's id and runs the calls after it.
+  `result_named(call, name)` reads a method that answers more than once under one id (the
+  implicit `Email/set` after `EmailSubmission/set` with `onSuccessUpdateEmail`), and
+  `session_state()` the `sessionState` that says when the session must be fetched again.
+- **A `JmapError` shows codes only.** `Status` displays as `JMAP HTTP <status>`, plus the
+  problem-details `type` where the body is one; the body is a `ServerText`, whose `Debug` shows
+  its length and whose text only `as_str` gives, since a server's error text can echo what the
+  request carried. The conversion to `ProviderError` inherits that.
+- **`JmapClient::execute`, `upload`, `download`, `download_stream`.** Every request goes through
+  the one transport: authenticated, inside the account's `RequestGate`, throttled by the shared
+  funnel. `upload` answers the stored `BlobId`. `download_stream` answers a `BlobDownload` read a
+  piece at a time, each read under `Deadlines::stall`, so a large blob is never whole in memory.
+  **A blob request goes only to the origin of the session's own template** (`downloadUrl` for a
+  download, `uploadUrl` for an upload); anything else is `JmapError::Refused` before a byte is
+  sent, because the request carries the account's credential and the session is the only party
+  that names where it may go. Where blobs live on an origin of their own (Fastmail's
+  user-content domain), that origin gets the credential and the API origin does not.
+- **The credential is asked for, per request.** `JmapConfig::from_credential_source` takes the
+  account's `engine_provider::CredentialSource`, and the transport asks it for every request it
+  sends (session discovery and each redirect hop, method calls, blob download and upload, the
+  EventSource stream) through one `engine_http::AuthenticatedClient`, whose own client follows
+  no redirect and sends each request whatever built it; `JmapConfig::new` wraps its
+  `Credentials` in a `FixedCredential` of its own. So a host whose token is refreshed builds the
+  client once and never rebuilds it to present a new token (`docs/design/credential-source.md`).
+  Two behaviours came with it:
+  - **No credential over plaintext HTTP except to loopback** (`localhost`, `127.0.0.0/8`,
+    `::1`) **from an account configured on loopback**, and none to an origin the source does not
+    `permits`: whether configured, reached by a well-known redirect, or advertised by the session
+    (`apiUrl`, `downloadUrl`, `uploadUrl`, `eventSourceUrl`), the request fails as `Permanent`
+    (`JmapError::Credential`) before anything is sent. An account configured over `https` never
+    sends its credential to `http://127.0.0.1:…`, even where its session names one, since
+    whatever listens on the machine's loopback would read it. The harness is configured on
+    `127.0.0.1`, so nothing there changed. Such an account's client also ignores the
+    environment's proxies (`engine_http::AuthenticatedClient::new`): reqwest applies `HTTP_PROXY` to loopback
+    unless `NO_PROXY` names it, and a proxy would see the credential in cleartext. Every other
+    account keeps the environment's proxies.
+  - **A `401` the source can answer is replayed once.** The Basic/Bearer re-framing below runs
+    first; only a `401` whose challenge offers the scheme used, or offers none, refuses the
+    credential, and then the source is asked once to `replace` it and the request goes once more
+    with the replacement. One `401` gets one or the other, never both. A `403`, a failed
+    exchange and a second refusal are never replayed. Stalwart's `401` (v1.0.2) carries two
+    challenges, `Bearer realm="Stalwart Server", resource_metadata="…"` and then
+    `Basic realm="Stalwart Server"`, in separate headers, so a wrong password is a refusal and
+    is not re-framed; a tool that prints only the first header shows `Bearer` alone. Proven live
+    with a wrong password and with a revoked token minted by the harness's own OAuth endpoints
+    (`tests/live_credential_source.rs`).
+
+  A credential JMAP cannot present (`Credential::ActingAs`: HTTP carries no authorization
+  identity) is refused before anything is sent. **A `401` whose challenge offers only schemes
+  the credential cannot be framed under (Basic alone, to a token) asks for no replacement,
+  deliberately**: another token would be refused the same way, and every request would refresh
+  the token against a server that never takes Bearer. A re-framing is latched only when it is
+  sent: a second one, which the funnel does not send, leaves the latch alone. A source's own failure reaches the host with
+  the class the source gave it.
+- **`blob::download_url` and `blob::upload_url`** fill the templates in, percent-encoding every
+  substitution. Before this, a draft's upload URL substituted the account id raw; both now go
+  through the one encoder.
+- **`Session`** answers the templates (`download_url`, `upload_url`, `event_source_url`) and each
+  domain's account as a **`JmapAccountId`** (`mail_account_id`, `submission_account_id`,
+  `calendar_account_id`, `contact_account_id`), a newtype distinct from the engine's `AccountId`.
+  It serializes as the bare string, so it goes into a call's arguments as it is.
+  `has_capability(urn)` says whether the server speaks an extension (Sieve, a vacation
+  response), and `account_for(urn)` which account its calls address, by the one rule the domain
+  accessors use: the `primaryAccounts` entry, or the bound shared account where it lists the URN.
+  The `capability` module names `VACATION_RESPONSE` and `SIEVE` beside the domains the adapter
+  speaks; the out-of-office reply itself is a `JmapProvider` verb (below), so a host reaches it
+  through `Provider::vacation` rather than building the request.
+
+Kept internal: `Walk` and the sync passes, the normalizers, and the `Executor` test seam.
+
+## Import (`Email/import`)
+
+`JmapProvider` implements `engine_provider::import::MailImporter` behind the `import` feature
+(`src/import/`), and `Provider::mail_importer` answers it wherever the account takes mail writes
+and a message's bytes: an `uploadUrl`, or the blob extension (`providers.md` → "Import"). An
+account with neither could send no message, so it imports nothing.
+
+- **The bytes travel inline where they fit.** RFC 9404 `Blob/upload` in the same request as the
+  `Email/import` that references each blob as `#b<n>`. On Stalwart this is not an optimisation:
+  as shipped it takes about 1,000 requests per account a minute, and one upload per message met
+  that wall within seconds, where inline batches imported 10,000 messages in 541 requests
+  (measured on Stalwart 1.0). A message goes to the `uploadUrl` instead, at most
+  `maxConcurrentUpload` at once, only when it cannot go inline: the account lacks the blob
+  extension, the message is larger than `maxSizeBlobSet`, or its base64 does not fit a request.
+- **A request is sized in its bytes on the wire**, base64 included, against `maxSizeRequest`,
+  since a request over it fails whole (`400`, `limit: maxSizeRequest`), and each call holds at
+  most `maxObjectsInSet` messages (`plan.rs`). Stalwart states `maxSizeBlobSet` as 7,499,488, so
+  that the largest blob's base64 still fits its 10 MB request. The offline suite sweeps message
+  sizes and checks every request it sends is within the limit and leaves no room for another
+  message beyond the budget's fixed slack.
+- **The limits are the session's.** `mail_import_limits` states `maxSizeUpload` (or, with no
+  `uploadUrl`, `maxSizeBlobSet`) and `maxMailboxesPerEmail` (`null` is no limit, RFC 8621
+  §1.3.1); `MailImportLimits::check` refuses a message over either before anything is sent.
+- **Each message is answered on its own** (`wire.rs`): `created` is stored, with the keywords and
+  `receivedAt` asked for kept (RFC 8621 §4.8 stores both as given; Stalwart keeps the time to the
+  second, the engine's precision); `alreadyExists` with its `existingId` is already there, a link
+  (RFC 8621 allows a server to refuse duplicates; **Stalwart never does**, so this arm is offline
+  only), and without the id it may be there (`requires_confirmation`: find it, do not resend);
+  `invalidEmail`, `tooLarge`, `tooManyMailboxes` and `tooManyKeywords` are `item_unavailable`;
+  the target's own state is its named `TargetRefusal` (`overQuota`, as a `SetError` or a method
+  error, is `StorageFull`; `invalidProperties` naming only `mailboxIds` is `NoSuchContainer`;
+  `forbidden` is `ReadOnlyContainer`); `blobNotFound` is retryable; a message named nowhere, or
+  a `serverPartialFail`, may be stored (`requires_confirmation`).
+- **A refused blob is its message's cause.** RFC 9404 refuses a blob on its own (`notCreated`),
+  and Stalwart then fails the whole `Email/import` with `invalidResultReference`. Only that
+  error says the other messages of the call were not stored, so only then are they answered
+  retryable; any other failure of the call (a `serverPartialFail`, a missing answer) says they
+  may be. Stalwart refuses a malformed `Blob/upload` as a whole method (`invalidArguments`,
+  captured in `email_import_blob_refused_response.json`), so then every message of the call
+  carries that refusal.
+- **The upload quota is a throttle that ends the batch.** A blob's `overQuota` from `Blob/upload`
+  is the upload quota, `RateLimited` (unlike `Email/import`'s, which is the account's storage),
+  and so is a `429` from the `uploadUrl`. Either reaches every message after it, as a refused
+  credential does: the uploads stop, nothing more is sent, and every message not yet answered
+  is `engine_provider::import::not_sent`, which carries the wait.
+- **A request that fails whole ends the batch.** Its messages are answered by whether it may have
+  reached the server, and every later message by `not_sent`. An upload that fails stored no
+  message, whatever the transport says. A failure's detail names its status or method error,
+  never the server's text.
+- **The import cursor is the account's `Email` state**, read in one request beside a
+  `Mailbox/get` that says the mailbox exists (`TargetRefusal::NoSuchContainer` when it does
+  not, as on IMAP). A delta from it lists what was stored in any mailbox. Its failure names its
+  code, never the server's text.
+- **Mailboxes are created by `MailboxWrites::edit_mailbox`**, the one `Mailbox/set` path; the
+  importer files into ids it is given.
+- **Stalwart's upload quota** (1,000 blobs or 50 MB per account, counted for an hour, blobs
+  imported or not) is not in the session. Past it, the `uploadUrl` answers `429` with a
+  `Retry-After` to the oldest blob's expiry, which reaches the host as `RateLimited` with that
+  wait: the shared funnel absorbs only stated waits up to five seconds. Its `RateLimit-Policy`
+  (`blob-upload-*` against `requests`) is not read: both are `RateLimited` with the server's own
+  wait, and naming which limit would need a neutral vocabulary every adapter shares.
+
+Live: `tests/live_import.rs` runs the shared conformance check as the scratch account `carol@`,
+then one message into two mailboxes with a custom keyword, a 7.6 MB message by the upload URL, a
+message refused for a mailbox that does not exist beside them, and one over
+`maxMailboxesPerEmail`, all read back from the import cursor and byte-compared. The 7.6 MB message
+would count against Stalwart's upload quota for an hour as shipped (about six runs an hour); the
+harness raises that quota (`stalwart-harness.md`), so the suite can be run again at once.
+
+## Out-of-office (`VacationResponse`)
+
+`JmapProvider` implements `engine_provider::Vacation` (`src/vacation.rs`; `providers.md` →
+"Out-of-office"), and `Provider::vacation` answers it where the session addresses an account with
+`urn:ietf:params:jmap:vacationresponse`: `Session::extension_account`, the one lookup for an
+extension (the server lists it, and a call for it is addressed), used for Sieve too. A client
+bound to a read-only share (which lists none) has no reply, and one bound to a group share has
+the group's.
+
+- **Read**: `VacationResponse/get` with `ids: ["singleton"]`; the type's `state` is the
+  `VacationVersion`, and the object's JSON is kept as `RawVacation`. A missing or non-string
+  `state` is a protocol error, since a reply without one could only be written unguarded; so is a
+  missing `isEnabled`, a date that is not a `UTCDate`, or a text property that is neither a string
+  nor `null`. Each names the property, never its value.
+- **Vocabulary**: a window with either end, a subject, a text and an HTML body, everyone, one
+  reply. The same for every account, so asking sends nothing.
+- **Write**: one `VacationResponse/set` updating the singleton with all six properties (a part the
+  reply leaves out is sent `null`, so it is cleared), `ifInState` set to the read reply's version
+  under `VacationPrecondition::IfUnchanged`, and none only under an `Unconditional` the caller
+  spelled out. Stalwart enforces it: a stale state is the method error `stateMismatch`, a
+  `Conflict`, and the write does not land. A `SetError` names its type and properties; an answer
+  naming the singleton nowhere, or a request that failed once it may have reached the server, is
+  `requires_confirmation`.
+- **The rules effect is observed in the same request.** Where the account also has JMAP Sieve,
+  the write is sandwiched between two `SieveScript/get` calls asking only `isActive`. The effect
+  is read only where the first listing's `state` is the write's `oldState` and the second's its
+  `newState` (one counter for both types, as on Stalwart), so nothing came between them. Then a
+  script active before and present but inactive after is `RulesEffect::Deactivated` while the
+  reply goes on; while it goes off, that script is the reply's own, and if nothing runs after
+  though the account has other scripts, it is `StillDeactivated`. A listing that fails, states
+  that do not bracket the write, or no Sieve, is `Unknown`, and never fails the write.
+- **What Stalwart does underneath** (live, `tests/live_vacation.rs`; the design note's "Settled
+  by live tests"): the reply is a Sieve script named `vacation` that the first write creates and
+  activates; `VacationResponse` and `SieveScript` share one state; turning the reply on
+  deactivates the user's own script and turning it off does not reactivate it; `isEnabled` reads
+  whether the `vacation` script is the active one; that script cannot be updated through
+  `SieveScript/set` but can be destroyed once inactive (`spec-deviations.md`, STALWART-3); its
+  `toDate` test is inclusive (STALWART-4), in UTC.
+- **While the user's rules run, the reply runs through them** (`src/vacation_include.rs`). Stalwart
+  keeps the reply in a script named `vacation` and runs one script at a time, so the server's own
+  flag would switch the rules off. Where a script of the user's runs, a write lists the scripts
+  first, then sends `VacationResponse/set` with the words and `isEnabled: false` (which stores them
+  in the reply's script and activates nothing), then, in a second request guarded by the
+  `newState` the first answered, updates the rules script with its `include` of the reply added
+  (on) or taken out (off). Two requests, because Stalwart ignores a result reference for
+  `ifInState` (`docs/spec-deviations.md`, STALWART-7). If the first lands and the second does not, the words
+  are stored and whether it runs is as it was: `requires_confirmation`. A read lists the scripts
+  in the same request and answers on where the reply's script is active, or the running rules
+  script includes it: `sieve_scripts::reply_runs`, the one answer the reply and the rules share.
+
+  **The condition**, checked on every request, not by server name, gates *adding* an include:
+  where it fails, a reply turned on is written with the server's own flag, as without rules, and
+  the receipt reports what that did to them (`RulesEffect`). Keeping an include, or taking one
+  out, needs only the script: the second write is guarded by the `SieveScript` state the script
+  was composed at (the words' `newState` where the two are one counter), so turning the reply off
+  never answers success through the flag while the running script still includes it, and a script
+  that includes the reply and cannot be read or rewritten is refused before anything is written.
+  A read, and a rules write, take "the running script includes the reply" as on, whatever the
+  counters, because that is what the server does at delivery.
+
+  | Fact | How it is checked | On Stalwart v1.0.2 | Where it does not hold |
+  |---|---|---|---|
+  | A script of the user's runs | the listing | when the user has rules | the flag: nothing to keep running |
+  | The account lists `include` | the session's `sieveExtensions` | yes | the flag |
+  | `VacationResponse` and `SieveScript` are one counter | both states, read in one response, equal | yes (live) | the flag |
+  | The running script can be read, and rewritten where the reply's state changes | its blob downloads as UTF-8, and the dialect can write it | for scripts it can split | the flag |
+  | The reply's script is named `vacation` | **not checkable**: the constant `REPLY_SCRIPT`, observed, pinned by `live_rules_reply` | yes (live) | a server that names it otherwise: the include names nothing (`:optional`). Its reply script, while active, is taken for the user's rules: `replace_rules` writing over it is refused `forbidden` (RFC 9661 §4; `Permanent`), and `set_vacation` lands its words, then has the include refused, answering `requires_confirmation`. Nothing is lost, Stalwart is unaffected, and `live_rules_reply` turns red on a rename |
+
+  The same surface on the other transports, for the "provider-neutral" survey: ManageSieve (slice
+  3) keeps the reply and the rules in one script the engine writes, so there is no second script
+  to include; Graph and Gmail keep the reply apart from the rules, so neither stops the other. The
+  include is JMAP's answer to a reply kept as a script of its own, and the neutral types
+  (`RulesEffect`, `ReplyEffect`) describe the effect, not the provider.
+
+  **What the include path rewrites.** It writes over whatever user script is running, another
+  client's included, adds `include` to its `require` (and keeps it there when the reply goes off:
+  a require never drops a name), and when the reply goes off removes every top-level
+  `include :personal "vacation"` it finds, a hand-written one too.
+
+  **What another client sees.** On such an account `VacationResponse/get` answers
+  `isEnabled: false` while the reply runs, and switching it off there does nothing: the include,
+  not the flag, runs it. Switching it on there activates the reply's script and switches the
+  user's rules off, as without the engine. Rendering the reply into the rules script instead
+  would show another client the same, so this did not decide between the two; the include keeps
+  the reply's words in the one object every JMAP client reads.
+
+Live: `tests/live_vacation.rs` runs as the scratch account `carol@`. It:
+- writes a reply and reads it back;
+- is refused with a stale version and accepted with the current one;
+- writes a reply with no subject, only a start and no HTML over a full one, and reads each part
+  back cleared;
+- plants a script of the user's, turns the reply on and off over it through the include, and sees
+  the user's script keep running; then turns the reply on with the server's own flag, as another
+  client would, and sees the receipt report the user's script still off after it goes off;
+- restores Carol's reply and scripts whatever happens, and fails if they differ afterwards.
+
+Fixtures: `vacation_get_response.json`, `vacation_set_response.json`,
+`vacation_set_deactivates_response.json`, `vacation_set_off_response.json`,
+`vacation_set_stale_response.json`, `vacation_set_clears_response.json`,
+`vacation_get_cleared_response.json`.
+
+## Mail rules (JMAP Sieve)
+
+`JmapProvider` implements `engine_provider::MailRules` (`src/rules.rs`), and `Provider::mail_rules`
+answers it where the session addresses an account with `urn:ietf:params:jmap:sieve`. The account's
+`sieveExtensions`, `maxNumberRedirects` and `maxSizeScript` are read from the session
+(`src/session_sieve.rs`) into the dialect's vocabulary (`engine_sieve::dialect::vocabulary`).
+
+- **One script holds the rules** (`sieve_scripts::Scripts::rules`, by the function every adapter
+  uses, `engine_sieve::dialect::scripts::rules_script`, the reply's script known by its name;
+  the include helpers are `engine_sieve::dialect::include`): the one running; else, where
+  none of the user's runs, the engine's own `rules` script, or the one script besides the reply's;
+  with several and none of them running or named `rules`, the engine starts its own rather than
+  pick one for the user. A first write creates `rules` and activates it. Read: `SieveScript/get`
+  (`name`, `isActive`, `blobId`), then the script's blob from the download URL; the type's
+  `state` is the `RuleSetVersion`, the text is `RawRules`, and the include of the reply is no rule
+  of the user's.
+- **Write**: `plan_rules` in edit mode first, then the dialect writes the kept rules over the
+  script read (a rule the caller did not change is copied byte for byte), with the reply's include
+  first where the reply runs, so no rule's `stop` or `discard` keeps the reply from running
+  (proven by delivery). The script is uploaded to the upload URL, then one `SieveScript/set`
+  updates (or creates) and activates it, with `ifInState` set to the read version; a listing at a
+  newer state is a `Conflict` before anything is sent. A script over `maxSizeScript` is
+  `item_unavailable` before sending.
+- **Where the rules are written.** In place, running or not as they were: a write never switches
+  a stored script on or off (`RuleSet::activation` says which it is). Only an account with no
+  script to edit gets `rules`, created and made the active one (`RulesStored::CreatedRunning`).
+  What a write would copy unchanged, and whether the reply runs, come from the server's script:
+  `base`'s raw form stands for it only where `base` was read at the state just listed, and is
+  downloaded otherwise. Where the reply ran and the written script cannot include it (the
+  condition above fails), the receipt says `ReplyEffect::Stopped`.
+- **Refusals.** `invalidScript`/`invalidSieve` and `tooLarge` are `item_unavailable`; `overQuota`
+  is `refused_by_target(StorageFull)`, the account's own state, which waiting does not clear.
+- **No validate before set.** `SieveScript/set` refuses an invalid script whole, proven live both
+  ways: an invalid create asking to be activated stores and activates nothing and leaves the
+  state, and an invalid update of the running script leaves its bytes and its flag. So
+  `SieveScript/validate` would add a round trip and no safety, and on Stalwart it cannot see a
+  blob uploaded in the same request anyway (STALWART-6). `invalidScript` (Stalwart, STALWART-5) and `invalidSieve` (RFC
+  9661) are the same refusal, `item_unavailable`, naming the type and never the description, which
+  quotes the script.
+- **Order matters on delivery.** A flag set after a `fileinto` misses the filed copy on Stalwart,
+  as RFC 5232 §3 says (live); the writer puts `addflag` and `addheader` first.
+- **The receipt says whether the rules run** (`RulesReceipt::activation`): `Inactive` where the
+  rules script is stored and not the active one, `Running` where it is, or where the write created
+  it.
+- **Import** (`src/import/rules.rs`, the `import` feature): `RulesImporter` through
+  `engine_provider::import::append_rules` and `import_reply` (`providers.md`, "Importing rules and
+  the reply"), answered by `Provider::rules_importer` wherever the rules are. What JMAP adds:
+  - **The target's folders.** The host's `FolderMap` gives each source folder its target id; the
+    mapped ids the rules need are asked of the server (`Mailbox/get`, `ids` exactly those,
+    `properties: ["id"]`, as many to a call as `maxObjectsInGet` allows), and a pair whose target
+    the server answers `notFound` is dropped, so the rule loses that action as `MissingMailbox`
+    rather than being written as `fileinto :mailboxid`, which would file into the inbox (RFC
+    9042's fallback). No request where no rule names a folder by id.
+  - **Never stopping what runs.** The import writes through `ImportTarget`, this adapter's rules
+    and reply with `WhenItStops::Refuse`: the edit's own write paths (`rules::replace`,
+    `vacation::set`), refusing before anything is sent where the edit would write and say so. A
+    rules import that would create and switch on `rules` while the server's reply script runs and
+    the include condition fails (`ReplyEffect::Stopped` for an edit) is `item_unavailable`; so is a
+    reply import that would go on by the server's flag while a script of the user's runs
+    (`vacation_include::Path::Flag { rules_running: true }`, `RulesEffect::Deactivated` for an
+    edit).
+  - An include of a reply that does not run, in a rules script that is switched off, is left out
+    by the write, as an edit leaves it: an included script runs even where it is not the active
+    one.
+  The reply's import refuses an account without `urn:ietf:params:jmap:vacationresponse`.
+
+Live: `tests/live_rules.rs` (rules written, read back typed, guarded both ways, refused whole,
+the vocabulary the server's), `tests/live_rules_import.rs` (a Graph-shaped set imported after a
+rule of the account's own, which stays byte for byte; the redirect disabled and on the preflight
+list; a folder the server does not have lost; a reply imported, again for nothing, refused over
+another) and `tests/live_rules_reply.rs` (the reply's script named `vacation`;
+rules and reply running together, proven by delivering mail through a rule that stops, one that
+discards and one that files; the reply on and off through the include) run as `carol@`, Bob
+sending, and restore both.
+
+Fixtures: `sieve_get_rules_and_reply_response.json`, `sieve_set_create_rules_response.json`,
+`sieve_set_update_rules_response.json`, `sieve_set_stale_response.json`,
+`sieve_set_invalid_response.json`, `vacation_set_kept_off_response.json`,
+`mailbox_get_rule_folders_response.json` (a held and an unknown folder id).
 
 ## JMAP specifics implemented
 
@@ -80,8 +420,9 @@ body-download concurrency. Reach for it to capture a fixture from observed bytes
   nothing, and paces an account's downloads at about 25 a second whatever the width (5 to 100
   in flight, HTTP/2 or HTTP/1.1, all measured at 25), so width past the number buys nothing
   there either.
-- **Stalwart also limits requests per account over time**, separately from concurrency: the
-  harness and Thundermail both answer `429` after about 1,000 requests in a minute, with a
+- **Stalwart also limits requests per account over time**, separately from concurrency: as
+  shipped and on Thundermail it answers `429` after about 1,000 requests in a minute (the harness
+  raises the limit, and `live_concurrency` sets it back to measure it), with a
   problem-details body ("try again in a few seconds") and **no `Retry-After`**, so the funnel
   falls back to its own backoff. Measured on Thundermail: 4,000 downloads at the session's
   width of 4 were throttled at requests 996, 1,999, 3,027 and 4,059, and averaged 19 a second
@@ -127,16 +468,18 @@ body-download concurrency. Reach for it to capture a fixture from observed bytes
   instead.
 
   ⚠️ **Know what that trust buys and what it costs.** The JMAP transport authenticates
-  every request unconditionally, with no `same_origin` gate (CalDAV has one, for URLs
-  named by card *content*), so whoever controls the web server at the user's own domain
-  can point `/.well-known/jmap` at any `https` origin and be handed the account's
-  password or bearer token on the first request. That is inherent to RFC 8620 §2.2
+  every request, with no `same_origin` gate (CalDAV has one, for URLs named by card
+  *content*), and a host that sets no `CredentialSource::permits` narrows nothing, so
+  whoever controls the web server at the user's own domain can point `/.well-known/jmap`
+  at any `https` origin and be handed the account's password or bearer token on the first
+  request. That is inherent to RFC 8620 §2.2
   discovery rather than something this adapter chose: the apex is the authority for its
   own domain's mail, and a client that would not follow it cannot connect a hosted
   provider at all. It is written down because it used to be bounded by accident. While
   redirects were rebased onto the connection origin a credential structurally could not
   leave it, and removing that (a bug: it made such providers unconnectable) removed the
-  bound with it. TLS is now the only floor, so a change that would let a chain leave it,
+  bound with it. TLS is now the floor (plaintext only to loopback), and a host holding
+  OAuth tokens narrows it with `permits`, so a change that would let a chain leave it,
   or that widens what a `Location` may name, is a decision and not a detail. **The rebase is scoped to the session's own advertised
   origin.** A session may legitimately span two: Fastmail serves `apiUrl` from
   `api.fastmail.com` and `downloadUrl` from `www.fastmailusercontent.com`, a separate
@@ -212,7 +555,8 @@ body-download concurrency. Reach for it to capture a fixture from observed bytes
   it with `split_page` (a **snapshot** page becomes `Reconcile` chunks, a **delta**
   page `Additive` chunks), then yields a final marker chunk carrying the cursor. JMAP
   is not cheaply resumable mid-pass, so intermediate chunks **hold** the cursor
-  (`additive_held`) and a crash re-runs the pass. A **snapshot** is the anchored walk
+  (`additive_held`) and a crash re-runs the pass (a widening's band is the exception: it
+  checkpoints its place after every page, below). A **snapshot** is the anchored walk
   above, sorted `receivedAt` descending (newest first), with `calculateTotal:true` for
   the progress total; each page's new ids are its `present` share. A **delta** page is
   `Email/changes` bounded by `maxChanges`, paging on `hasMoreChanges` and resuming from
@@ -229,7 +573,35 @@ body-download concurrency. Reach for it to capture a fixture from observed bytes
   `Email/changes` takes no filter, so a delta carries an old message moved into scope; the
   engine drops it on apply (`SyncWindow::admits`, `store-and-sync.md`), which is where the
   bound holds for every adapter. `default_sync_window` (the full history) backs the
-  whole-scope `sync_email` drain.
+  whole-scope `sync_email` drain. The filter is built from the window's bands
+  (`MailboxWindows::bands`, `email_window.rs`), one condition each: the account's `{after}`, and
+  for a mailbox the host holds further back an `{inMailbox, after, before}` from its own floor
+  (no `after` for its whole history) up to the account's, all joined by an `OR`
+  `FilterOperator` (RFC 8620 §5.5), so the one `Email` scope fetches that mailbox's older mail
+  and no other's (`store-and-sync.md`). `after` is "same or after" and `before` "strictly
+  before" on the UTC instant `receivedAt`, so two bands meeting on a day are exact complements,
+  cut on the UTC day the engine judges mail by. A mailbox the server does not have matches
+  nothing: Stalwart answers an unknown `inMailbox` with the other conditions' ids, not an error
+  (observed). `tests/live_mailbox_window.rs` deepens Sent after a first pass and sees its older
+  mail arrive on the next.
+- **Widening by band (`email_band.rs`).** A pass asked for more than its cursor covers runs its
+  delta, then `widen_email`: the widening's bands as one filter (`Widening::bands`), walked by
+  anchor as a snapshot is and closed by a listing, as additive chunks that tombstone nothing.
+  The cursor keeps the `Email` state it was handed, which predates the walk, so every change to
+  band mail during or after it is replayed by the next `Email/changes`. After every page the
+  cursor stores the band's place beside that state, `band:<last 8 ids read>\n<state>`. When the
+  caller says the widening resumes (`Widening::resumes`), the band continues after those ids
+  (`Walk::resumed`), stepping back through them when the last was destroyed and starting from the
+  top when none is left, and its closing listing fetches only what the query places after them
+  and the resumed walk did not see. That holds because the walk is `Order::Fixed` on
+  `receivedAt`; the one known server placement that moves an id behind the walk, Stalwart sorting
+  a message it has just stored, concerns a message created after the kept state, which
+  `Email/changes` replays. Otherwise the place is ignored: only the caller knows whether a pass
+  under a narrower window ran in between. A delta carries the
+  place through; a `cannotCalculateChanges` snapshot drops it, since its reconcile may have
+  tombstoned what the band stored. `tests/live_email_band.rs` sends `before` to Stalwart for
+  the first time, and kills a band mid-walk, destroys its anchor, files a message in the gap,
+  and resumes.
 - **Delta vs snapshot.** First sync (no cursor) is a snapshot; thereafter a delta,
   recovering to a snapshot on a `cannotCalculateChanges` method error (mapped to
   `FailureClass::NeedsResync`) — recovery happens on the first page, so a recovered
@@ -268,8 +640,8 @@ body-download concurrency. Reach for it to capture a fixture from observed bytes
   `?` that raises a `Permanent` error for the whole page (issue #38).
 - **Drafts.** `put_draft` is the first half of submission and nothing else: the same
   `Email/set` create, into the mailbox carrying the Drafts **role**, with
-  `keywords: { "$draft": true, "$seen": true }` — just no `EmailSubmission/set` after
-  it. One `build_draft` serves both, so a saved draft and a sent one cannot drift apart
+  `keywords: { "$draft": true, "$seen": true }` plus the keywords `put_draft` is given —
+  just no `EmailSubmission/set` after it. One `build_draft` serves both, so a saved draft and a sent one cannot drift apart
   in shape, and a saved draft keeps its Cc, Bcc and threading headers for the resume.
 - ⚠️ **There is no way to edit a stored draft, and this was measured rather than assumed.**
   RFC 8621 §4.6 makes `keywords` and `mailboxIds` the only mutable `Email` properties, and
@@ -313,14 +685,18 @@ body-download concurrency. Reach for it to capture a fixture from observed bytes
   identity (`Mailbox/get` + `Identity/get`) before the batched create. The
   `onSuccessUpdateEmail` produces an implicit second `Email/set` response sharing
   the submission's call id. The created `Email` is the sender's copy, so it carries
-  every recipient header **including `bcc`**, plus `inReplyTo` and `references`: RFC
+  every recipient header **including `bcc`**, plus `inReplyTo` and `references`, and an
+  importance other than normal as `header:Importance:asText` and `header:X-Priority:asText`
+  (JMAP has no importance property; `Email/get` asks for every header the importance rule reads
+  in the same singular `asText` form, which answers a header's last occurrence as the rule wants,
+  live-verified in `tests/live_importance.rs`): RFC
   8621 §7.5 has the server **remove the Bcc header during delivery**, which is the same
   filed-copy shape `engine-rfc5322` gives the other transports. The envelope is sent
   explicitly, `rcptTo` = To + Cc + Bcc deduplicated case-insensitively as SMTP's
   `RCPT TO` is: a Bcc recipient is reached through the envelope alone. Both halves are
   pinned live (`tests/live_submit_recipients.rs`), because the server accepts a create
-  naming only `to` without complaint and delivers to nobody else. A draft's
-  `sent_copy_keywords` are set by an `Email/set` **update of its own, in a second
+  naming only `to` without complaint and delivers to nobody else. The keywords of a draft's
+  `sent_copy_metadata` are set by an `Email/set` **update of its own, in a second
   request** addressed to the id the send created, and only when it asks for any: the
   create also serves saved drafts, which must not carry them; a keyword refused inside
   `onSuccessUpdateEmail` would fail the whole patch and leave the copy in Drafts; and
@@ -433,8 +809,36 @@ body-download concurrency. Reach for it to capture a fixture from observed bytes
   (only the cycle names `parentId`), classified `Conflict` unless the error names `name`
   alone; a missing target is `notFound`. Stalwart applies a `destroy` list in array order;
   RFC 8620 does not promise that, so a server that reorders would refuse the parent until a
-  retry. `mailbox_writes` rides the `mail_writes` gate. Live: `tests/live_mailbox_writes.rs`,
-  as the scratch account `carol@`.
+  retry. Names are the server's to judge (RFC 8621 §2 asks only for a non-empty Net-Unicode
+  name): the adapter refuses none itself, a trash's included, and an `invalidProperties`
+  naming only `name` is `InvalidState`. `mailbox_writes` rides the `mail_writes` gate. Live:
+  `tests/live_mailbox_writes.rs`, as the scratch account `carol@`.
+- **A create with a role** sends `role` in the same `create` (RFC 8621 §2), so
+  `mailbox_create_role` rides `mailbox_writes`, and the refusal follows it: a role asked of an
+  account that cannot change its folders is `CreateRoleError::NotSupported`, before any
+  request. Only a registered role is sent (`MailboxRole::jmap_role`: the IANA attribute names
+  and `inbox`); `ServerRecords`, `ChatHistory` and any `Other` are refused before the request
+  (`InvalidState`, `CreateRoleError::NoTransportForm`), because `Other` holds whatever some
+  server reported and would be a guess on another. A created mailbox's role is read back: from
+  `created` where the server echoed it (RFC 8620 §5.3 has it echo only what it set or changed,
+  so usually not), else one `Mailbox/get` of that id's `role`; a mailbox without it is
+  `CreateRoleError::NotKept`. RFC 8621 allows one mailbox per role, so a refusal
+  (`alreadyExists`, or `invalidProperties` naming `role`) is read against a `Mailbox/get` of
+  `name`, `parentId` and `role`, never against the server's `description`: the folder
+  `existingId` names (first, since a server may normalise the name), else the one of that name
+  and parent, holding the role is the retry of a create that landed and resolves to it; one
+  without the role, or another folder holding the role, is a `Conflict` (a create that asked
+  for a role never resolves to a folder lacking it); a role nobody holds that the server still
+  refuses is `InvalidState`. A create without a role sends no `role` key and reads nothing back,
+  byte for byte what it sent
+  before. Offline: `mailbox_write_role_tests.rs`. **Verified live on Stalwart**
+  (`tests/live_mailbox_create_role.rs`, as carol, whose account holds inbox, trash, junk,
+  drafts and sent): a new folder takes `archive` and lists with it, a retry resolves to it, a
+  second folder asking for `archive` or for `sent` is a `Conflict` and nothing is made, a
+  same-named folder without the role is a `Conflict`, and `ServerRecords` is refused before
+  sending. Stalwart's refusal of a held role is `invalidProperties` with `properties: ["role"]`
+  (and the prose "A mailbox with role 'sent' already exists.", never read), captured in
+  `mailbox_set_role_refusal_response.json`.
 - **A submission that loses its answer needs confirming.** The batched `Email/set` +
   `EmailSubmission/set` goes through `Executor::submit`, which waits the `submission`
   bound for its reply. Once that request may have reached the server, a failure there (a

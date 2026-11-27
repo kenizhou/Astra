@@ -3,9 +3,11 @@
 
 mod apply;
 mod collection_tag;
+mod fetch_window;
 mod forget;
 mod lease;
 mod mail;
+mod mailbox;
 mod occurrences;
 mod read;
 mod state_change;
@@ -18,6 +20,7 @@ pub(super) use self::{
         streaming_page_keeps_cursor,
     },
     collection_tag::collection_tag_travels_with_the_cursor,
+    fetch_window::fetch_window_travels_with_the_cursor,
     forget::{
         forget_scope_drops_objects_rows_and_cursor, forget_scope_under_a_stale_lease_is_rejected,
     },
@@ -33,6 +36,7 @@ pub(super) use self::{
         list_mail_on_threads_gathers_only_the_named_threads,
         list_mail_orders_by_date_and_excludes_tombstones,
     },
+    mailbox::a_mailbox_span_reads_one_mailbox_between_two_instants,
     occurrences::{
         scope_occurrences_keep_overrides_and_drop_with_the_event,
         scope_occurrences_reads_the_overlapping_window,

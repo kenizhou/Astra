@@ -59,23 +59,43 @@ If product pressure changes the order, the domain model tests still need JMAP an
   server-canonical card without advancing the normal cursor. Capabilities report
   reads, groups, photos, and contact-write guard strength independently. JMAP and
   Graph are `WriteGuard::Absent`; Google and CardDAV are
-  `WriteGuard::Enforced`.
-- **A new optional verb goes on `Provider` with a rejecting default, never on its own
-  sub-trait.** The default is what makes it optional: an adapter that cannot do it
-  implements nothing and says nothing, and `Capabilities` gates the caller before it
-  asks. A sub-trait is for a distinct data domain with its own methods — the
-  `ContactsProvider` above is the one that earns it, and its ten methods are why.
+  `WriteGuard::Enforced`. A card's `uid` (`Uid`) is the vCard/JSContact `UID` the
+  source carries: CardDAV's `UID`, JMAP's `uid`, and none from Google People or Graph,
+  which carry no such identity; a provider id is never put there. A CardDAV or JMAP
+  create of a draft without one mints one from the whole draft
+  (`engine_provider::content_uid_of`): a fallback that keeps a retried create stable, not an
+  identity; a host that has one (a migration host) sets `uid` itself (`contacts.md`).
+- **A new capability is its own trait, reached through an accessor on `Provider` that
+  defaults to `None`** (`north-star.md`, Key Decisions). `Provider::mail_importer() ->
+  Option<&dyn MailImporter>` is the first: an adapter that implements the trait answers
+  `Some(self)`, one that cannot implements nothing and answers `None`, and the answer is
+  both the capability check and the means to act on it, so no flag in `Capabilities` has to
+  agree with a method that rejects. `Provider::vacation() -> Option<&dyn Vacation>` (below,
+  "Out-of-office") is the second, `Provider::mail_rules() -> Option<&dyn MailRules>` (below,
+  "Mail rules") the third, and `Provider::rules_importer() -> Option<&dyn RulesImporter>`
+  (behind `import`; below, "Importing rules and the reply") the fourth. `Box<dyn Provider>`
+  delegates every accessor, so a host
+  holding the box reaches the capability without knowing the adapter.
 
-  A one-method sub-trait costs what a rejecting default does not, and the cost lands
-  outside this repo. Rust will not upcast `dyn Provider` to `dyn Sub`, so a host that
-  wants the verb has to widen its trait object where the box is *built* and then through
-  every signature naming the bound. Measured on one host when `report_message` moved off
-  such a sub-trait onto `Provider`: 97 changed files became 36, with no behaviour
-  difference. Ask which half of that a new verb is before adding the trait.
+  The accessor is what makes a sub-trait affordable. A bare sub-trait costs a host what a
+  rejecting default does not: Rust will not upcast `dyn Provider` to `dyn Sub`, so a host
+  that wants the verb has to widen its trait object where the box is *built* and then
+  through every signature naming the bound. Measured on one host when `report_message`
+  moved off such a sub-trait onto `Provider`: 97 changed files became 36, with no behaviour
+  difference. An accessor removes that cost, because the capability is reached *through*
+  `dyn Provider` rather than by casting it. So a sub-trait without an accessor is still
+  wrong.
+
+  The verbs that predate this keep their rejecting defaults and `Capabilities` gates until
+  the planned capability-trait split moves them, as one migration with a guide per host
+  kind (`north-star.md`, "Direction"). Do not move one ahead of that piecemeal.
+  `ContactsProvider` stays the data-domain contract it is.
 
   **A *super*trait is a different thing and does not carry that cost.** `CalendarWrites`
-  holds the five calendar verbs and the read of the addresses they schedule as, and
-  `Provider: CalendarWrites`, so a `dyn Provider`
+  holds the five calendar verbs and the read of the addresses they schedule as,
+  `CalendarSync` the calendar scopes and the two calendar fetches (`calendar_scope`,
+  `event_scope`, `sync_calendars`, `sync_events`), `MailboxWrites` the folder-tree verb, and
+  `Provider: CalendarSync + CalendarWrites + MailboxWrites`, so a `dyn Provider`
   still exposes them, a host's bound is unchanged, and nothing upcasts. What it exists
   for is the 500-line file limit: the trait *is* `provider.rs`, so a file that cannot be
   split any other way splits here, along the line a data domain already draws. The price
@@ -88,12 +108,13 @@ If product pressure changes the order, the domain model tests still need JMAP an
   beside its calendar rather than a calendar adapter. A host builds one per service it can make
   meetings with and holds it apart from its providers, so nothing upcasts
   (`calendar-semantics.md`, "Meeting services").
-- The streaming primitive is `stream_email(account, cursor, window, fetch_batch, chunk_size) -> EmailStream`: a pull stream of `EmailChunk`s for one sync pass. Each chunk carries a `PassMode` (additive or reconcile, constant across the pass), its `changed` upserts and explicit `removed` keys, a `present` id set (reconcile only — the orchestrator accumulates it to tombstone at end of pass), an optional `total`, and an `advance_to` cursor disposition: additive chunks checkpoint the cursor on **every** commit (so a killed cold backfill resumes where it stopped), reconcile chunks hold it until a final tombstoning chunk. The two knobs are decoupled (`store-and-sync.md`): `fetch_batch` bounds each network round trip, `chunk_size` bounds how many messages a chunk commits/reports — a large batch with a small chunk gives *both* few round trips *and* row-as-it-arrives commits. `sync_email` is a **default drain** over the stream (one combined `SyncUpdate`), so a new adapter implements one streaming method and gets both incremental streaming and whole-scope fetch for free; it drains under `default_sync_window` (the provider's default depth, e.g. an IMAP/Graph `with_since`), while the streaming path takes its `window` **per sync** so a host changes depth without reconnecting.
+- The streaming primitive is `stream_email(account, cursor, window, fetch_batch, chunk_size) -> EmailStream`: a pull stream of `EmailChunk`s for one sync pass. Each chunk carries a `PassMode` (additive or reconcile, constant across the pass), its `changed` upserts and explicit `removed` keys, a `present` id set (reconcile only — the orchestrator accumulates it to tombstone at end of pass), an optional `total`, and an `advance_to` cursor disposition: additive chunks checkpoint the cursor on **every** commit (so a killed cold backfill resumes where it stopped), reconcile chunks hold it until a final tombstoning chunk. The two knobs are decoupled (`store-and-sync.md`): `fetch_batch` bounds each network round trip, `chunk_size` bounds how many messages a chunk commits/reports — a large batch with a small chunk gives *both* few round trips *and* row-as-it-arrives commits. `sync_email` is a **default drain** over the stream (one combined `SyncUpdate`), so a new adapter implements one streaming method and gets both incremental streaming and whole-scope fetch for free; it drains under `default_sync_window` (the provider's default depth, e.g. an IMAP/Graph `with_since`), while the streaming path takes its `window` **per sync** so a host changes depth without reconnecting. That `window` is a `MailboxWindows`, the account's `SyncWindow` with any mailbox held further back: a folder-bound adapter fetches under its folder's `window_for`, and an account-wide one fetches the account's window and each `deepened` mailbox's own beside it, never the account's older mail as a whole (`store-and-sync.md`).
+- `widen_email(account, cursor, widening, fetch_batch, chunk_size) -> EmailStream` streams what a `Widening` adds to the depth a scope's cursor covers, **keeping** that cursor. An adapter that can list a date range without giving up its delta cursor fetches only `widening.bands()` (a folder-bound one its `band_for(folder)`) as additive chunks that tombstone nothing, checkpoints its position in the band beside the kept cursor, ignores a position recorded for another band, carries a position through a delta that tombstones nothing and drops it on a reconcile, and says so with `Capabilities::with_band_widening` (IMAP, JMAP). The default **reopens**: `stream_email` with no cursor under `widening.to()`, correct for every adapter and what a transport whose cursor is bound to its window must do (Graph; Gmail until slice 2 of the design note). A caller applies either kind of chunk the same way and never branches on the capability, which exists for cost estimates (`docs/design/windows-and-widening.md`).
 - `PageToken`/`SyncPage`/`SyncKind` are provider-**internal** paging helpers (an HTTP adapter re-chunks its own whole-page fetch into the stream with `split_page`), not trait surface. Whatever resumes an adapter's fetch — a JMAP walk's anchor or `Email/changes` state, IMAP UID range, Gmail/Graph page token or delta link — the adapter encodes and decodes it itself; the engine only round-trips the opaque `SyncState` cursor.
 - Adapters own protocol pagination, retries, throttling, and provider quirks. Chunks should be ordered so the first ones are the most useful (mail newest-first), since a streaming host renders them as they commit.
 - The store owns atomic application of changes, cursor persistence, and pending-op reconciliation. A streaming additive chunk commits as a delta and **checkpoints** the cursor (`ApplyBatch::with_cursor(Some)`); a reconcile pass commits intermediate chunks with the cursor held (`None`) and tombstones on the final chunk (`store-and-sync.md`).
-- On-demand content fetch is one provider-neutral method, `fetch_message_source(account, &Message) -> RawMime`, gated by the `message_source` capability (distinct from read `mail` — an adapter can sync envelopes without downloading full bodies, like `submission` vs `mail`). It returns the whole raw RFC 5322 source (headers + every part); the engine extracts displayable text, inline CID parts, and downloadable attachments with `engine-mime`, and caches the raw in the store's content-addressed blob area, so one fetch serves body, inline resources, and attachment downloads (the north-star Tier-3 path). `&Message` carries everything an adapter needs to address it — the `id` key (IMAP `UID FETCH BODY.PEEK[]`) and the `blob_id` (a JMAP/Graph download handle). A stale IMAP target (UID under a changed `UIDVALIDITY`) is a `Conflict` → re-sync then retry. It is driven by `engine_sync::fetch_message_body` / `fetch_inline_parts` / `fetch_message_attachments` / `fetch_message_attachment` (lease-free read-through caches, **not** outbox-mediated — reads need no durable op). (Method + capability **implemented** in `engine-provider`; the IMAP adapter implements it — `imap-smtp.md`; JMAP/Graph overrides via blob download are a later slice.)
-- **Storing a draft is two neutral verbs, and the key is the adapter's answer, not the caller's assumption.** `put_draft(account, &Draft, replacing: Option<&ProviderKey>) -> ProviderKey` and `delete_draft(account, &ProviderKey)`, gated by the `mail_drafts` capability. A host hands over the same `Draft` it would submit, plus the draft this one supersedes, and stores **whatever key comes back** — because on three of the four adapters the key *moves* and on one it does not:
+- On-demand content fetch is one provider-neutral method, `fetch_message_source(account, &Message) -> RawMime`, gated by the `message_source` capability (distinct from read `mail` — an adapter can sync envelopes without downloading full bodies, like `submission` vs `mail`). It returns the whole raw RFC 5322 source (headers + every part); the engine extracts displayable text, inline CID parts, and downloadable attachments with `engine-mime`, and caches the raw in the store's content-addressed blob area, so one fetch serves body, inline resources, and attachment downloads (the north-star Tier-3 path). `&Message` carries everything an adapter needs to address it — the `id` key (IMAP `UID FETCH BODY.PEEK[]`; Graph's and Gmail's message id) and the `blob_id` (a JMAP download handle). A stale IMAP target (UID under a changed `UIDVALIDITY`) is a `Conflict` → re-sync then retry. It is driven by `engine_sync::fetch_message_body` / `fetch_inline_parts` / `fetch_message_attachments` / `fetch_message_attachment` (lease-free read-through caches, **not** outbox-mediated — reads need no durable op). (Method + capability in `engine-provider`; IMAP, JMAP, Graph and Gmail implement and advertise it: IMAP by `BODY.PEEK[]` (`imap-smtp.md`), JMAP by blob download (when the session offers a download URL), Gmail by `format=raw` or its IMAP half's `BODY.PEEK[]`, Graph by `/messages/{id}/$value`, which `tests/live_message_source.rs` proves read-only on a personal account and a work/school tenant.)
+- **Storing a draft is two neutral verbs, and the key is the adapter's answer, not the caller's assumption.** `put_draft(account, &Draft, replacing: Option<&ProviderKey>, keywords: &BTreeSet<Keyword>) -> DraftReceipt` and `delete_draft(account, &ProviderKey)`, gated by the `mail_drafts` capability. A host hands over the same `Draft` it would submit, plus the draft this one supersedes and the keywords it should carry, and stores **whatever key comes back** (`DraftReceipt::key`) — because on three of the four adapters the key *moves* and on one it does not:
 
   | adapter | a re-save is | key after | why |
   |---|---|---|---|
@@ -105,10 +126,18 @@ If product pressure changes the order, the domain model tests still need JMAP an
   That is the whole reason this is one verb rather than a create and an update: the difference is real, it is not a capability a host could usefully branch on, and the engine absorbing it is the engine doing its job. Gmail's key is a **draft** id and its synced message carries a different one, which is safe only because these two verbs are the sole consumers of what `put_draft` returns.
   - **Rewrite in place wherever the transport allows it, and send only what changed.** A saved draft is saved *repeatedly*, so the cost that matters is the second and hundredth save, not the first. Creating a replacement and removing the original costs two requests, moves the key, and makes the draft jump to the top of the Drafts folder every time. Graph and Gmail can rewrite instead, and Graph goes further: an attachment is a resource of its own there, so a draft that gains or loses one sends just that attachment and keeps its message. Re-uploading every attachment on every save, or replacing the message to change one, is the thing to design out: a draft with a large file attached should not get more expensive each time it is saved. Where a transport *must* replace the message, the attachments can still be carried over: a JMAP replacement references the `blobId`s the stored draft already holds rather than sending the bytes again.
   - **Where it is two calls, the new copy comes first, and a failed removal does not fail the save.** The order decides which way a partial failure falls: append-then-remove leaves the user two drafts, remove-then-append can leave them none, and for a message nobody has sent a duplicate is recoverable while a loss is not. Returning an error after the new copy is stored would be worse still, because the caller retries and appends another.
+  - **A draft's keywords are the whole set it should carry, answered per save** (`DraftReceipt::kept`, gated by `draft_keywords`), mirroring a Sent copy's (`sent_copy_metadata`): a request, never a reason to fail the save. Each transport keeps them where it keeps any keyword, and the read-back is the same path every synced message takes, so a host resuming a draft on another device sees them:
+
+    | adapter | how the keywords are kept | a re-save |
+    |---|---|---|
+    | IMAP | on the `APPEND`, those Drafts' `PERMANENTFLAGS` keeps (named, or `\*`) | the new message carries what this save asked for |
+    | JMAP | in the `Email/set` create, beside `$draft` and `$seen` | the same |
+    | Graph | as named categories (`KeywordName`), set by a `PATCH` after the save, keeping the person's own | the rewritten message keeps its categories (live), so one no longer asked for is taken off |
+    | Gmail | as hidden named labels (`KeywordName`), by `messages.modify` on the message the save answers with | `drafts.update` replaces the message and drops the label (live), so every save labels the new one |
   - **An absent draft is a successful delete.** The verb sits behind a retryable op, so it *will* be called again on a draft the first call removed; an adapter that reported that as a failure would park the op forever. Getting this right is per-adapter and not guessable: JMAP answers a `notFound` `SetError`, Gmail and Graph answer `404` — **and Graph also answers `403 ErrorCannotDeleteObject`** for a message that existed and was deleted, which is the shape a retry actually meets. Both Graph answers were observed against a real mailbox, in both directions, and are pinned as fixtures; the match is on the error *code*, since a genuine permission failure is also a `403`.
   - **There is no lost-update guard**, and none is claimed. A draft has one author at a time in practice, the transports offer nothing to guard it with, and a `mail_drafts` flag that implied otherwise would be the same mistake `WriteGuard` exists to prevent on the calendar side.
 
-- **Changing the folder tree is one neutral verb over four very different transports.** `MailboxWrites::edit_mailbox(account, &MailboxEdit) -> MailboxEditReceipt`, a supertrait of `Provider` (the `CalendarWrites` pattern: `provider.rs` is at the file-length limit), gated by `Capabilities::mailbox_writes`. `MailboxEdit` is `Create`, `Update` (rename, move, or both: the name and parent it is to have, `None` meaning the top), `Trash` (with the Trash folder and a name already chosen free there) and `Delete` (permanent, subtree included). The receipt names the folder the edit **resolved to**, because on IMAP that is not the key that went in.
+- **Changing the folder tree is one neutral verb over four very different transports.** `MailboxWrites::edit_mailbox(account, &MailboxEdit) -> MailboxEditReceipt`, a supertrait of `Provider` (the `CalendarWrites` pattern: `provider.rs` is at the file-length limit), gated by `Capabilities::mailbox_writes`. `MailboxEdit` is `Create` (a name, a parent, and optionally a role; built by `MailboxEdit::create` or `create_with_role`, since the variant is `#[non_exhaustive]`), `Update` (rename, move, or both: the name and parent it is to have, `None` meaning the top), `Trash` (with the Trash folder and a name already chosen free there) and `Delete` (permanent, subtree included). The receipt names the folder the edit **resolved to**, because on IMAP that is not the key that went in.
 
   | adapter | create | rename or move | trash | delete | key moves? |
   |---|---|---|---|---|---|
@@ -120,8 +149,25 @@ If product pressure changes the order, the domain model tests still need JMAP an
   Gmail is the one transport that cannot file a folder inside Trash (a label cannot nest under a system label), so there `Trash` moves the mail and removes the labels, and its receipt names no folder. What the four share, and what the verb promises: nothing leaves the user's reach through `Trash`, and a message also filed elsewhere (a JMAP mailbox, a Gmail label) keeps that filing.
   - **A create that finds its folder already there, and a delete that finds nothing, succeed.** The verb sits behind a retryable op. JMAP's `alreadyExists` carries the `existingId`; IMAP's `[ALREADYEXISTS]` and Graph's duplicate answer are resolved by listing the parent.
   - **The adapter never judges staleness; the caller already has.** The outbox reads the folder list and refuses a change whose folder moved since the user saw it before this is called (`store-and-sync.md`). What an adapter still refuses is what only it can know: a name carrying its hierarchy separator (IMAP's is the server's, and may be `.`), a subfolder on a flat namespace, a system label.
+  - **An adapter refuses exactly the names its own transport cannot carry, before it sends any change; the engine's portable name policy is applied only where a host asks for a name.** The policy (`engine_core::mail::validate_mailbox_name`: not empty, no control character, no `/`, no surrounding whitespace) is what a host offers its user, and the outbox applies it before enqueue; the adapters do not, so a host that mirrors folders can write any name the target holds (a folder `Q1/Q2` onto an IMAP server whose delimiter is `.`, which takes it as one level) and move or trash a folder whose current name another client chose. What each refuses, as `InvalidState` with the rule and never the name: IMAP an empty leaf, CR, LF or NUL, the server's delimiter and a top-level `INBOX`; Gmail an empty name and a `/`, which it would read as nesting; JMAP and Graph nothing of their own, since the server decides (RFC 8621 §2 leaves the name to it).
+  - **A create can ask for a role, and only some targets can give one.** `MailboxEdit::create_with_role(name, parent, role)`; `Capabilities::mailbox_create_role` says whether the target can (never without `mailbox_writes`). A host that mirrors folders (a migration's Sent onto a target that has none) reads it first, and otherwise resolves the target's own folder for the role.
+
+    | adapter | role on create | `mailbox_create_role` | a role it has no form for |
+    |---|---|---|---|
+    | JMAP | `Mailbox/set` `role` (RFC 8621 §2) | yes | not registered (`MailboxRole::jmap_role` is `None`): `ServerRecords`, `ChatHistory`, `Other` |
+    | IMAP | `CREATE … (USE (\Archive))` (RFC 6154 §3) | only where `CREATE-SPECIAL-USE` is advertised (Stalwart yes, Dovecot no) | no attribute (`as_imap_special_use` is `None`): the inbox too |
+    | Graph | none: the well-known folders exist already | no | — |
+    | Gmail | none: the system labels exist already | no | — |
+
+    **A role the target cannot set is refused before anything is sent, by one rule**, `MailboxEdit::role_as(&capabilities, form)`, which every adapter calls first with its **own** capabilities: a role asked of a target whose `mailbox_create_role` is `false` is `CreateRoleError::NotSupported` (a JMAP account that cannot change its folders included), and one the transport's naming (`MailboxRole::jmap_role`, `as_imap_special_use`) has no name for is `CreateRoleError::NoTransportForm`. So the gate a host reads and the gate the adapter applies are one. Both convert to `InvalidState` carrying the typed error as `source` (re-exported by `engine-api`), naming the rule and never the role, like a refused name; that is also what an unsupported verb is (`MailboxWrites`' default). Making the folder without the role instead would leave a host believing the target has one. Which roles have a form is decided in `engine-core`, once per transport, by those two functions.
+
+    **Success is read back, not assumed.** After a create the server accepted, the adapter reads the new folder's role once (JMAP: from `created`, else one `Mailbox/get` of it; IMAP: one `LIST` of the path, asking `RETURN (SPECIAL-USE)` where `SPECIAL-USE` is advertised, since on rev2 without it the role is base `LIST` data), and a folder without it is `CreateRoleError::NotKept { mailbox }` (`InvalidState`). **`NotKept` is the one refusal with a side effect: the folder exists, without the role, under the id it carries.** The adapter finishes it as any create does (IMAP subscribes it) and never deletes it; a host records it as made, or deletes it, since a retry of the same create meets it by name and is a `Conflict`. This is what keeps a server that takes the request and drops the role (DOVECOT-1, were `USE` ever sent there) from reading as success.
+
+    **A refusal by the server is told apart by the folder list, never by its prose.** A folder already there **with** the role (on JMAP the one `existingId` names, checked first since a server may normalise the name; else the one by that name and parent) is the retry of a create that landed and resolves to it; one **without** it is a `Conflict` (a create that asked for a role never resolves to a folder lacking it); another folder holding the role is a `Conflict` (JMAP allows one per role; RFC 6154 lets an IMAP server refuse it, and `[USEATTR]` says the refusal is about the role); a role nobody holds that the server still refuses is `InvalidState`. An IMAP server may instead move the role or let two folders share it (RFC 6154 §3): its choice, and the create succeeds.
+
+    `engine-sync`'s outbox (`MailboxChange::Create`) carries no role: the sync host's user creates ordinary folders. A host that queues a role-bearing create later needs a `role` on `MailboxChange::Create`, its plan to check `mailbox_create_role` and that no listed folder holds the role (as it checks the name), and the create sent with `create_with_role`.
   - **A host learns before it asks which folders can hold one**, from `Mailbox::accepts_children`, so it need not offer what the adapter would refuse. `false` is the provider's word: IMAP `\Noinferiors` or no delimiter, JMAP `myRights.mayCreateChild`, a Gmail system label (and the synthetic All Mail). Graph lets any folder hold folders. `true` promises nothing, so the refusals above stand.
-  - **Verified live:** IMAP on Stalwart and on Dovecot (rev1 and rev2), JMAP on Stalwart, both in `tests/live_mailbox_writes.rs`. The Graph and Gmail live suites exist beside them and have not yet run against a real mailbox; their offline fixtures follow the documented shapes and say so.
+  - **Verified live:** IMAP on Stalwart and on Dovecot (rev1 and rev2), JMAP on Stalwart, both in `tests/live_mailbox_writes.rs`. The role on create has its own `tests/live_mailbox_create_role.rs` in both crates: verified on Stalwart over JMAP and IMAP (both give the role and refuse a second folder one already held, as a `Conflict`), and on Dovecot rev1 and rev2, which do not advertise `CREATE-SPECIAL-USE`, so the adapter refuses. That refusal is load-bearing: Dovecot answers a `USE` sent anyway with `OK` and makes the folder without the role (`DOVECOT-1`, `imap-smtp.md`), so only the capability tells a host whether a role on create will hold. The Graph and Gmail live suites exist beside them and have not yet run against a real mailbox; their offline fixtures follow the documented shapes and say so.
 
 - **Post-connect facts are one object.** `Provider::connection_info() -> ConnectionInfo` is the single seam a caller reads after an adapter connects: `{ capabilities, tls_version, http_version }`. There is no separate `capabilities()` method — capabilities are a *field* of the object, so the facts cannot drift apart. Callers must not switch on provider kind for normal behavior. `ConnectionInfo` is `Copy`, so it is returned by value and an adapter may either store it or compose it per call. The two version fields are independently optional because what an adapter can observe is asymmetric (`tls.md`): a `tokio-rustls` adapter (IMAP/SMTP) reports `tls_version` — read off its finished handshake — and never `http_version`; a `reqwest` adapter (JMAP/CalDAV/Graph/Google) reports both, and learns **both from a response** (`http_version` from `Response::version()`, `tls_version` from reqwest's `TlsInfo` extension, which the shared `reqwest_builder` asks for). TLS *policy* stays out of the object: the host chose it and already knows it. Both are the **most recently** observed response's version, recorded together at each transport's single send/collect funnel into one `engine_http::ObservedConnection` — *not* the first, because JMAP and CalDAV follow the well-known `30x` themselves and the redirector may be a different origin, over a different TLS session, from the endpoint that then serves every real request. So JMAP (session discovery) and CalDAV (discovery `PROPFIND`) have values as soon as `connect` returns and keep them accurate thereafter, while Graph and Google — which issue no request at connect — report `None` until their first fetch. An HTTP adapter's `tls_version` is also `None` on a plaintext `http://` hop, which is what the Stalwart harness serves.
 - **`concurrent_fetches` is how many fetches are worth having in flight; it is not what
@@ -155,7 +201,7 @@ If product pressure changes the order, the domain model tests still need JMAP an
   - **`rsvp_event` is a verb of its own for a reason the bytes hide: answering an invitation makes the server *tell the organizer*, and an edit does not.** Graph routes it through `POST /events/{id}/accept`, Google through `sendUpdates`, CalDAV and JMAP through a server that watches the participation status. Expressing it as an `EventEdit` of the attendee array would change the same field on every transport and schedule nothing. It has its own capability because an adapter can create and patch events without being able to schedule, and because two controls around it — a `comment` for the organizer, and choosing *not* to notify — are not universal: `Capabilities::calendar_rsvp() -> Option<RsvpControls>` states which the transport honours, **plus the guard on this specific request**, which is not always `calendar_write_guard` (Graph's action endpoint takes no `If-Match` while its `PATCH` does). An adapter **refuses** a control it cannot honour rather than dropping it — `RsvpControls::accept`, one shared implementation, so an adapter cannot advertise what it ignores or ignore what it advertises.
   - The address travels with the intent (`EventRsvp::attendee`) and an adapter uses it **verbatim**: identity is a *set*, and only the caller knows which member of it the invitation matched. An alias invitation that answered as the account's primary would match no attendee at all.
   - `put_event(account, &EventWrite)` — replace the whole stored document — is **not** part of that spine and is default-unsupported. Only a *document-oriented* transport has such a verb (CalDAV `PUT`; JMAP has none), and only an operation naturally expressed as a finished document should use it. An adapter may advertise `calendar_writes` and still leave it rejecting; the capability covers the neutral spine, not this escape hatch.
-  - **`put_event` stores a document; it does not only *replace* one.** `EventWrite.guard` is a three-state `WritePrecondition` — `Unconditional` / `IfUnchanged(RevisionTokens)` / `IfAbsent` — because a create's precondition is the *inverse* of an update's: not "the revision I read is still current" but "nothing is there at all" (CalDAV `If-None-Match: *`, RFC 7232 §3.2). Collapsing the two would leave a **guarded create** unrepresentable, and the fallback a caller then reaches for is an unconditional write — which silently overwrites the copy an auto-scheduling server deposited a moment ago. `EventWrite::creating` is how an invitation that arrived as mail goes onto the calendar with its received `ORGANIZER`/`ATTENDEE`/`SEQUENCE` and extensions intact. `EventDraft::meeting` is the organiser-authored new-meeting path. Proven live on both harness servers.
+  - **`put_event` stores a document; it does not only *replace* one.** `EventWrite.guard` is a three-state `WritePrecondition` — `Unconditional` / `IfUnchanged(RevisionTokens)` / `IfAbsent` — because a create's precondition is the *inverse* of an update's: not "the revision I read is still current" but "nothing is there at all" (CalDAV `If-None-Match: *`, RFC 7232 §3.2). Collapsing the two would leave a **guarded create** unrepresentable, and the fallback a caller then reaches for is an unconditional write — which silently overwrites the copy an auto-scheduling server deposited a moment ago. `EventWrite::creating` is how an invitation that arrived as mail goes onto the calendar with its received `ORGANIZER`/`ATTENDEE`/`SEQUENCE` and extensions intact. Its address comes from `CalendarWrites::new_event_id(calendar, uid)`, the adapter's own naming rule (the one its `create_event` and importer use), so a host never mints one; it defaults to unsupported, like `put_event`, on a transport whose server names new events. `EventDraft::meeting` is the organiser-authored new-meeting path. Proven live on Stalwart, SabreDAV and Nextcloud.
 - **"Can this transport express an answer?" and "will anyone be told?" are different questions.** `Capabilities::calendar_rsvp` answers the first. `Capabilities::calendar_scheduling` answers the second, and on CalDAV they come apart: RFC 4791 is calendar *access*, RFC 6638 adds scheduling on top, and on a server without it a rewritten `PARTSTAT` is stored correctly and the organizer is told nothing — the silent success `RsvpControls` exists to prevent, arriving from the transport instead of from a caller.
   - **CalDAV discovers it**, at connect: `OPTIONS` on the *calendar home* (not the connection base — a server's site root need not be a DAV resource; Stalwart's answers `302` with no `DAV:` header at all), then the `calendar-auto-schedule` token in the `DAV:` response header, matched as a whole token and case-insensitively (RFC 6638 §2). Both answers are real and live-pinned: the Stalwart and Nextcloud harnesses advertise it, the SabreDAV fixture does not. A response with no such token — whatever its status — is `false`, never a connect failure: a server may answer `OPTIONS` with a `405` and still read and write perfectly well.
   - **Graph, Google and JMAP are constants**, for two different reasons. Graph and Google schedule server-side with no opt-out a client can reach. JMAP reports `true` because `sendSchedulingMessages` makes it the *request's* choice and the adapter asks on every write — but there is nothing to *detect*: JMAP Calendars leaves scheduling to the implementation and offers no capability to probe, so a server that accepted the argument and quietly did nothing would look identical.
@@ -197,8 +243,251 @@ If product pressure changes the order, the domain model tests still need JMAP an
 - Provider errors should classify retryable, authentication, rate-limit, invalid-state, conflict, and permanent failures.
 - Provider adapters must expose whether a sync response is a delta or a complete snapshot.
 - Provider object ids may not be stable across container moves; adapters expose a stable or immutable id as the `ProviderKey`, plus a version token (ETag, `changeKey`, MODSEQ) for concurrency.
-- Sync cursors are provider-specific (state strings, MODSEQ, sync-tokens, history ids, delta tokens); calendar sync may be inherently time-windowed (a date-bounded view), surfaced as scoped, possibly-incomplete coverage.
+- Sync cursors are provider-specific (state strings, MODSEQ, sync-tokens, history ids, delta tokens); calendar sync may be inherently time-windowed (a date-bounded view). Such an adapter advertises `Capabilities::windowed_events` and takes the window from the engine (the `window` of `CalendarSync::sync_events`, which a transport fetching whole ignores), which records the window each cursor was opened over and reopens it over a wider one when a host reaches past it (`store-and-sync.md` → "The fetch window is the store's too"). Graph and Google are windowed; CalDAV and JMAP fetch a calendar whole.
 - Providers that support push or idle signals emit wake hints; the engine still performs pull sync to fetch changes. This is a **provider-neutral** capability: the `idle` capability flag advertises it, and a `Watch` session (`engine-provider`) yields a `WatchEvent` stream (`Changed` | `KeepAlive`) for one scope. A watch event carries **no data** and is never a source of truth — it means only "run the scope's normal sync," which is the authoritative, idempotent reconciliation. So a missed/coalesced/spurious notification cannot corrupt the store; push only lowers the *latency* of seeing a change, and a poll-only host is fully correct. (**Implemented** for IMAP `IDLE` — `imap-smtp.md` — and for **JMAP EventSource** (`StateChange`, RFC 8620 §7.3) via `JmapWatcher` — `jmap.md`; a Graph webhook is a later slice over the same `Watch` contract.)
+
+## Import
+
+Importing stores an object that already exists in a target, as it was: the bytes it has, the
+state it carries (keywords, mailboxes, arrival time), and no scheduling message to anyone. It is
+not a sync write. A sync write is a user's change, made through the outbox; it may re-assemble
+the object (a draft gets a fresh `Date:`) and it schedules meetings. Any host that stores an
+existing object uses import: a migration moving a mailbox between providers, a webmail storing
+an uploaded `.eml` in a folder, an app importing a file. It lives behind the `import` feature in
+traits of its own (`engine_provider::import`), so the sync `Provider` contract is unchanged by
+it. An adapter that can import implements the trait; there is no capability flag.
+
+- **Mail: `MailImporter`.** `import_messages` takes a batch of `MessageImport` (raw bytes,
+  mailboxes, and a `MessageMetadata`) and answers each message in order. An answer is `Ok`
+  (stored, or already there, with the metadata the target kept, so a target that keeps less says
+  so per field), `requires_confirmation` (sent, unanswered: it may be stored), or any other error
+  (not stored; `item_unavailable` when the target will never take that message).
+  `import_cursor` reads the target's cursor for a mailbox before a batch's first write, so a host
+  that crashed mid-batch finds what was stored through the target's own `stream_email` delta.
+  `mail_import_limits` is what the target states (largest message, mailboxes per message);
+  `MailImportLimits::check` is the one rule every adapter refuses an over-limit message by.
+- **The metadata is the one every write that stores a message uses**
+  (`engine_core::mail::MessageMetadata`, above under drafts and Sent copies), and
+  `Message::metadata` maps a message read at a source onto it. The import types are
+  `#[non_exhaustive]`, built through constructors and `with_*` methods, so a new field breaks no
+  caller.
+- **How a host reaches it: `Provider::mail_importer`.** It answers the adapter as a
+  `&dyn MailImporter`, or `None` where the adapter cannot import (the default), so a host holding
+  a `Box<dyn Provider>` imports without knowing the concrete adapter, and the answer and the
+  means to act on it are one value. This is how a capability is reached from here on: an
+  accessor on `Provider` that defaults to `None`, delegated by the `Box<dyn Provider>` impl.
+  `Box<dyn MailImporter>` and `Arc<dyn MailImporter>` are importers too, for code generic over
+  `I: MailImporter`.
+- **Who implements it:** IMAP (`APPEND`, `imap-smtp.md` → "Import") and JMAP (`Email/import`,
+  `jmap.md` → "Import"); Graph and Gmail are sources only. Rules and the reply import through a
+  sibling, `RulesImporter` (below, "Importing rules and the reply").
+- **What every importer must do is checked once**: `engine_provider::import::conformance` (the
+  `import-conformance` feature, for live suites) imports a dated message with keywords and an
+  undated control, and reads both back through the sync seam: bytes, the mailbox asked for, a
+  message stored now rather than already there, the arrival time as sent (and the control's
+  within a day of the clock running the check), the receipt saying exactly which keywords were
+  stored, and a delta from the import cursor listing exactly the imports. Its own offline test
+  shows each claim fail, by name, against a target that breaks it. Each adapter's live suite runs it against its servers and adds only what is its
+  own. An adapter that imports runs it; a claim every importer makes belongs there, not in one
+  suite.
+- **Events: `CalendarImporter`** (`docs/design/calendar-and-contact-import.md`). `import_events`
+  takes a batch of `EventImport` (one event's raw iCalendar, overrides included, and its
+  calendar) and answers each in order, as mail does. Two things differ, and the data decides both:
+  an event is matched by its `UID`, so one its calendar already holds is answered
+  `ImportedEvent::existing` and never stored twice; and an event's state is inside its document,
+  so there is no `kept` until a target that keeps less of it (Graph, Google) is built. An import
+  **tells nobody**: that is the contract, not an option, and each adapter says how it keeps it.
+  `calendar_import_limits` and `import_cursor` are per calendar, because CalDAV states both per
+  collection. Reached through `Provider::calendar_importer`, which an adapter answers only where
+  it can keep the import silent. CalDAV implements it, offered where the server advertises
+  `calendar-auto-schedule` or has nothing to schedule with (no scheduling inbox or outbox;
+  `caldav.md` → "Import"). The item is UTF-8 text, as `RawIcal` is.
+- **Cards: `ContactImporter`**, the calendar half's shape for the same reasons. What a card
+  adds is its vCard version: `ContactImportLimits` names the versions a book takes
+  (`engine_core::contact::VcardVersion`), and `check` refuses a card in another rather than
+  converting it, since converting is the job of a vCard writer that converts between versions (not yet in the engine). Reached through
+  `Provider::contact_importer`. CardDAV implements it (`contacts.md` → "CardDAV").
+- **Creating a container is not import.** `CalendarCollections::create_calendar` (outside the
+  `import` feature, reached through `Provider::calendar_collections`) makes a new calendar from a
+  name, a description and a colour, and answers it as the target holds it, which is the receipt of
+  what was kept. A sync host creating a calendar for its user and a transfer host creating one to
+  import into are the same act, as mail import shares `MailboxWrites::edit_mailbox`. A time zone
+  joins `NewCalendar` with an event-to-iCalendar writer that builds `VTIMEZONE` from tzdb (not
+  yet in the engine). `AddressBookCollections::create_address_book` (through
+  `Provider::address_book_collections`) does the same for address books.
+- **When the target's own state refuses, the reason is named, once for every adapter and every
+  kind of object.** `ProviderError::refused_by_target(TargetRefusal)` (`engine-provider`,
+  `error.rs`) is `FailureClass::InvalidState`: not retryable as it stands, and with no wait,
+  because waiting changes nothing; the host changes the state, then sends again.
+  `ProviderError::target_refusal()` reads the reason back, and the detail is the engine's own
+  words, never the server's. A rate limit is never one of these: an upload quota that clears
+  by the hour is `RateLimited`, with its wait.
+
+  | Reason | Meaning | What clears it |
+  |---|---|---|
+  | `StorageFull` | The account's storage is full. | Freeing space, or a larger quota. |
+  | `NoSuchContainer` | The container the object names (mailbox, calendar, address book) does not exist. | Creating it, or naming one that does. |
+  | `ReadOnlyContainer` | The credential may not write into the container (read-only or shared). | Granting the right, or another container. |
+
+  Each adapter's mapping, one line per adapter:
+
+  | Adapter | `StorageFull` | `NoSuchContainer` | `ReadOnlyContainer` |
+  |---|---|---|---|
+  | IMAP (any `NO`, `error.rs`) | `NO [OVERQUOTA]` (RFC 9208) | `NO [TRYCREATE]` (RFC 3501), `NO [NONEXISTENT]` (RFC 5530) | `NO [NOPERM]` (RFC 5530) |
+  | JMAP (`Email/import`, `import/wire.rs`) | `overQuota`, as a `SetError` or a method error (RFC 8621 §4.8) | `invalidProperties` naming only `mailboxIds`; a mailbox the import cursor cannot find | `forbidden` |
+  | CalDAV, CardDAV (a write's answer, `write_refusal.rs`) | `507`; `DAV:quota-not-exceeded` (RFC 4331) | `404`; a `409` naming no precondition (RFC 4918 §9.7.1: Stalwart's missing calendar) | `403` naming `DAV:need-privileges` (SabreDAV); a plain `403` (Stalwart's read-only share, Nextcloud's birthday calendar, observed) |
+- **Every other situation an import meets has one class too**, the same on every adapter:
+
+  | Situation | Answer |
+  |---|---|
+  | Stored, or already there | `Ok`; `already_there` for a link (JMAP `alreadyExists`), with the key |
+  | Over a limit the target states, or the message refused as such (too large, too many mailboxes or keywords, not a message) | `item_unavailable` (`Permanent`) |
+  | The target's own state (above) | `refused_by_target`, `InvalidState` |
+  | Throttled, an upload quota included | `RateLimited`, with the server's wait |
+  | A refused credential | `Authentication` |
+  | No credential could be had (the source failed, or the credential may not go there) | the source's class, and `is_credential_failure` |
+  | Sent, and the answer lost | `requires_confirmation`: find it from the import cursor before sending again |
+  | Not sent, because an earlier failure ended the batch | `import::not_sent(ending)`: a throttle (with its wait) or a refused credential carries over, and an ending where no credential could be had carries over whole (its class, its wait, `is_credential_failure`), so a credential that may never go there stays `Permanent`; anything else is `Retryable` |
+  | A transient fault | `Retryable` |
+
+  A throttle, a refused credential, or no credential at all ends the batch on every adapter,
+  since it reaches every message after it; a refusal of one message never does. The rule is one
+  function, `ProviderError::ends_batch`, so a source that is down or hung is asked once per batch,
+  not once per message at a deadline each.
+
+## Out-of-office (`Vacation`)
+
+An account's automatic reply is a setting, not a message: every host kind writes it directly,
+guarded by the version it read, never through the outbox, and the store keeps no copy
+(`docs/design/filters-and-out-of-office.md`, decision 1). The model is
+`engine_core::vacation` (`modeling.md`); the capability is `engine_provider::Vacation`, reached
+through `Provider::vacation()`, which answers `Some` only for an account that has a reply the
+adapter can reach.
+
+- **`read_vacation`** answers the reply with its `version`. **`set_vacation(precondition, new)`**
+  writes every modelled part of `new`, a part left out cleared, under a precondition the caller
+  spells out: `VacationPrecondition::IfUnchanged(&read)` is guarded by the read reply's version
+  where `vacation_write_guard()` is `Enforced`, and refused before sending if that reply carries
+  none (`Permanent`), so a guard is never quietly dropped; `Unconditional` is a deliberate
+  overwrite. A stale read is a `Conflict`; a lost answer is `requires_confirmation` (read before
+  writing again).
+- **A part the account cannot hold is refused, never dropped.** `vocabulary(account)` (async,
+  per account, as `mail_import_limits` is) states what the account holds: its `WindowSupport`
+  (none, either end, both ends), a subject, its `ReplyBodies` (one, or text and HTML), the
+  audiences, an outside reply. `VacationVocabulary::lost_parts` is the one rule for what a reply
+  would lose, and `refuse_unheld_vacation` is how every adapter refuses, before sending, a lost
+  part or a window that ends at or before its start: `item_unavailable`, naming the parts and
+  never their words, so a host tells "change the reply" from "may have landed". A reply limited to
+  contacts written as one to everyone would answer every stranger.
+- **The receipt says what the write did to the account's rules** (`RulesEffect`). On a JMAP
+  server that runs the reply as a Sieve script of its own, turning it on switches the user's own
+  filter script off, silently, and turning it off leaves it off (observed on Stalwart); the
+  adapter observes both and reports `Deactivated`, then `StillDeactivated`, so a host can offer to
+  switch the rules back on. The engine never does it for them. `Unknown` is an adapter that cannot
+  see the rules, or could not show that nothing else changed between its listings.
+
+| Adapter | Reply | Guard | Vocabulary | Rules effect |
+|---|---|---|---|---|
+| JMAP (`VacationResponse`, RFC 8621 §8) | **Implemented** (`jmap.md` → "Out-of-office") | `Enforced` (`ifInState`) | either end, subject, text and HTML; everyone; one reply | observed through JMAP Sieve, else `Unknown` |
+| IMAP + ManageSieve | **Implemented** (`imap-smtp.md` → "Rules and the reply over ManageSieve"): Roundcube's reply rule in the rules' script | `Absent`, with a stale read refused in the write's session | either end where `date` and `relational` are listed, subject, text only; everyone; one reply | `Untouched`: one script holds both |
+| Graph (`automaticRepliesSetting`) | **Implemented** (`graph.md` → "Mail rules and the out-of-office reply"): read canonically, the zoned schedule as instants; written with a `PATCH` of `mailboxSettings`, applied by Graph after it answers, so the receipt names no version | `Absent` (no ETag), with a stale read refused after reading again | both ends, no subject, one (HTML) body; organization, organization and contacts; outside reply | `Untouched` |
+| Gmail (`VacationSettings`) | **Implemented** (`google.md` → "Filters and the vacation reply"): written with a `PUT` of the whole setting, the window rounded to the millisecond and never wider | `Absent` (no ETag), with a stale read refused after reading again | either end, subject (a prefix), one body (Gmail drops the text where HTML is set); contacts, and on a Workspace account organization and contacts in organization | `Untouched` |
+| CalDAV / CardDAV | n/a | | | |
+
+On a JMAP server that runs the reply as a script of its own, the JMAP adapter keeps the user's
+rules running: while a script of the user's runs, the reply runs through its `include` of the
+reply's script, and the receipt is `Untouched` (`jmap.md` → "Out-of-office"). `Deactivated` and
+`StillDeactivated` remain for what another client does with the server's own flag.
+
+## Mail rules (`MailRules`)
+
+An account's rules are a setting too, written whole and directly, guarded by the version read
+(decision 1). The model is `engine_core::rules` (`modeling.md`); the capability is
+`engine_provider::MailRules`, reached through `Provider::mail_rules()`.
+
+- **`read_rules`** answers the `RuleSet`: the rules in order, the `RuleSetVersion`, and the
+  provider's own form (`RawRules`). **`replace_rules(base, rules)`** writes the whole set, built on
+  `base`: its version guards the write where `rules_write_guard()` is `Enforced` (a `base` without
+  one is refused before sending, `guard_version`), and its raw form supplies every rule the caller
+  did not change, byte for byte.
+- **What the account cannot hold is decided first**, by `plan_rules` in edit mode against
+  `rule_vocabulary(account)`, and the `RulesReceipt` carries each rule's `RuleOutcome`; adapters
+  add only what the server alone refuses: a script over its size limit or one it calls invalid
+  (`item_unavailable`), an account with no room for it (`refused_by_target(StorageFull)`). A stale
+  base is a `Conflict`; a lost answer is `requires_confirmation`. A transport that stores rules
+  one by one (Graph, Gmail) goes on past a rule the server refuses, but not past a throttle, a
+  refused credential or no credential at all, which reach every later rule as they reach every
+  later message of an import (`ProviderError::ends_batch`, kept by `RuleWriteEnding`): each rule
+  after it is answered unsent, with that class. It lists each rule not written in the
+  receipt's `failures` (`RuleWriteFailure`: which rule, its class, whether it may have landed, and
+  whether no credential could be had for it, `credential_failure`, and a throttle's wait,
+  `retry_after`);
+  one that stores the set at once fails whole. A rule listed there says so on its outcome too
+  (`LossReason::NotWritten`). What a target holds part by part but not together is a `RuleLimit`
+  of its vocabulary, so the plan, not the writer, decides it.
+- **An edit that is not kept does not apply.** On a transport that stores rules one by one
+  (Graph, Gmail), a rule not kept, by the plan or because its write failed, leaves the rule it was
+  read as where it is, and the receipt names it (`RulesReceipt::left_as_read`): one answer,
+  `RuleListing::left_as_read`. The Sieve targets still leave such a rule out of the script they
+  write; the same treatment there is a follow-up.
+- **A write never switches stored rules on or off** (`RuleSet::activation`, `RulesStored`), and
+  says on the receipt whether the rules it wrote run (`RulesReceipt::activation`) and what it did
+  to a running reply (`ReplyEffect`).
+- **Rule values are content**: names, addresses, folders, test values. Errors and `Debug` carry
+  kinds, positions and counts only.
+
+| Adapter | Rules | Guard | Vocabulary |
+|---|---|---|---|
+| JMAP (Sieve, RFC 9661) | **Implemented** (`jmap.md` → "Mail rules") | `Enforced` (`ifInState` on `SieveScript`) | the dialect's, from the account's `sieveExtensions` and `maxNumberRedirects` |
+| IMAP + ManageSieve | **Implemented** (`imap-smtp.md` → "Rules and the reply over ManageSieve"): the same dialect, one script with the reply | `Absent`; a stale read (a SHA-256 of the script list and the script) is refused in the write's own session | the dialect's, from the `SIEVE` and `MAXREDIRECTS` the server lists once signed in |
+| Graph (`messageRule`) | **Implemented** (`graph.md` → "Mail rules and the out-of-office reply"): read typed or native per predicate; written rule by rule by position, a change that drops a part as a new rule in its place, each failure in the receipt's `failures` and on the rule's outcome | `Absent`: no `@odata.etag` and a stale `If-Match` ignored (observed); a stale read (a SHA-256 of the listing) is refused after reading again, though the listing can lag a write | fixed (`provider-graph`'s `rules::vocabulary`), with `RuleLimit`s |
+| Gmail (filters) | **Implemented** (`google.md` → "Filters and the vacation reply"): criteria read typed (a word match of Gmail's own, `TextOp::Words`) from a small search subset or kept whole; written filter by filter, a change as a new filter before the old is deleted, a filter Gmail already holds kept rather than sent again, a rule not written leaving the filter it was read as | `Absent`: a filter has no ETag and no update; a stale read (a SHA-256 of the listing) is refused after reading again | fixed (`provider-google`'s `rules::vocabulary`): no stop, order, name or disabled rule; one forward, one user label and at least one criterion per filter; exact exceptions; values as phrases; the order approximated |
+| CalDAV / CardDAV | n/a | | |
+
+### Importing rules and the reply (`RulesImporter`, the `import` feature)
+
+A transfer host carries a source's rules and reply to a target through
+`engine_provider::import::RulesImporter`, reached through `Provider::rules_importer()` wherever the
+target offers its rules (`filters-and-out-of-office.md`, "Import").
+
+The contract: **never change what the target already had, and be safe to run again.**
+
+- **One import for every target.** An adapter implements the trait with `import::append_rules` and
+  `import::import_reply` over its own `MailRules` and `Vacation`; it adds only what it alone knows,
+  which of the target's folders exist. So the import writes through `replace_rules` and
+  `set_vacation`, and script choice, the guard, the reply's include and activation are decided
+  where an edit decides them. Where an edit would stop what runs and say so (a reply stopped by
+  new rules, rules switched off by a reply), the import refuses instead (`item_unavailable`); JMAP
+  hands the engine's import a view whose writes refuse there.
+- **Rules are appended after the target's own, never replacing or reordering them**, planned in
+  `Import` mode: a rule that sends mail out of the account is stored disabled unless the host arms
+  forwarding. Folder ids go through the host's `FolderMap` (source id to target id), which the
+  importer takes: a mapped id is written as the target's, and one the map does not hold, or whose
+  target folder is gone, loses its action as `MissingMailbox`. A rule carried whole that names a
+  folder by id, runs another script or holds `${` is not imported. Where the target's own edit
+  would not write its rules back as they are, nothing is imported (`item_unavailable`). An
+  imported rule is written as a rule of no script (its origin cleared).
+- **Safe to run again**: a planned rule the target already holds an equal typed rule for is not
+  written again, one held rule for each handed in, and the receipt lists it (`already_held`). It
+  is compared as the target will read it back once written, and a rule carried whole is planned
+  with the facts its own text gives: both through the `ImportDialect` the adapter passes (for a
+  Sieve target, `engine_sieve::dialect::read_back` and `facts_from_text`).
+- **The answer** is a `RulesReceipt` whose outcomes are indexed by the rules handed in; it also
+  says where the rules went (`Unwritten` where nothing was left to add), whether they run, and
+  which were already held.
+- **The preflight list** of decision 2 is `engine_core::rules::held_forwarding(rules, target)`:
+  the rules the import holds back because they send mail out, decided by `plan_rules` alone.
+- **A reply is imported only where the target holds none** (off, with nothing to say), answered
+  without a write where it already says the same as the target holds it (line ends and the
+  window's fraction of a second aside), and refused (`item_unavailable`) over any other: a host
+  that means to replace a target's reply calls `set_vacation` itself. A part the target cannot
+  hold refuses the reply whole (`refuse_unheld_vacation`).
+
+| Target | Rules import | Folders by id |
+|---|---|---|
+| JMAP (Sieve) | **Implemented** (`jmap.md` → "Mail rules") | through the host's map, the mapped target ids asked of the server (`Mailbox/get`, chunked by `maxObjectsInGet`) |
+| IMAP + ManageSieve | **Implemented** (`imap-smtp.md` → "Rules and the reply over ManageSieve") | none: folder ids are names, not RFC 8474 `MAILBOXID`s, so the vocabulary offers no filing by id and such a rule loses that action; a host names an IMAP target's folders by path |
+| Graph, Gmail | Sources only, for now | |
 
 ## Stalwart Test Spine
 
@@ -290,21 +579,6 @@ Run the first deterministic IMAP/SMTP/CalDAV tests against Stalwart. Add externa
   A server acts on a request only once it has all of it, which is what makes the last piece,
   not the first, the line. A request with no body (none submits today) commits before it is
   sent.
-- **A host can wrap the assembled MIME before it leaves, per account** (`MimeWrapper`,
-  `engine-provider/src/mime_wrap.rs`): one neutral trait, installed on the account's config,
-  consulted only when the draft's serde-defaulted `sign`/`encrypt` flags ask, given the
-  **filed** assembly (with `Bcc`) and returning both variants — the wire one the same
-  ciphertext minus the `Bcc` header. A refusal is a `ProviderError` raised **before any
-  dial**, so a gated send never reaches the server. Where the seam can hang is exactly the
-  set of adapters that assemble MIME at submission:
-
-  | Adapter | Submits | Seam |
-  |---|---|---|
-  | IMAP/SMTP | assembled RFC 5322 bytes to `DATA` | **implemented** (`wrap.rs`: pre-dial, `refile` re-wraps) |
-  | Graph | the same bytes, base64 in `sendMail` | applicable, not yet wired |
-  | Gmail | the same bytes, `raw` upload | applicable, not yet wired |
-  | JMAP | an `Email/set` object — the server renders the MIME | not applicable: there are no bytes to wrap |
-
 - SMTP per-recipient acceptance/rejection before DATA must be represented.
 - Sent folder placement must reconcile by generated Message-ID.
 - Mail mutations (mark-read/flag, move, delete) are one provider-neutral method, `edit_mail(account, &MailEdit) -> MailEditReceipt`, gated by the `mail_writes` capability (distinct from read `mail`, like `calendar_writes` vs `calendars`). `MailEdit` mirrors the three independent mail axes (`modeling.md`): `SetKeywords{add,remove}` (the `$seen`/`$flagged` state), `MoveTo{destination}` (membership — and the mechanism behind a Trash "delete"), and `Delete` (permanent). It is outbox-driven by `engine_sync::edit_mail`, exactly like the calendar writes. JMAP maps all three to one `Email/set` (keywords/mailboxIds patch or `destroy`); IMAP maps them to `UID STORE`, `UID MOVE`, and `UID STORE \Deleted` + `UID EXPUNGE`. A stale target (an IMAP UID under a changed `UIDVALIDITY`) is a `Conflict` → re-sync then retry. (Shape + capability + trait method **implemented** in `engine-provider`; the IMAP adapter implements it — `imap-smtp.md` — as does the JMAP adapter, folding all three edits onto one `Email/set` — `jmap.md`.)
@@ -351,7 +625,10 @@ byte fetch, and the client picks between them by origin.
 **The guard is about who named the URL, not about which origin it is.** A host named by
 *content* never gets the credential. A host the account's **own server** redirects
 discovery to is the opposite case: it is that server saying where its resources live.
-`provider-jmap`'s `fetch_session` adopts the new origin and the credential follows;
+`provider-jmap`'s `fetch_session` adopts the new origin and the credential follows, through
+the same checks as every JMAP request (`engine_http::AuthenticatedClient`): no credential over
+plaintext HTTP except to loopback from an account configured on loopback, and none to an origin the account's
+`CredentialSource` does not permit (`docs/design/credential-source.md`, "Host binding");
 `provider-caldav` trusts it and sends the credential once it asks with a `401` challenge
 (`DavExecutor::trust_origin`, RFC 9110 §11.5). Both adapters resolve a `Location`
 against the URL that issued it (RFC 9110 §10.2.2, `engine_provider::redirect_target`) and
@@ -360,6 +637,56 @@ taken over TLS instead: a server behind a TLS-terminating proxy builds its redir
 were served in plaintext, and the host has just answered over TLS. Resolving a redirect against the *configured base* instead
 is what one of these adapters shipped: it turned a provider whose apex redirects to its
 mail host into an unconnectable account.
+
+**When no credential could be had, the error says so, on every adapter and every operation.**
+`ProviderError::is_credential_failure()` is `true` when the credential source failed or did not
+answer within its deadline, did not permit the origin, or the engine refused to present the
+credential (plaintext off loopback, an origin discovery would move to that the credential may not
+go to, a kind or a byte the protocol cannot carry, another account than the connection pool's).
+Every HTTP adapter checks its credential before it goes on a header, in one place:
+`engine_http::present_token` takes a token of visible ASCII only (RFC 6750's `b64token` and the
+wider tokens real issuers mint), and `present_basic` refuses a username holding a colon (RFC 7617
+§2) or a control character in either part. Without the check a token holding CR, LF or a byte
+past ASCII failed every send as a `Retryable` transport error. IMAP's `LOGIN` checks its quoted
+strings the same way (`imap-smtp.md`).
+The class stays the source's. A host tells a source's `Retryable` (a token endpoint or broker
+that cannot be reached) from a transport's this way, and does not drop a sound connection for
+it. It is set once, by `CredentialFailure` (`engine-provider`, `credential/ask.rs`), never by an
+adapter; the adapters only pass it through (`docs/design/credential-source.md`, "Where the
+failure lies"):
+
+| Adapter | Where it reaches `ProviderError` | Paths that reword and keep it |
+|---|---|---|
+| IMAP, SMTP, ManageSieve | `ImapError::Credential`, passed through as the source gave it | a fetch batch's copy for each message (`fetch_batch.rs`); a fetch is not repeated on a new connection after one |
+| JMAP | `JmapError::Credential` | an import's failure for each message and the batch's `not_sent`; a held-back `Blob/get`'s answer for each message |
+| CalDAV, CardDAV, Talk | `CalDavError::Credential`, discovery's refused origins included | `content_free` on the import and collection paths |
+| Graph | `GraphError::Credential`, a submission's and a write's included | none |
+| Google | `GoogleError::Credential`; the Gmail IMAP half as IMAP | the IMAP bodies' copy for each message not yet answered |
+
+A server refusing a credential, or offering no way to present one, is not this fact: it is the
+server's answer, and a host reads its class.
+
+**Why no credential could be had is said too,** for a host to word its answer:
+`ProviderError::credential_failure()` is a `CredentialFailureKind`, set by the same constructor
+that marks the failure and the same on every adapter. `Source`: the source failed or missed its
+deadline, and the class says what to do. `Insecure`: the credential would leave TLS because the
+configured address is plaintext off loopback; the person gives the account a secure address.
+`LedToInsecure`: the credential would leave TLS on another address, from a configured address
+the rule accepts (plaintext off loopback reached by discovery, a session or a link, or a CalDAV
+shared principal the host stored in plaintext; plaintext loopback named to an account on
+`https`; or a redirect from HTTPS to plaintext on another host or port, or back to the URL that
+issued it); usually the server's operator serves that address over TLS, or the account is
+pointed straight at a secure address for the same service where one exists, or the host replaces
+a stored principal by discovering again. No password prompt can help either.
+`NotPermitted`: the host's policy refuses the origin (`permits`, the deprecated credential-host
+policy), on the configured address or one the server led to; the policy or the address changes.
+`Form`: the credential cannot be presented as it is (a kind the protocol cannot carry, a byte it
+cannot frame, a Basic username with a colon, a password JMAP re-frames as a token that holds a
+space); the person changes the stored credential. `Account`: the source answered for another
+account than the pool's, a host's mistake. A rules receipt's `RuleWriteFailure::credential_failure`
+stays a flag: the write reads the rules first with the same credential, so a refusal there ends
+it with its kind, and a later request's refusal is reported by the flag alone
+(`docs/design/credential-source.md`).
 
 Placeholder substitution into a URL **template** (RFC 8620 §6.2 `downloadUrl`) has the
 same shape of hazard: percent-encode every substituted value (RFC 6570 level-1 simple

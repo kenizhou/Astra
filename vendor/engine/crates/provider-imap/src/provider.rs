@@ -18,20 +18,21 @@ use std::{
 use async_trait::async_trait;
 use engine_core::{
     ids::{AccountId, MailboxId, ProviderKey, SharedAccountId},
-    mail::{Mailbox, Message},
-    sync::{SyncScope, SyncState, SyncUpdate, SyncWindow},
+    mail::{Mailbox, Message, MessageMetadata},
+    sync::{MailboxWindows, SyncScope, SyncState, SyncUpdate, SyncWindow, Widening},
     time::CalendarDate,
 };
 use engine_provider::{
-    CalendarWrites, ConnectionInfo, Draft, EmailStream, MailEdit, MailEditReceipt, MailboxEdit,
-    MailboxEditReceipt, MailboxWrites, MessageReport, Provider, ProviderError, ProviderResult,
-    ReportReceipt, ScopeSync, SharedAccount, SharedAccounts, SourceStream, SubmissionReceipt,
+    CalendarSync, CalendarWrites, ConnectionInfo, Draft, DraftReceipt, EmailStream, MailEdit,
+    MailEditReceipt, MailboxEdit, MailboxEditReceipt, MailboxWrites, MessageReport, Provider,
+    ProviderError, ProviderResult, ReportReceipt, ScopeSync, SharedAccount, SharedAccounts,
+    SourceStream, SubmissionReceipt,
 };
-use futures_util::StreamExt;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::{
     filing::SmtpSender,
+    managesieve::Sieve,
     pool::{ImapPool, PooledConnection},
     store::Namespaces,
 };
@@ -47,13 +48,10 @@ pub struct ImapProvider<S> {
     /// `pub(crate)` so the [`crate::filing`] submission/draft helpers (split out to keep this
     /// file under the size limit) can borrow a session.
     pub(crate) pool: Arc<ImapPool<S>>,
-    mailbox: MailboxId,
+    pub(crate) mailbox: MailboxId,
     /// The resolved SMTP transport, or `None` when submission is unconfigured.
     /// `pub(crate)` so [`crate::filing`] (which owns the submission dispatch) reads it.
     pub(crate) smtp: Option<Arc<SmtpSender>>,
-    /// The host-installed MIME wrapper submissions consult when a draft asks for
-    /// crypto; `pub(crate)` for the same reason as `smtp`.
-    pub(crate) mime_wrapper: Option<Arc<dyn engine_provider::MimeWrapper>>,
     /// The sync-depth window floor: when set, a snapshot fetches only mail delivered
     /// on or after this date (`ImapConfig::with_since`). `None` syncs the whole mailbox.
     since: Option<time::Date>,
@@ -69,6 +67,9 @@ pub struct ImapProvider<S> {
     /// (`crate::folders`) — never at connect, which most providers would pay for nothing —
     /// and shared by every provider of the account, so the login asks once.
     pub(crate) namespaces: Arc<OnceLock<Namespaces>>,
+    /// The account's rules and out-of-office reply over ManageSieve, where the host configured it
+    /// and it answered when the account connected (`crate::managesieve`).
+    sieve: Option<Arc<dyn Sieve>>,
 }
 
 impl<S> core::fmt::Debug for ImapProvider<S> {
@@ -85,12 +86,10 @@ impl<S> core::fmt::Debug for ImapProvider<S> {
 impl<S> ImapProvider<S> {
     /// A provider bound to `mailbox`, borrowing from `pool`. The account computes the rest once
     /// for all of its providers (`crate::account`).
-    #[allow(clippy::too_many_arguments)] // the account facts a provider borrows are all distinct
     pub(crate) fn new(
         pool: Arc<ImapPool<S>>,
         mailbox: MailboxId,
         smtp: Option<Arc<SmtpSender>>,
-        mime_wrapper: Option<Arc<dyn engine_provider::MimeWrapper>>,
         since: Option<time::Date>,
         connection_info: ConnectionInfo,
         shared_account: Option<SharedAccountId>,
@@ -100,12 +99,18 @@ impl<S> ImapProvider<S> {
             pool,
             mailbox,
             smtp,
-            mime_wrapper,
             since,
             connection_info,
             shared_account,
             namespaces,
+            sieve: None,
         }
+    }
+
+    /// Offers the account's rules and reply through `sieve` (builder-style).
+    pub(crate) fn with_sieve(mut self, sieve: Option<Arc<dyn Sieve>>) -> Self {
+        self.sieve = sieve;
+        self
     }
 
     /// Wraps an already-open, logged-in connection bound to `mailbox` (mail only), in an
@@ -151,6 +156,46 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static> ImapProvider<S> 
 
 #[async_trait]
 impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static> Provider for ImapProvider<S> {
+    /// IMAP imports by `APPEND` (`crate::import`), so a host holding this adapter as a
+    /// `dyn Provider` reaches it here.
+    #[cfg(feature = "import")]
+    fn mail_importer(&self) -> Option<&dyn engine_provider::import::MailImporter> {
+        Some(self)
+    }
+
+    /// Over ManageSieve, where the host configured it ([`ImapConfig::with_managesieve`]) and the
+    /// last probe of its greeting succeeded (at connect, or beside a later dial after a failure
+    /// that may pass or `ImapAccount::invalidate`); never for a shared mail store, whose rules are
+    /// its owner's. `Some` says the service answered, not that signing in works: no credential
+    /// was presented, so a credential ManageSieve does not carry, or a token where the server
+    /// offers only `PLAIN`, fails at the first call.
+    ///
+    /// [`ImapConfig::with_managesieve`]: crate::ImapConfig::with_managesieve
+    fn mail_rules(&self) -> Option<&dyn engine_provider::MailRules> {
+        self.sieve
+            .as_deref()
+            .filter(|sieve| sieve.offered().is_some())
+            .map(|sieve| sieve as &dyn engine_provider::MailRules)
+    }
+
+    /// As [`mail_rules`](Self::mail_rules), where the server also listed `vacation`: the reply is
+    /// a rule of the same script, sharing its version. The same caveat on signing in holds.
+    fn vacation(&self) -> Option<&dyn engine_provider::Vacation> {
+        self.sieve
+            .as_deref()
+            .filter(|sieve| sieve.offered() == Some(true))
+            .map(|sieve| sieve as &dyn engine_provider::Vacation)
+    }
+
+    /// As [`mail_rules`](Self::mail_rules): rules and the reply imported over the same script.
+    #[cfg(feature = "import")]
+    fn rules_importer(&self) -> Option<&dyn engine_provider::import::RulesImporter> {
+        self.sieve
+            .as_deref()
+            .filter(|sieve| sieve.offered().is_some())
+            .map(crate::managesieve::Sieve::importer)
+    }
+
     /// The negotiated facts, and as many overlapping body fetches as the account has worker
     /// connections for right now: each fetch borrows its own from the pool, so the width is the
     /// pool's, less the connections its watches hold. Read per call, because it moves as
@@ -221,61 +266,33 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static> Provider for Ima
         &'a self,
         _account: &'a AccountId,
         cursor: Option<&'a SyncState>,
-        window: SyncWindow,
+        window: MailboxWindows,
         fetch_batch: usize,
         chunk_size: usize,
     ) -> EmailStream<'a> {
-        // An unbounded caller window falls back to the construction cutoff
-        // (`with_since`), so a provider built with a depth still windows its streamed
-        // backfill; an explicit per-sync window overrides it.
+        // The bound mailbox fetches under its own window. An unbounded one falls back to the
+        // construction cutoff (`with_since`), so a provider built with a depth still windows
+        // its streamed backfill; an explicit per-sync window overrides it.
+        let window = window.window_for(&self.mailbox);
         let window = if window.is_bounded() {
             window
         } else {
             self.default_sync_window()
         };
-        Box::pin(async_stream::stream! {
-            let mut connection = match self.session().await {
-                Ok(connection) => connection,
-                Err(err) => {
-                    yield Err(err);
-                    return;
-                }
-            };
-            // A provider scoped to a shared store syncs that store's folders only. Binding any
-            // other folder to it would put that folder's mail in the shared mailbox's account
-            // — refused, not synced.
-            if self.shared_account.is_some()
-                && let Err(refusal) = self.check_in_store(&mut connection, &self.mailbox).await
-            {
-                connection.discard();
-                yield Err(refusal);
-                return;
-            }
-            // The stream holds its connection for as long as it lives, and hands it back
-            // healthy only if every item was: a pass that failed mid-way has left the session
-            // in a state no one should inherit. One abandoned mid-fetch parks normally — the
-            // connection drains the leftover response before its next command.
-            let mut failed = false;
-            {
-                let pass = crate::stream::stream_email(
-                    &mut connection,
-                    Some(&self.pool),
-                    &self.mailbox,
-                    cursor,
-                    window,
-                    fetch_batch,
-                    chunk_size,
-                );
-                futures_util::pin_mut!(pass);
-                while let Some(item) = pass.next().await {
-                    failed = item.is_err();
-                    yield item;
-                }
-            }
-            if failed {
-                connection.discard();
-            }
-        })
+        self.folder_stream(cursor, window, fetch_batch, chunk_size)
+    }
+
+    /// Fetches the bound folder's band of `widening` (`crate::band`): only the older mail the
+    /// wider window adds, keeping the delta cursor, its position checkpointed at each fetch group.
+    fn widen_email<'a>(
+        &'a self,
+        _account: &'a AccountId,
+        cursor: &'a SyncState,
+        widening: &'a Widening,
+        fetch_batch: usize,
+        chunk_size: usize,
+    ) -> EmailStream<'a> {
+        self.band_stream(cursor, widening, fetch_batch, chunk_size)
     }
 
     /// Submits `draft` over the configured SMTP transport and files the sent copy in
@@ -309,8 +326,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static> Provider for Ima
         self.refile(draft).await
     }
 
-    /// Stores a draft in the account's `\\Drafts` folder (`APPEND`), removing the copy it
-    /// supersedes.
+    /// Stores a draft in the account's `\\Drafts` folder (`APPEND`, carrying the keywords the
+    /// folder keeps), removing the copy it supersedes.
     ///
     /// A thin borrow-and-call, like [`Provider::edit_mail`]: the ordering rule that decides
     /// whether a partial failure duplicates a draft or loses one lives in `crate::drafts`,
@@ -320,10 +337,13 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static> Provider for Ima
         _account: &AccountId,
         draft: &Draft,
         replacing: Option<&ProviderKey>,
-    ) -> ProviderResult<ProviderKey> {
+        metadata: &MessageMetadata,
+    ) -> ProviderResult<DraftReceipt> {
         let mut connection = self.session().await?;
         let result = match self.store_on(&mut connection).await {
-            Ok(store) => crate::drafts::put_draft(&mut connection, &store, draft, replacing).await,
+            Ok(store) => {
+                crate::drafts::put_draft(&mut connection, &store, draft, replacing, metadata).await
+            }
             Err(err) => Err(err),
         };
         connection.settle(result)
@@ -419,6 +439,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static> Provider for Ima
     }
 }
 
+impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static> CalendarSync for ImapProvider<S> {}
+
 /// Changes the folder tree of the store this provider covers (`CREATE`, `RENAME`, `DELETE`)
 /// over a pooled session.
 ///
@@ -431,9 +453,13 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static> MailboxWrites fo
         _account: &AccountId,
         edit: &MailboxEdit,
     ) -> ProviderResult<MailboxEditReceipt> {
+        let capabilities = self.connection_info().capabilities;
         let mut connection = self.session().await?;
         let result = match self.store_on(&mut connection).await {
-            Ok(store) => crate::mailbox_write::edit_mailbox(&mut connection, &store, edit).await,
+            Ok(store) => {
+                crate::mailbox_write::edit_mailbox(&mut connection, &store, edit, &capabilities)
+                    .await
+            }
             Err(err) => Err(err),
         };
         connection.settle(result)

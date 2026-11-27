@@ -76,7 +76,10 @@ are split escape-aware so the writer and the parser agree.
   `reqwest` implementation), `request` (the PROPFIND/REPORT bodies),
   `discovery`/`calendar` (principal → home → collection listing), `sync` (the
   `sync-collection` REPORT snapshot/delta logic), `write` (the conditional
-  `PUT`/`DELETE` of event resources), `provider` (the `Provider` impl).
+  `PUT`/`DELETE` of event resources), `provider` (the `Provider` impl),
+  `calendar_create` (`MKCALENDAR`) and `calendar_import` (the `import` feature; "Import" below),
+  `contact_create` and `contact_import` beside them, and `dav_import`, what an import's
+  `PUT`, `UID` lookup and collection properties answer, read once for both.
 
 ## How CalDAV differs from JMAP (the shape)
 
@@ -225,11 +228,22 @@ are split escape-aware so the writer and the parser agree.
   origin (`DavExecutor::settle_on`): iCloud answers the principal on `caldav.icloud.com` and
   names the home on `pNN-caldav.icloud.com`, and every collection href the home returns is
   relative to the latter. `crates/provider-caldav/README.md` draws the whole walk.
-  A host may also confine the credential with a `CredentialHosts` policy
-  (`CalDavConfig::with_credential_hosts`, the same on `CardDavConfig`): the configured base URL
-  and every origin discovery is led to must be a host it permits, or the connect fails before
-  anything is sent there. Which hosts qualify is the host's decision; for an OAuth token it is the token
-  issuer's resources, which this adapter knows nothing of.
+  The credential is never held: every request that carries it goes through the account's
+  `engine_http::AuthenticatedClient`, which asks the account's `CredentialSource` for it then
+  (`CalDavConfig::from_credential_source`, the same on `CardDavConfig`; `new` wraps a fixed
+  credential), and on a `401` to a request that carried it, whose challenge offers its scheme or
+  none, asks once for a replacement and sends the request once more
+  (`docs/design/credential-source.md`). The configured start and every origin discovery is led
+  to must be admitted (`AuthenticatedClient::admits`): plaintext only from a loopback account to
+  loopback, and only where the source's `permits` agrees, or the connect fails before anything
+  is sent there, as a `Permanent` credential failure (so `ProviderError::is_credential_failure`
+  says so, as on JMAP): `Insecure` where the configured server is plaintext off loopback,
+  `LedToInsecure` where discovery was led to plaintext from one the rule accepts, `NotPermitted`
+  where the source refuses. Which hosts qualify is the host's
+  decision; for an OAuth token it is the token issuer's resources, which this adapter knows
+  nothing of. The older `CredentialHosts` policy (`with_credential_hosts`) is deprecated and
+  still consulted beside `permits`; both must agree.
+  `Talk` (`TalkMeetings::from_credential_source`) sends through the same client.
   CalDAV emits no `Authenticated` step —
   credentials ride on every `PROPFIND` to an answered origin, so there is no discrete
   authentication exchange to observe — and no `TlsEstablished`, because an HTTP adapter learns its TLS
@@ -444,7 +458,7 @@ the user's `calendar-home-set` never names. It is offered through the neutral
   its own copy the moment the organizer writes, and an unconditional `PUT` would erase it
   along with whatever the server had recorded about delivery. A `412` is the same
   `Conflict` as any other precondition failure — re-read and decide, never a blind retry.
-  Live on both servers (`tests/common/imip.rs`).
+  Live on Stalwart, SabreDAV and Nextcloud (`tests/common/imip.rs`).
 - **Optimistic concurrency uses the strongest scheduling revision available.** It
   advertises `Capabilities::calendar_writes(WriteGuard::Enforced)` — the *other* calendar
   transport cannot (`jmap.md`), which is why the guard is a capability a host reads rather
@@ -536,10 +550,21 @@ the user's `calendar-home-set` never names. It is offered through the neutral
     the event vanished.
 
   `CalDavProvider::event_href` mints the conventional `<collection>/<uid>.ics` resource href
-  for a create (percent-encoding the `UID` as one path segment) from the draft's `UID`; a
-  patch/delete reuses the stored `EventId`. A create lands in the calendar its draft names,
-  by the href the listing gave it; a bare name is refused, since it would be a second id for
-  a listed calendar, keyed to a scope of its own.
+  for a create (percent-encoding the `UID` as one path segment, its `@` left as it is) from the
+  draft's `UID`; a patch/delete reuses the stored `EventId`. The `@` stays because Stalwart,
+  SabreDAV and Nextcloud all list an object `PUT` to `uid%40example.com.ics` as
+  `uid@example.com.ics` (observed live), so the id a create answers is the id sync reports. A
+  name longer than 255 bytes is replaced by `sha256-<hex>` of the `UID`: Nextcloud stores a
+  255-byte name and answers a 260-byte one `500` (measured), while Stalwart and the SabreDAV fixture
+  took 1,004 (`href::resource_name`). A host that holds a `dyn Provider` asks the same rule
+  through `CalendarWrites::new_event_id(calendar, uid)` before a document create
+  (`EventWrite::creating`), and never mints the href itself: a copy of the rule drifts. A host
+  copy that encoded the `@` read the event back under an id no server lists: `common::imip`
+  asserts on all three servers that the event is listed under the minted id, and failed on all
+  three with the encoding swapped in. The minted id names only copies written under this rule; a
+  copy an auto-scheduling server filed sits at its own href (below), found by `UID`. A create
+  lands in the calendar its draft names, by the href the listing gave it; a bare name is
+  refused, since it would be a second id for a listed calendar, keyed to a scope of its own.
 - **The new `ETag` is read back where the server supplies it.** A successful PUT returns the
   resource's new entity tag in the `ETag` response header (RFC 4791 §5.3.4), surfaced on the
   receipt as `revisions`; when the server omits it the receipt carries an empty
@@ -590,6 +615,57 @@ the user's `calendar-home-set` never names. It is offered through the neutral
     holds for a reserializing server and a byte-verbatim one alike. Its last leg is the
     point: the second edit's `If-Match` comes from the store, and without the reconcile the
     server refuses it with the `412` this issue is named for.
+
+## Import
+
+`CalDavProvider` is a `CalendarImporter` (behind this crate's `import` feature) and a
+`CalendarCollections` (`docs/design/calendar-and-contact-import.md` has the design and the live
+survey; `providers.md` → "Import" the contract).
+
+- **Creating a calendar** is one `MKCALENDAR` (`calendar_create.rs`) with `displayname`,
+  `calendar-description` and the Apple `calendar-color` (all three servers keep all three), under a
+  fresh 128-bit path segment, then the collection read back with the listing's `PROPFIND`: that
+  `Calendar` is the answer. A lost answer is "may be stored"; a read-back that fails after a `201`
+  is too, since the calendar exists.
+- **Importing an event** (`calendar_import.rs`) is: `engine_ical::import_object` (one event with
+  one `UID`; every `ORGANIZER` and `ATTENDEE` outside an alarm marked `SCHEDULE-AGENT=CLIENT`,
+  overrides included; other `SCHEDULE-AGENT` spellings, `SCHEDULE-FORCE-SEND` and `METHOD`
+  dropped; every other byte kept; anything it cannot read for certain refuses the object), the
+  calendar's `max-resource-size` checked on the rewritten text, the `UID` looked up with a
+  `calendar-query` (keeping only exact matches, since `text-match` matches substrings), then one
+  `PUT` with `If-None-Match: *` to `event_href`.
+- **Offered only where silence is promised**: `calendar_importer()` is `Some` when the home
+  advertises `calendar-auto-schedule` (RFC 6638 §7.1 binds such a server to honour the
+  parameter), or when it advertises none and the principal lists no `schedule-inbox-URL` or
+  `schedule-outbox-URL`, read by the discovery `PROPFIND` (nothing can be sent: the SabreDAV
+  fixture). Scheduling collections without the advertisement, or a principal discovery never
+  asked, answer `None` (`docs/design/calendar-and-contact-import.md`, "Where silence is promised").
+- **Already there** is three answers from the server, and the lookup: a held `UID` found by the
+  lookup; a bare `412` on our own name whose object, read back, has our `UID` (an earlier attempt
+  of this import; another `UID` there is a `Conflict`); and `no-uid-conflict` in a `403`
+  (Stalwart) or a `409` (Nextcloud), each naming the holder. SabreDAV stores a second
+  object with a held `UID` (`docs/spec-deviations.md`, SABREDAV-1), which is why the lookup runs on
+  every server: nothing tells the two kinds apart. Measured per lookup, 1,000 events in the
+  calendar: Stalwart ~10 ms, SabreDAV ~65 ms and growing with the calendar, Nextcloud ~390 ms (its
+  per-request cost).
+- **Refusals are judged once** (`CalDavError::write_refusal`, `error.rs`), for the import and the
+  sync create alike: an object precondition, `400`, `413` or `415` is the object's
+  (`item_unavailable`); `507` or `quota-not-exceeded`, `404` or a bare `409`, and a `403` naming
+  `need-privileges` or nothing are the calendar's (`ProviderError::refused_by_target` with
+  `StorageFull`, `NoSuchContainer`, `ReadOnlyContainer`); Stalwart's `400` concurrency refusal is
+  a throttle. Errors carry a class and a status, never the server's text.
+- **The import cursor** is the calendar's `sync-token`, or `ctag:<getctag>` where it has none: what
+  `sync_events` deltas from.
+- **Silence is proven live** on Stalwart with a control (`tests/scheduling/import.rs`): the plain
+  create of a meeting reaches the attendee's calendar, scheduling inbox and mailbox; the import of
+  the same meeting reaches none of them. The attendee's direction has no control there: Stalwart
+  sent the organizer no `REPLY` when the attendee stored an accepted copy plainly. The stored
+  object keeps `SCHEDULE-AGENT=CLIENT`, so the server never schedules that meeting later either
+  while a client keeps the parameter.
+- **Live on all three servers**: `tests/common/import.rs` (create, import, re-import, a `UID`
+  another client stored, the delta from the cursor), run in the scratch account Bob's home by
+  `tests/scheduling/import.rs` (in the `live_caldav` binary), and by `live_sabredav.rs` and
+  `live_nextcloud.rs`. All three need the `import` feature (`--all-features`).
 
 ## iMIP scheduling
 
@@ -770,10 +846,11 @@ what a client would assume:
   answers `429` with a `Retry-After` — 31 seconds, observed — and since the engine stopped
   sleeping through a wait that long, a `connect` or a sync that meets one fails with
   `FailureClass::RateLimited` and the instant attached (`http-throttling.md`). That is the
-  intended contract, not a regression: the caller comes back when the server said. It shows
-  up in this crate's own live suites because `tests/live_concurrency.rs` drains that limiter
-  by design, which is why it now cools down on the way out and why `tests/live_contacts.rs`
-  honours the instant at connect — the smallest version of what a host does.
+  intended contract, not a regression: the caller comes back when the server said. The
+  harness raises that limit (1,000 requests a minute per account as shipped) out of the live
+  suites' way, so only `tests/live_concurrency.rs` meets it: it sets Stalwart's own limit back
+  for its run and raises it again after (`stalwart-harness.md`). `tests/live_contacts.rs`
+  still honours the instant at connect — the smallest version of what a host does.
 
 - **iTIP/iMIP inbound parse + RSVP are implemented; delivery/persistence wiring is
   staged.** `engine_core::scheduling` (keys, `SEQUENCE` ordering, the trust
@@ -793,19 +870,19 @@ what a client would assume:
   still the caller's job is *building* the `REPLY` object — the engine has no
   `Event` → iTIP serializer, and the answer keys to a `UID`/`SEQUENCE` only the caller
   holds.
-- **Only event object resources are written, not collections.** Creating or
-  deleting a *calendar collection* (`MKCALENDAR`, RFC 4791 §5.3.1; collection
-  `DELETE`) is out of scope — the write slice manages event resources within an
-  existing collection. The host provisions calendars out of band.
+- **A calendar is created, never renamed or deleted.** `MKCALENDAR` backs
+  `CalendarCollections::create_calendar` ("Import" above); renaming a calendar or deleting a
+  collection has no verb yet.
 - **A JSCalendar→iCalendar serializer and a structural iCal patcher are separate
   concerns.** The write carries the iCalendar body as `RawIcal`; constructing it
   for a create, and applying targeted patches to the stored raw for an update, are
   the caller's job in this slice (the engine supplies the conditional-`PUT`
   transport + outbox, not the serialization). The lossy projection is never
   re-serialized to the wire.
-- **CardDAV collection mutation is out of scope.** Existing address books and
-  group cards are readable; address-book/group create, rename, delete, and
-  membership mutation remain deferred.
+- **An address book is created, never renamed or deleted.** An extended `MKCOL`
+  (RFC 5689, `contact_create.rs`) backs `AddressBookCollections::create_address_book`, and
+  cards are imported by `contact_import.rs` (`contacts.md` → "CardDAV"); group create, rename,
+  delete and membership mutation remain deferred.
 - **Custom (non-IANA) `VTIMEZONE` expansion is staged.** A `TZID` is resolved as
   an IANA zone; a genuinely custom embedded `VTIMEZONE` is preserved in `RawIcal`
   but not parsed into the expander, so such an event stores with no occurrences

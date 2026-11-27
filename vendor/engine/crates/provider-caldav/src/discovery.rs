@@ -50,6 +50,9 @@ pub(crate) struct CalendarHome {
     /// own home; for a shared one ([`discover_shared_home`]) it is still the user's, which is
     /// what shared-store discovery starts from whichever store is bound.
     pub(crate) user: Option<String>,
+    /// Whether the principal has a scheduling inbox or outbox (RFC 6638 §2.2), when discovery
+    /// read the principal itself; `None` when the home was found without asking it.
+    pub(crate) scheduling_collections: Option<bool>,
 }
 
 /// Resolves the calendar home, starting at `start_href`.
@@ -86,6 +89,7 @@ pub(crate) async fn discover_home(
             user: principal.clone(),
             principal,
             addresses: address_set(&bootstrap),
+            scheduling_collections: None,
         });
     }
     // RFC 6764 §6: the calendar-home-set is a property of the principal resource,
@@ -106,6 +110,7 @@ pub(crate) async fn discover_home(
         user: Some(principal.clone()),
         principal: Some(principal),
         addresses: Some(address_set(&from_principal).unwrap_or(CalendarUserAddresses::NotEnabled)),
+        scheduling_collections: Some(scheduling_collections(&from_principal)),
     })
 }
 
@@ -140,6 +145,7 @@ pub(crate) async fn discover_shared_home(
         user: current_user_principal(&answer).and_then(|user| follow(exec, &at, &user).ok()),
         principal: Some(at),
         addresses: Some(address_set(&answer).unwrap_or(CalendarUserAddresses::NotEnabled)),
+        scheduling_collections: Some(scheduling_collections(&answer)),
     })
 }
 
@@ -156,13 +162,8 @@ pub(crate) fn trusted_start(
     start_href: &str,
 ) -> Result<String, CalDavError> {
     let start = exec.absolute(start_href);
-    if exec.trust_origin(&start) {
-        Ok(start)
-    } else {
-        Err(CalDavError::protocol(format!(
-            "the configured start {start:?} is a host the credential may not go to"
-        )))
-    }
+    exec.trust_origin(&start)?;
+    Ok(start)
 }
 
 /// Resolves `href`, which the response to a request at `at` named (a principal or a home),
@@ -176,18 +177,14 @@ pub(crate) fn trusted_start(
 /// # Errors
 ///
 /// Returns [`CalDavError`] when `href` cannot be resolved, or names an origin the credential
-/// may not go to (a plaintext one after TLS, or a host the credential policy refuses): going
+/// may not go to (plaintext off loopback, or one the source or the deprecated host policy
+/// refuses): going
 /// on without it would read the refusal of an unauthenticated request as the server's answer
 /// about the account.
 pub(crate) fn follow(exec: &dyn DavExecutor, at: &str, href: &str) -> Result<String, CalDavError> {
     let href = resolve_reference(at, href)?;
-    if exec.trust_origin(&href) {
-        Ok(href)
-    } else {
-        Err(CalDavError::protocol(format!(
-            "the server named {href:?}, a host the credential may not go to"
-        )))
-    }
+    exec.trust_origin(&href)?;
+    Ok(href)
 }
 
 /// Asks `principal` for the addresses the server schedules as for this user.
@@ -229,18 +226,13 @@ async fn propfind_principal(
             // without one the loop re-requests `href` and exhausts [`MAX_REDIRECTS`],
             // exactly as before.
             if let Some(location) = &response.location {
-                let next = redirect_href(&href, location).ok_or_else(|| {
-                    CalDavError::protocol(engine_provider::redirect_refused(location))
-                })?;
+                let next = redirect_href(&href, location)
+                    .ok_or_else(|| crate::href::redirect_refusal(&href, location))?;
                 observer.step(&ConnectStep::redirected(&href, &next));
                 // The account's own server moved the chain, so its target may receive the
                 // credential once it asks (`DavExecutor::trust_origin`), and is refused
                 // outright when it would leave TLS or the credential policy refuses it.
-                if !exec.trust_origin(&next) {
-                    return Err(CalDavError::protocol(
-                        "a discovery redirect left TLS or named a host the credential may not go to",
-                    ));
-                }
+                exec.trust_origin(&next)?;
                 href = next;
             }
             continue;
@@ -382,6 +374,20 @@ fn address_set(multistatus: &MultiStatus) -> Option<CalendarUserAddresses> {
     })
 }
 
+/// Whether a principal's answer names a scheduling inbox or outbox (RFC 6638 §2.2.1, §2.2.2).
+fn scheduling_collections(multistatus: &MultiStatus) -> bool {
+    multistatus.responses.iter().any(|response| {
+        ["schedule-inbox-url", "schedule-outbox-url"]
+            .into_iter()
+            .any(|name| {
+                response
+                    .props
+                    .hrefs(name)
+                    .is_some_and(|hrefs| !hrefs.is_empty())
+            })
+    })
+}
+
 /// Reads the first `current-user-principal` href from a discovery response.
 fn current_user_principal(multistatus: &MultiStatus) -> Option<String> {
     multistatus.responses.iter().find_map(|response| {
@@ -395,6 +401,10 @@ fn current_user_principal(multistatus: &MultiStatus) -> Option<String> {
 #[cfg(test)]
 #[path = "discovery_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "discovery_scheduling_tests.rs"]
+mod scheduling_tests;
 
 #[cfg(test)]
 #[path = "home_origin_tests.rs"]

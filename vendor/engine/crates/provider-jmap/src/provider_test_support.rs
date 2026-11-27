@@ -17,12 +17,16 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use engine_core::ids::BlobId;
 use reqwest::Url;
 use serde_json::{Value, json};
 
 use super::*;
+// What the sibling test modules named through `provider`'s imports before the adapter handle
+// moved to `crate::adapter`; they reach them through this module's glob.
+pub(crate) use crate::{error::JmapError, executor::Executor, request::Request};
 use crate::{
-    request::Response,
+    response::Response,
     session::{Session, SessionUrlPolicy},
 };
 
@@ -179,7 +183,7 @@ impl Executor for FakeExecutor {
             .ok_or_else(|| JmapError::status(404, "no blob"))
     }
 
-    async fn upload(&self, url: &str, media_type: &str, bytes: &[u8]) -> Result<String, JmapError> {
+    async fn upload(&self, url: &str, media_type: &str, bytes: &[u8]) -> Result<BlobId, JmapError> {
         self.uploads
             .lock()
             .unwrap()
@@ -188,6 +192,7 @@ impl Executor for FakeExecutor {
             .lock()
             .unwrap()
             .pop_front()
+            .map(|id| BlobId::try_from(id.as_str()).expect("a canned blob id"))
             .ok_or_else(|| JmapError::status(413, "no upload slot"))
     }
 
@@ -219,7 +224,7 @@ impl Executor for Arc<FakeExecutor> {
         (**self).download(url).await
     }
 
-    async fn upload(&self, url: &str, media_type: &str, bytes: &[u8]) -> Result<String, JmapError> {
+    async fn upload(&self, url: &str, media_type: &str, bytes: &[u8]) -> Result<BlobId, JmapError> {
         (**self).upload(url, media_type, bytes).await
     }
 
@@ -254,4 +259,19 @@ pub(crate) fn message_with_blob(id: &str, blob: &str) -> engine_core::mail::Mess
     );
     message.blob_id = Some(BlobId::try_from(blob).unwrap());
     message
+}
+
+/// Carol's scripts with the reply's state beside them, as the adapter lists them for the rules
+/// and the reply: the captured `SieveScript/get` (`sieve_get_rules_and_reply_response.json`, the
+/// rules running, the reply's script beside them) and the `VacationResponse/get` answer at the
+/// same state, as Stalwart answers both in one request
+/// (`sieve_listing_with_reply_state_response.json`).
+pub(crate) fn sieve_listing() -> Value {
+    let mut doc = fixture("sieve_get_rules_and_reply_response.json");
+    let state = doc["methodResponses"][0][1]["state"].clone();
+    let mut reply =
+        fixture("sieve_listing_with_reply_state_response.json")["methodResponses"][1].clone();
+    reply[1]["state"] = state;
+    doc["methodResponses"].as_array_mut().unwrap().push(reply);
+    doc
 }

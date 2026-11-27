@@ -111,7 +111,6 @@ pub(in crate::contract) async fn a_send_that_failed_stays_listed_until_the_host_
                 PendingOutcome::Failed {
                     class: FailureClass::Retryable,
                     retry_after: None,
-                    detail: String::new(),
                 },
             )
             .await
@@ -130,7 +129,6 @@ pub(in crate::contract) async fn a_send_that_failed_stays_listed_until_the_host_
             PendingOutcome::Failed {
                 class: FailureClass::Permanent,
                 retry_after: None,
-                detail: String::new(),
             },
         )
         .await
@@ -158,7 +156,6 @@ pub(in crate::contract) async fn a_send_that_failed_stays_listed_until_the_host_
             PendingOutcome::Failed {
                 class: FailureClass::Authentication,
                 retry_after: None,
-                detail: String::new(),
             },
         )
         .await
@@ -201,7 +198,6 @@ pub(in crate::contract) async fn a_send_that_failed_stays_listed_until_the_host_
             PendingOutcome::Failed {
                 class: FailureClass::Permanent,
                 retry_after: None,
-                detail: String::new(),
             },
         )
         .await

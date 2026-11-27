@@ -55,7 +55,7 @@ impl Provider for FakeJmap {
         &'a self,
         _account: &'a AccountId,
         cursor: Option<&'a SyncState>,
-        _window: SyncWindow,
+        _window: engine_core::sync::MailboxWindows,
         _fetch_batch: usize,
         _chunk_size: usize,
     ) -> EmailStream<'a> {
@@ -75,6 +75,8 @@ impl Provider for FakeJmap {
     }
 }
 
+impl CalendarSync for FakeJmap {}
+
 impl crate::MailboxWrites for FakeJmap {}
 impl CalendarWrites for FakeJmap {}
 
@@ -82,7 +84,7 @@ pub(crate) fn account() -> AccountId {
     AccountId::try_from("acct-1").unwrap()
 }
 
-fn calendar() -> CalendarId {
+pub(crate) fn calendar() -> CalendarId {
     CalendarId::new(ProviderKey::new("/cal/").unwrap())
 }
 
@@ -130,7 +132,7 @@ async fn email_stream_primitive_drives_the_drain_default() {
     // The streaming primitive: a first pass (no cursor) is a one-chunk reconciling
     // snapshot that carries the ids it covers, its progress total, and the cursor.
     let chunks: Vec<_> = provider
-        .stream_email(&account(), None, SyncWindow::full(), 50, 0)
+        .stream_email(&account(), None, SyncWindow::full().into(), 50, 0)
         .collect()
         .await;
     assert_eq!(chunks.len(), 1);
@@ -186,6 +188,8 @@ impl Provider for BareProvider {
     }
 }
 
+impl CalendarSync for BareProvider {}
+
 impl crate::MailboxWrites for BareProvider {}
 impl CalendarWrites for BareProvider {}
 
@@ -214,7 +218,7 @@ async fn box_dyn_provider_delegates_overrides_and_defaults() {
     assert_eq!(over.mailbox_scope(&account()), mailbox_scope);
     assert!(over.sync_mailboxes(&account(), None).await.is_ok());
     let chunks: Vec<_> = over
-        .stream_email(&account(), None, SyncWindow::full(), 50, 0)
+        .stream_email(&account(), None, SyncWindow::full().into(), 50, 0)
         .collect()
         .await;
     let chunk = chunks.into_iter().next().unwrap().unwrap();
@@ -252,7 +256,7 @@ async fn box_dyn_provider_delegates_overrides_and_defaults() {
     // The bare stream default yields a single classified `Err`, so a
     // capability-checking caller never relies on it.
     let stream_first = bare
-        .stream_email(&account(), None, SyncWindow::full(), 0, 0)
+        .stream_email(&account(), None, SyncWindow::full().into(), 0, 0)
         .next()
         .await
         .unwrap()
@@ -262,9 +266,14 @@ async fn box_dyn_provider_delegates_overrides_and_defaults() {
         stream_first,
         bare.sync_email(&account(), None).await.unwrap_err(),
         bare.sync_calendars(&account(), None).await.unwrap_err(),
-        bare.sync_events(&account(), &calendar(), None)
-            .await
-            .unwrap_err(),
+        bare.sync_events(
+            &account(),
+            &calendar(),
+            None,
+            crate::calendar_default_tests::whole(),
+        )
+        .await
+        .unwrap_err(),
     ];
     for err in &rejected {
         assert_eq!(err.class(), FailureClass::InvalidState);
@@ -434,34 +443,6 @@ async fn calendar_writes_default_to_unsupported() {
     {
         assert_eq!(class, FailureClass::InvalidState);
     }
-}
-
-#[tokio::test]
-async fn calendar_methods_default_to_unsupported_with_jmap_scopes() {
-    let provider = FakeJmap {
-        info: ConnectionInfo::new(Capabilities::none().with_mail()),
-    };
-    assert_eq!(
-        provider.calendar_scope(&account()),
-        SyncScope::JmapType {
-            account: account(),
-            data_type: JmapDataType::Calendar,
-        }
-    );
-    assert_eq!(
-        provider.event_scope(&account(), &calendar()),
-        SyncScope::JmapType {
-            account: account(),
-            data_type: JmapDataType::CalendarEvent,
-        }
-    );
-    assert!(provider.sync_calendars(&account(), None).await.is_err());
-    assert!(
-        provider
-            .sync_events(&account(), &calendar(), None)
-            .await
-            .is_err()
-    );
 }
 
 #[test]

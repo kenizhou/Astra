@@ -1,7 +1,7 @@
 //! The half-open UTC window `[start, end)` that bounds occurrence materialization
 //! and the range reads over it, plus the window a store has actually materialized.
 
-use super::{TimeError, TimeZoneId, UtcDateTime};
+use super::{CalendarDate, TimeError, TimeZoneId, UtcDateTime};
 
 /// The half-open UTC window `[start, end)` within which occurrences are
 /// materialized, and which a range read over them is bounded by.
@@ -34,6 +34,21 @@ impl Horizon {
         Ok(Self { start, end })
     }
 
+    /// The whole UTC days `[from, until)`: from the first instant of `from` to the first instant
+    /// of `until`, which it does not include.
+    ///
+    /// With [`CalendarDate::checked_add_days`] and [`CalendarDate::checked_months_before`], this
+    /// is how a host builds a horizon around a day without date arithmetic of its own.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TimeError::EmptyRange`] unless `from` is strictly before `until`.
+    pub fn days(from: CalendarDate, until: CalendarDate) -> Result<Self, TimeError> {
+        let midnight =
+            |date: CalendarDate| UtcDateTime::new(date.year(), date.month(), date.day(), 0, 0, 0);
+        Self::new(midnight(from)?, midnight(until)?)
+    }
+
     /// The inclusive lower bound.
     #[must_use]
     pub fn start(self) -> UtcDateTime {
@@ -60,6 +75,35 @@ impl Horizon {
             return start >= self.start && start < self.end;
         }
         start < self.end && end > self.start
+    }
+
+    /// Whether `other` lies wholly inside this window.
+    #[must_use]
+    pub fn contains(self, other: Self) -> bool {
+        self.start <= other.start && other.end <= self.end
+    }
+
+    /// The whole UTC days that cover this window, as dates `[start, end)`: the day it starts
+    /// on, and the first midnight at or after its end. For a transport that takes its window in
+    /// dates, which must never cover less than the window it was asked for.
+    #[must_use]
+    pub fn covering_dates(self) -> (CalendarDate, CalendarDate) {
+        let date = |at: UtcDateTime| {
+            CalendarDate::new(at.year(), at.month(), at.day()).expect("an instant's own date")
+        };
+        let last_second = core::time::Duration::from_secs(86_399);
+        let end = self.end.checked_add(last_second).unwrap_or(self.end);
+        (date(self.start), date(end))
+    }
+
+    /// The one window from the earlier start of `self` and `other` to the later end: the
+    /// smallest that contains both, and the days between them where they do not meet.
+    #[must_use]
+    pub fn union(self, other: Self) -> Self {
+        Self {
+            start: self.start.min(other.start),
+            end: self.end.max(other.end),
+        }
     }
 }
 
@@ -114,6 +158,62 @@ mod tests {
             Horizon::new(at("2026-07-13T00:00:00Z"), instant),
             Err(TimeError::EmptyRange)
         );
+    }
+
+    #[test]
+    fn a_horizon_of_days_runs_from_midnight_to_midnight() {
+        let date = |raw: &str| raw.parse::<CalendarDate>().unwrap();
+        let week = Horizon::days(date("2026-07-06"), date("2026-07-13")).unwrap();
+        assert_eq!(week, window());
+        assert_eq!(
+            week.covering_dates(),
+            (date("2026-07-06"), date("2026-07-13"))
+        );
+        assert_eq!(
+            Horizon::days(date("2026-07-06"), date("2026-07-06")),
+            Err(TimeError::EmptyRange)
+        );
+        assert_eq!(
+            Horizon::days(date("2026-07-13"), date("2026-07-06")),
+            Err(TimeError::EmptyRange)
+        );
+    }
+
+    #[test]
+    fn a_window_contains_itself_and_what_lies_inside_it_only() {
+        let h = window();
+        assert!(h.contains(h));
+        let inside = Horizon::new(at("2026-07-07T00:00:00Z"), at("2026-07-08T00:00:00Z")).unwrap();
+        assert!(h.contains(inside));
+        assert!(!inside.contains(h));
+        let straddling =
+            Horizon::new(at("2026-07-12T00:00:00Z"), at("2026-07-14T00:00:00Z")).unwrap();
+        assert!(!h.contains(straddling));
+    }
+
+    #[test]
+    fn the_covering_dates_round_out_to_whole_days() {
+        let date = |raw: &str| raw.parse::<CalendarDate>().unwrap();
+        assert_eq!(
+            window().covering_dates(),
+            (date("2026-07-06"), date("2026-07-13")),
+            "a window of whole days is its own dates"
+        );
+        let ragged = Horizon::new(at("2026-07-06T22:30:00Z"), at("2026-07-13T00:00:01Z")).unwrap();
+        assert_eq!(
+            ragged.covering_dates(),
+            (date("2026-07-06"), date("2026-07-14"))
+        );
+    }
+
+    #[test]
+    fn a_union_spans_both_windows_and_the_gap_between() {
+        let later = Horizon::new(at("2026-09-01T00:00:00Z"), at("2026-09-08T00:00:00Z")).unwrap();
+        let union = window().union(later);
+        assert_eq!(union.start(), at("2026-07-06T00:00:00Z"));
+        assert_eq!(union.end(), at("2026-09-08T00:00:00Z"));
+        assert_eq!(later.union(window()), union);
+        assert_eq!(window().union(window()), window());
     }
 
     #[test]

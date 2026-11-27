@@ -17,29 +17,34 @@
 //! a crash resumes from the last checkpoint instead of re-downloading from the
 //! start; a reconciling pass holds the cursor until its final chunk tombstones
 //! (rare, restarts on crash).
+//!
+//! A pass asked for more than its scope's cursor covers widens: after the delta, it streams
+//! [`Provider::widen_email`] under the same lease, and records the wider depth as covered only
+//! in a commit of its own once the band has ended (`crate::window_cursor`).
 
-use std::{collections::BTreeSet, time::Instant};
+use std::collections::BTreeSet;
 
 use engine_core::{
-    ids::{AccountId, MailboxId, ProviderKey},
-    mail::Message,
-    search_index::project_state_change,
-    sync::{SyncState, SyncUpdate, SyncWindow},
+    ids::{AccountId, MailboxId},
+    sync::{MailboxWindows, SyncScope, SyncState, Widening},
 };
-use engine_provider::{EmailChunk, PassMode, Provider};
-use engine_store::{ApplyBatch, LeaseRequest, Store, StoreError, StoreRead, SyncApplied};
-use futures_util::StreamExt;
+use engine_provider::{Provider, ProviderError};
+use engine_store::{LeaseRequest, Store, StoreError, StoreRead, SyncApplied};
 
 use crate::{
-    MAX_STALE_RECLAIMS, SyncCommit, SyncError, SyncObserver, derive_messages,
-    keep_alive::KeepAlive, mail_report::SyncTiming, recipients, sent_copies, window_cursor,
+    MAX_STALE_RECLAIMS, SyncError, SyncObserver,
+    keep_alive::KeepAlive,
+    mail_report::SyncTiming,
+    stream_drain::{Drained, Run, RunningApplied},
+    window_cursor::{self, Phase, Plan},
 };
 
 /// How a streaming sync runs: the depth window, plus how it separates network
 /// batching from commit granularity.
 ///
 /// - [`window`](Self::window): the sync-depth bound (a snapshot/backfill fetches only mail on or
-///   after it); the full history by default.
+///   after it); the full history by default. It is the account's window, with any mailbox the host
+///   deepened ([`MailboxWindows::deepen`]) held further back.
 /// - [`fetch_batch`](Self::fetch_batch): objects per provider round trip (`0` = the provider's
 ///   protocol maximum). Larger = fewer round trips.
 /// - [`chunk_size`](Self::chunk_size): objects committed and reported per chunk (`0` = one chunk
@@ -47,10 +52,10 @@ use crate::{
 ///
 /// A large `fetch_batch` with a small `chunk_size` is the sweet spot: few round
 /// trips *and* immediate row-by-row rendering.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StreamTuning {
-    /// The sync-depth window (full history by default).
-    pub window: SyncWindow,
+    /// The sync-depth window per mailbox (full history by default).
+    pub window: MailboxWindows,
     /// Objects per network round trip (`0` = provider maximum).
     pub fetch_batch: usize,
     /// Objects committed and reported per chunk (`0` = one chunk per batch).
@@ -62,7 +67,7 @@ impl StreamTuning {
     #[must_use]
     pub fn new(fetch_batch: usize, chunk_size: usize) -> Self {
         Self {
-            window: SyncWindow::full(),
+            window: MailboxWindows::default(),
             fetch_batch,
             chunk_size,
         }
@@ -73,7 +78,7 @@ impl StreamTuning {
     #[must_use]
     pub fn responsive() -> Self {
         Self {
-            window: SyncWindow::full(),
+            window: MailboxWindows::default(),
             fetch_batch: 200,
             chunk_size: 3,
         }
@@ -84,16 +89,18 @@ impl StreamTuning {
     #[must_use]
     pub fn bulk() -> Self {
         Self {
-            window: SyncWindow::full(),
+            window: MailboxWindows::default(),
             fetch_batch: 500,
             chunk_size: 100,
         }
     }
 
-    /// Bounds this tuning to a sync-depth `window` (builder-style).
+    /// Bounds this tuning to a sync-depth `window` (builder-style): a plain
+    /// [`SyncWindow`](engine_core::sync::SyncWindow) for the whole account, or
+    /// [`MailboxWindows`] to hold some mailboxes further back.
     #[must_use]
-    pub fn within(mut self, window: SyncWindow) -> Self {
-        self.window = window;
+    pub fn within(mut self, window: impl Into<MailboxWindows>) -> Self {
+        self.window = window.into();
         self
     }
 }
@@ -116,14 +123,27 @@ pub(crate) struct FolderPass<'a, S, O> {
     /// The lease every scope in this pass claims under.
     pub(crate) req: &'a LeaseRequest,
     /// Depth window, fetch batching and commit granularity.
-    pub(crate) tuning: StreamTuning,
+    pub(crate) tuning: &'a StreamTuning,
     /// Told about every committed chunk.
     pub(crate) observer: &'a O,
     /// The account's Sent mailboxes, resolved once for the whole pass.
     pub(crate) sent: &'a BTreeSet<MailboxId>,
 }
 
+/// What one folder's pass did, and whether its stored mail now reaches the depth asked.
+pub(crate) struct FolderOutcome {
+    /// What the pass applied.
+    pub(crate) applied: SyncApplied,
+    /// Whether the scope's recorded depth is now the one asked: `false` when a widening is
+    /// still to finish, on a pass fenced off by another.
+    pub(crate) reached: bool,
+}
+
 /// Streams one folder's mail into the store, filling `timing` as it goes.
+///
+/// One claim runs the plan its stored cursor calls for ([`Plan`]): a fresh pass, a delta, or a
+/// delta and then the widening to the depth asked. The delta goes first, so new mail shows before
+/// old mail and the band starts from a current cursor; both run under the one lease.
 ///
 /// Everything that is the same for every folder of a pass travels in [`FolderPass`], so what
 /// varies per call is the folder's provider, the account, and where its measurements go.
@@ -132,7 +152,7 @@ pub(crate) async fn stream_email<P, S, O>(
     account: &AccountId,
     pass: &FolderPass<'_, S, O>,
     timing: &mut SyncTiming,
-) -> Result<SyncApplied, SyncError>
+) -> Result<FolderOutcome, SyncError>
 where
     P: Provider,
     S: Store + StoreRead,
@@ -146,10 +166,13 @@ where
         sent,
     } = *pass;
     let scope = provider.email_scope(account);
+    // The depth this scope fetches under, and records with its cursor: a folder-bound scope's
+    // is its own folder's window, an account-wide one's every mailbox's (`window_cursor`).
+    let depth = depth_of(&scope, &tuning.window);
     let mut reclaims = 0u32;
     // Set when a commit was refused as stale: the cursor this pass had left, and what it applied.
     let mut fenced: Option<(Option<SyncState>, RunningApplied)> = None;
-    'restart: loop {
+    loop {
         let claimed = store
             .claim_sync_scope(account.clone(), &scope, req.clone())
             .await;
@@ -158,237 +181,132 @@ where
         // over under this pass's own window would undo the clear; the next pass takes it up.
         // A scope already held is that next pass, and this one ends rather than report busy.
         if let Some((left, applied)) = fenced.take() {
+            let ended = FolderOutcome {
+                applied: applied.into_applied(),
+                reached: false,
+            };
             match claimed {
-                Err(StoreError::ScopeHeld) => return Ok(applied.into_applied()),
+                Err(StoreError::ScopeHeld) => return Ok(ended),
                 Ok(claim) if claim.state != left => {
                     store.release_sync_scope(claim.lease).await?;
-                    return Ok(applied.into_applied());
+                    return Ok(ended);
                 }
                 _ => {}
             }
         }
         let claim = claimed?;
         let lease = claim.lease;
-        let mut keep_alive = KeepAlive::new(store, &lease, req.ttl);
-        // The cursor each pass resumes the *provider* fetch from; the store advances
-        // it per additive checkpoint, or only on the final reconcile chunk.
-        let mut left = claim.state.clone();
-        let pass_cursor = window_cursor::resume(claim.state, tuning.window);
-        let mut present: BTreeSet<ProviderKey> = BTreeSet::new();
-        // A message a chunk sends again (an IMAP backfill's settled attachment flag) is written,
-        // but counted once, so progress never runs past its total.
-        let mut counted: BTreeSet<ProviderKey> = BTreeSet::new();
-        let mut totals = RunningApplied::default();
-        let mut fetched = 0usize;
-        let mut stream = provider.stream_email(
+        let (first, widening) = Plan::new(claim.state.clone(), &depth).into_parts();
+        let mut run = Run {
+            store,
+            req,
             account,
-            pass_cursor.as_ref(),
-            tuning.window,
-            tuning.fetch_batch,
-            tuning.chunk_size,
-        );
-        loop {
-            let awaited = Instant::now();
-            let next = keep_alive.around(stream.next()).await;
-            timing.add_fetching(awaited);
-            let Some(item) = next else {
-                // The stream ended cleanly: an additive pass has committed and
-                // checkpointed its final chunk, so the cursor is already current.
+            scope: &scope,
+            tuning,
+            observer,
+            sent,
+            lease: &lease,
+            keep_alive: KeepAlive::new(store, &lease, req.ttl),
+            left: claim.state,
+            totals: RunningApplied::default(),
+        };
+        let phases = run_plan(provider, &mut run, first, widening.as_ref(), &depth, timing).await;
+        match phases {
+            Ok(Drained::Ended) => {
+                let applied = run.totals.into_applied();
                 store.release_sync_scope(lease).await?;
-                return Ok(totals.into_applied());
-            };
-            let chunk = match item {
-                Ok(chunk) => chunk,
-                Err(other) => {
-                    let _ = store.release_sync_scope(lease).await;
-                    return Err(other.into());
-                }
-            };
-            let count = chunk
-                .changed
-                .iter()
-                .filter(|message| counted.insert(message.id.key().clone()))
-                .count();
-            let repeats = chunk.changed.len() - count;
-            let total = chunk.total;
-            let is_reconcile_final = chunk.is_reconcile_final();
-            let projected = Instant::now();
-            let (update, advance_to) = build_update(chunk, tuning.window, &mut present);
-            let advance_to = advance_to.map(|cursor| window_cursor::stamp(cursor, tuning.window));
-            let mut derived = derive_messages(changed_of(&update));
-            for change in update.patched() {
-                derived.push_state_change(project_state_change(change));
+                return Ok(FolderOutcome {
+                    applied,
+                    reached: true,
+                });
             }
-            timing.add_deriving(projected);
-            let stored = Instant::now();
-            let observations =
-                match recipients::observations(store, account, &scope, &update, sent).await {
-                    Ok(observations) => observations,
-                    Err(err) => {
-                        let _ = store.release_sync_scope(lease).await;
-                        return Err(err);
-                    }
-                };
-            let confirmed =
-                match sent_copies::reconciliations(store, account, &scope, &update, sent).await {
-                    Ok(confirmed) => confirmed,
-                    Err(err) => {
-                        let _ = store.release_sync_scope(lease).await;
-                        return Err(err);
-                    }
-                };
-            let batch = ApplyBatch::with_cursor(&update, &derived, &confirmed, advance_to.as_ref())
-                .with_recipient_observations(&observations);
-            let batch = crate::read_since(batch, &lease, req);
-            let applied_result = store.apply_sync_update(&lease, batch).await;
-            timing.add_storing(stored);
-            match applied_result {
-                Ok(mut applied) => {
-                    if advance_to.is_some() {
-                        left.clone_from(&advance_to);
-                    }
-                    applied.upserted = applied.upserted.saturating_sub(repeats);
-                    totals.add(applied);
-                    fetched += count;
-                    observer.committed(&SyncCommit {
-                        scope: &scope,
-                        fetched,
-                        total,
-                        upserted: changed_of(&update),
-                        removed: removed_of(&update),
-                        tombstoned: applied.tombstoned,
-                    });
-                    if is_reconcile_final {
-                        // A reconcile pass ends on its final (tombstoning) chunk.
-                        store.release_sync_scope(lease).await?;
-                        return Ok(totals.into_applied());
-                    }
-                }
-                Err(StoreError::StaleLease) if reclaims < MAX_STALE_RECLAIMS => {
-                    // The lease was superseded mid-stream. The cursor is either
-                    // checkpointed (additive) or never advanced (reconcile), so drop
-                    // the partial stream and re-claim; the adapter re-syncs its
-                    // transport on the next fetch.
-                    reclaims += 1;
-                    drop(stream);
-                    fenced = Some((left, totals));
-                    continue 'restart;
-                }
-                Err(other) => {
-                    let _ = store.release_sync_scope(lease).await;
-                    return Err(other.into());
-                }
+            // The lease was superseded mid-stream. The cursor is either checkpointed
+            // (additive) or never advanced (reconcile), so re-claim; the adapter re-syncs
+            // its transport on the next fetch.
+            Ok(Drained::Stale) if reclaims < MAX_STALE_RECLAIMS => {
+                reclaims += 1;
+                fenced = Some((run.left, run.totals));
+            }
+            Ok(Drained::Stale) => {
+                let _ = store.release_sync_scope(lease).await;
+                return Err(StoreError::StaleLease.into());
+            }
+            Err(err) => {
+                let _ = store.release_sync_scope(lease).await;
+                return Err(err);
             }
         }
     }
 }
 
-/// Accumulates per-chunk apply results into one pass total. Every field sums across
-/// chunks: a delta's `removed` tombstones and pending-op reconciliations can land on
-/// any chunk, and a reconcile pass tombstones only on its final chunk, so summing is
-/// correct in both cases.
-#[derive(Default)]
-struct RunningApplied {
-    upserted: usize,
-    tombstoned: usize,
-    reconciled: usize,
-}
-
-impl RunningApplied {
-    fn add(&mut self, applied: SyncApplied) {
-        self.upserted += applied.upserted;
-        self.tombstoned += applied.tombstoned;
-        self.reconciled += applied.reconciled;
+/// Runs the first stream of a claimed pass and, when the plan widens, the band after it, ending
+/// with the commit that records the depth asked as covered.
+async fn run_plan<P, S, O>(
+    provider: &P,
+    run: &mut Run<'_, S, O>,
+    first: Option<SyncState>,
+    widening: Option<&Widening>,
+    depth: &MailboxWindows,
+    timing: &mut SyncTiming,
+) -> Result<Drained, SyncError>
+where
+    P: Provider,
+    S: Store + StoreRead,
+    O: SyncObserver,
+{
+    let (fetch_batch, chunk_size) = (run.tuning.fetch_batch, run.tuning.chunk_size);
+    let first_stamp = |cursor| window_cursor::stamp(cursor, depth, widening, Phase::First);
+    let stream = provider.stream_email(
+        run.account,
+        first.as_ref(),
+        depth.clone(),
+        fetch_batch,
+        chunk_size,
+    );
+    if let Drained::Stale = run.drain(stream, &first_stamp, false, timing).await? {
+        return Ok(Drained::Stale);
     }
-
-    fn into_applied(self) -> SyncApplied {
-        SyncApplied {
-            upserted: self.upserted,
-            tombstoned: self.tombstoned,
-            reconciled: self.reconciled,
-        }
-    }
-}
-
-/// Turns one chunk into the [`SyncUpdate`] to apply and the cursor to advance to.
-///
-/// - [`PassMode::Additive`]: a delta (upserts + explicit removals); advance to the chunk's
-///   checkpoint.
-/// - [`PassMode::Reconcile`]: intermediate chunks apply additively and hold the cursor while
-///   `present` accumulates; the final chunk applies a snapshot against the whole accumulated
-///   present set (tombstoning) and advances the cursor.
-///
-/// The chunk's state changes go **into the update** rather than beside it, so this driver and
-/// the whole-scope [`drain_email`](engine_provider::stream) reach the same two conclusions from
-/// the same code: a key that also arrived whole drops its patch (the object is the later word),
-/// and a snapshot carries no partials at all, because it is already the scope's whole current
-/// state. Carrying them alongside made the update an incomplete account of the pass — which is
-/// how a message moved into Sent by a state change was invisible to the recipient observations.
-fn build_update(
-    chunk: EmailChunk,
-    window: SyncWindow,
-    present: &mut BTreeSet<ProviderKey>,
-) -> (SyncUpdate<Message>, Option<SyncState>) {
-    let EmailChunk {
-        mode,
-        changed,
-        patched,
-        removed,
-        present: page_present,
-        advance_to,
-        ..
-    } = chunk;
-    let update = match mode {
-        // A delta's arrivals are new to *us* rather than recent — every protocol reports a
-        // message filed into a folder as one, and none of them can carry a date filter — so
-        // without this, mail the user asked not to keep walks back in and no later pass
-        // removes it. This is the only place that can say no: a delta has no present set, so
-        // nothing downstream ever revisits the decision.
-        PassMode::Additive => SyncUpdate::delta(admitted(changed, window), removed),
-        // A reconcile is **not** filtered here, and that is deliberate. Its `present` set is
-        // the adapter's own enumeration of the window, and the store tombstones by diffing
-        // against it, so the adapter already decided — with its server's date semantics, which
-        // are not ours. Re-deciding with a second rule can only disagree: IMAP `SINCE`
-        // compares `INTERNALDATE` in the *server's* timezone, so a message a snapshot
-        // deliberately asked for can read as out-of-window here and be dropped while its key
-        // stays in `present`. Depth on the snapshot path is the adapter's job, and
-        // `prune_account_mail_outside_window` is the backstop.
-        PassMode::Reconcile => {
-            present.extend(page_present);
-            if advance_to.is_some() {
-                SyncUpdate::snapshot(changed, core::mem::take(present))
-            } else {
-                SyncUpdate::delta(changed, removed)
-            }
-        }
+    let Some(widening) = widening else {
+        return Ok(Drained::Ended);
     };
-    (update.with_patched(patched), advance_to)
-}
-
-/// The messages a window admits, by the date the store will sort and filter them on.
-fn admitted(changed: Vec<Message>, window: SyncWindow) -> Vec<Message> {
-    if !window.is_bounded() {
-        return changed;
+    // The delta ends on a cursor, which the band keeps. A widening is planned only from a stored
+    // cursor, and a delta only ever moves one on.
+    let left = run
+        .left
+        .clone()
+        .ok_or_else(|| ProviderError::invalid_state("a widening began with no stored cursor"))?;
+    let cursor = window_cursor::provider_cursor(left);
+    let band_stamp = |cursor| window_cursor::stamp(cursor, depth, Some(widening), Phase::Band);
+    let band = provider.widen_email(run.account, &cursor, widening, fetch_batch, chunk_size);
+    if let Drained::Stale = run.drain(band, &band_stamp, true, timing).await? {
+        return Ok(Drained::Stale);
     }
-    changed
-        .into_iter()
-        .filter(|message| window.admits(message.received_at.or(message.sent_at)))
-        .collect()
+    // Only now does the covered depth become the one asked: a pass killed before this commit
+    // continues the widening rather than claim mail it did not fetch.
+    let ended = run
+        .left
+        .clone()
+        .map_or(cursor, window_cursor::provider_cursor);
+    run.record(window_cursor::stamp(ended, depth, None, Phase::First))
+        .await
+}
+/// The depth `scope` fetches under: its own folder's window where it is bound to one, else
+/// the account's with every mailbox held further back.
+fn depth_of(scope: &SyncScope, windows: &MailboxWindows) -> MailboxWindows {
+    folder_of(scope).map_or_else(
+        || windows.clone(),
+        |mailbox| MailboxWindows::new(windows.window_for(mailbox)),
+    )
 }
 
-/// The upserted objects of an update (a delta's `changed` or a snapshot's `objects`).
-fn changed_of(update: &SyncUpdate<Message>) -> &[Message] {
-    match update {
-        SyncUpdate::Delta { changed, .. } => changed,
-        SyncUpdate::Snapshot { objects, .. } => objects,
-    }
-}
-
-/// The explicitly-removed keys of an update (empty for a snapshot, whose removals
-/// are computed by present-set diff inside the store).
-fn removed_of(update: &SyncUpdate<Message>) -> &[ProviderKey] {
-    match update {
-        SyncUpdate::Delta { removed, .. } => removed,
-        SyncUpdate::Snapshot { .. } => &[],
+/// The one mailbox a mail scope is bound to, where the protocol syncs mail per folder (IMAP,
+/// Graph). `None` for a scope that holds the whole account's mail.
+pub(crate) fn folder_of(scope: &SyncScope) -> Option<&MailboxId> {
+    match scope {
+        SyncScope::ImapMailbox { mailbox, .. }
+        | SyncScope::GraphFolder {
+            folder: mailbox, ..
+        } => Some(mailbox),
+        _ => None,
     }
 }

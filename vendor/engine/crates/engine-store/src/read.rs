@@ -10,7 +10,7 @@ use engine_core::{
     mail::Keyword,
     search_index::MailRow,
     sync::SyncScope,
-    time::{ExpansionWindow, Horizon},
+    time::{ExpansionWindow, Horizon, UtcDateTime},
     version::CollectionTag,
     write::PendingOpId,
 };
@@ -159,6 +159,16 @@ pub enum MailSelector<'a> {
     /// The messages named by these provider keys. Keys not found (moved, tombstoned) are simply
     /// absent; an empty slice selects nothing.
     Keys(&'a [ProviderKey]),
+    /// The messages filed in one mailbox and dated within `[since, until)`. Undated mail has no
+    /// place in a span of time and is not selected; an empty span selects nothing.
+    Mailbox {
+        /// The mailbox the messages are filed in (among any others).
+        mailbox: &'a MailboxId,
+        /// The inclusive lower bound.
+        since: UtcDateTime,
+        /// The exclusive upper bound.
+        until: UtcDateTime,
+    },
 }
 
 /// A minimal lease-free read/inspection surface.
@@ -211,6 +221,17 @@ pub trait StoreRead: Send + Sync {
     ///
     /// Returns `StoreError::Backend` on a backend failure.
     async fn collection_tag(&self, scope: &SyncScope) -> Result<Option<CollectionTag>>;
+
+    /// The date window a windowed event scope's cursor was opened over, or `None` if no pass
+    /// has recorded one ([`ApplyBatch::fetch_window`](crate::ApplyBatch::fetch_window)).
+    ///
+    /// A lease-free read: the engine compares it with the range a host wants before claiming
+    /// the scope, so a range already inside it is never fetched again.
+    ///
+    /// # Errors
+    ///
+    /// Returns `StoreError::Backend` on a backend failure.
+    async fn fetch_window(&self, scope: &SyncScope) -> Result<Option<Horizon>>;
 
     /// The provider keys of live (non-tombstoned) objects in a scope.
     ///
@@ -287,6 +308,19 @@ pub trait StoreRead: Send + Sync {
         select: MailSelector<'_>,
         limit: usize,
     ) -> Result<Vec<MailListRow>>;
+
+    /// The date of the oldest message `account` holds in `mailbox`: how far back this store
+    /// reaches for that mailbox, whatever window synced it. `None` when the mailbox holds no
+    /// dated mail.
+    ///
+    /// # Errors
+    ///
+    /// Returns `StoreError::Backend` on a backend failure.
+    async fn oldest_in_mailbox(
+        &self,
+        account: &AccountId,
+        mailbox: &MailboxId,
+    ) -> Result<Option<UtcDateTime>>;
 
     /// The materialized occurrences in a scope that overlap `window`, ascending by
     /// `(start, end, event)`.
