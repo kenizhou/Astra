@@ -13,8 +13,8 @@
 //!
 //! It runs as the scratch account `carol@`, because Alice's folders are count-asserted
 //! elsewhere, and deletes the folders it creates whether it passes or not. The large message is
-//! 7.6 MB, which counts against Stalwart's upload quota for an hour (50 MB per account,
-//! `jmap.md`), so the suite can run about six times an hour.
+//! 7.6 MB, which counts against Stalwart's upload quota for an hour. As shipped that quota is
+//! 50 MB per account (`jmap.md`), about six runs an hour; the harness raises it.
 //!
 //! ```sh
 //! STALWART_HTTP_ADDR=127.0.0.1:18080 \
@@ -58,7 +58,7 @@ fn nanos() -> u128 {
 
 async fn folder(provider: &JmapProvider, name: String) -> MailboxId {
     provider
-        .edit_mailbox(&account(), &MailboxEdit::Create { name, parent: None })
+        .edit_mailbox(&account(), &MailboxEdit::create(name, None))
         .await
         .expect("create a scratch folder")
         .mailbox
